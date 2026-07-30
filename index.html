@@ -52,7 +52,7 @@ linear-gradient(35deg,#d8e4f6 25%,transparent 25%) 0 0/220px 220px}
 .chart{display:flex;align-items:flex-end;gap:10px;height:220px;padding:12px 4px 28px}.bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%}.bar{width:70%;min-width:18px;background:linear-gradient(180deg,var(--teal),var(--navy));border-radius:8px 8px 0 0}.bar-label{font-size:11px;color:var(--muted);margin-top:6px}
 .empty{padding:35px;text-align:center;color:var(--muted)}
 @media(max-width:1050px){#appView{grid-template-columns:84px 1fr}.side-brand strong,.side-brand small,.nav-btn span{display:none}.nav-btn{text-align:center}.cards{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:700px){#appView{display:block}.sidebar{position:fixed;left:0;right:0;bottom:0;top:auto;height:64px;display:flex;overflow:auto;padding:6px;z-index:15}.side-brand{display:none}.nav-btn{min-width:72px;margin:0}.main{padding-bottom:70px}.topbar{padding:0 12px}.content{padding:12px}.cards,.grid-2,.grid-3,.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}.metric .value{font-size:22px}}
+ .mobile-menu-toggle{display:none}@media(max-width:700px){#appView{display:block}.sidebar{position:fixed;left:0;right:0;bottom:0;top:auto;height:64px;display:flex;overflow:auto;padding:6px;z-index:15}.side-brand{display:none}.nav-btn{min-width:72px;margin:0}.main{padding-bottom:70px}.topbar{padding:0 12px}.content{padding:12px}.cards,.grid-2,.grid-3,.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}.metric .value{font-size:22px}.mobile-menu-toggle{display:flex;align-items:center;justify-content:center;position:fixed;right:14px;bottom:78px;z-index:20;border:0;border-radius:999px;background:#0b2e69;color:#fff;padding:12px 16px;font-size:15px;font-weight:800;box-shadow:0 8px 20px rgba(7,29,66,.32)}.sidebar.mobile-open{top:0;bottom:0;height:100vh;display:block;padding:20px 14px;overflow:auto}.sidebar.mobile-open .side-brand{display:flex}.sidebar.mobile-open #nav{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:16px}.sidebar.mobile-open .nav-btn{min-width:0;margin:0;text-align:left;padding:13px 12px;background:rgba(255,255,255,.08)}.sidebar.mobile-open .nav-btn span{display:inline}.sidebar.mobile-open~.mobile-menu-toggle{bottom:16px;background:#d64747}}
 @media print{.sidebar,.topbar,.toolbar,.row-actions,.btn,.no-print{display:none!important}#appView{display:block}.content{padding:0}.panel{box-shadow:none;border:0}.panel-head{border:0}.data-table{min-width:0;font-size:11px}}
 
 /* V2.6 報價單／請款單專用編輯器 */
@@ -111,6 +111,7 @@ linear-gradient(35deg,#d8e4f6 25%,transparent 25%) 0 0/220px 220px}
     <div class="side-brand"><div class="mini-logo">KS</div><div><strong>酷舍 ERP</strong><br><small>正式版 3.0.2</small></div></div>
     <nav id="nav"></nav>
   </aside>
+  <button class="mobile-menu-toggle" id="mobileMenuToggle" type="button">☰ 選單</button>
   <main class="main">
     <header class="topbar"><h2 id="pageTitle">首頁總覽</h2><div class="top-actions"><span class="badge" id="saveBadge">● 已自動儲存</span><button class="btn" id="quickBackup">立即備份</button><button class="btn" id="logoutBtn">登出</button></div></header>
     <div class="content" id="content"></div>
@@ -211,7 +212,7 @@ function relLabel(module,id){const item=(state[module]||[]).find(x=>x.id===id);r
 
 function buildNav(){
  document.getElementById("nav").innerHTML=modules.map(([id,icon,label])=>`<button class="nav-btn ${id===currentModule?"active":""}" data-nav="${id}">${icon} <span>${label}</span></button>`).join("");
- document.querySelectorAll("[data-nav]").forEach(b=>b.onclick=()=>{currentModule=b.dataset.nav;render()})
+ document.querySelectorAll("[data-nav]").forEach(b=>b.onclick=()=>{currentModule=b.dataset.nav;document.querySelector(".sidebar")?.classList.remove("mobile-open");render()})
 }
 function render(){
  buildNav();
@@ -1105,7 +1106,7 @@ async function init(){
   rebuildAllPayroll();
   rebuildMaterialPayables();
  await saveState("啟動時重新同步點工與抽成薪資");
- document.getElementById("loginBtn").onclick=login;document.getElementById("logoutBtn").onclick=logout;document.getElementById("quickBackup").onclick=exportBackup;
+ document.getElementById("loginBtn").onclick=login;document.getElementById("logoutBtn").onclick=logout;document.getElementById("quickBackup").onclick=exportBackup;document.getElementById("mobileMenuToggle").onclick=()=>{const side=document.querySelector(".sidebar");side.classList.toggle("mobile-open");document.getElementById("mobileMenuToggle").textContent=side.classList.contains("mobile-open")?"✕ 關閉":"☰ 選單"};
  document.getElementById("loginPass").addEventListener("keydown",e=>{if(e.key==="Enter")login()});
  const emergency=localStorage.getItem("KuSheERP25_EMERGENCY");if(!state&&emergency)state=JSON.parse(emergency);
 }
