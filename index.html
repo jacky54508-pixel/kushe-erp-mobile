@@ -102,6 +102,10 @@ linear-gradient(35deg,#d8e4f6 25%,transparent 25%) 0 0/220px 220px}
 @media(min-width:701px){body{background:linear-gradient(135deg,#f5f8fd 0%,#edf3fa 100%)}.main{min-height:100vh}.topbar{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.9);backdrop-filter:blur(12px);border-bottom:1px solid #e1eaf5;box-shadow:0 4px 18px rgba(19,46,92,.05)}.topbar h2{letter-spacing:.3px}.content{max-width:1640px;margin:0 auto;padding:28px 34px 46px}.panel{border:1px solid #dce7f4;box-shadow:0 12px 30px rgba(18,49,94,.07);overflow:hidden}.panel-head{padding:18px 22px;background:linear-gradient(90deg,#fff,#f8fbff)}.panel-head h3{letter-spacing:.2px}.panel-body{padding:22px}.cards{gap:20px}.card{border:1px solid #e0e9f4;box-shadow:0 8px 22px rgba(18,49,94,.06);transition:transform .18s ease,box-shadow .18s ease}.card:hover{transform:translateY(-2px);box-shadow:0 13px 26px rgba(18,49,94,.11)}.toolbar input,.toolbar select,.field input,.field select,.field textarea{border-color:#c9d9ed;background:#fff;transition:border-color .15s,box-shadow .15s}.toolbar input:focus,.toolbar select:focus,.field input:focus,.field select:focus,.field textarea:focus{border-color:#0f8a82;box-shadow:0 0 0 4px rgba(15,138,130,.11);outline:0}.data-table th{background:linear-gradient(180deg,#f8fbff,#eef4fb);color:#294261;font-size:13px;letter-spacing:.4px}.data-table td{border-color:#e2eaf4}.data-table tbody tr{transition:background .14s}.data-table tbody tr:hover td{background:#f4fbfb}.row-actions button{border-color:#d7e3f1;background:#fff}.modal-card{box-shadow:0 26px 65px rgba(6,27,63,.3)}.modal-head{background:linear-gradient(90deg,#fff,#f6fbff)}.modal-foot{background:#fbfdff}.notice{border-left:4px solid #0f8a82;background:#f4fbfb}.owner-card{border:1px solid #e0e9f4;box-shadow:0 10px 24px rgba(18,49,94,.07)}}
 
 </style>
+<style>
+/* 手機每日紀錄：按鈕不覆蓋品項，需滑到表單底部才顯示 */
+@media(max-width:700px){.modal-foot{position:static!important;bottom:auto!important;box-shadow:none!important;margin-top:8px}.modal-card{max-height:92vh}.modal-body{max-height:none!important;overflow:visible!important}.modal-card{overflow:auto;-webkit-overflow-scrolling:touch}.modal-foot{display:flex!important}}
+</style>
 </head>
 <body>
 <section id="loginView">
@@ -146,6 +150,7 @@ const modules=[
 ["payables","💸","應付帳款"],["banks","🏦","銀行帳戶"],["employees","🧑‍🔧","員工管理"],["payroll","💼","薪資管理"],
  ["attendance","📅","出勤點工"],["dailyLogs","📝","每日業績／點工"],["commissions","📈","員工業績抽成"],["materials","📦","材料管理"],["materialUsages","🧱","案場材料用量"],["calendar","🗓️","工程行事曆"],["tax","🧮","發票稅額"],["reports","📊","年度報表"],["monthClose","🔒","月結快照"],["settings","⚙️","系統設定"],["backups","🛡️","備份還原"]
 ];
+modules.splice(modules.findIndex(x=>x[0]==='banks')+1,0,['ownerDraws','👤','老闆往來']);
 
 const schemas={
 customers:{title:"客戶",fields:[
@@ -189,7 +194,7 @@ function defaultState(){
  return {
   meta:{version:APP_VERSION,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()},
   settings:{company:"酷舍企業有限公司",taxId:"",owner:"",phone:"",address:"",username:"admin",password:"1234",defaultTax:5,cloudUrl:"",cloudPublishableKey:""},
-  customers:[],vendors:[],projects:[],quotations:[],billings:[],invoices:[],receivables:[],receipts:[],payables:[],banks:[],bankTransactions:[],employees:[],attendance:[],dailyLogs:[],commissions:[],payroll:[],materials:[],materialUsages:[],calendar:[],monthSnapshots:[],
+  customers:[],vendors:[],projects:[],quotations:[],billings:[],invoices:[],receivables:[],receipts:[],payables:[],banks:[],bankTransactions:[],ownerDraws:[],employees:[],attendance:[],dailyLogs:[],commissions:[],payroll:[],materials:[],materialUsages:[],calendar:[],monthSnapshots:[],
   audit:[{id:uid(),time:new Date().toISOString(),action:"建立全新 ERP 資料庫"}],
   backups:[],
   notePresets:["現金匯款","100% 現金票","付款方式依雙方約定"],itemPresets:[]
@@ -246,6 +251,7 @@ function render(){
   if(currentModule==="dashboard"){renderDashboard();setTimeout(renderDashboardV46,0)}
   else if(currentModule==="projectOverview")renderProjectOverview();
   else if(currentModule==="dailyLogs")renderDailyLogs();
+  else if(currentModule==="ownerDraws")renderOwnerDraws();
   else if(currentModule==="reports")renderReports();
  else if(currentModule==="tax")renderTax();
  else if(currentModule==="settings"){renderSettings();setTimeout(renderCloudSettings,0)}
@@ -348,6 +354,24 @@ function showDashboardProfitDetail(month,revenue,material,labor,commission,profi
 function metric(label,value,sub,target="",filter=""){return `<div class="card metric" ${target?`data-dashboard-target="${target}" data-dashboard-filter="${filter}"`:""}><div class="label">${label}</div><div class="value">${value}</div><div class="sub">${sub}</div></div>`}
 function bindDashboardCards(){document.querySelectorAll("[data-dashboard-target]").forEach(el=>el.onclick=()=>{currentModule=el.dataset.dashboardTarget;window.__ksListFilter=el.dataset.dashboardFilter||"";render()})}
 function smallStat(label,value){return `<div style="text-align:center;padding:16px;background:#f7f9fd;border-radius:14px"><div style="font-size:28px;font-weight:900">${value}</div><div style="color:var(--muted)">${label}</div></div>`}
+
+function renderOwnerDraws(){
+ state.ownerDraws=state.ownerDraws||[];
+ const month=selectedQueryMonth()||new Date().toISOString().slice(0,7),rows=(state.ownerDraws||[]).slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))),monthRows=rows.filter(x=>String(x.date||'').startsWith(month)),withdrawn=monthRows.filter(x=>x.flow==='out').reduce((a,x)=>a+num(x.amount),0),returned=monthRows.filter(x=>x.flow==='in').reduce((a,x)=>a+num(x.amount),0),balance=rows.reduce((a,x)=>a+(x.flow==='out'?num(x.amount):-num(x.amount)),0);
+ document.getElementById('content').innerHTML=`<section class="panel"><div class="panel-head"><div><h3>老闆往來／個人提領</h3><p style="margin:5px 0 0;color:var(--muted)">個人使用的公司款項會扣除銀行餘額，但不列入材料、人工或毛利成本。</p></div><button class="btn primary" id="addOwnerDraw">＋ 新增往來</button></div><div class="panel-body"><div class="cards" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:18px"><div class="card"><div class="label">本月個人提領</div><div class="value" style="color:#c05621">${money(withdrawn)}</div><div class="sub">${month}</div></div><div class="card"><div class="label">本月歸還／墊款</div><div class="value" style="color:var(--teal)">${money(returned)}</div><div class="sub">${month}</div></div><div class="card"><div class="label">目前老闆往來餘額</div><div class="value">${money(balance)}</div><div class="sub">正數＝公司款項供個人使用</div></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>日期</th><th>類型</th><th>銀行帳戶</th><th>金額</th><th>用途／備註</th><th>操作</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date||'')}</td><td><span class="badge ${x.flow==='out'?'unpaid':'paid'}">${esc(x.type||'')}</span></td><td>${esc(relLabel('banks',x.bankId)||'')}</td><td class="num"><b class="${x.flow==='out'?'negative':''}">${x.flow==='out'?'-':'+'}${money(x.amount)}</b></td><td>${esc(x.note||'')}</td><td><div class="row-actions"><button data-owner-edit="${x.id}">編輯</button><button data-owner-delete="${x.id}">刪除</button></div></td></tr>`).join('')||'<tr><td colspan="6">尚無老闆往來紀錄</td></tr>'}</tbody></table></div></div></section>`;
+ document.getElementById('addOwnerDraw').onclick=()=>openOwnerDrawForm();document.querySelectorAll('[data-owner-edit]').forEach(b=>b.onclick=()=>openOwnerDrawForm(b.dataset.ownerEdit));document.querySelectorAll('[data-owner-delete]').forEach(b=>b.onclick=()=>deleteOwnerDraw(b.dataset.ownerDelete));
+}
+function reverseOwnerDrawBank(row){
+ const tx=(state.bankTransactions||[]).find(x=>x.id===row.bankTransactionId);if(!tx)return;
+ const bank=(state.banks||[]).find(x=>x.id===tx.bankId);if(bank){if(row.flow==='out')bank.expense=Math.max(0,num(bank.expense)-num(row.amount));else bank.income=Math.max(0,num(bank.income)-num(row.amount));recalcBankBalance(bank)}state.bankTransactions=(state.bankTransactions||[]).filter(x=>x.id!==tx.id);
+}
+function openOwnerDrawForm(id=null){
+ const row=id?(state.ownerDraws||[]).find(x=>x.id===id)||{}:{date:today(),flow:'out',type:'個人提領'};const modal=document.getElementById('modal');
+ modal.innerHTML=`<div class="modal-card" style="width:min(760px,96vw)"><div class="modal-head"><h3>${id?'編輯':'新增'}老闆往來</h3><button class="btn" id="closeModal">✕</button></div><form id="ownerDrawForm"><div class="modal-body"><div class="notice">此功能會同步更新銀行餘額，但不會列入公司成本、應付帳款或毛利。</div><div class="form-grid" style="margin-top:16px"><div class="field"><label>日期</label><input name="date" type="date" value="${esc(row.date||today())}" required></div><div class="field"><label>類型</label><select name="flow" id="ownerFlow"><option value="out" ${row.flow==='out'?'selected':''}>個人提領／老闆借款</option><option value="in" ${row.flow==='in'?'selected':''}>歸還公司／個人墊款</option></select></div><div class="field"><label>提領／存入銀行帳戶</label><select name="bankId" required><option value="">請選擇銀行帳戶</option>${(state.banks||[]).map(x=>`<option value="${x.id}" ${x.id===row.bankId?'selected':''}>${esc(x.name||x.bank||x.account||'銀行帳戶')}</option>`).join('')}</select></div><div class="field"><label>金額</label><input name="amount" type="number" min="1" step="1" value="${num(row.amount)}" required></div><div class="field full"><label>用途／備註</label><textarea name="note" placeholder="例如：個人生活費、個人先墊的款項歸還公司">${esc(row.note||'')}</textarea></div></div></div><div class="modal-foot"><button type="button" class="btn" id="cancelModal">取消</button><button class="btn primary" type="submit">儲存往來紀錄</button></div></form></div>`;
+ modal.classList.remove('hidden');document.getElementById('closeModal').onclick=closeModal;document.getElementById('cancelModal').onclick=closeModal;
+ document.getElementById('ownerDrawForm').onsubmit=async e=>{e.preventDefault();const fd=new FormData(e.target),existing=id?(state.ownerDraws||[]).find(x=>x.id===id):null,flow=fd.get('flow'),amount=num(fd.get('amount')),bank=(state.banks||[]).find(x=>x.id===fd.get('bankId'));if(!bank)return alert('請選擇銀行帳戶');if(existing)reverseOwnerDrawBank(existing);const obj=existing||{id:uid(),createdAt:new Date().toISOString()};Object.assign(obj,{date:fd.get('date'),flow,type:flow==='out'?'個人提領／老闆借款':'歸還公司／個人墊款',bankId:bank.id,amount,note:fd.get('note')||'',updatedAt:new Date().toISOString()});if(flow==='out')bank.expense=num(bank.expense)+amount;else bank.income=num(bank.income)+amount;recalcBankBalance(bank);const tx={id:uid(),date:obj.date,bankId:bank.id,type:flow==='out'?'支出':'收入',category:'老闆往來',amount,sourceType:'ownerDraw',sourceId:obj.id,note:obj.note||obj.type,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};state.bankTransactions.unshift(tx);obj.bankTransactionId=tx.id;if(!existing)state.ownerDraws.unshift(obj);await saveState(existing?'修改老闆往來':'新增老闆往來');closeModal();toast('已同步更新銀行流水');renderOwnerDraws()};
+}
+async function deleteOwnerDraw(id){const row=(state.ownerDraws||[]).find(x=>x.id===id);if(!row||!confirm('確定刪除此筆老闆往來？銀行餘額會一併還原。'))return;reverseOwnerDrawBank(row);state.ownerDraws=state.ownerDraws.filter(x=>x.id!==id);await saveState('刪除老闆往來');toast('已刪除並還原銀行餘額');renderOwnerDraws()}
 
 function renderCrud(module){
  const s=schemas[module],rows=state[module]||[];
