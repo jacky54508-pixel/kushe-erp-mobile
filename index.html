@@ -1371,6 +1371,20 @@ function showProjectCardDetail(projectId,type){
 }
 const __showProjectCenterV8=showProjectCenter;
 showProjectCenter=function(projectId){__showProjectCenterV8(projectId);const types=["performance","billing","receivable","material","labor","commission","billed","profit"];[...document.querySelectorAll("#modal .cards > *")].forEach((card,index)=>{const type=types[index];if(!type)return;card.dataset.projectCardType=type;card.style.cssText+=(";cursor:pointer;transition:transform .15s ease,box-shadow .15s ease");card.onclick=()=>showProjectCardDetail(projectId,type);card.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();showProjectCardDetail(projectId,type)}}})};
+
+/* 將舊資料依「相同案場名稱」回填案場 ID，讓歷史紀錄也能出現在案場營運中心。 */
+function linkExistingProjectRecords(){
+ const projects=state.projects||[],byName=new Map(projects.map(p=>[projectNameKey(p.name),p]).filter(([key])=>key));let linked=0,dailyChanged=[];
+ const link=(row,collection)=>{if(!row)return;const existing=projects.find(p=>String(p.id)===String(row.project));if(existing){if(!row.projectName)row.projectName=existing.name;return}const name=row.projectName||row.projectLabel||row.project||"",project=byName.get(projectNameKey(name));if(!project)return;row.project=project.id;row.projectName=project.name;row.updatedAt=new Date().toISOString();linked++;if(collection==="dailyLogs")dailyChanged.push(row)};
+ ["quotations","billings","receivables","payables","attendance","dailyLogs","commissions","materialUsages","invoices","receipts","bankTransactions"].forEach(collection=>(state[collection]||[]).forEach(row=>link(row,collection)));
+ dailyChanged.forEach(log=>syncDailyLogLinks(log));
+ if(linked){scheduleSave(`自動串聯 ${linked} 筆歷史案場資料`);toast(`已自動串聯 ${linked} 筆既有案場資料`) }
+ return linked;
+}
+const __showProjectCenterV9=showProjectCenter;
+showProjectCenter=function(projectId){linkExistingProjectRecords();return __showProjectCenterV9(projectId)};
+const __renderProjectOverviewV9=renderProjectOverview;
+renderProjectOverview=function(){linkExistingProjectRecords();return __renderProjectOverviewV9()};
 </script>
 </body>
 </html>
