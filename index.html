@@ -1341,7 +1341,7 @@ function rememberDailyMultiPresetRows(rows){
 }
 function dailyMultiDecoratePresets(){
  const form=document.getElementById("dailyMultiForm");if(!form)return;let host=form.querySelector("#dmPresetStore");if(!host){host=document.createElement("div");host.id="dmPresetStore";host.style.display="none";form.appendChild(host)}const rows=dailyMultiPresetRows();
- const setList=(id,values)=>{let list=document.getElementById(id);if(!list){list=document.createElement("datalist");list.id=id;host.appendChild(list)}list.innerHTML=[...new Set(values.filter(Boolean))].map(v=>`<option value="${esc(String(v))}"></option>`).join("")};
+ const setList=(id,values)=>{let list=document.getElementById(id);if(!list){list=document.createElement("datalist");list.id=id;host.appendChild(list)}const unique=[...new Set(values.filter(Boolean))].map(String),signature=JSON.stringify(unique);if(list.dataset.dmValues===signature)return;list.dataset.dmValues=signature;list.innerHTML=unique.map(v=>`<option value="${esc(v)}"></option>`).join("")};
  setList("dmItemPresetList",rows.map(x=>x.item));setList("dmUnitPresetList",rows.map(x=>x.unit));setList("dmQtyPresetList",rows.map(x=>x.qty));setList("dmPricePresetList",rows.map(x=>x.price));
  const decorate=(selector,listId)=>form.querySelectorAll(selector).forEach(input=>{if(input.dataset.dmSmartReady)return;input.dataset.dmSmartReady="1";input.setAttribute("list",listId);prepareSmartList(input)});
  decorate(".dm-item","dmItemPresetList");decorate(".dm-unit","dmUnitPresetList");decorate(".dm-qty","dmQtyPresetList");decorate(".dm-price","dmPricePresetList");
