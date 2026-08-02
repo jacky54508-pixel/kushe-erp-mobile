@@ -119,6 +119,32 @@ linear-gradient(35deg,#d8e4f6 25%,transparent 25%) 0 0/220px 220px}
 /* 手機每日紀錄：按鈕不覆蓋品項，需滑到表單底部才顯示 */
 @media(max-width:700px){.modal-foot{position:static!important;bottom:auto!important;box-shadow:none!important;margin-top:8px}.modal-card{max-height:92vh}.modal-body{max-height:none!important;overflow:visible!important}.modal-card{overflow:auto;-webkit-overflow-scrolling:touch}.modal-foot{display:flex!important}}
 </style>
+<style>
+/* V6：多案場每日業績輸入器 */
+#dailyMultiForm .panel{border:1px solid #cfe2ed;border-radius:18px;overflow:hidden;background:linear-gradient(145deg,#fff,#f8fcfd);box-shadow:none}
+#dailyMultiForm .panel-head{min-height:76px;padding:17px 22px;border-left:5px solid #0b988b;background:linear-gradient(90deg,#fff,#f0fbf9)}
+#dailyMultiForm .panel-head h3{font-size:20px;color:#092e63;letter-spacing:.3px}
+#dailyMultiForm .panel-head small{display:block;margin-top:4px;color:#55708f;font-weight:700}
+#dailyMultiForm #dmEmployees{padding:2px}
+#dailyMultiForm .daily-employee-choice{min-width:142px;background:#fff;border:1px solid #cbdcea!important;border-radius:12px!important;box-shadow:0 2px 7px rgba(16,50,92,.04)}
+#dailyMultiForm .daily-employee-choice:hover{transform:translateY(-1px);border-color:#0b988b!important}
+#dailyMultiForm .daily-employee-choice:has(input:checked){background:linear-gradient(135deg,#e7fbf7,#f9fffe);border-color:#0b988b!important;box-shadow:0 0 0 3px rgba(11,152,139,.12)}
+#dailyMultiForm .data-table{min-width:1080px;border:1px solid #cfe0ec;border-radius:14px;overflow:hidden}
+#dailyMultiForm .data-table th{padding:14px 12px!important;background:linear-gradient(180deg,#eff7fb,#e6f1f8)!important;color:#173c68!important;font-size:14px;border-bottom:2px solid #bcd9e8!important}
+#dailyMultiForm .data-table td{padding:13px 12px!important;background:#fff;vertical-align:middle}
+#dailyMultiForm .data-table tbody tr:nth-child(odd) td{background:#f1fbfa}
+#dailyMultiForm .data-table tbody tr:hover td{background:#e3f6f3!important}
+#dailyMultiForm .dm-project,#dailyMultiForm .dm-house,#dailyMultiForm .dm-item,#dailyMultiForm .dm-unit,#dailyMultiForm .dm-qty,#dailyMultiForm .dm-price{display:block;width:100%;min-width:0;height:46px;padding:0 13px;border:1px solid #bcd1e4;border-radius:10px;background:#fff;color:#102a50;font-weight:800;transition:.15s ease;box-shadow:inset 0 1px 1px rgba(10,41,79,.03)}
+#dailyMultiForm .dm-project:focus,#dailyMultiForm .dm-house:focus,#dailyMultiForm .dm-item:focus,#dailyMultiForm .dm-unit:focus,#dailyMultiForm .dm-qty:focus,#dailyMultiForm .dm-price:focus{outline:0;border-color:#07877c;box-shadow:0 0 0 4px rgba(7,135,124,.13)}
+#dailyMultiForm .dm-project{min-width:155px;color:#092e63;background:#faffff}
+#dailyMultiForm .dm-house{min-width:112px}.dm-item{min-width:190px}.dm-unit{min-width:82px;text-align:center}.dm-qty{min-width:90px;text-align:right}.dm-price{min-width:120px;text-align:right}
+#dailyMultiForm .dm-sub{display:inline-flex;justify-content:flex-end;min-width:100px;font-size:17px;color:#087c72;font-variant-numeric:tabular-nums}
+#dailyMultiForm .dm-delete{min-width:74px;padding:10px 12px!important}
+#dailyMultiForm tfoot td{padding:15px!important;background:linear-gradient(90deg,#e5f7f4,#f7fcfb)!important;border-top:2px solid #9ed7cf!important;color:#073d68;font-size:16px}
+#dailyMultiForm #dmPreview{display:flex;gap:16px;align-items:center;justify-content:center;padding:13px 16px;background:linear-gradient(90deg,#effaf8,#f7fcff);font-size:15px;color:#234d66}
+#dailyMultiForm #dmPreview b{font-size:19px;color:#087c72}
+@media(max-width:700px){#dailyMultiForm .panel-head{padding:15px 16px;align-items:flex-start}#dailyMultiForm .panel-head h3{font-size:18px}#dailyMultiForm .panel-head small{font-size:12px;line-height:1.5}#dailyMultiForm .data-table{min-width:0!important;border:0}#dailyMultiForm .data-table thead{display:none}#dailyMultiForm .data-table tbody{display:block}#dailyMultiForm .data-table tbody tr{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px;margin:10px 0;border:1px solid #cfe0ec;border-radius:15px;background:#fff!important;box-shadow:0 6px 15px rgba(16,50,92,.06)}#dailyMultiForm .data-table td{display:block!important;padding:0!important;border:0!important;background:transparent!important}#dailyMultiForm .data-table td:before{display:block;margin:0 0 5px;color:#56718f;font-size:12px;font-weight:900}#dailyMultiForm .data-table td:nth-child(1){grid-column:1/-1}#dailyMultiForm .data-table td:nth-child(1):before{content:"案場"}#dailyMultiForm .data-table td:nth-child(2):before{content:"戶別"}#dailyMultiForm .data-table td:nth-child(3){grid-column:1/-1}#dailyMultiForm .data-table td:nth-child(3):before{content:"施工品項"}#dailyMultiForm .data-table td:nth-child(4):before{content:"單位"}#dailyMultiForm .data-table td:nth-child(5):before{content:"數量"}#dailyMultiForm .data-table td:nth-child(6):before{content:"單價"}#dailyMultiForm .data-table td:nth-child(7):before{content:"小計"}#dailyMultiForm .data-table td:nth-child(8){grid-column:1/-1}#dailyMultiForm .dm-project,#dailyMultiForm .dm-house,#dailyMultiForm .dm-item,#dailyMultiForm .dm-unit,#dailyMultiForm .dm-qty,#dailyMultiForm .dm-price{min-width:0;width:100%;height:48px}#dailyMultiForm .dm-sub{min-height:48px;align-items:center;justify-content:flex-start;font-size:19px}#dailyMultiForm .dm-delete{width:100%}#dailyMultiForm tfoot,#dailyMultiForm tfoot tr,#dailyMultiForm tfoot td{display:block!important}#dailyMultiForm tfoot td{border:0!important;border-top:1px solid #cfe0ec!important;text-align:right!important}#dailyMultiForm #dmPreview{display:block;line-height:2;text-align:left}}
+</style>
 </head>
 <body>
 <section id="loginView">
@@ -1301,6 +1327,32 @@ function openDailyMultiProjectForm(){
 openDailyLogForm=function(id=null){return id?__openDailyLogFormV6(id):openDailyMultiProjectForm()};
 const __renderDailyLogsV6=renderDailyLogs;
 renderDailyLogs=function(){__renderDailyLogsV6();const month=dailyLogMonth(),logs=(state.dailyLogs||[]).filter(x=>String(x.date||"").startsWith(month)),groups=new Map();logs.filter(x=>num(x.performance)>0&&!x.billingId).forEach(x=>{const k=x.groupId||x.id;if(!groups.has(k))groups.set(k,num(x.groupTotal)||num(x.performance))});const perf=[...groups.values()].reduce((a,x)=>a+num(x),0),comm=logs.reduce((a,x)=>a+num(x.commission),0),labor=logs.reduce((a,x)=>a+dailyLogWorkAmount(x),0),cards=document.querySelector("#content .cards");if(cards)cards.innerHTML=`${metric("待轉請款業績",money(perf),`${groups.size} 組未請款`)}${metric("本月預估抽成",money(comm),"依每日紀錄計算")}${metric("本月點工",money(labor),"同一員工每日只計一次")}`;const byEmp=new Map();logs.forEach(x=>{const key=x.employee||x.employeeName||"未指定";if(!byEmp.has(key))byEmp.set(key,{name:relLabel("employees",x.employee)||x.employeeName||"未指定",performance:0,commission:0,work:0,days:new Set()});const v=byEmp.get(key);v.performance+=num(x.performance);v.commission+=num(x.commission);v.work+=dailyLogWorkAmount(x);if(dailyLogWorkAmount(x)>0)v.days.add(x.date)});cards?.insertAdjacentHTML("afterend",`<section class="panel" style="margin:0 0 14px"><div class="panel-head"><h3>員工當月業績摘要</h3><small>${esc(month)}｜業績依參與案場累加</small></div><div class="table-wrap"><table class="data-table"><thead><tr><th>員工</th><th>當月業績</th><th>預估抽成</th><th>點工薪資</th><th>點工天數</th></tr></thead><tbody>${[...byEmp.values()].map(v=>`<tr><td><b>${esc(v.name)}</b></td><td class="num">${money(v.performance)}</td><td class="num">${money(v.commission)}</td><td class="num">${money(v.work)}</td><td class="num">${v.days.size} 天</td></tr>`).join("")||"<tr><td colspan=\"5\">本月尚無員工業績或點工資料。</td></tr>"}</tbody></table></div></section>`)};
+
+/* V7：每日施工品項常用資料。輸入一次後，品項、單位、數量、單價皆可下拉重複使用。 */
+function dailyMultiPresetRows(){
+ const found=new Map(),add=row=>{const item=String(row?.item||row?.name||"").trim();if(!item)return;const key=normalizeDailyItemName(item);if(!key)return;const old=found.get(key)||{};found.set(key,{item,unit:String(row?.unit||old.unit||"式").trim()||"式",qty:num(row?.qty??old.qty??1)||1,price:num(row?.price??row?.unitPrice??old.price??0)})};
+ (state.dailyItemPresets||[]).forEach(add);(state.dailyLogs||[]).forEach(log=>(log.items||[]).forEach(add));(state.billings||[]).forEach(b=>(b.lines||[]).forEach(add));
+ return [...found.values()].sort((a,b)=>a.item.localeCompare(b.item,"zh-Hant"));
+}
+function rememberDailyMultiPresetRows(rows){
+ state.dailyItemPresets=Array.isArray(state.dailyItemPresets)?state.dailyItemPresets:[];
+ const stored=new Map();state.dailyItemPresets.forEach(row=>{const key=normalizeDailyItemName(row?.item);if(key)stored.set(key,row)});
+ (rows||[]).forEach(row=>{const item=String(row?.item||"").trim(),key=normalizeDailyItemName(item);if(!key)return;const next={item,unit:String(row.unit||"式").trim()||"式",qty:num(row.qty)||1,price:num(row.price)};if(stored.has(key)){Object.assign(stored.get(key),next)}else{state.dailyItemPresets.push(next);stored.set(key,next)}});
+}
+function dailyMultiDecoratePresets(){
+ const form=document.getElementById("dailyMultiForm");if(!form)return;let host=form.querySelector("#dmPresetStore");if(!host){host=document.createElement("div");host.id="dmPresetStore";host.style.display="none";form.appendChild(host)}const rows=dailyMultiPresetRows();
+ const setList=(id,values)=>{let list=document.getElementById(id);if(!list){list=document.createElement("datalist");list.id=id;host.appendChild(list)}list.innerHTML=[...new Set(values.filter(Boolean))].map(v=>`<option value="${esc(String(v))}"></option>`).join("")};
+ setList("dmItemPresetList",rows.map(x=>x.item));setList("dmUnitPresetList",rows.map(x=>x.unit));setList("dmQtyPresetList",rows.map(x=>x.qty));setList("dmPricePresetList",rows.map(x=>x.price));
+ const decorate=(selector,listId)=>form.querySelectorAll(selector).forEach(input=>{if(input.dataset.dmSmartReady)return;input.dataset.dmSmartReady="1";input.setAttribute("list",listId);prepareSmartList(input)});
+ decorate(".dm-item","dmItemPresetList");decorate(".dm-unit","dmUnitPresetList");decorate(".dm-qty","dmQtyPresetList");decorate(".dm-price","dmPricePresetList");
+}
+const dailyMultiPresetObserver=new MutationObserver(()=>dailyMultiDecoratePresets());dailyMultiPresetObserver.observe(document.getElementById("modal"),{childList:true,subtree:true});
+document.addEventListener("change",e=>{const input=e.target.closest?.("#dailyMultiForm .dm-item");if(!input)return;const preset=dailyMultiPresetRows().find(row=>normalizeDailyItemName(row.item)===normalizeDailyItemName(input.value));if(!preset)return;const tr=input.closest("tr");[[".dm-unit",preset.unit],[".dm-qty",preset.qty],[".dm-price",preset.price]].forEach(([selector,value])=>{const field=tr.querySelector(selector);if(!field)return;field.value=value;field.dispatchEvent(new Event("input",{bubbles:true}));field.dispatchEvent(new Event("change",{bubbles:true}))})},true);
+document.addEventListener("submit",e=>{if(e.target?.id!=="dailyMultiForm")return;const rows=[...e.target.querySelectorAll("#dmLines tr")].map(tr=>({item:tr.querySelector(".dm-item")?.value.trim(),unit:tr.querySelector(".dm-unit")?.value.trim(),qty:tr.querySelector(".dm-qty")?.value,price:tr.querySelector(".dm-price")?.value})).filter(row=>row.item);rememberDailyMultiPresetRows(rows)},true);
+
+/* 案場營運中心的字卡直接可點，不再只是數字展示。 */
+const __showProjectCenterV7=showProjectCenter;
+showProjectCenter=function(projectId){__showProjectCenterV7(projectId);const cards=[...document.querySelectorAll("#modal .cards > *")],actions=[()=>{closeModal();window.__ksQueryMonth=selectedQueryMonth()||new Date().toISOString().slice(0,7);renderDailyLogs()},()=>{closeModal();renderBillings()},()=>showProjectReceivableDetail(projectId),()=>showProjectMaterials(projectId),()=>{closeModal();renderAttendance()},()=>{closeModal();renderDailyLogs()},()=>{closeModal();renderBillings()},()=>showProjectCenter(projectId)];cards.forEach((card,index)=>{card.classList.add("clickable");card.tabIndex=0;card.title="點擊查看相關明細";card.onclick=actions[index];card.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();actions[index]()}}})};
 </script>
 </body>
 </html>
