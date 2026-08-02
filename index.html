@@ -1263,8 +1263,8 @@ async function undoDailyBilling(billingId){
  state.billings=(state.billings||[]).filter(x=>x.id!==billing.id);
  await saveState(`撤銷每日業績轉請款 ${billing.number}`);toast("已撤銷請款，原始品項已恢復為未請款");render();
 }
-function projectNameKey(value){return String(value||"").trim().replace(/\s+/g,"").toLowerCase()}
-function recordBelongsToProject(row,project){if(!row||!project)return false;if(row.project===project.id)return true;const target=projectNameKey(project.name),linked=projectNameKey(row.projectName||relLabel("projects",row.project)||"");return !!target&&linked===target}
+function projectNameKey(value){return String(value||"").normalize("NFKC").trim().toLowerCase().replace(/[\s\-_—–－／/、，,。.．.()（）\[\]【】「」]/g,"")}
+function recordBelongsToProject(row,project){if(!row||!project)return false;if(String(row.project)===String(project.id))return true;const target=projectNameKey(project.name),linked=projectNameKey(row.projectName||row.projectLabel||row.siteName||row.site||row.caseName||row.jobName||relLabel("projects",row.project)||row.project||"");return !!target&&linked===target}
 function projectRows(project,collection){return (state[collection]||[]).filter(row=>recordBelongsToProject(row,project))}
 function projectNumbers(p){const bill=projectRows(p,"billings"),ars=projectRows(p,"receivables"),materials=projectRows(p,"materialUsages"),labor=projectRows(p,"attendance"),commission=projectRows(p,"commissions");const billed=bill.reduce((a,x)=>a+num(x.amount),0),received=ars.reduce((a,x)=>a+num(x.received),0),ar=ars.reduce((a,x)=>a+Math.max(0,num(x.amount)-num(x.received)),0),materialCost=materials.reduce((a,x)=>a+num(x.amount),0),laborCost=labor.reduce((a,x)=>a+num(x.amount),0),commissionCost=commission.reduce((a,x)=>a+num(x.commission),0),cost=materialCost+laborCost+commissionCost;return {billed,received,ar,materialCost,laborCost,commissionCost,cost,profit:billed-cost}}
 function projectMonthPerformance(project,month){const groups=new Map();projectRows(project,"dailyLogs").filter(x=>String(x.date||"").startsWith(month)).forEach(x=>{const key=x.groupId||x.id;if(!groups.has(key))groups.set(key,num(x.groupTotal)||num(x.performance))});return [...groups.values()].reduce((a,x)=>a+num(x),0)}
@@ -1385,6 +1385,10 @@ const __showProjectCenterV9=showProjectCenter;
 showProjectCenter=function(projectId){linkExistingProjectRecords();return __showProjectCenterV9(projectId)};
 const __renderProjectOverviewV9=renderProjectOverview;
 renderProjectOverview=function(){linkExistingProjectRecords();return __renderProjectOverviewV9()};
+
+/* 舊版每日紀錄若尚未產生出勤／抽成明細，也直接計入案場成本，不重複計算。 */
+const __projectNumbersV10=projectNumbers;
+projectNumbers=function(project){const base=__projectNumbersV10(project),attendanceRows=projectRows(project,"attendance"),commissionRows=projectRows(project,"commissions"),attendanceSources=new Set(attendanceRows.filter(x=>x.sourceType==="daily-log"&&x.sourceId).map(x=>String(x.sourceId))),commissionSources=new Set(commissionRows.filter(x=>x.sourceType==="daily-log"&&x.sourceId).map(x=>String(x.sourceId))),logs=projectRows(project,"dailyLogs"),extraLabor=logs.filter(x=>dailyLogWorkAmount(x)>0&&!attendanceSources.has(String(x.id))).reduce((sum,x)=>sum+dailyLogWorkAmount(x),0),extraCommission=logs.filter(x=>num(x.commission)>0&&!commissionSources.has(String(x.id))).reduce((sum,x)=>sum+num(x.commission),0),laborCost=base.laborCost+extraLabor,commissionCost=base.commissionCost+extraCommission,cost=base.materialCost+laborCost+commissionCost;return {...base,laborCost,commissionCost,cost,profit:base.billed-cost}};
 </script>
 </body>
 </html>
