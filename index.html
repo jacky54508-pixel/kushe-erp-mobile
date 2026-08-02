@@ -1389,6 +1389,21 @@ renderProjectOverview=function(){linkExistingProjectRecords();return __renderPro
 /* 舊版每日紀錄若尚未產生出勤／抽成明細，也直接計入案場成本，不重複計算。 */
 const __projectNumbersV10=projectNumbers;
 projectNumbers=function(project){const base=__projectNumbersV10(project),attendanceRows=projectRows(project,"attendance"),commissionRows=projectRows(project,"commissions"),attendanceSources=new Set(attendanceRows.filter(x=>x.sourceType==="daily-log"&&x.sourceId).map(x=>String(x.sourceId))),commissionSources=new Set(commissionRows.filter(x=>x.sourceType==="daily-log"&&x.sourceId).map(x=>String(x.sourceId))),logs=projectRows(project,"dailyLogs"),extraLabor=logs.filter(x=>dailyLogWorkAmount(x)>0&&!attendanceSources.has(String(x.id))).reduce((sum,x)=>sum+dailyLogWorkAmount(x),0),extraCommission=logs.filter(x=>num(x.commission)>0&&!commissionSources.has(String(x.id))).reduce((sum,x)=>sum+num(x.commission),0),laborCost=base.laborCost+extraLabor,commissionCost=base.commissionCost+extraCommission,cost=base.materialCost+laborCost+commissionCost;return {...base,laborCost,commissionCost,cost,profit:base.billed-cost}};
+
+/* 人工成本明細同時列出「出勤點工」及「每日業績／點工」；每日紀錄已轉成出勤者不重複列出。 */
+function showProjectLaborDetail(projectId){
+ const project=(state.projects||[]).find(x=>String(x.id)===String(projectId));if(!project)return;
+ const attendanceRows=projectRows(project,"attendance"),linkedDailyIds=new Set(attendanceRows.filter(x=>x.sourceType==="daily-log"&&x.sourceId).map(x=>String(x.sourceId)));
+ const rows=[
+  ...attendanceRows.map(x=>({date:x.date||"",employee:relLabel("employees",x.employee)||x.employeeName||"未指定",mode:x.workMode==="hourly"?"時薪":"日薪",rate:x.workMode==="hourly"?num(x.hourlyRate||x.workRate):num(x.dailyRate||x.workRate),amount:num(x.amount),note:x.note||"",source:x.sourceType==="daily-log"?"每日紀錄":"出勤點工"})),
+  ...projectRows(project,"dailyLogs").filter(x=>dailyLogWorkAmount(x)>0&&!linkedDailyIds.has(String(x.id))).map(x=>({date:x.date||"",employee:relLabel("employees",x.employee)||x.employeeName||"未指定",mode:x.workMode==="hourly"?"時薪":"日薪",rate:num(x.workRate),amount:dailyLogWorkAmount(x),note:x.note||"",source:"每日紀錄"}))
+ ].sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+ const modal=document.getElementById("modal");
+ modal.innerHTML=`<div class="modal-card" style="width:min(1100px,96vw)"><div class="modal-head" style="background:linear-gradient(120deg,#082f63,#087f77);color:#fff"><div><h3 style="margin:0">${esc(project.name)}｜人工成本明細</h3><small>包含出勤點工與每日業績／點工；同一筆資料不重複計算。</small></div><button class="btn" id="closeModal">×</button></div><div class="modal-body"><div class="table-wrap"><table class="data-table"><thead><tr><th>日期</th><th>員工</th><th>來源</th><th>點工方式</th><th>日薪／時薪</th><th>金額</th><th>備註</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date)}</td><td>${esc(x.employee)}</td><td>${esc(x.source)}</td><td>${esc(x.mode)}</td><td class="num">${money(x.rate)}</td><td class="num"><b>${money(x.amount)}</b></td><td>${esc(x.note)}</td></tr>`).join("")||'<tr><td colspan="7">此案場目前沒有出勤點工或每日點工紀錄。</td></tr>'}</tbody><tfoot><tr><td colspan="5"><b>人工成本合計</b></td><td class="num"><b>${money(rows.reduce((sum,x)=>sum+num(x.amount),0))}</b></td><td></td></tr></tfoot></table></div></div><div class="modal-foot"><button class="btn" id="backProjectCenter">返回案場中心</button><button class="btn primary" id="closeLaborDetail">關閉</button></div></div>`;
+ modal.classList.remove("hidden");document.getElementById("closeModal").onclick=closeModal;document.getElementById("closeLaborDetail").onclick=closeModal;document.getElementById("backProjectCenter").onclick=()=>showProjectCenter(projectId);
+}
+const __showProjectCardDetailV11=showProjectCardDetail;
+showProjectCardDetail=function(projectId,type){return type==="labor"?showProjectLaborDetail(projectId):__showProjectCardDetailV11(projectId,type)};
 </script>
 </body>
 </html>
