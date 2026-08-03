@@ -1565,6 +1565,57 @@ function sortProjectPickerOptions(root=document){
 }
 document.addEventListener("focusin",event=>sortProjectPickerOptions(event.target.closest?.("form,.modal-card,#content")||document),true);
 document.addEventListener("click",event=>{if(event.target.matches?.("select,input[list]"))sortProjectPickerOptions(event.target.closest?.("form,.modal-card,#content")||document)},true);
+
+/* 純點工／修繕：案場可多選，不必建立業績或請款資料；同員工同日只計一次日薪。 */
+const __openDailyMultiProjectFormV18=openDailyMultiProjectForm;
+openDailyMultiProjectForm=function(){
+ __openDailyMultiProjectFormV18();
+ setTimeout(()=>{
+  const form=document.getElementById("dailyMultiForm");if(!form)return;
+  const heading=[...form.querySelectorAll(".panel-head h3")].find(node=>node.textContent.includes("案場施工品項"));
+  if(heading){
+   heading.textContent="案場施工品項與業績（選填）";
+   const hint=heading.parentElement?.querySelector("small");
+   if(hint)hint.textContent="有業績時填施工品項；純修繕／點工時，只需選擇一個或多個案場即可，不會轉為請款。";
+  }
+ },0);
+};
+document.addEventListener("submit",async event=>{
+ const form=event.target;if(form?.id!=="dailyMultiForm")return;
+ const number=value=>Number(value)||0;
+ const rows=[...form.querySelectorAll("#dmLines tr")].map(row=>({
+  project:row.querySelector(".dm-project")?.value||"",house:row.querySelector(".dm-house")?.value.trim()||"",
+  item:row.querySelector(".dm-item")?.value.trim()||"",unit:row.querySelector(".dm-unit")?.value.trim()||"式",
+  qty:number(row.querySelector(".dm-qty")?.value),price:number(row.querySelector(".dm-price")?.value)
+ }));
+ const performanceRows=rows.filter(row=>row.project&&row.item&&row.qty>0);
+ const projectIds=[...new Set(rows.filter(row=>row.project).map(row=>row.project))];
+ /* 有業績的正常交由原本程式處理；只有選案場、未填品項時改走純點工流程。 */
+ if(performanceRows.length||!projectIds.length)return;
+ event.preventDefault();event.stopImmediatePropagation();
+ const employeeIds=[...form.querySelectorAll("#dmEmployees input:checked")].map(input=>input.value);
+ const date=form.querySelector("#dmDate")?.value||today();
+ const note=form.querySelector("#dmNote")?.value.trim()||"";
+ const workMode=form.querySelector("#dmWorkMode")?.value||"none";
+ const workQty=number(form.querySelector("#dmQty")?.value);
+ const workRate=number(form.querySelector("#dmRate")?.value);
+ if(!employeeIds.length)return alert("請至少勾選一位員工。");
+ if(workMode==="none"||workQty<=0||workRate<=0)return alert("純點工請選擇日薪或時薪，並填寫天數／時數與薪資單價。");
+ const batchId=uid(),now=new Date().toISOString(),skipped=[];
+ employeeIds.forEach(employeeId=>{
+  const employee=(state.employees||[]).find(row=>row.id===employeeId)||{};
+  const hasDaily=(state.dailyLogs||[]).some(row=>row.employee===employeeId&&row.date===date&&row.workMode==="daily"&&row.isPrimaryWork!==false);
+  let first=true;
+  projectIds.forEach(projectId=>{
+   const project=(state.projects||[]).find(row=>row.id===projectId)||{};
+   const canAddWork=first&&!(workMode==="daily"&&hasDaily);
+   const log={id:uid(),batchId,groupId:`${batchId}:${projectId}`,date,employee:employeeId,employeeName:employee.name||"",project:projectId,projectName:project.name||"",items:[],groupTotal:0,performance:0,rate:number(employee.commissionRate),commission:0,workMode:canAddWork?workMode:"none",workQty:canAddWork?workQty:0,workRate:canAddWork?workRate:0,isPrimaryWork:canAddWork,note,createdAt:now,updatedAt:now,purePointWork:true,noInvoice:true};
+   state.dailyLogs.unshift(log);syncDailyLogLinks(log);first=false;
+  });
+  if(workMode==="daily"&&hasDaily)skipped.push(employee.name||"未命名員工");
+ });
+ await saveState("新增純點工／多案場修繕");closeModal();toast(`已儲存 ${projectIds.length} 個修繕案場的點工紀錄${skipped.length?`；${skipped.join("、")}同日已計日薪`:""}`);renderDailyLogs();
+},true);
 </script>
 </body>
 </html>
