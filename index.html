@@ -1404,6 +1404,21 @@ function showProjectLaborDetail(projectId){
 }
 const __showProjectCardDetailV11=showProjectCardDetail;
 showProjectCardDetail=function(projectId,type){return type==="labor"?showProjectLaborDetail(projectId):__showProjectCardDetailV11(projectId,type)};
+
+/* 舊材料資料有些只保留材料 ID，統一轉回可閱讀的材料名稱。 */
+function materialUsageLabel(usage){
+ const material=(state.materials||[]).find(x=>String(x.id)===String(usage?.material));
+ return usage?.materialName||usage?.materialLabel||material?.name||material?.materialName||material?.item||material?.title||usage?.material||"未命名材料";
+}
+showProjectMaterials=function(projectId){
+ const project=(state.projects||[]).find(x=>String(x.id)===String(projectId));if(!project)return;
+ const rows=projectRows(project,"materialUsages"),total=rows.reduce((sum,x)=>sum+num(x.amount),0),modal=document.getElementById("modal");
+ modal.innerHTML=`<div class="modal-card" style="width:min(1120px,96vw)"><div class="modal-head" style="background:linear-gradient(120deg,#082f63,#087f77);color:#fff"><div><h3 style="margin:0">${esc(project.name)}｜材料成本明細</h3><small>所有材料用量、廠商與金額皆可在此查閱。</small></div><button class="btn" id="closeModal">×</button></div><div class="modal-body"><div class="table-wrap"><table class="data-table"><thead><tr><th>日期</th><th>材料</th><th>廠商</th><th>數量</th><th>單價</th><th>金額</th><th>操作</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.date||"")}</td><td><b>${esc(materialUsageLabel(x))}</b></td><td>${esc(relLabel("vendors",x.vendor)||x.vendorName||x.vendor||"未指定")}</td><td class="num">${num(x.quantity??x.qty)} ${esc(x.unit||"")}</td><td class="num">${money(num(x.unitPrice??x.price))}</td><td class="num"><b>${money(num(x.amount))}</b></td><td><div class="row-actions"><button data-material-edit="${x.id}">編輯</button><button class="btn danger" data-material-delete="${x.id}">刪除</button></div></td></tr>`).join("")||'<tr><td colspan="7">此案場目前沒有材料紀錄。</td></tr>'}</tbody><tfoot><tr><td colspan="5"><b>材料總計</b></td><td class="num"><b>${money(total)}</b></td><td></td></tr></tfoot></table></div></div><div class="modal-foot"><button class="btn" id="backProjectCenter">返回案場中心</button><button class="btn primary" id="closeMaterialDetail">關閉</button></div></div>`;
+ modal.classList.remove("hidden");document.getElementById("closeModal").onclick=closeModal;document.getElementById("closeMaterialDetail").onclick=closeModal;document.getElementById("backProjectCenter").onclick=()=>showProjectCenter(projectId);
+ document.querySelectorAll("[data-material-edit]").forEach(b=>b.onclick=()=>openForm("materialUsages",b.dataset.materialEdit));document.querySelectorAll("[data-material-delete]").forEach(b=>b.onclick=()=>{if(!confirm("確定刪除這筆材料嗎？"))return;state.materialUsages=(state.materialUsages||[]).filter(x=>String(x.id)!==String(b.dataset.materialDelete));rebuildMaterialPayables();saveState("刪除案場材料");showProjectMaterials(projectId)});
+};
+const __showProjectCardDetailV12=showProjectCardDetail;
+showProjectCardDetail=function(projectId,type){return type==="material"?showProjectMaterials(projectId):__showProjectCardDetailV12(projectId,type)};
 </script>
 </body>
 </html>
