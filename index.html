@@ -804,7 +804,8 @@ function rebuildMaterialPayables(){
 }
 
 function projectOptions(value=""){
- return `<option value="">可選擇或直接輸入新案場</option>${(state.projects||[]).map(x=>`<option value="${x.id}" ${x.id===value?"selected":""}>${esc(x.name)}</option>`).join("")}`;
+ const projects=[...(state.projects||[])].sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""),"zh-Hant",{numeric:true,sensitivity:"base"}));
+ return `<option value="">可選擇或直接輸入新案場</option>${projects.map(x=>`<option value="${x.id}" ${x.id===value?"selected":""}>${esc(x.name)}</option>`).join("")}`;
 }
 function customerOptions(value=""){
  return `<option value="">請選擇客戶</option>${(state.customers||[]).map(x=>`<option value="${x.id}" ${x.id===value?"selected":""}>${esc(x.name)}</option>`).join("")}`;
@@ -1222,7 +1223,7 @@ function syncDailyLogLinks(log,oldLog=null){
 function repairOrphanedDailyBillingLinks(){const validBillingIds=new Set((state.billings||[]).map(x=>x.id)),validNumbers=new Set((state.billings||[]).map(x=>x.number));let repaired=0;(state.dailyLogs||[]).forEach(x=>{if(x.billingId&&!validBillingIds.has(x.billingId)){x.billingId="";x.billingNo="";x.updatedAt=new Date().toISOString();syncDailyLogLinks(x);repaired++}else if(x.billingNo&&!validNumbers.has(x.billingNo)){x.billingId="";x.billingNo="";x.updatedAt=new Date().toISOString();syncDailyLogLinks(x);repaired++}});return repaired}
 function renderDailyLogs(){
  const repaired=repairOrphanedDailyBillingLinks();if(repaired)scheduleSave(`自動恢復 ${repaired} 筆已刪除請款單的每日業績`);
- const month=dailyLogMonth(),logs=(state.dailyLogs||[]).filter(x=>String(x.date||"").startsWith(month)).sort((a,b)=>String(b.date).localeCompare(String(a.date))),projects=(state.projects||[]),projectOptions=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join(""),unbilled=logs.filter(x=>num(x.performance)>0&&!x.billingId),perf=unbilled.reduce((a,x)=>a+num(x.performance),0),comm=logs.reduce((a,x)=>a+num(x.commission),0),labor=logs.reduce((a,x)=>a+dailyLogWorkAmount(x),0);
+ const month=dailyLogMonth(),logs=(state.dailyLogs||[]).filter(x=>String(x.date||"").startsWith(month)).sort((a,b)=>String(b.date).localeCompare(String(a.date))),projects=[...(state.projects||[])].sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""),"zh-Hant",{numeric:true,sensitivity:"base"})),projectOptions=projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join(""),unbilled=logs.filter(x=>num(x.performance)>0&&!x.billingId),perf=unbilled.reduce((a,x)=>a+num(x.performance),0),comm=logs.reduce((a,x)=>a+num(x.commission),0),labor=logs.reduce((a,x)=>a+dailyLogWorkAmount(x),0);
  document.getElementById("content").innerHTML=`<section class="panel"><div class="panel-head"><h3>每日業績／點工登錄</h3><div class="toolbar"><input id="dailyMonth" type="month" value="${month}"><button class="btn primary" id="addDailyLog">＋ 新增每日紀錄</button></div></div><div class="panel-body"><div class="notice">每天只需填一次：業績員工填「當日業績＋抽成比例」，點工員工填「日薪／時薪」。系統會自動彙入薪資；未請款業績可於月底直接轉為請款單。</div><div class="cards" style="margin:14px 0;grid-template-columns:repeat(3,minmax(0,1fr))">${metric("待轉請款業績",money(perf),`${unbilled.length} 筆未請款`)}${metric("本月預估抽成",money(comm),"依每日紀錄計算")}${metric("本月點工",money(labor),"已同步薪資")}</div><div class="toolbar" style="justify-content:flex-start;margin-bottom:12px"><label><b>直接轉請款：</b></label><select id="dailyBillingProject"><option value="">請選擇案場</option>${projectOptions}</select><button class="btn teal" id="convertDailyBilling">將未請款業績轉成請款單</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>日期</th><th>員工</th><th>案場</th><th>當日業績</th><th>抽成比例</th><th>抽成</th><th>點工</th><th>請款狀態</th><th>備註</th><th>操作</th></tr></thead><tbody>${logs.map(x=>`<tr><td>${esc(x.date||"")}</td><td><b>${esc(relLabel("employees",x.employee)||x.employeeName||"")}</b></td><td>${esc(relLabel("projects",x.project)||x.projectName||"")}</td><td class="num">${money(x.performance)}</td><td class="num">${num(x.rate)}%</td><td class="num">${money(x.commission)}</td><td class="num">${x.workMode==="daily"?"日薪":x.workMode==="hourly"?"時薪":"－"}<br><b>${money(dailyLogWorkAmount(x))}</b></td><td>${x.billingNo?`<span class="badge paid">已轉 ${esc(x.billingNo)}</span>`:`<span class="badge unpaid">未請款</span>`}</td><td>${esc(x.note||"")}</td><td><div class="row-actions"><button data-daily-edit="${x.id}">編輯</button><button data-daily-delete="${x.id}" ${x.billingId?"disabled title=\"已轉請款，請先修改請款單\"":""}>刪除</button></div></td></tr>`).join("")||"<tr><td colspan=\"10\">尚無每日紀錄，請按「新增每日紀錄」。</td></tr>"}</tbody></table></div></div></section>`;
  document.getElementById("dailyMonth").onchange=e=>{window.__ksDailyMonth=e.target.value;renderDailyLogs()};document.getElementById("addDailyLog").onclick=()=>openDailyLogForm();document.getElementById("convertDailyBilling").onclick=()=>convertDailyLogsToBilling(month,document.getElementById("dailyBillingProject").value);document.querySelectorAll("[data-daily-edit]").forEach(b=>b.onclick=()=>openDailyLogForm(b.dataset.dailyEdit));document.querySelectorAll("[data-daily-delete]").forEach(b=>b.onclick=()=>deleteDailyLog(b.dataset.dailyDelete));
 }
@@ -1546,6 +1547,24 @@ if(!document.getElementById("daily-log-premium-style")){
  @media(max-width:700px){.daily-log-table tbody .daily-log-merged{display:grid!important;grid-template-columns:1fr 1fr;gap:12px;padding:15px!important;border:1px solid #d4e4ef!important;border-radius:15px;margin:10px 0}.daily-log-table tbody .daily-log-merged td{padding:0!important;border:0!important;background:transparent!important}.daily-log-table tbody .daily-log-merged td:nth-child(1),.daily-log-table tbody .daily-log-merged td:nth-child(2),.daily-log-table tbody .daily-log-merged td:nth-child(3),.daily-log-table tbody .daily-log-merged td:last-child{grid-column:1/-1}.daily-log-actions{justify-content:stretch}.daily-log-actions button{flex:1}}
  `;document.head.appendChild(style);
 }
+
+/* 所有案場欄位統一依案名自然排序，讓同前綴的案場排在一起。 */
+function sortProjectPickerOptions(root=document){
+ const compare=(a,b)=>String(a||"").localeCompare(String(b||""),"zh-Hant",{numeric:true,sensitivity:"base"});
+ const isProjectField=field=>/project|案場/i.test(`${field.id||""} ${field.name||""} ${field.closest?.(".field")?.querySelector("label")?.textContent||""}`);
+ root.querySelectorAll?.("select").forEach(select=>{
+  if(!isProjectField(select))return;
+  const selected=select.value,options=[...select.options],empty=options.filter(option=>!option.value),rows=options.filter(option=>option.value).sort((a,b)=>compare(a.textContent,b.textContent));
+  [...empty,...rows].forEach(option=>select.appendChild(option));select.value=selected;
+ });
+ root.querySelectorAll?.("input[list]").forEach(input=>{
+  if(!isProjectField(input))return;
+  const list=document.getElementById(input.getAttribute("list"));if(!list)return;
+  [...list.options].sort((a,b)=>compare(a.value,b.value)).forEach(option=>list.appendChild(option));
+ });
+}
+document.addEventListener("focusin",event=>sortProjectPickerOptions(event.target.closest?.("form,.modal-card,#content")||document),true);
+document.addEventListener("click",event=>{if(event.target.matches?.("select,input[list]"))sortProjectPickerOptions(event.target.closest?.("form,.modal-card,#content")||document)},true);
 </script>
 </body>
 </html>
