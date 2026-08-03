@@ -1446,6 +1446,37 @@ document.addEventListener("submit",e=>{
  const form=e.target;if(form?.id!=="dailyMultiForm")return;
  form.querySelectorAll("input.dm-project[data-project-picker]").forEach(input=>{const name=String(input.value||"").trim();if(!name)return;let project=(state.projects||[]).find(x=>projectNameKey(x.name)===projectNameKey(name));if(!project){project={id:uid(),name,customer:"",customerName:"",status:"進行中",createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};state.projects.unshift(project)}input.value=project.id});
 },true);
+
+/* 每日業績案場欄：所有新增列都可手動輸入，儲存後自動建立案場。 */
+function upgradeDailyMultiProjectPickers(){
+ const form=document.getElementById("dailyMultiForm");if(!form)return;
+ let list=form.querySelector("#dmProjectPresetList");
+ if(!list){list=document.createElement("datalist");list.id="dmProjectPresetList";form.appendChild(list)}
+ const names=[...new Set((state.projects||[]).map(p=>String(p.name||"").trim()).filter(Boolean))]
+   .sort((a,b)=>a.localeCompare(b,"zh-Hant"));
+ list.innerHTML=names.map(name=>`<option value="${esc(name)}"></option>`).join("");
+ form.querySelectorAll("input.dm-project[data-project-picker]").forEach(input=>{
+   if(input.value==="請選擇案場")input.value="";
+   input.setAttribute("list","dmProjectPresetList");input.placeholder="輸入或選擇案場";
+ });
+ form.querySelectorAll("select.dm-project").forEach(select=>{
+   const selected=select.options[select.selectedIndex];
+   const input=document.createElement("input");
+   input.className="dm-project";input.dataset.projectPicker="1";
+   input.setAttribute("list","dmProjectPresetList");input.placeholder="輸入或選擇案場";
+   input.value=select.value?(selected?.textContent||"").trim():"";
+   select.replaceWith(input);
+ });
+}
+const __openDailyMultiProjectFormV15=openDailyMultiProjectForm;
+openDailyMultiProjectForm=function(){
+ __openDailyMultiProjectFormV15();
+ setTimeout(upgradeDailyMultiProjectPickers,0);
+};
+document.addEventListener("click",e=>{
+ if(!e.target.closest?.("#dailyMultiForm #dmAdd"))return;
+ setTimeout(upgradeDailyMultiProjectPickers,0);
+},true);
 </script>
 </body>
 </html>
