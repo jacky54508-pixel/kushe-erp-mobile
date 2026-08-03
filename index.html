@@ -1433,6 +1433,19 @@ openMaterialUsageBatchForm=function(defaultProjectId=""){
  renderRows();document.getElementById("muAddItem").onclick=()=>{items.push({material:"",quantity:1,unitPrice:0});renderRows()};document.getElementById("closeModal").onclick=closeModal;document.getElementById("cancelModal").onclick=closeModal;
  document.getElementById("materialUsageBatchForm").onsubmit=async e=>{e.preventDefault();const date=document.getElementById("muDate").value||today(),project=document.getElementById("muProject").value,vendor=document.getElementById("muVendor").value,note=document.getElementById("muNote").value||"";if(!project)return alert("請選擇案場");if(!vendor)return alert("請選擇廠商");const valid=items.filter(x=>x.material&&num(x.quantity)>0);if(!valid.length)return alert("請至少新增一個材料品項並填寫數量");if(valid.length!==items.length)return alert("每個材料品項都需要選擇材料並填寫大於 0 的數量");const now=new Date().toISOString();valid.forEach(x=>state.materialUsages.unshift({id:uid(),date,project,material:x.material,vendor,quantity:num(x.quantity),unitPrice:num(x.unitPrice),amount:num(x.quantity)*num(x.unitPrice),status:"未付",note,createdAt:now,updatedAt:now}));rebuildMaterialPayables();await saveState(`新增案場材料 ${valid.length} 筆`);closeModal();toast(`已新增 ${valid.length} 筆材料，並依廠商自動合併應付帳款`);render()};
 };
+
+/* 每日多案場登錄：案場可輸入新名稱，也可由既有案場下拉選取。 */
+const __openDailyMultiProjectFormV14=openDailyMultiProjectForm;
+openDailyMultiProjectForm=function(){
+ __openDailyMultiProjectFormV14();
+ const form=document.getElementById("dailyMultiForm");if(!form)return;
+ const list=document.createElement("datalist");list.id="dmProjectPresetList";list.innerHTML=(state.projects||[]).map(x=>`<option value="${esc(x.name)}"></option>`).join("");form.appendChild(list);
+ form.querySelectorAll("select.dm-project").forEach(select=>{const input=document.createElement("input"),selected=select.options[select.selectedIndex];input.className="dm-project";input.dataset.projectPicker="1";input.setAttribute("list","dmProjectPresetList");input.placeholder="輸入或選擇案場";input.value=selected?.textContent?.trim()||"";select.replaceWith(input)});
+};
+document.addEventListener("submit",e=>{
+ const form=e.target;if(form?.id!=="dailyMultiForm")return;
+ form.querySelectorAll("input.dm-project[data-project-picker]").forEach(input=>{const name=String(input.value||"").trim();if(!name)return;let project=(state.projects||[]).find(x=>projectNameKey(x.name)===projectNameKey(name));if(!project){project={id:uid(),name,customer:"",customerName:"",status:"進行中",createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};state.projects.unshift(project)}input.value=project.id});
+},true);
 </script>
 </body>
 </html>
