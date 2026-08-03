@@ -1510,7 +1510,7 @@ function showDailyLogGroupDetails(key){
 const __renderDailyLogsV17=renderDailyLogs;
 renderDailyLogs=function(){
  __renderDailyLogsV17();
- const month=dailyLogMonth(),logs=(state.dailyLogs||[]).filter(row=>String(row.date||"").startsWith(month)),body=document.querySelector("#content .data-table tbody");
+ const month=dailyLogMonth(),logs=(state.dailyLogs||[]).filter(row=>String(row.date||"").startsWith(month)),dailyTable=[...document.querySelectorAll("#content .data-table")].find(table=>table.querySelector("thead")?.textContent.includes("請款狀態")),body=dailyTable?.querySelector("tbody");
  if(!body)return;
  const groups=new Map();
  logs.forEach(row=>{const key=dailyLogGroupKey(row);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row)});
