@@ -1477,6 +1477,53 @@ document.addEventListener("click",e=>{
  if(!e.target.closest?.("#dailyMultiForm #dmAdd"))return;
  setTimeout(upgradeDailyMultiProjectPickers,0);
 },true);
+
+function showDailySummaryDetail(kind){
+ const month=dailyLogMonth(),logs=(state.dailyLogs||[]).filter(x=>String(x.date||"").startsWith(month));
+ const config={
+  pending:{title:"待轉請款業績明細",hint:"僅顯示尚未轉成請款單的每日業績。",rows:logs.filter(x=>num(x.performance)>0&&!x.billingId),amount:x=>num(x.performance),amountLabel:"業績金額"},
+  commission:{title:"本月預估抽成明細",hint:"依每日紀錄與員工抽成比例計算。",rows:logs.filter(x=>num(x.commission)>0),amount:x=>num(x.commission),amountLabel:"抽成金額"},
+  labor:{title:"本月點工明細",hint:"同一員工同日只計一次日薪。",rows:logs.filter(x=>dailyLogWorkAmount(x)>0),amount:x=>dailyLogWorkAmount(x),amountLabel:"點工金額"}
+ }[kind];if(!config)return;
+ const rows=config.rows,total=rows.reduce((sum,row)=>sum+config.amount(row),0),modal=document.getElementById("modal");
+ modal.innerHTML=`<div class="modal-card" style="width:min(980px,94vw)"><div class="modal-head"><div><h3>${config.title}</h3><small>${esc(month)}｜${config.hint}</small></div><button class="btn" id="closeModal">✕</button></div><div class="modal-body"><div class="table-wrap"><table class="data-table"><thead><tr><th>日期</th><th>員工</th><th>案場</th><th>${config.amountLabel}</th><th>備註</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.date||"")}</td><td><b>${esc(relLabel("employees",row.employee)||row.employeeName||"未指定")}</b></td><td>${esc(relLabel("projects",row.project)||row.projectName||"未指定")}</td><td class="num"><b>${money(config.amount(row))}</b></td><td>${esc(row.note||"－")}</td></tr>`).join("")||`<tr><td colspan="5">本月尚無${config.title.replace("本月","").replace("明細","")}資料。</td></tr>`}</tbody><tfoot><tr><td colspan="3"><b>合計</b></td><td class="num"><b>${money(total)}</b></td><td></td></tr></tfoot></table></div></div><div class="modal-foot"><button class="btn primary" id="dailySummaryClose">關閉</button></div></div>`;
+ modal.classList.remove("hidden");document.getElementById("closeModal").onclick=closeModal;document.getElementById("dailySummaryClose").onclick=closeModal;
+}
+const __renderDailyLogsV16=renderDailyLogs;
+renderDailyLogs=function(){
+ __renderDailyLogsV16();
+ const cards=[...document.querySelectorAll("#content .cards .metric")];
+ [["pending","待轉請款業績"],["commission","本月預估抽成"],["labor","本月點工"]].forEach(([kind,label])=>{
+  const card=cards.find(node=>node.querySelector(".label")?.textContent.trim()===label);if(!card)return;
+  card.classList.add("clickable");card.tabIndex=0;card.setAttribute("role","button");card.title="點擊查看明細";
+  const open=()=>showDailySummaryDetail(kind);card.onclick=open;card.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();open()}};
+ });
+};
+
+function dailyLogGroupKey(row){return [row.date||"",row.project||row.projectName||"",row.groupId||row.batchId||row.id].join("||")}
+function showDailyLogGroupDetails(key){
+ const rows=(state.dailyLogs||[]).filter(row=>dailyLogGroupKey(row)===key),modal=document.getElementById("modal");
+ modal.innerHTML=`<div class="modal-card" style="width:min(940px,94vw)"><div class="modal-head"><div><h3>每日紀錄人員明細</h3><small>可逐筆查看或修改員工資料。</small></div><button class="btn" id="closeModal">✕</button></div><div class="modal-body"><div class="table-wrap"><table class="data-table"><thead><tr><th>日期</th><th>員工</th><th>案場</th><th>業績</th><th>抽成</th><th>點工</th><th>備註</th><th>操作</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.date||"")}</td><td><b>${esc(relLabel("employees",row.employee)||row.employeeName||"未指定")}</b></td><td>${esc(relLabel("projects",row.project)||row.projectName||"未指定")}</td><td class="num">${money(row.performance)}</td><td class="num">${money(row.commission)}</td><td class="num">${money(dailyLogWorkAmount(row))}</td><td>${esc(row.note||"－")}</td><td><button class="btn" data-group-daily-edit="${row.id}">編輯</button></td></tr>`).join("")}</tbody></table></div></div><div class="modal-foot"><button class="btn primary" id="groupDetailClose">關閉</button></div></div>`;
+ modal.classList.remove("hidden");document.getElementById("closeModal").onclick=closeModal;document.getElementById("groupDetailClose").onclick=closeModal;
+ modal.querySelectorAll("[data-group-daily-edit]").forEach(button=>button.onclick=()=>{closeModal();openDailyLogForm(button.dataset.groupDailyEdit)});
+}
+const __renderDailyLogsV17=renderDailyLogs;
+renderDailyLogs=function(){
+ __renderDailyLogsV17();
+ const month=dailyLogMonth(),logs=(state.dailyLogs||[]).filter(row=>String(row.date||"").startsWith(month)),body=document.querySelector("#content .data-table tbody");
+ if(!body)return;
+ const groups=new Map();
+ logs.forEach(row=>{const key=dailyLogGroupKey(row);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row)});
+ body.innerHTML=[...groups.entries()].map(([key,rows])=>{
+  const first=rows[0],employees=[...new Set(rows.map(row=>relLabel("employees",row.employee)||row.employeeName||"未指定"))],performance=num(first.groupTotal)||num(first.performance),commission=rows.reduce((sum,row)=>sum+num(row.commission),0),work=rows.reduce((sum,row)=>sum+dailyLogWorkAmount(row),0),rates=[...new Set(rows.map(row=>`${num(row.rate)}%`))],notes=[...new Set(rows.map(row=>String(row.note||"").trim()).filter(Boolean))],allBilled=rows.every(row=>row.billingId),canDelete=rows.every(row=>!row.billingId);
+  const actions=rows.length===1?`<button data-daily-edit="${first.id}">編輯</button><button data-daily-delete="${first.id}" ${first.billingId?"disabled":""}>刪除</button>`:(canDelete?`<button data-daily-group-delete="${esc(key)}">刪除整組</button>`:"");
+  return `<tr><td>${esc(first.date||"")}</td><td><b>${esc(employees.join("、"))}</b>${rows.length>1?`<br><small>${rows.length} 位員工</small>`:""}</td><td>${esc(relLabel("projects",first.project)||first.projectName||"")}</td><td class="num"><b>${money(performance)}</b></td><td class="num">${esc(rates.join("／"))}<br><b>${money(commission)}</b></td><td class="num">${work?money(work):"－"}</td><td>${esc(allBilled?`已轉 ${first.billingNo||"請款單"}`:"未請款")}</td><td>${esc(notes.join("／")||"－")}</td><td><div class="row-actions"><button class="btn" data-daily-group-detail="${esc(key)}">明細${rows.length>1?`（${rows.length}）`:""}</button>${actions}</div></td></tr>`;
+ }).join("")||"<tr><td colspan=\"10\">尚無每日紀錄，請按「新增每日紀錄」。</td></tr>";
+ body.querySelectorAll("[data-daily-group-detail]").forEach(button=>button.onclick=()=>showDailyLogGroupDetails(button.dataset.dailyGroupDetail));
+ body.querySelectorAll("[data-daily-edit]").forEach(button=>button.onclick=()=>openDailyLogForm(button.dataset.dailyEdit));
+ body.querySelectorAll("[data-daily-delete]").forEach(button=>button.onclick=()=>deleteDailyLog(button.dataset.dailyDelete));
+ body.querySelectorAll("[data-daily-group-delete]").forEach(button=>button.onclick=async()=>{const key=button.dataset.dailyGroupDelete,rows=(state.dailyLogs||[]).filter(row=>dailyLogGroupKey(row)===key);if(!confirm(`確定刪除這組 ${rows.length} 位員工的每日紀錄？`))return;state.dailyLogs=(state.dailyLogs||[]).filter(row=>dailyLogGroupKey(row)!==key);for(const row of rows)syncDailyLogLinks({...row,performance:0,workMode:"none"},row);await saveState("刪除整組每日業績／點工");renderDailyLogs()});
+};
 </script>
 </body>
 </html>
