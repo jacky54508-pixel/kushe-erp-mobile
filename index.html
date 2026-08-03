@@ -1512,18 +1512,40 @@ renderDailyLogs=function(){
  __renderDailyLogsV17();
  const month=dailyLogMonth(),logs=(state.dailyLogs||[]).filter(row=>String(row.date||"").startsWith(month)),dailyTable=[...document.querySelectorAll("#content .data-table")].find(table=>table.querySelector("thead")?.textContent.includes("請款狀態")),body=dailyTable?.querySelector("tbody");
  if(!body)return;
+ dailyTable.classList.add("daily-log-table");
  const groups=new Map();
  logs.forEach(row=>{const key=dailyLogGroupKey(row);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row)});
  body.innerHTML=[...groups.entries()].map(([key,rows])=>{
   const first=rows[0],employees=[...new Set(rows.map(row=>relLabel("employees",row.employee)||row.employeeName||"未指定"))],performance=num(first.groupTotal)||num(first.performance),commission=rows.reduce((sum,row)=>sum+num(row.commission),0),work=rows.reduce((sum,row)=>sum+dailyLogWorkAmount(row),0),rates=[...new Set(rows.map(row=>`${num(row.rate)}%`))],notes=[...new Set(rows.map(row=>String(row.note||"").trim()).filter(Boolean))],allBilled=rows.every(row=>row.billingId),canDelete=rows.every(row=>!row.billingId);
   const actions=rows.length===1?`<button data-daily-edit="${first.id}">編輯</button><button data-daily-delete="${first.id}" ${first.billingId?"disabled":""}>刪除</button>`:(canDelete?`<button data-daily-group-delete="${esc(key)}">刪除整組</button>`:"");
-  return `<tr><td>${esc(first.date||"")}</td><td><b>${esc(employees.join("、"))}</b>${rows.length>1?`<br><small>${rows.length} 位員工</small>`:""}</td><td>${esc(relLabel("projects",first.project)||first.projectName||"")}</td><td class="num"><b>${money(performance)}</b></td><td class="num">${esc(rates.join("／"))}<br><b>${money(commission)}</b></td><td class="num">${work?money(work):"－"}</td><td>${esc(allBilled?`已轉 ${first.billingNo||"請款單"}`:"未請款")}</td><td>${esc(notes.join("／")||"－")}</td><td><div class="row-actions"><button class="btn" data-daily-group-detail="${esc(key)}">明細${rows.length>1?`（${rows.length}）`:""}</button>${actions}</div></td></tr>`;
+  return `<tr class="daily-log-merged"><td class="daily-log-date">${esc(first.date||"")}</td><td class="daily-log-employees"><b>${esc(employees.join("、"))}</b>${rows.length>1?`<small>${rows.length} 位員工共同登錄</small>`:""}</td><td class="daily-log-project"><b>${esc(relLabel("projects",first.project)||first.projectName||"")}</b></td><td class="num daily-log-performance"><b>${money(performance)}</b></td><td class="num daily-log-rate">${esc(rates.join("／"))}</td><td class="num daily-log-commission"><b>${money(commission)}</b></td><td class="num daily-log-work">${work?money(work):"－"}</td><td><span class="badge ${allBilled?"paid":"unpaid"}">${esc(allBilled?`已轉 ${first.billingNo||"請款單"}`:"未請款")}</span></td><td class="daily-log-note">${esc(notes.join("／")||"－")}</td><td><div class="row-actions daily-log-actions"><button class="btn" data-daily-group-detail="${esc(key)}">明細${rows.length>1?`（${rows.length}）`:""}</button>${actions}</div></td></tr>`;
  }).join("")||"<tr><td colspan=\"10\">尚無每日紀錄，請按「新增每日紀錄」。</td></tr>";
  body.querySelectorAll("[data-daily-group-detail]").forEach(button=>button.onclick=()=>showDailyLogGroupDetails(button.dataset.dailyGroupDetail));
  body.querySelectorAll("[data-daily-edit]").forEach(button=>button.onclick=()=>openDailyLogForm(button.dataset.dailyEdit));
  body.querySelectorAll("[data-daily-delete]").forEach(button=>button.onclick=()=>deleteDailyLog(button.dataset.dailyDelete));
  body.querySelectorAll("[data-daily-group-delete]").forEach(button=>button.onclick=async()=>{const key=button.dataset.dailyGroupDelete,rows=(state.dailyLogs||[]).filter(row=>dailyLogGroupKey(row)===key);if(!confirm(`確定刪除這組 ${rows.length} 位員工的每日紀錄？`))return;state.dailyLogs=(state.dailyLogs||[]).filter(row=>dailyLogGroupKey(row)!==key);for(const row of rows)syncDailyLogLinks({...row,performance:0,workMode:"none"},row);await saveState("刪除整組每日業績／點工");renderDailyLogs()});
 };
+
+if(!document.getElementById("daily-log-premium-style")){
+ const style=document.createElement("style");style.id="daily-log-premium-style";style.textContent=`
+ .daily-log-table{border:1px solid #d5e5f0;border-radius:16px;overflow:hidden;box-shadow:0 10px 25px rgba(14,52,93,.07)}
+ .daily-log-table thead th{background:linear-gradient(180deg,#f4f9fd,#e9f3fa)!important;color:#163d69!important;border-bottom:2px solid #c6dceb!important;font-weight:900!important;letter-spacing:.2px}
+ .daily-log-table tbody .daily-log-merged td{padding:17px 15px!important;border-bottom:1px solid #dce9f2!important;vertical-align:middle;background:#fff}
+ .daily-log-table tbody .daily-log-merged:nth-child(even) td{background:#f7fbfd}
+ .daily-log-table tbody .daily-log-merged:hover td{background:#eefaf8!important}
+ .daily-log-date{font-variant-numeric:tabular-nums;color:#183c67;font-weight:800;white-space:nowrap}
+ .daily-log-employees b{color:#082f63;font-size:16px}.daily-log-employees small{display:block;margin-top:6px;color:#57809b;font-weight:700}
+ .daily-log-project b{display:inline-block;color:#087f75;background:#e6f7f4;padding:7px 10px;border-radius:9px;white-space:nowrap}
+ .daily-log-performance b,.daily-log-commission b{font-size:18px;color:#073c77}.daily-log-commission b{color:#b76a06}.daily-log-rate{color:#426581;font-weight:800}.daily-log-work{color:#087f75;font-weight:800}
+ .daily-log-note{min-width:110px;color:#60758b;line-height:1.45}.daily-log-actions{display:flex!important;align-items:center;justify-content:flex-end;gap:8px;white-space:nowrap}
+ .daily-log-actions button{min-height:38px;border-radius:10px!important;padding:8px 12px!important;font-weight:900!important;box-shadow:0 3px 9px rgba(11,50,93,.08);transition:transform .15s ease,box-shadow .15s ease}
+ .daily-log-actions button:hover{transform:translateY(-1px);box-shadow:0 7px 15px rgba(11,50,93,.14)}
+ .daily-log-actions [data-daily-group-detail]{background:linear-gradient(135deg,#0b9b8d,#08776d)!important;color:#fff!important;border-color:#08776d!important}
+ .daily-log-actions [data-daily-edit]{background:#103b78!important;color:#fff!important;border-color:#103b78!important}
+ .daily-log-actions [data-daily-delete],.daily-log-actions [data-daily-group-delete]{background:#fff7f6!important;color:#cf3c31!important;border-color:#f1bdb7!important}
+ @media(max-width:700px){.daily-log-table tbody .daily-log-merged{display:grid!important;grid-template-columns:1fr 1fr;gap:12px;padding:15px!important;border:1px solid #d4e4ef!important;border-radius:15px;margin:10px 0}.daily-log-table tbody .daily-log-merged td{padding:0!important;border:0!important;background:transparent!important}.daily-log-table tbody .daily-log-merged td:nth-child(1),.daily-log-table tbody .daily-log-merged td:nth-child(2),.daily-log-table tbody .daily-log-merged td:nth-child(3),.daily-log-table tbody .daily-log-merged td:last-child{grid-column:1/-1}.daily-log-actions{justify-content:stretch}.daily-log-actions button{flex:1}}
+ `;document.head.appendChild(style);
+}
 </script>
 </body>
 </html>
