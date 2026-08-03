@@ -1544,6 +1544,15 @@ if(!document.getElementById("daily-log-premium-style")){
  .daily-log-actions [data-daily-group-detail]{background:linear-gradient(135deg,#0b9b8d,#08776d)!important;color:#fff!important;border-color:#08776d!important}
  .daily-log-actions [data-daily-edit]{background:#103b78!important;color:#fff!important;border-color:#103b78!important}
  .daily-log-actions [data-daily-delete],.daily-log-actions [data-daily-group-delete]{background:#fff7f6!important;color:#cf3c31!important;border-color:#f1bdb7!important}
+ @media(min-width:701px){
+  .daily-log-table{table-layout:fixed!important;width:100%!important}
+  .daily-log-table thead th{padding:16px 10px!important;white-space:nowrap;font-size:15px!important}
+  .daily-log-table thead th:nth-child(1){width:10%}.daily-log-table thead th:nth-child(2){width:13%}.daily-log-table thead th:nth-child(3){width:10%}.daily-log-table thead th:nth-child(4){width:9%}.daily-log-table thead th:nth-child(5){width:8%}.daily-log-table thead th:nth-child(6){width:9%}.daily-log-table thead th:nth-child(7){width:8%}.daily-log-table thead th:nth-child(8){width:9%}.daily-log-table thead th:nth-child(9){width:7%}.daily-log-table thead th:nth-child(10){width:17%}
+  .daily-log-table tbody .daily-log-merged td{padding:17px 10px!important;overflow:hidden}
+  .daily-log-table .badge{display:inline-flex!important;align-items:center;justify-content:center;min-width:68px;white-space:nowrap;padding:8px 10px!important}
+  .daily-log-table .daily-log-note{min-width:0!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
+  .daily-log-table .daily-log-actions{gap:6px!important}.daily-log-table .daily-log-actions button{padding:8px 10px!important;font-size:15px!important}
+ }
  @media(max-width:700px){.daily-log-table tbody .daily-log-merged{display:grid!important;grid-template-columns:1fr 1fr;gap:12px;padding:15px!important;border:1px solid #d4e4ef!important;border-radius:15px;margin:10px 0}.daily-log-table tbody .daily-log-merged td{padding:0!important;border:0!important;background:transparent!important}.daily-log-table tbody .daily-log-merged td:nth-child(1),.daily-log-table tbody .daily-log-merged td:nth-child(2),.daily-log-table tbody .daily-log-merged td:nth-child(3),.daily-log-table tbody .daily-log-merged td:last-child{grid-column:1/-1}.daily-log-actions{justify-content:stretch}.daily-log-actions button{flex:1}}
  `;document.head.appendChild(style);
 }
