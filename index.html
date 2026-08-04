@@ -2322,6 +2322,47 @@ openDocumentForm=function(module,id){
   item.addEventListener("change",()=>ksApplyDocumentProjectItemPrice(true));
  },0);
 };
+/* Team commission is calculated from the full project performance.
+   Example: $8,000 with two 25% employees = $2,000 each. */
+function ksCorrectTeamCommissionShares(){
+ if(!Array.isArray(state?.dailyLogs)||!state.dailyLogs.length)return false;
+ const groups=new Map(),changes=[];
+ state.dailyLogs.forEach(row=>{
+  const key=String(row.groupId||row.id||"");
+  if(!groups.has(key))groups.set(key,[]);
+  groups.get(key).push(row);
+ });
+ groups.forEach(rows=>{
+  let total=rows.reduce((max,row)=>Math.max(max,num(row.groupTotal)),0);
+  if(!total)total=rows.reduce((sum,row)=>sum+num(row.performance),0);
+  rows.forEach(row=>{
+   const employee=(state.employees||[]).find(x=>x.id===row.employee)||{};
+   const rate=num(row.rate??employee.commissionRate);
+   const expected=Math.round(total*rate/100);
+   if(num(row.commission)===expected)return;
+   const old={...row};
+   row.groupTotal=total;
+   row.commission=expected;
+   row.updatedAt=new Date().toISOString();
+   changes.push({row,old});
+  });
+ });
+ changes.forEach(({row,old})=>syncDailyLogLinks(row,old));
+ return changes.length>0;
+}
+const __ksRenderWithTeamCommissionFix=render;
+render=function(){
+ const changed=ksCorrectTeamCommissionShares();
+ if(changed&&typeof scheduleSave==="function")scheduleSave("Correct team commission calculation");
+ return __ksRenderWithTeamCommissionFix.apply(this,arguments);
+};
+const __ksSyncDailyLogLinksTeamCommission=syncDailyLogLinks;
+syncDailyLogLinks=function(log,oldLog=null){
+ const total=num(log?.groupTotal);
+ const rate=num(log?.rate);
+ if(total>0&&rate>0)log.commission=Math.round(total*rate/100);
+ return __ksSyncDailyLogLinksTeamCommission(log,oldLog);
+};
 </script>
 </body>
 </html>
