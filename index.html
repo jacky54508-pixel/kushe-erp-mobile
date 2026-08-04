@@ -2053,6 +2053,138 @@ function renderProjectOverview(){
 if(!document.getElementById("ks-project-overview-final-style")){
  const style=document.createElement("style");style.id="ks-project-overview-final-style";style.textContent=`.ks-project-overview .project-month-summary{grid-template-columns:repeat(4,minmax(0,1fr))}.ks-open-ar-card{display:block;text-align:left;border:1px solid #9ee3d8;border-radius:16px;background:linear-gradient(135deg,#edfffb,#f8fffd);padding:16px 19px;cursor:pointer;box-shadow:0 8px 22px rgba(4,126,118,.08);transition:.2s}.ks-open-ar-card:hover{transform:translateY(-2px);box-shadow:0 13px 28px rgba(4,126,118,.18);border-color:#109c91}.ks-open-ar-card span,.ks-open-ar-card small{display:block;color:#55728a;font-weight:800}.ks-open-ar-card b{display:block;margin:5px 0;color:#c5422d;font-size:25px}.ks-open-ar-card small{font-size:12px}.ks-project-hidden-note{margin-top:13px;color:#6b7d90;font-size:13px;font-weight:700}.ks-open-ar-summary{display:flex;gap:12px;margin-bottom:16px}.ks-open-ar-summary>div{flex:1;padding:14px 18px;border-radius:14px;background:#f2fbfa;border:1px solid #ccece7}.ks-open-ar-summary span{display:block;color:#587188;font-weight:800}.ks-open-ar-summary b{display:block;margin-top:3px;font-size:24px;color:#087f77}.ks-open-ar-modal{width:min(1100px,94vw)}@media(max-width:700px){.ks-project-overview .project-month-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.ks-open-ar-card{padding:14px}.ks-open-ar-summary{display:grid;grid-template-columns:1fr}.ks-open-ar-modal{width:96vw}}`;document.head.appendChild(style);
 }
+/* 點工去重：同一員工同一天的日薪只保留一筆，避免從兩個入口重複計薪。 */
+function ksNormaliseSameDayAttendance(){
+ const rows=state.attendance||[], groups=new Map(), affected=new Map();
+ rows.forEach(row=>{if(row.workMode==="hourly")return;const key=`${row.employee||row.employeeName||""}|${String(row.date||"").slice(0,10)}`;if(!key.startsWith("|")){if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row)}});
+ const remove=new Set();
+ groups.forEach((items,key)=>{if(items.length<2)return;items.sort((a,b)=>{const ap=a.sourceType==="daily-log"?1:0,bp=b.sourceType==="daily-log"?1:0;return ap-bp||num(b.amount)-num(a.amount)});const main=items[0],projects=[...new Set(items.map(x=>relLabel("projects",x.project)||x.projectName).filter(Boolean))],notes=[...new Set(items.map(x=>String(x.note||"").trim()).filter(Boolean))];
+ main.days=Math.max(...items.map(x=>num(x.days)||1));main.amount=Math.max(...items.map(x=>num(x.amount)));main.dailyRate=Math.max(...items.map(x=>num(x.dailyRate||x.workRate)));main.note=[...notes,projects.length>1?`同日施工案場：${projects.join("、")}`:""].filter(Boolean).join("｜");main.updatedAt=new Date().toISOString();
+ items.slice(1).forEach(x=>remove.add(x));affected.set(key,[String(main.date||"").slice(0,7),main.employee]);
+ });
+ if(remove.size)state.attendance=rows.filter(x=>!remove.has(x));
+ return [...affected.values()];
+}
+const __saveStatePreventDuplicateAttendance=saveState;
+saveState=async function(action="資料更新"){
+ const affected=ksNormaliseSameDayAttendance();
+ affected.forEach(([month,employee])=>{if(month&&employee)rebuildPayrollFor(month,employee)});
+ return __saveStatePreventDuplicateAttendance(affected.length?`${action}（已合併同日重複點工）`:action);
+};
+/* 每個未請款案場旁直接轉請款，取代容易選錯的上方下拉列。 */
+const __renderDailyLogsQuickBilling=renderDailyLogs;
+renderDailyLogs=function(){
+ __renderDailyLogsQuickBilling();
+ const direct=document.getElementById("dailyBillingProject");
+ direct?.closest(".toolbar")?.remove();
+ const month=dailyLogMonth(),table=[...document.querySelectorAll("#content .data-table")].find(t=>t.querySelector("thead")?.textContent.includes("請款狀態")),body=table?.querySelector("tbody");
+ if(!body)return;
+ const groups=new Map();
+ (state.dailyLogs||[]).filter(row=>String(row.date||"").startsWith(month)).forEach(row=>{const key=dailyLogGroupKey(row);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row)});
+ [...body.querySelectorAll("tr.daily-log-merged")].forEach((tr,index)=>{
+  const rows=[...groups.values()][index]||[],first=rows[0];
+  if(!first||first.billingId||!rows.some(row=>num(row.performance)>0)||!first.project)return;
+  const actions=tr.querySelector(".daily-log-actions");if(!actions||actions.querySelector(".ks-quick-bill"))return;
+  const button=document.createElement("button");button.type="button";button.className="btn ks-quick-bill";button.textContent="轉請款";button.title="將此案場本月全部未請款業績轉成一張請款單";
+  button.onclick=()=>{const name=relLabel("projects",first.project)||first.projectName||"此案場";if(confirm(`確定將「${name}」${month} 的未請款業績轉成請款單？`))convertDailyLogsToBilling(month,first.project)};
+  actions.prepend(button);
+ });
+};
+if(!document.getElementById("ks-quick-bill-style")){
+ const style=document.createElement("style");style.id="ks-quick-bill-style";style.textContent=`.daily-log-actions .ks-quick-bill{background:linear-gradient(135deg,#f2a900,#d47b00)!important;color:#fff!important;border-color:#d47b00!important;box-shadow:0 6px 15px rgba(212,123,0,.22)!important}.daily-log-actions .ks-quick-bill:hover{filter:brightness(1.05)}.daily-log-table{margin-top:8px}.daily-log-table tbody tr.daily-log-merged td:last-child{min-width:220px}`;document.head.appendChild(style);
+}
+/* 收款完成後：請款單預設隱藏，仍可依月份／狀態／關鍵字查詢。 */
+function ksBillingNumber(row){return String(row?.number||row?.billingNo||row?.sourceNo||row?.no||"").trim()}
+function ksBillingReceiptStatus(billing){
+ const no=ksBillingNumber(billing), id=String(billing?.id||"");
+ const related=(state.receivables||[]).filter(row=>{
+  const refs=[row.billingId,row.billingNo,row.sourceNo,row.sourceId,row.documentId].map(x=>String(x||""));
+  return (id&&refs.includes(id))||(no&&refs.includes(no));
+ });
+ if(!related.length)return "未收款";
+ const total=related.reduce((sum,row)=>sum+num(row.amount),0);
+ const received=related.reduce((sum,row)=>sum+num(row.received),0);
+ if(total>0&&received>=total)return "已收款";
+ return received>0?"部分收款":"未收款";
+}
+function ksEnhanceBillingList(){
+ const table=[...document.querySelectorAll("#content .data-table")].find(node=>{
+  const text=node.querySelector("thead")?.textContent||"";
+  return text.includes("請款")||text.includes("單號");
+ });
+ const body=table?.querySelector("tbody");if(!body)return;
+ const panel=table.closest(".panel")||document.getElementById("content");
+ let tools=document.getElementById("ksBillingReceiptTools");
+ if(!tools){
+  tools=document.createElement("div");tools.id="ksBillingReceiptTools";tools.className="ks-billing-receipt-tools";
+  tools.innerHTML='<span>收款顯示</span><select id="ksBillingReceiptFilter"><option value="open">未收／部分收款（預設）</option><option value="paid">已收款</option><option value="all">全部請款單</option></select><input id="ksBillingReceiptMonth" type="month" title="查詢月份"><input id="ksBillingReceiptSearch" placeholder="搜尋單號、客戶或案場"><button class="btn" type="button" id="ksBillingReceiptClear">清除查詢</button>';
+  table.closest(".table-wrap")?.insertAdjacentElement("beforebegin",tools);
+  tools.querySelector("#ksBillingReceiptFilter").onchange=e=>{window.__ksBillingReceiptFilter=e.target.value;ksEnhanceBillingList()};
+  tools.querySelector("#ksBillingReceiptMonth").onchange=e=>{window.__ksBillingReceiptMonth=e.target.value;ksEnhanceBillingList()};
+  tools.querySelector("#ksBillingReceiptSearch").oninput=e=>{window.__ksBillingReceiptSearch=e.target.value;ksEnhanceBillingList()};
+  tools.querySelector("#ksBillingReceiptClear").onclick=()=>{window.__ksBillingReceiptFilter="open";window.__ksBillingReceiptMonth="";window.__ksBillingReceiptSearch="";ksEnhanceBillingList()};
+ }
+ const filter=window.__ksBillingReceiptFilter||"open", month=window.__ksBillingReceiptMonth||"", query=String(window.__ksBillingReceiptSearch||"").trim().toLocaleLowerCase("zh-TW");
+ const select=tools.querySelector("#ksBillingReceiptFilter"),monthInput=tools.querySelector("#ksBillingReceiptMonth"),search=tools.querySelector("#ksBillingReceiptSearch");
+ if(select)select.value=filter;if(monthInput)monthInput.value=month;if(search&&document.activeElement!==search)search.value=window.__ksBillingReceiptSearch||"";
+ [...body.querySelectorAll("tr")].forEach(tr=>{
+  const text=tr.textContent||"";
+  const billing=(state.billings||[]).find(row=>{const no=ksBillingNumber(row);return no&&text.includes(no)});
+  if(!billing)return;
+  const status=ksBillingReceiptStatus(billing),rowDate=String(billing.date||billing.createdAt||"").slice(0,7);
+  const haystack=`${text} ${relLabel("customers",billing.customer)||billing.customerName||""} ${relLabel("projects",billing.project)||billing.projectName||""}`.toLocaleLowerCase("zh-TW");
+  const visible=(filter==="all"||filter===status||((filter==="open")&&status!=="已收款"))&&(!month||rowDate===month)&&(!query||haystack.includes(query));
+  tr.style.display=visible?"":"none";
+  let badge=tr.querySelector(".ks-billing-receipt-badge");
+  if(!badge){badge=document.createElement("span");badge.className="ks-billing-receipt-badge";const target=[...tr.cells].find(cell=>cell.textContent.includes(ksBillingNumber(billing)))||tr.cells[0];target?.appendChild(badge)}
+  badge.textContent=status;badge.dataset.status=status;
+ });
+}
+const __renderCrudWithBillingReceiptStatus=renderCrud;
+renderCrud=function(module){
+ const result=__renderCrudWithBillingReceiptStatus(module);
+ if(module==="billings")setTimeout(ksEnhanceBillingList,0);
+ return result;
+};
+function ksHideDailyBillingUndo(){
+ document.querySelectorAll("button,.btn").forEach(button=>{
+  if((button.textContent||"").replace(/\s/g,"").includes("撤銷每日轉請款"))button.classList.add("ks-hide-daily-billing-undo");
+ });
+}
+if(!document.getElementById("ks-billing-paid-filter-style")){
+ const style=document.createElement("style");style.id="ks-billing-paid-filter-style";style.textContent=`
+ .ks-billing-receipt-tools{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 14px;padding:11px 14px;border:1px solid #cce8e4;border-left:4px solid #0f998a;border-radius:13px;background:linear-gradient(90deg,#f0fbf9,#f8fbff);color:#123c68;font-weight:900}.ks-billing-receipt-tools select,.ks-billing-receipt-tools input{height:38px;min-width:150px;background:#fff}.ks-billing-receipt-tools input[type="month"]{min-width:135px}.ks-billing-receipt-badge{display:block;width:max-content;margin:5px auto 0;padding:3px 8px;border-radius:999px;background:#fff0ed;color:#bc3b2a;border:1px solid #ffc9c0;font-size:12px;font-weight:900;line-height:1.25}.ks-billing-receipt-badge[data-status="部分收款"]{background:#fff8e6;color:#a96c00;border-color:#f3de9e}.ks-billing-receipt-badge[data-status="已收款"]{background:#e8f8f0;color:#0f765d;border-color:#bce7d7}.ks-hide-daily-billing-undo{display:none!important}@media(max-width:720px){.ks-billing-receipt-tools{align-items:stretch}.ks-billing-receipt-tools select,.ks-billing-receipt-tools input{flex:1;min-width:130px}.ks-billing-receipt-tools .btn{width:100%}}
+ `;document.head.appendChild(style);
+}
+ksHideDailyBillingUndo();
+new MutationObserver(ksHideDailyBillingUndo).observe(document.body,{childList:true,subtree:true});
+
+/* 每日業績／點工：以狀態帶領操作，避免把「撤銷」混在日常列表中。 */
+function ksApplyDailyBillingUX(){
+ const filter=document.getElementById("ksDailyBillingFilter");
+ if(filter&&!filter.querySelector(".ks-daily-status-guide")){
+  const guide=document.createElement("div");guide.className="ks-daily-status-guide";
+  guide.innerHTML='<span><b>未請款</b> 可直接轉請款</span><span><b>不需請款</b> 僅記錄點工／修繕</span><span><b>已轉請款</b> 可查詢對應請款單</span>';
+  filter.insertAdjacentElement("afterend",guide);
+ }
+ const month=dailyLogMonth();
+ const billingNos=[...new Set((state.dailyLogs||[]).filter(row=>String(row.date||"").startsWith(month)&&row.billingId).map(row=>String(row.billingNo||"")).filter(Boolean))];
+ document.querySelectorAll("#content .daily-log-billed").forEach(row=>{
+  const no=billingNos.find(value=>(row.textContent||"").includes(value));
+  const actions=row.querySelector(".daily-log-actions");
+  if(!no||!actions||actions.querySelector(".ks-open-linked-billing"))return;
+  const button=document.createElement("button");button.type="button";button.className="btn ks-open-linked-billing";button.textContent="查看請款單";
+  button.onclick=()=>{currentModule="billings";window.__ksSearchText=no;render()};
+  actions.prepend(button);
+ });
+}
+const __renderDailyLogsStatusUX=renderDailyLogs;
+renderDailyLogs=function(){const result=__renderDailyLogsStatusUX();setTimeout(ksApplyDailyBillingUX,0);return result;};
+if(!document.getElementById("ks-daily-status-ux-style")){
+ const style=document.createElement("style");style.id="ks-daily-status-ux-style";style.textContent=`
+ .ks-daily-status-guide{display:flex;gap:9px;flex-wrap:wrap;margin:-4px 0 13px}.ks-daily-status-guide span{padding:7px 10px;border:1px solid #dce8f3;border-radius:999px;background:#fff;color:#657b92;font-size:12px;font-weight:700}.ks-daily-status-guide b{color:#0e786d}.ks-open-linked-billing{background:#f1f7ff!important;border-color:#b9d4f5!important;color:#164a8e!important}@media(max-width:680px){.ks-daily-status-guide{display:grid;grid-template-columns:1fr}.ks-daily-status-guide span{border-radius:10px}}
+ `;document.head.appendChild(style);
+}
 </script>
 </body>
 </html>
