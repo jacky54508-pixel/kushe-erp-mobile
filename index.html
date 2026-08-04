@@ -2363,6 +2363,79 @@ syncDailyLogLinks=function(log,oldLog=null){
  if(total>0&&rate>0)log.commission=Math.round(total*rate/100);
  return __ksSyncDailyLogLinksTeamCommission(log,oldLog);
 };
+/* 報價單專用：雙模式與精簡明細介面 */
+function ksInstallQuoteFormStyle(){
+  if(document.getElementById('ksQuoteFormStyle')) return;
+  const style=document.createElement('style'); style.id='ksQuoteFormStyle';
+  style.textContent=`
+    .ks-quote-pro-form .modal-body{background:linear-gradient(180deg,#f7fbff 0%,#fff 38%);padding:24px 28px 30px}
+    .ks-quote-pro-form .doc-head-grid{padding:18px;border:1px solid #dbe8f5;border-radius:18px;background:#fff;box-shadow:0 10px 28px rgba(15,50,91,.05)}
+    .ks-quote-pro-form .doc-lines{margin-top:20px;padding:22px;border:1px solid #cfe2e8;border-radius:20px;background:#fff}
+    .ks-quote-pro-form .doc-lines>h3{display:flex;align-items:center;gap:10px;margin:0 0 18px;color:#073d70;font-size:20px}
+    .ks-quote-pro-form .doc-lines>h3:before{content:'';width:5px;height:23px;border-radius:9px;background:linear-gradient(#0c9b8e,#0a5a84)}
+    .ks-quote-pro-form .doc-line-grid{grid-template-columns:minmax(220px,2.2fr) minmax(92px,.65fr) minmax(92px,.65fr) minmax(120px,.85fr) auto!important;align-items:end;gap:13px}
+    .ks-quote-pro-form .doc-line-grid .field{min-width:0}
+    .ks-quote-pro-form .doc-line-grid .btn{min-height:48px;white-space:nowrap;box-shadow:0 8px 18px rgba(6,72,128,.18)}
+    .ks-quote-pro-form .ks-quote-hidden-field{display:none!important}
+    .ks-quote-pro-form .doc-lines-table{border-radius:14px;overflow:hidden}
+    .ks-quote-pro-form .doc-lines-table thead{background:linear-gradient(110deg,#082d64,#078b83)}
+    .ks-quote-pro-form .doc-lines-table th{color:#fff;border-color:rgba(255,255,255,.25)}
+    .ks-quote-pro-form .doc-lines-table tfoot{background:#f2fbf9;color:#073d70;font-weight:800}
+    .ks-quote-pro-form .doc-summary-grid{grid-template-columns:repeat(2,minmax(180px,1fr))!important;max-width:600px;margin:22px 0 0 auto}
+    .ks-quote-pro-form .doc-summary-box{border-radius:15px!important;border-left:5px solid #0c9b8e!important;background:#f6fbff!important;box-shadow:0 8px 20px rgba(7,61,112,.06)}
+    .ks-quote-hidden-total{display:none!important}
+    .ks-quote-mode-help{grid-column:1/-1;margin:-3px 0 3px;padding:10px 13px;border-radius:11px;background:#effaf8;color:#16716b;font-size:13px;font-weight:700}
+    @media(max-width:760px){.ks-quote-pro-form .modal-body{padding:16px}.ks-quote-pro-form .doc-line-grid{grid-template-columns:1fr 1fr!important}.ks-quote-pro-form .doc-line-grid .field:first-child{grid-column:1/-1}.ks-quote-pro-form .doc-line-grid .btn{grid-column:1/-1}.ks-quote-pro-form .doc-summary-grid{grid-template-columns:1fr!important;max-width:none}.ks-quote-pro-form .doc-lines{padding:15px}}
+  `;
+  document.head.appendChild(style);
+}
+function ksQuoteTableCompact(form){
+  form.querySelectorAll('table.doc-lines-table').forEach(table=>{
+    const headers=[...table.querySelectorAll('thead th')];
+    const removeIndices=headers.map((h,i)=>({i,t:h.textContent.replace(/\s/g,'')})).filter(x=>/戶別|規格.?說明/.test(x.t)).map(x=>x.i).sort((a,b)=>b-a);
+    if(!removeIndices.length) return;
+    table.querySelectorAll('tr').forEach(row=>{
+      removeIndices.forEach(i=>{if(row.children[i]) row.children[i].remove()});
+      [...row.children].forEach(cell=>{if(cell.colSpan>1)cell.colSpan=Math.max(1,cell.colSpan-removeIndices.length)});
+    });
+  });
+}
+function ksHideQuoteUntaxedCard(form){
+  [...form.querySelectorAll('.doc-summary-box')].forEach(box=>{
+    const text=box.textContent.replace(/\s/g,'');
+    if(text.includes('未稅金額') && !text.includes('稅額') && !text.includes('總金額')) box.classList.add('ks-quote-hidden-total');
+  });
+}
+function ksUpgradeQuoteForm(){
+  const form=document.getElementById('docForm');
+  if(!form || form.dataset.ksQuoteEnhanced==='1') return;
+  const mode=form.querySelector('[name="format"]');
+  if(!mode) return;
+  form.dataset.ksQuoteEnhanced='1';
+  const card=form.closest('.modal-card'); if(card) card.classList.add('ks-quote-pro-form');
+  ksInstallQuoteFormStyle();
+  const oldMode=String(mode.value||'');
+  const modeField=mode.closest('.field');
+  if(modeField){
+    const label=modeField.querySelector('label'); if(label) label.textContent='報價模式';
+    mode.innerHTML='<option value="實做實算">實做實算模式</option><option value="一般報價">確認數量與金額模式</option>';
+    mode.value=oldMode.includes('實做')?'實做實算':'一般報價';
+    const help=document.createElement('div'); help.className='ks-quote-mode-help';
+    const refresh=()=>{help.textContent=mode.value==='實做實算'?'實做實算：數量與金額依實際施工結算，適合尚未確認最終數量的案場。':'確認數量與金額：本次報價即為確認數量與金額，適合正式報價。'};
+    mode.addEventListener('change',refresh); refresh(); modeField.after(help);
+  }
+  ['lineHouse','lineSpec'].forEach(id=>{
+    const input=document.getElementById(id); if(input){input.value='';input.closest('.field')?.classList.add('ks-quote-hidden-field');}
+  });
+  const tidy=()=>{ksQuoteTableCompact(form);ksHideQuoteUntaxedCard(form)};
+  tidy();
+  new MutationObserver(tidy).observe(form.querySelector('.doc-lines')||form,{childList:true,subtree:true});
+}
+const __ksOpenDocumentFormQuoteLayout=openDocumentForm;
+openDocumentForm=function(module,id){
+  __ksOpenDocumentFormQuoteLayout(module,id);
+  if(module==='quotations') setTimeout(ksUpgradeQuoteForm,0);
+};
 </script>
 </body>
 </html>
