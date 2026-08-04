@@ -1775,6 +1775,134 @@ showProjectMaterials=function(projectId){
   footer.prepend(button);
  },0);
 };
+
+/* Pure point-work records are clearly separated from invoiceable performance. */
+function ksRenderDailyInvoiceStatus(){
+ const month=dailyLogMonth();
+ const logs=(state.dailyLogs||[]).filter(row=>String(row.date||"").startsWith(month));
+ const table=[...document.querySelectorAll("#content .data-table")].find(node=>node.querySelector("thead")?.textContent.includes("請款狀態"));
+ const body=table?.querySelector("tbody");
+ if(!body)return;
+ table.classList.add("daily-log-table");
+ const groups=new Map();
+ logs.forEach(row=>{const key=dailyLogGroupKey(row);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row)});
+ const html=[...groups.entries()].sort((a,b)=>String(b[1][0]?.date||"").localeCompare(String(a[1][0]?.date||""))).map(([key,rows])=>{
+  const first=rows[0];
+  const noInvoice=rows.every(row=>row.noInvoice===true||row.purePointWork===true);
+  const employees=[...new Set(rows.map(row=>relLabel("employees",row.employee)||row.employeeName||"未指定"))];
+  const performance=num(first.groupTotal)||num(first.performance);
+  const commission=rows.reduce((sum,row)=>sum+num(row.commission),0);
+  const work=rows.reduce((sum,row)=>sum+dailyLogWorkAmount(row),0);
+  const rates=[...new Set(rows.map(row=>`${num(row.rate)}%`))];
+  const notes=[...new Set(rows.map(row=>String(row.note||"").trim()).filter(Boolean))];
+  const billed=rows.every(row=>row.billingId);
+  const canDelete=rows.every(row=>!row.billingId);
+  const actions=rows.length===1
+    ?`<button data-daily-edit="${esc(first.id)}">編輯</button><button data-daily-delete="${esc(first.id)}" ${first.billingId?"disabled":""}>刪除</button>`
+    :(canDelete?`<button data-daily-group-delete="${esc(key)}">刪除整組</button>`:"");
+  const status=noInvoice
+    ?'<span class="badge daily-no-invoice-badge">不需請款</span><small class="daily-no-invoice-note">純點工</small>'
+    :`<span class="badge ${billed?"paid":"unpaid"}">${esc(billed?`已轉 ${first.billingNo||"請款單"}`:"未請款")}</span>`;
+  return `<tr class="daily-log-merged ${noInvoice?"daily-log-no-invoice":""}"><td class="daily-log-date">${esc(first.date||"")}</td><td class="daily-log-employees"><b>${esc(employees.join("、"))}</b>${rows.length>1?`<small>${rows.length} 位員工共同登錄</small>`:""}</td><td class="daily-log-project"><b>${esc(relLabel("projects",first.project)||first.projectName||"")}</b></td><td class="num daily-log-performance"><b>${noInvoice?"—":money(performance)}</b></td><td class="num daily-log-rate">${noInvoice?"—":esc(rates.join("／"))}</td><td class="num daily-log-commission"><b>${noInvoice?"—":money(commission)}</b></td><td class="num daily-log-work">${work?money(work):"—"}</td><td class="daily-log-status">${status}</td><td class="daily-log-note">${esc(notes.join("／")||"—")}</td><td><div class="row-actions daily-log-actions"><button class="btn" data-daily-group-detail="${esc(key)}">查看明細</button>${actions}</div></td></tr>`;
+ }).join("")||'<tr><td colspan="10">尚無每日紀錄。</td></tr>';
+ body.innerHTML=html;
+ body.querySelectorAll("[data-daily-group-detail]").forEach(button=>button.onclick=()=>showDailyLogGroupDetails(button.dataset.dailyGroupDetail));
+ body.querySelectorAll("[data-daily-edit]").forEach(button=>button.onclick=()=>openDailyLogForm(button.dataset.dailyEdit));
+ body.querySelectorAll("[data-daily-delete]").forEach(button=>button.onclick=()=>deleteDailyLog(button.dataset.dailyDelete));
+ body.querySelectorAll("[data-daily-group-delete]").forEach(button=>button.onclick=async()=>{
+  const key=button.dataset.dailyGroupDelete,rows=(state.dailyLogs||[]).filter(row=>dailyLogGroupKey(row)===key);
+  if(!confirm(`確定刪除這組 ${rows.length} 位員工的每日紀錄？`))return;
+  state.dailyLogs=(state.dailyLogs||[]).filter(row=>dailyLogGroupKey(row)!==key);
+  for(const row of rows)syncDailyLogLinks({...row,performance:0,workMode:"none"},row);
+  await saveState("刪除整組每日紀錄");renderDailyLogs();
+ });
+}
+const __renderDailyLogsNoInvoice=renderDailyLogs;
+renderDailyLogs=function(){__renderDailyLogsNoInvoice();ksRenderDailyInvoiceStatus();};
+if(!document.getElementById("daily-no-invoice-style")){
+ const style=document.createElement("style");style.id="daily-no-invoice-style";style.textContent=`
+ .daily-log-table .daily-log-no-invoice td{background:linear-gradient(90deg,#f7fafc,#f1f6fa)!important}
+ .daily-log-table .daily-log-no-invoice:hover td{background:#edf4f8!important}
+ .daily-no-invoice-badge{display:inline-flex!important;align-items:center;gap:6px;background:#e9f0f7!important;color:#46627b!important;border:1px solid #c8d6e3!important;box-shadow:none!important;font-weight:900!important}
+ .daily-no-invoice-badge:before{content:"";width:7px;height:7px;border-radius:50%;background:#6e879e;box-shadow:0 0 0 3px rgba(110,135,158,.12)}
+ .daily-no-invoice-note{display:block;margin-top:5px;color:#71869a;font-size:12px;font-weight:800;white-space:nowrap}
+ .daily-log-no-invoice .daily-log-performance b,.daily-log-no-invoice .daily-log-commission b,.daily-log-no-invoice .daily-log-rate{color:#7890a4!important}
+ `;document.head.appendChild(style);
+}
+
+/* Inventory centre: receipts add stock; project usage is shown as outbound cost only. */
+function ksInventoryReceipts(){
+ state.inventoryReceipts=Array.isArray(state.inventoryReceipts)?state.inventoryReceipts:[];
+ return state.inventoryReceipts;
+}
+function ksMaterialInventory(material){
+ const receipts=ksInventoryReceipts().filter(x=>x.material===material.id);
+ const usages=(state.materialUsages||[]).filter(x=>x.material===material.id);
+ const inbound=receipts.reduce((s,x)=>s+num(x.quantity),0);
+ const outbound=usages.reduce((s,x)=>s+num(x.quantity),0);
+ const value=receipts.reduce((s,x)=>s+num(x.amount),0)-usages.reduce((s,x)=>s+num(x.amount),0);
+ return {opening:num(material.stock),inbound,outbound,current:num(material.stock)+inbound-outbound,value,receipts,usages};
+}
+function ksInventoryMaterialOptions(selected=""){
+ return `<option value="">請選擇材料</option>${(state.materials||[]).map(m=>`<option value="${esc(m.id)}" ${m.id===selected?"selected":""}>${esc(m.name||"")}${m.model?`｜${esc(m.model)}`:""}</option>`).join("")}`;
+}
+function ksInventoryVendorOptions(selected=""){
+ return `<option value="">請選擇廠商</option>${(state.vendors||[]).map(v=>`<option value="${esc(v.id)}" ${v.id===selected?"selected":""}>${esc(v.name||"")}</option>`).join("")}`;
+}
+function ksInventoryStatus(stock,safe){
+ if(stock<0)return `<span class="ks-stock-badge danger">庫存待盤點</span>`;
+ if(num(safe)>0&&stock<=num(safe))return `<span class="ks-stock-badge warn">低於安全庫存</span>`;
+ return `<span class="ks-stock-badge ok">庫存正常</span>`;
+}
+function renderMaterialInventory(){
+ const search=String(window.__ksInventorySearch||"").trim().toLocaleLowerCase("zh-TW");
+ const list=(state.materials||[]).map(m=>({m,inv:ksMaterialInventory(m)})).filter(({m})=>!search||[m.name,m.model,relLabel("vendors",m.vendor)].join(" ").toLocaleLowerCase("zh-TW").includes(search));
+ const low=list.filter(({m,inv})=>inv.current<0||(num(m.safeStock)>0&&inv.current<=num(m.safeStock))).length;
+ const value=list.reduce((s,{inv})=>s+Math.max(0,inv.value),0);
+ document.getElementById("content").innerHTML=`
+ <section class="ks-inventory-hero"><div><span class="ks-eyebrow">INVENTORY CONTROL</span><h2>材料庫存中心</h2><p>入庫增加庫存；案場領用自動扣庫存並計入成本。未付款入庫才會建立應付帳款。</p></div><div class="ks-inventory-hero-actions"><button class="btn" id="ksNewMaterial">＋ 新增材料</button><button class="btn primary" id="ksNewReceipt">＋ 入庫／採購</button></div></section>
+ <section class="ks-inventory-cards"><div class="ks-inventory-card"><span>管理品項</span><b>${(state.materials||[]).length}</b><small>材料主檔</small></div><div class="ks-inventory-card amber"><span>待留意庫存</span><b>${low}</b><small>低庫存或待盤點</small></div><div class="ks-inventory-card teal"><span>帳面庫存金額</span><b>${money(value)}</b><small>依入庫與案場領用估算</small></div></section>
+ <section class="panel ks-inventory-panel"><div class="panel-head"><div><h3>庫存清單</h3><p>可先建立材料主檔，再以「入庫／採購」累積現有庫存。</p></div><div class="toolbar"><input id="ksInventorySearch" placeholder="搜尋材料、型號或廠商" value="${esc(window.__ksInventorySearch||"")}"><button class="btn" id="ksInventoryClear">清除</button></div></div>
+ <div class="table-wrap"><table class="data-table ks-inventory-table"><thead><tr><th>材料品項</th><th>目前庫存</th><th>單位</th><th>預設單價</th><th>主要廠商</th><th>安全庫存</th><th>庫存狀態</th><th>操作</th></tr></thead><tbody>${list.length?list.map(({m,inv})=>`<tr><td><b>${esc(m.name||"未命名材料")}</b>${m.model?`<small>${esc(m.model)}</small>`:""}</td><td><strong class="ks-stock-number ${inv.current<0?"negative":""}">${num(inv.current)}</strong><small>入庫 ${num(inv.inbound)} ／ 領用 ${num(inv.outbound)}</small></td><td><span class="ks-unit-pill">${esc(m.unit||"未設定")}</span></td><td class="num"><b>${money(m.unitPrice)}</b></td><td>${esc(relLabel("vendors",m.vendor)||"未設定")}</td><td>${num(m.safeStock)||"—"}</td><td>${ksInventoryStatus(inv.current,m.safeStock)}</td><td><div class="row-actions"><button class="btn teal" data-inventory-receipt="${esc(m.id)}">入庫</button><button data-inventory-history="${esc(m.id)}">異動明細</button><button data-inventory-edit="${esc(m.id)}">編輯</button></div></td></tr>`).join(""):`<tr><td colspan="8" class="empty">尚未建立材料。請先按「新增材料」。</td></tr>`}</tbody></table></div></section>`;
+ document.getElementById("ksNewMaterial").onclick=()=>openForm("materials");
+ document.getElementById("ksNewReceipt").onclick=()=>openInventoryReceiptForm();
+ document.getElementById("ksInventoryClear").onclick=()=>{window.__ksInventorySearch="";renderMaterialInventory()};
+ const input=document.getElementById("ksInventorySearch");
+ input.oninput=e=>{window.__ksInventorySearch=e.target.value;renderMaterialInventory();requestAnimationFrame(()=>{const next=document.getElementById("ksInventorySearch");next?.focus();next?.setSelectionRange(next.value.length,next.value.length)})};
+ document.querySelectorAll("[data-inventory-receipt]").forEach(b=>b.onclick=()=>openInventoryReceiptForm(b.dataset.inventoryReceipt));
+ document.querySelectorAll("[data-inventory-history]").forEach(b=>b.onclick=()=>showInventoryHistory(b.dataset.inventoryHistory));
+ document.querySelectorAll("[data-inventory-edit]").forEach(b=>b.onclick=()=>openForm("materials",b.dataset.inventoryEdit));
+}
+function openInventoryReceiptForm(defaultMaterial=""){
+ const modal=document.getElementById("modal"),material=(state.materials||[]).find(x=>x.id===defaultMaterial);
+ modal.innerHTML=`<div class="modal-card ks-receipt-modal"><div class="modal-head"><div><span class="ks-eyebrow">STOCK IN</span><h3>材料入庫／採購</h3></div><button class="btn" id="closeModal">×</button></div><form id="ksReceiptForm"><div class="modal-body"><div class="notice">未付款會依同廠商彙總至「應付帳款」；已付款只增加庫存，不會產生應付。</div><div class="form-grid" style="margin-top:16px"><div class="field"><label>入庫日期</label><input name="date" type="date" value="${today()}" required></div><div class="field"><label>付款狀態</label><select name="paymentStatus"><option value="unpaid">未付款（建立應付）</option><option value="paid">已付款（僅入庫）</option></select></div><div class="field"><label>材料</label><select name="material" id="ksReceiptMaterial" required>${ksInventoryMaterialOptions(defaultMaterial)}</select></div><div class="field"><label>廠商</label><select name="vendor" id="ksReceiptVendor" required>${ksInventoryVendorOptions(material?.vendor||"")}</select></div><div class="field"><label>入庫數量</label><input name="quantity" type="number" min="0.01" step="0.01" value="1" required></div><div class="field"><label>單價</label><input name="unitPrice" type="number" min="0" step="1" value="${num(material?.unitPrice)}" required></div><div class="field"><label>金額</label><div class="ks-readonly-money" id="ksReceiptAmount">${money(num(material?.unitPrice))}</div></div><div class="field"><label>發票號碼（選填）</label><input name="invoiceNo" placeholder="例如 AB-12345678"></div><div class="field full"><label>備註</label><textarea name="note" placeholder="例如：8 月第一次進貨、送貨單號…"></textarea></div></div></div><div class="modal-foot"><button type="button" class="btn" id="cancelModal">取消</button><button class="btn primary" type="submit">確認入庫</button></div></form></div>`;
+ modal.classList.remove("hidden");
+ document.getElementById("closeModal").onclick=closeModal;document.getElementById("cancelModal").onclick=closeModal;
+ const form=document.getElementById("ksReceiptForm"),mSel=form.elements.material,vSel=form.elements.vendor,qSel=form.elements.quantity,pSel=form.elements.unitPrice;
+ const update=()=>document.getElementById("ksReceiptAmount").textContent=money(num(qSel.value)*num(pSel.value));
+ mSel.onchange=()=>{const m=(state.materials||[]).find(x=>x.id===mSel.value);if(m){pSel.value=num(m.unitPrice);if(m.vendor)vSel.value=m.vendor}update()};qSel.oninput=update;pSel.oninput=update;
+ form.onsubmit=async e=>{e.preventDefault();const fd=new FormData(form),m=(state.materials||[]).find(x=>x.id===fd.get("material")),vendor=(state.vendors||[]).find(x=>x.id===fd.get("vendor")),quantity=num(fd.get("quantity")),unitPrice=num(fd.get("unitPrice"));if(!m||!vendor||quantity<=0)return alert("請完整選擇材料、廠商與入庫數量。");const amount=quantity*unitPrice,receipt={id:uid(),date:fd.get("date"),material:m.id,vendor:vendor.id,quantity,unitPrice,amount,paymentStatus:fd.get("paymentStatus"),invoiceNo:fd.get("invoiceNo")||"",note:fd.get("note")||"",createdAt:new Date().toISOString()};ksInventoryReceipts().unshift(receipt);m.unitPrice=unitPrice;m.vendor=vendor.id;
+ if(receipt.paymentStatus==="unpaid"){
+  const payable=(state.payables||[]).find(x=>x.sourceType==="inventory-receipt"&&x.vendor===vendor.id&&num(x.amount)>num(x.paid));
+  const line=`${m.name} × ${quantity}（${receipt.date}）`;
+  if(payable){payable.amount=num(payable.amount)+amount;payable.untaxedAmount=num(payable.untaxedAmount)+amount;payable.note=[payable.note,line].filter(Boolean).join("；");payable.updatedAt=new Date().toISOString();receipt.payableId=payable.id;}
+  else {const row={id:uid(),date:receipt.date,vendor:vendor.id,vendorName:vendor.name,project:"",sourceNo:"庫存入庫彙總",sourceType:"inventory-receipt",invoiceNo:receipt.invoiceNo,taxMode:"未稅",untaxedAmount:amount,tax:0,amount,paid:0,status:"未付款",note:line,createdAt:new Date().toISOString()};state.payables.unshift(row);receipt.payableId=row.id;}
+ }
+ await saveState("材料入庫");closeModal();toast(receipt.paymentStatus==="unpaid"?"已入庫，並彙總至該廠商應付帳款。":"已入庫，未建立應付帳款。");renderMaterialInventory();};
+}
+function showInventoryHistory(materialId){
+ const m=(state.materials||[]).find(x=>x.id===materialId);if(!m)return;const inv=ksMaterialInventory(m),modal=document.getElementById("modal");
+ const receipts=inv.receipts.map(x=>({...x,type:"入庫",sign:1}));const usages=inv.usages.map(x=>({...x,type:"案場領用",sign:-1}));const rows=[...receipts,...usages].sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+ modal.innerHTML=`<div class="modal-card" style="width:min(920px,96vw)"><div class="modal-head"><div><span class="ks-eyebrow">MOVEMENT LOG</span><h3>${esc(m.name)}｜庫存異動</h3></div><button class="btn" id="closeModal">×</button></div><div class="modal-body"><div class="ks-history-summary"><div><span>期初庫存</span><b>${num(m.stock)} ${esc(m.unit||"")}</b></div><div><span>累計入庫</span><b>＋${num(inv.inbound)}</b></div><div><span>累計領用</span><b>－${num(inv.outbound)}</b></div><div><span>目前庫存</span><b>${num(inv.current)}</b></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>日期</th><th>類型</th><th>來源／案場</th><th>廠商</th><th>數量</th><th>單價</th><th>金額</th><th>備註</th></tr></thead><tbody>${rows.length?rows.map(x=>`<tr><td>${esc(x.date||"")}</td><td><span class="ks-move ${x.sign>0?"in":"out"}">${x.type}</span></td><td>${x.type==="案場領用"?esc(relLabel("projects",x.project)||x.projectName||"未指定案場"):"庫存入庫"}</td><td>${esc(relLabel("vendors",x.vendor)||x.vendorName||"—")}</td><td class="num"><b>${x.sign>0?"＋":"－"}${num(x.quantity)}</b></td><td class="num">${money(x.unitPrice)}</td><td class="num">${money(x.amount)}</td><td>${esc(x.note||"")}</td></tr>`).join(""):`<tr><td colspan="8" class="empty">尚無庫存異動紀錄。</td></tr>`}</tbody></table></div></div><div class="modal-foot"><button class="btn primary" id="closeHistory">關閉</button></div></div>`;
+ modal.classList.remove("hidden");document.getElementById("closeModal").onclick=closeModal;document.getElementById("closeHistory").onclick=closeModal;
+}
+const __renderInventoryModule=render;
+render=function(){__renderInventoryModule();if(currentModule==="materials")renderMaterialInventory();};
+if(!document.getElementById("ks-inventory-style")){
+ const style=document.createElement("style");style.id="ks-inventory-style";style.textContent=`
+ .ks-inventory-hero{display:flex;justify-content:space-between;gap:24px;align-items:center;padding:28px 32px;border-radius:22px;background:linear-gradient(115deg,#082b69,#0d5478 56%,#07847a);color:#fff;box-shadow:0 16px 36px rgba(8,43,105,.18);margin-bottom:18px}.ks-inventory-hero h2{margin:4px 0 8px;font-size:28px}.ks-inventory-hero p{margin:0;color:#d9eff5;max-width:720px;font-weight:700}.ks-eyebrow{font-size:12px;letter-spacing:1.3px;font-weight:900;color:#42d4bf}.ks-inventory-hero-actions{display:flex;gap:10px;flex-wrap:wrap}.ks-inventory-hero .btn{white-space:nowrap}.ks-inventory-hero .btn:not(.primary){background:#fff;color:#08346b;border-color:#fff}.ks-inventory-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:18px}.ks-inventory-card{padding:19px 22px;border-radius:18px;background:#fff;border:1px solid #dbe8f4;box-shadow:0 10px 24px rgba(15,55,102,.06);position:relative;overflow:hidden}.ks-inventory-card:before{content:"";display:block;width:44px;height:5px;border-radius:99px;background:#149e91;margin-bottom:12px}.ks-inventory-card.amber:before{background:#f5a623}.ks-inventory-card.teal:before{background:#0b7b93}.ks-inventory-card span,.ks-inventory-card small{display:block;color:#6b7c93;font-weight:800}.ks-inventory-card b{display:block;font-size:28px;color:#0a316b;margin:4px 0}.ks-inventory-panel .panel-head p{margin:4px 0 0;color:#70839a;font-size:13px;font-weight:700}.ks-inventory-table td small{display:block;margin-top:5px;color:#7b8ca1;font-size:12px;font-weight:700}.ks-stock-number{font-size:19px;color:#087a6a}.ks-stock-number.negative{color:#c24131}.ks-unit-pill{display:inline-block;border-radius:9px;background:#e9f8f5;color:#087a6a;padding:5px 10px;font-weight:900}.ks-stock-badge,.ks-move{display:inline-flex;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:900}.ks-stock-badge.ok,.ks-move.in{background:#e7f8f1;color:#11725f}.ks-stock-badge.warn{background:#fff5dd;color:#a96000}.ks-stock-badge.danger,.ks-move.out{background:#fff0ed;color:#b83a2c}.ks-receipt-modal .modal-head h3{margin:4px 0 0}.ks-readonly-money{height:46px;display:flex;align-items:center;padding:0 14px;border-radius:12px;background:#ecfbf7;color:#087a6a;border:1px solid #bce8df;font-weight:900;font-size:19px}.ks-history-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:0 0 18px}.ks-history-summary div{background:#f2f8fc;border:1px solid #dcebf5;padding:13px;border-radius:13px}.ks-history-summary span{display:block;color:#75879b;font-size:12px;font-weight:800}.ks-history-summary b{display:block;color:#082d65;font-size:18px;margin-top:4px}@media(max-width:800px){.ks-inventory-hero{padding:22px;align-items:flex-start;flex-direction:column}.ks-inventory-cards{grid-template-columns:1fr}.ks-history-summary{grid-template-columns:1fr 1fr}.ks-inventory-hero-actions{width:100%}.ks-inventory-hero-actions .btn{flex:1}.ks-inventory-table{min-width:840px}}
+ `;document.head.appendChild(style);
+}
 </script>
 </body>
 </html>
