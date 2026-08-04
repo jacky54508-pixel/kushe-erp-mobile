@@ -1710,6 +1710,71 @@ document.addEventListener("change",event=>{
 document.addEventListener("submit",event=>{
  ksRememberDailyFormProjectPrices(event.target);
 },true);
+
+/* Material refill trace: record who delivered materials to each project. */
+function ksMaterialName(usage){
+ const material=(state.materials||[]).find(row=>String(row.id)===String(usage?.material));
+ return usage?.materialName||usage?.materialLabel||material?.name||material?.materialName||material?.item||"未填寫材料";
+}
+function ksShowMaterialRefillLog(projectId){
+ const project=(state.projects||[]).find(row=>String(row.id)===String(projectId));
+ if(!project)return;
+ const rows=(typeof projectRows==="function"?projectRows(project,"materialUsages"):(state.materialUsages||[]).filter(row=>String(row.project)===String(projectId)))
+  .slice().sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+ const body=rows.map(row=>{
+  const employee=relLabel?.("employees",row.employee)||row.employeeName||"未填寫";
+  const quantity=num(row.quantity??row.qty);
+  return `<tr><td>${esc(row.date||"")}</td><td><b>${esc(employee)}</b></td><td>${esc(ksMaterialName(row))}</td><td>${esc(relLabel?.("vendors",row.vendor)||row.vendorName||"未填寫")}</td><td class="num">${quantity} ${esc(row.unit||"")}</td><td class="num"><b>${money(num(row.amount??quantity*num(row.unitPrice??row.price)))}</b></td><td>${esc(row.note||"—")}</td></tr>`;
+ }).join("")||'<tr><td colspan="7">此案場尚無補料紀錄；舊有材料資料若未填員工，會顯示「未填寫」。</td></tr>';
+ const modal=document.getElementById("modal");
+ modal.innerHTML=`<div class="modal-card" style="width:min(1120px,96vw)"><div class="modal-head" style="background:linear-gradient(120deg,#082f63,#087f77);color:#fff"><div><h3 style="margin:0">${esc(project.name)}｜補料紀錄</h3><small>可查看哪位員工在哪一天補了哪些材料。</small></div><button class="btn" id="closeModal">✕</button></div><div class="modal-body"><div class="table-wrap"><table class="data-table"><thead><tr><th>日期</th><th>補料員工</th><th>材料</th><th>廠商</th><th>數量</th><th>金額</th><th>備註</th></tr></thead><tbody>${body}</tbody></table></div></div><div class="modal-foot"><button class="btn" id="backMaterials">返回材料明細</button><button class="btn primary" id="closeRefillLog">關閉</button></div></div>`;
+ modal.classList.remove("hidden");
+ document.getElementById("closeModal").onclick=closeModal;
+ document.getElementById("closeRefillLog").onclick=closeModal;
+ document.getElementById("backMaterials").onclick=()=>showProjectMaterials(projectId);
+}
+const __openMaterialUsageBatchFormEmployee=openMaterialUsageBatchForm;
+openMaterialUsageBatchForm=function(defaultProjectId=""){
+ __openMaterialUsageBatchFormEmployee(defaultProjectId);
+ setTimeout(()=>{
+  const form=document.getElementById("materialUsageBatchForm");
+  if(!form||form.querySelector("#muEmployee"))return;
+  const projectField=document.getElementById("muProject")?.closest(".field");
+  if(projectField){
+   const field=document.createElement("div");
+   field.className="field";
+   field.innerHTML=`<label>補料員工</label><select id="muEmployee"><option value="">未填寫</option>${(state.employees||[]).map(row=>`<option value="${esc(row.id)}">${esc(row.name||"")}</option>`).join("")}</select>`;
+   projectField.after(field);
+  }
+  const originalSubmit=form.onsubmit;
+  form.onsubmit=async function(event){
+   const before=new Set((state.materialUsages||[]).map(row=>String(row.id)));
+   const employeeId=document.getElementById("muEmployee")?.value||"";
+   const employee=(state.employees||[]).find(row=>String(row.id)===String(employeeId));
+   const result=await originalSubmit.call(this,event);
+   const created=(state.materialUsages||[]).filter(row=>!before.has(String(row.id)));
+   if(created.length){
+    created.forEach(row=>{row.employee=employeeId;row.employeeName=employee?.name||"";row.refillRecordedAt=new Date().toISOString();});
+    await saveState("記錄補料員工");
+   }
+   return result;
+  };
+ },0);
+};
+const __showProjectMaterialsRefill=showProjectMaterials;
+showProjectMaterials=function(projectId){
+ __showProjectMaterialsRefill(projectId);
+ setTimeout(()=>{
+  const modal=document.getElementById("modal");
+  if(!modal||modal.querySelector("#showMaterialRefillLog"))return;
+  const footer=modal.querySelector(".modal-foot");
+  if(!footer)return;
+  const button=document.createElement("button");
+  button.id="showMaterialRefillLog";button.className="btn teal";button.type="button";button.textContent="補料紀錄";
+  button.onclick=()=>ksShowMaterialRefillLog(projectId);
+  footer.prepend(button);
+ },0);
+};
 </script>
 </body>
 </html>
