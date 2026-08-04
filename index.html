@@ -1052,6 +1052,7 @@ function closeModal(){document.getElementById("modal").classList.add("hidden");d
 function printDocument(module,id){
  const r=state[module].find(x=>x.id===id),s=schemas[module];if(!r)return;
  const isQuote=module==="quotations";
+ const isPracticalQuote=isQuote&&/實做實算/.test(String(r.format||r.taxMode||""));
  const title=isQuote?"報價單":"請款單";
  const customer=relLabel("customers",r.customer)||"";
  const project=r.projectName||relLabel("projects",r.project)||"";
@@ -1075,7 +1076,7 @@ function printDocument(module,id){
  const printUntaxed=r.taxMode==="含稅"?(num(r.amount)||Math.round(gross/(1+printTaxRate/100))):(num(r.amount)||gross);
  const printTax=num(r.tax)||(r.taxMode==="含稅"?Math.max(0,gross-printUntaxed):Math.round(printUntaxed*printTaxRate/100));
  const printTotal=num(r.total)||(printUntaxed+printTax);
- const showSummary=true;
+ const showSummary=!isPracticalQuote;
  const company=esc(state.settings.company||"酷舍企業有限公司");
  const taxId=esc(state.settings.taxId||"");
  const phone=esc(state.settings.phone||"");
@@ -1109,6 +1110,7 @@ function printDocument(module,id){
  *{box-sizing:border-box}html,body{margin:0;background:#e9eef5;color:#12213b;font-family:"Microsoft JhengHei",Arial,sans-serif}.toolbar{position:sticky;top:0;z-index:5;display:flex;justify-content:center;gap:10px;padding:12px;background:#0b1736}.toolbar button{border:0;border-radius:9px;padding:10px 18px;color:#fff;background:#0f766e;font-weight:800;cursor:pointer}.toolbar .close{background:#475569}.paper{width:210mm;min-height:297mm;margin:18px auto;background:#fff;padding:15mm 17mm 13mm;box-shadow:0 12px 35px rgba(15,35,70,.16)}.head{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:10px;border-bottom:3px solid #0f766e}.company h1{margin:0;color:#13877f;font-size:31px;letter-spacing:2px}.company .en{margin-top:5px;color:#526078;font-size:14px}.company .sub{margin-top:5px;color:#526078;font-size:13px}.doc-title{text-align:right}.doc-title h2{margin:0;font-size:31px;letter-spacing:3px;color:#0b1736}.doc-title .no{margin-top:10px;color:#526078;font-size:14px}.info{display:grid;grid-template-columns:1fr 1fr;gap:0 24px;margin:12px 0 14px}.info div{padding:9px 2px;border-bottom:1px solid #d6e0ec}.label{display:inline-block;min-width:45px;color:#718096;font-weight:700}.section{margin-top:12px;border:1px solid #b8c8da;border-radius:10px 10px 0 0;overflow:hidden}.section-title{padding:9px 13px;color:#fff;font-weight:900;background:linear-gradient(90deg,#071d42,#0f766e)}table{width:100%;border-collapse:collapse;table-layout:fixed}.matrix th,.matrix td,.detail th,.detail td{border:1px solid #b8c8da;padding:7px 5px;text-align:center;font-size:12px}.matrix thead th{background:#fff064;color:#18213b;font-weight:900}.matrix thead .house-head{background:#f8fafc}.matrix tbody tr:nth-child(even) td{background:#f6f9fc}.matrix .house{font-weight:800}.matrix .sum{font-weight:900}.matrix .grand td{background:#dfe3e8!important;font-weight:900;font-size:13px}.detail thead th{background:#f8fafc;color:#0b1736;font-weight:900}.detail tbody td:first-child{text-align:left;background:#fff0df;font-weight:800}.detail .num{text-align:right}.detail tfoot td{font-weight:900;background:#f8fafc}.detail tfoot .total td{font-size:15px;color:#0f766e;border-top:2px solid #0f766e}.summary{width:310px;margin:12px 0 0 auto;border:1px solid #cbd5e1}.summary div{display:flex;justify-content:space-between;padding:8px 11px;border-bottom:1px solid #e2e8f0}.summary div:last-child{border-bottom:0;background:#ecfdf5;color:#0f766e;font-size:17px;font-weight:900}.note{margin-top:12px;padding:10px 12px;border:1px solid #d8e2ef;border-radius:8px;white-space:pre-wrap;font-size:12px;line-height:1.6}.sign{display:grid;grid-template-columns:1fr 1fr;gap:55px;margin-top:32px;align-items:end}.client-sign{padding-top:35px;border-top:1px solid #334155;text-align:center;color:#64748b;font-size:12px}.company-seals{text-align:center}.seal-pair{display:flex;justify-content:center;align-items:flex-end;gap:16px;height:108px}.seal-pair img{object-fit:contain;mix-blend-mode:multiply}.seal-big{width:122px;max-height:100px}.seal-small{width:72px;max-height:72px}.owner{font-size:11px;color:#64748b;margin-top:3px}@media print{html,body{background:#fff}.toolbar{display:none}.paper{width:210mm;min-height:297mm;margin:0;box-shadow:none;padding:12mm 14mm 10mm}@page{size:A4;margin:0}.section{break-inside:avoid}.sign{break-inside:avoid}}
  </style></head><body><div class="toolbar"><button onclick="window.print()">列印／匯出 PDF</button><button class="close" onclick="window.close()">關閉</button></div><main class="paper"><header class="head"><div class="company"><h1>${company}</h1><div class="en">Cool Sir Limited Company</div><div class="sub">${subtitle}</div></div><div class="doc-title"><h2>${title}</h2><div class="no">單號：${esc(r.number||"")}</div></div></header><section class="info"><div><span class="label">客戶</span>${esc(customer)}</div><div><span class="label">案場</span>${esc(project)}</div><div><span class="label">日期</span>${esc(r.date||"")}</div><div><span class="label">稅額方式</span>${esc(r.taxMode||"")}</div></section>${matrix}<section class="section"><div class="section-title">施工明細</div><table class="detail"><thead><tr><th style="width:38%">品名</th><th>單位</th><th>數量</th><th>單價${r.taxMode==="未稅"?"(未稅)":""}</th><th>金額${r.taxMode==="未稅"?"(未稅)":""}</th></tr></thead><tbody>${grouped.map(x=>`<tr><td>${esc(x.item)}</td><td>${esc(x.unit)}</td><td class="num">${x.qty}</td><td class="num">${money(x.price)}</td><td class="num">${money(x.amount)}</td></tr>`).join("")}</tbody><tfoot><tr><td colspan="4">明細合計</td><td class="num">${money(gross)}</td></tr></tfoot></table></section>${showSummary?`<div class="summary"><div><span>未稅金額</span><b>${money(r.amount)}</b></div><div><span>稅額</span><b>${money(r.tax)}</b></div>${!isQuote&&num(r.retention)?`<div><span>保留款</span><b>-${money(r.retention)}</b></div>`:""}<div><span>${isQuote?"總金額":"本期應領"}</span><b>${money(r.total)}</b></div></div>`:`<div style="margin-top:14px;text-align:right;font-size:22px;font-weight:900;color:#0f766e">實做實算</div>`}${employeeSummary}${r.note?`<div class="note"><b>備註／付款方式</b><br>${esc(r.note)}</div>`:""}<div class="sign"><div class="client-sign">客戶簽章</div><div class="company-seals"><div class="seal-pair"><img class="seal-big" src="${bigSeal}"><img class="seal-small" src="${smallSeal}"></div>${owner?`<div class="owner">負責人：${owner}</div>`:""}</div></div></main></body></html>`);
   const clientSummaryHtml=`<div class="summary client-total"><div><span>未稅金額</span><b>${money(printUntaxed)}</b></div><div><span>稅金（${printTaxRate}%）</span><b>${money(printTax)}</b></div><div><span>含稅總價</span><b>${money(printTotal)}</b></div>${!isQuote&&num(r.retention)?`<div><span>保留款</span><b>-${money(r.retention)}</b></div>`:""}</div>`;const currentSummary=w.document.querySelector(".summary");if(currentSummary)currentSummary.outerHTML=clientSummaryHtml;else{const holder=w.document.createElement("div");holder.innerHTML=clientSummaryHtml;const marker=w.document.querySelector(".note")||w.document.querySelector(".sign");marker?.parentNode?.insertBefore(holder.firstChild,marker)}
+  if(isPracticalQuote){w.document.querySelector(".summary")?.remove();w.document.querySelector(".detail tfoot")?.remove();w.document.querySelector(".paper > div[style]")?.remove()}
   const matrixSection=w.document.querySelector(".section:has(.matrix)"),detailSection=w.document.querySelector(".section:has(.detail)");if(matrixSection&&detailSection){matrixSection.style.marginBottom="0";matrixSection.style.borderRadius="10px 10px 0 0";matrixSection.style.borderBottom="0";detailSection.style.marginTop="0";detailSection.style.borderRadius="0 0 10px 10px"}
   w.document.querySelectorAll(".section").forEach(section=>{if(section.querySelectorAll(".detail thead th").length>=7)section.remove()});
   w.document.querySelectorAll(".section").forEach(section=>{if(section.querySelectorAll(".detail thead th").length>=7)section.remove()});
@@ -1124,7 +1126,7 @@ function printDocument(module,id){
   `;
   w.document.head.appendChild(printInfoStyle);
   if(sealPair)sealPair.innerHTML=`<img class="seal-source" src="${companySealAsset}" alt="酷舍企業有限公司大小章">`;
-  if(!isQuote){
+  if(true){
     const billingHead=w.document.querySelector(".head");
     if(billingHead){
       const documentTaxId=taxId||"82980636";
@@ -1135,6 +1137,7 @@ function printDocument(module,id){
       w.document.head.appendChild(billingHeadStyle);
     }
   }
+  if(isQuote){const quoteTitle=w.document.querySelector(".billing-title h2");if(quoteTitle)quoteTitle.textContent=title}
   w.document.close();
 }
 
@@ -2435,6 +2438,113 @@ const __ksOpenDocumentFormQuoteLayout=openDocumentForm;
 openDocumentForm=function(module,id){
   __ksOpenDocumentFormQuoteLayout(module,id);
   if(module==='quotations') setTimeout(ksUpgradeQuoteForm,0);
+};
+/* 案場／施工品項下拉資料分流：避免案場誤出現在品項清單 */
+function ksSuggestionKey(value){return String(value||'').replace(/\s+/g,'').trim().toLowerCase()}
+function ksIsPlaceholderSuggestion(value){
+  const text=String(value||'').trim();
+  return !text || /^(例如|請選擇|施工品項|項目名稱|品項名稱|新案場|新項目|kushe-erp-cloud)$/i.test(text);
+}
+function ksSeparateProjectAndItemSuggestions(){
+  if(!state) return false;
+  const projectKeys=new Set((state.projects||[]).map(x=>ksSuggestionKey(x?.name)).filter(Boolean));
+  const knownItems=[];
+  const collectLines=list=>{(list||[]).forEach(doc=>(doc?.lines||[]).forEach(line=>knownItems.push(line?.item||line?.name||'')))};
+  collectLines(state.quotations); collectLines(state.billings);
+  (state.dailyLogs||[]).forEach(log=>(log?.items||[]).forEach(line=>knownItems.push(line?.item||line?.name||'')));
+  (state.materials||[]).forEach(item=>knownItems.push(item?.name||item?.item||''));
+  const before=JSON.stringify(state.itemPresets||[]);
+  const unique=new Map();
+  [...(state.itemPresets||[]),...knownItems].forEach(raw=>{
+    const name=String(raw||'').trim().replace(/\s+/g,' '),key=ksSuggestionKey(name);
+    if(!key || ksIsPlaceholderSuggestion(name) || projectKeys.has(key) || unique.has(key)) return;
+    unique.set(key,name);
+  });
+  state.itemPresets=[...unique.values()].sort((a,b)=>a.localeCompare(b,'zh-Hant'));
+  return before!==JSON.stringify(state.itemPresets);
+}
+const __ksRenderWithSeparatedSuggestions=render;
+render=function(){
+  const changed=ksSeparateProjectAndItemSuggestions();
+  const result=__ksRenderWithSeparatedSuggestions.apply(this,arguments);
+  if(changed) scheduleSave?.();
+  return result;
+};
+const __ksOpenDocumentFormSeparatedSuggestions=openDocumentForm;
+openDocumentForm=function(module,id){
+  ksSeparateProjectAndItemSuggestions();
+  return __ksOpenDocumentFormSeparatedSuggestions(module,id);
+};
+setTimeout(()=>{if(ksSeparateProjectAndItemSuggestions()) scheduleSave?.()},0);
+/* 報價單六欄明細修正：避免明細重新渲染後欄位錯位 */
+function ksQuoteUnitOptions(){
+  const units=[];
+  (state.unitPresets||[]).forEach(x=>units.push(x));
+  [...(state.quotations||[]),...(state.billings||[])].forEach(doc=>(doc.lines||[]).forEach(line=>units.push(line.unit)));
+  (state.dailyLogs||[]).forEach(log=>(log.items||[]).forEach(line=>units.push(line.unit)));
+  return [...new Set(units.map(x=>String(x||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'zh-Hant'));
+}
+function ksQuoteTableCompact(form){
+  form.querySelectorAll('table.doc-lines-table').forEach(table=>{
+    const headRow=table.tHead?.rows?.[0];
+    const headers=headRow?[...headRow.cells]:[];
+    let original=headers.length>=8 && headers.some(h=>/戶別/.test(h.textContent)) && headers.some(h=>/規格.?說明/.test(h.textContent));
+    if(original){
+      [2,0].forEach(i=>{if(headRow.cells[i])headRow.deleteCell(i)});
+      table.dataset.ksQuoteCompact='1';
+    }
+    if(table.dataset.ksQuoteCompact!=='1') return;
+    [...(table.tBodies?.[0]?.rows||[])].forEach(row=>{
+      while(row.cells.length>6){
+        if(row.cells.length>=8){row.deleteCell(2);row.deleteCell(0)} else row.deleteCell(row.cells.length-1);
+      }
+    });
+    const total=table.querySelector('#docLinesTotal')?.textContent||'$0';
+    const footRow=table.tFoot?.rows?.[0];
+    if(footRow && (footRow.cells.length!==3 || footRow.cells[0].colSpan!==4)){
+      footRow.innerHTML='<td colspan="4">合計</td><td id="docLinesTotal">'+total+'</td><td></td>';
+    }
+  });
+}
+function ksApplyQuoteModeDisplay(form){
+  const mode=form.querySelector('[name="format"]'); if(!mode)return;
+  form.classList.toggle('ks-quote-practical',mode.value==='實做實算');
+}
+function ksEnhanceQuoteInputs(){
+  const form=document.getElementById('docForm'); if(!form)return;
+  form.querySelectorAll('input[type="text"],input:not([type]),textarea').forEach(input=>{
+    input.lang='zh-Hant'; input.setAttribute('autocapitalize','off'); input.setAttribute('autocomplete','off');
+  });
+  const unit=document.getElementById('lineUnit');
+  if(unit){
+    let list=document.getElementById('ksQuoteUnitList');
+    if(!list){list=document.createElement('datalist');list.id='ksQuoteUnitList';form.appendChild(list)}
+    list.innerHTML=ksQuoteUnitOptions().map(x=>'<option value="'+esc(x)+'">').join('');
+    unit.setAttribute('list','ksQuoteUnitList'); unit.placeholder='例如：支、式、才、坪';
+  }
+  const add=document.getElementById('addLine');
+  if(add && add.dataset.ksUnitMemory!=='1'){
+    add.dataset.ksUnitMemory='1'; const previous=add.onclick;
+    add.onclick=function(){
+      const value=String(document.getElementById('lineUnit')?.value||'').trim();
+      const result=previous?.apply(this,arguments);
+      if(value){
+        state.unitPresets=Array.isArray(state.unitPresets)?state.unitPresets:[];
+        if(!state.unitPresets.some(x=>ksSuggestionKey(x)===ksSuggestionKey(value))){state.unitPresets.push(value);scheduleSave?.();}
+      }
+      return result;
+    };
+  }
+}
+const __ksUpgradeQuoteFormStable=ksUpgradeQuoteForm;
+ksUpgradeQuoteForm=function(){
+  __ksUpgradeQuoteFormStable();
+  const form=document.getElementById('docForm'); if(!form)return;
+  const mode=form.querySelector('[name="format"]');
+  if(mode && mode.dataset.ksPracticalMode!=='1'){
+    mode.dataset.ksPracticalMode='1';mode.addEventListener('change',()=>ksApplyQuoteModeDisplay(form));
+  }
+  ksApplyQuoteModeDisplay(form);ksEnhanceQuoteInputs();ksQuoteTableCompact(form);
 };
 </script>
 </body>
