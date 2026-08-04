@@ -1628,6 +1628,88 @@ document.addEventListener("submit",async event=>{
  });
  await saveState("新增純點工／多案場修繕");closeModal();toast(`已儲存 ${projectIds.length} 個修繕案場的點工紀錄${skipped.length?`；${skipped.join("、")}同日已計日薪`:""}`);renderDailyLogs();
 },true);
+
+/* Project-specific daily item prices: same project + same item remembers its last saved price. */
+function ksProjectPriceText(projectValue){
+ const raw=String(projectValue||"").trim();
+ const direct=(state.projects||[]).find(p=>String(p.id)===raw);
+ if(direct)return String(direct.name||"").trim();
+ const byName=(state.projects||[]).find(p=>projectNameKey(p.name)===projectNameKey(raw));
+ return String(byName?.name||raw).trim();
+}
+function ksProjectItemPriceKey(projectValue,itemValue){
+ const project=ksProjectPriceText(projectValue);
+ const item=String(itemValue||"").trim().toLocaleLowerCase("zh-Hant");
+ return projectNameKey(project)+"::"+item;
+}
+function ksEnsureProjectItemPrices(){
+ state.projectItemPrices=(state.projectItemPrices&&typeof state.projectItemPrices==="object"&&!Array.isArray(state.projectItemPrices))?state.projectItemPrices:{};
+ const remember=(project,item,price)=>{
+  const key=ksProjectItemPriceKey(project,item),amount=num(price);
+  if(key!=="::"&&String(item||"").trim()&&amount>0)state.projectItemPrices[key]=amount;
+ };
+ (state.dailyLogs||[]).forEach(log=>(log.items||[]).forEach(line=>remember(log.project||log.projectName,line.item||line.name,line.price??line.unitPrice)));
+ ["quotations","billings"].forEach(collection=>(state[collection]||[]).forEach(doc=>{
+  (doc.lines||doc.items||[]).forEach(line=>remember(doc.project||doc.projectName,line.item||line.name,line.price??line.unitPrice));
+ }));
+ return state.projectItemPrices;
+}
+function ksApplyProjectItemPrice(row,force){
+ if(!row)return;
+ const project=row.querySelector(".dm-project")?.value||"";
+ const item=row.querySelector(".dm-item")?.value||"";
+ const priceInput=row.querySelector(".dm-price");
+ if(!project||!item||!priceInput)return;
+ const remembered=ksEnsureProjectItemPrices()[ksProjectItemPriceKey(project,item)];
+ if(!(num(remembered)>0))return;
+ const current=String(priceInput.value||"").trim();
+ if(!force&&current!==""&&num(current)!==0)return;
+ priceInput.value=String(remembered);
+ priceInput.dispatchEvent(new Event("input",{bubbles:true}));
+}
+function ksRememberDailyFormProjectPrices(form){
+ if(!form?.matches?.("#dailyMultiForm"))return;
+ const prices=ksEnsureProjectItemPrices();
+ form.querySelectorAll("#dmLines tr").forEach(row=>{
+  const project=row.querySelector(".dm-project")?.value||"";
+  const item=row.querySelector(".dm-item")?.value||"";
+  const price=num(row.querySelector(".dm-price")?.value);
+  const key=ksProjectItemPriceKey(project,item);
+  if(project&&item&&price>0)prices[key]=price;
+ });
+}
+function ksAddProjectPriceHint(){
+ const form=document.getElementById("dailyMultiForm");
+ if(!form||form.querySelector(".ks-project-price-hint"))return;
+ const panel=[...form.querySelectorAll(".panel")].find(node=>node.querySelector("#dmLines"));
+ const head=panel?.querySelector(".panel-head small");
+ if(!head)return;
+ const hint=document.createElement("span");
+ hint.className="ks-project-price-hint";
+ hint.textContent=" Same project + item will use its last saved price.";
+ hint.style.cssText="display:block;margin-top:4px;color:#087c72;font-weight:800";
+ head.after(hint);
+}
+const __openDailyMultiProjectFormProjectPrices=openDailyMultiProjectForm;
+openDailyMultiProjectForm=function(){
+ __openDailyMultiProjectFormProjectPrices();
+ setTimeout(ksAddProjectPriceHint,40);
+};
+document.addEventListener("input",event=>{
+ const field=event.target;
+ if(!field?.matches?.("#dailyMultiForm .dm-project,#dailyMultiForm .dm-item"))return;
+ const row=field.closest("tr");
+ setTimeout(()=>ksApplyProjectItemPrice(row,false),0);
+},true);
+document.addEventListener("change",event=>{
+ const field=event.target;
+ if(!field?.matches?.("#dailyMultiForm .dm-project,#dailyMultiForm .dm-item"))return;
+ const row=field.closest("tr");
+ setTimeout(()=>ksApplyProjectItemPrice(row,true),0);
+},true);
+document.addEventListener("submit",event=>{
+ ksRememberDailyFormProjectPrices(event.target);
+},true);
 </script>
 </body>
 </html>
