@@ -2223,6 +2223,15 @@ if(!document.getElementById("ks-unified-form-polish")){
  @media(max-width:620px){.ks-billing-receipt-tools{grid-template-columns:1fr!important;padding:13px!important}.ks-billing-receipt-tools input,.ks-billing-receipt-tools button{grid-column:auto!important}.ks-billing-receipt-tools select,.ks-billing-receipt-tools input,#ksBillingReceiptClear{width:100%!important}.ks-daily-filter{align-items:stretch!important}.ks-daily-filter select{width:100%!important;min-width:0!important}}
  `;document.head.appendChild(style);
 }
+
+/* 抽成明細：補上案場欄位，讓每一筆請款來源可直接對照施工案場。 */
+ksShowCommissionDetails=function(key,month){
+ const rows=(state.commissions||[]).filter(row=>ksCommissionKey(row)===key&&(!month||String(row.date||"").startsWith(month))).sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+ const first=rows[0]||{},name=relLabel("employees",first.employee)||first.employeeName||"未指定員工";
+ const total=rows.reduce((sum,row)=>sum+num(row.untaxedAmount),0),commission=rows.reduce((sum,row)=>sum+num(row.commission),0),modal=document.getElementById("modal");
+ modal.innerHTML=`<div class="modal-card ks-commission-detail" style="width:min(1080px,96vw)"><div class="modal-head"><div><h3>${esc(name)}｜業績抽成明細</h3><small>${esc(month||"全部月份")}・日期、案場、請款來源與抽成紀錄</small></div><button class="btn" id="closeModal">✕</button></div><div class="modal-body"><div class="ks-detail-summary"><div><span>紀錄筆數</span><b>${rows.length} 筆</b></div><div><span>未稅業績總和</span><b>${money(total)}</b></div><div><span>抽成總和</span><b>${money(commission)}</b></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>日期</th><th>案場</th><th>請款來源</th><th>未稅業績</th><th>抽成比例</th><th>抽成金額</th><th>備註</th><th>操作</th></tr></thead><tbody>${rows.map(row=>{const project=relLabel("projects",row.project)||row.projectName||"未指定案場";return `<tr><td><b>${esc(row.date||"－")}</b></td><td><span class="badge">${esc(project)}</span></td><td>${esc(row.sourceNo||"每日業績")}</td><td class="num">${money(row.untaxedAmount)}</td><td class="num">${num(row.rate)}%</td><td class="num"><b>${money(row.commission)}</b></td><td>${esc(row.note||"－")}</td><td><button class="btn" data-ks-commission-edit="${esc(row.id)}">編輯</button></td></tr>`}).join("")||`<tr><td colspan="8">沒有可顯示的抽成紀錄。</td></tr>`}</tbody><tfoot><tr><td colspan="3"><b>合計</b></td><td class="num"><b>${money(total)}</b></td><td></td><td class="num"><b>${money(commission)}</b></td><td colspan="2"></td></tr></tfoot></table></div></div><div class="modal-foot"><button class="btn primary" id="ksCommissionDetailClose">關閉</button></div></div>`;
+ modal.classList.remove("hidden");document.getElementById("closeModal").onclick=closeModal;document.getElementById("ksCommissionDetailClose").onclick=closeModal;modal.querySelectorAll("[data-ks-commission-edit]").forEach(button=>button.onclick=()=>{closeModal();openForm("commissions",button.dataset.ksCommissionEdit)});
+};
 </script>
 </body>
 </html>
