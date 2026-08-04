@@ -2185,6 +2185,44 @@ if(!document.getElementById("ks-daily-status-ux-style")){
  .ks-daily-status-guide{display:flex;gap:9px;flex-wrap:wrap;margin:-4px 0 13px}.ks-daily-status-guide span{padding:7px 10px;border:1px solid #dce8f3;border-radius:999px;background:#fff;color:#657b92;font-size:12px;font-weight:700}.ks-daily-status-guide b{color:#0e786d}.ks-open-linked-billing{background:#f1f7ff!important;border-color:#b9d4f5!important;color:#164a8e!important}@media(max-width:680px){.ks-daily-status-guide{display:grid;grid-template-columns:1fr}.ks-daily-status-guide span{border-radius:10px}}
  `;document.head.appendChild(style);
 }
+/* 統一舊版欄位外觀：移除瀏覽器預設黑框，保持桌機與手機一致。 */
+if(!document.getElementById("ks-unified-form-polish")){
+ const style=document.createElement("style");style.id="ks-unified-form-polish";style.textContent=`
+ #content input:not([type="checkbox"]):not([type="radio"]),#content select,#content textarea,
+ #modal input:not([type="checkbox"]):not([type="radio"]),#modal select,#modal textarea{
+   box-sizing:border-box!important;border:1px solid #c9dced!important;border-radius:11px!important;
+   background:#fff!important;color:#102d56!important;box-shadow:none!important;
+   outline:none!important;font-weight:700!important;
+ }
+ #content input:not([type="checkbox"]):not([type="radio"]),#content select,
+ #modal input:not([type="checkbox"]):not([type="radio"]),#modal select{min-height:42px!important;padding:8px 12px!important;}
+ #content textarea,#modal textarea{padding:11px 12px!important;min-height:92px!important;line-height:1.55!important;}
+ #content input:focus,#content select:focus,#content textarea:focus,
+ #modal input:focus,#modal select:focus,#modal textarea:focus{
+   border-color:#129b8b!important;box-shadow:0 0 0 4px rgba(18,155,139,.13)!important;
+ }
+ #content select,#modal select{appearance:auto!important;cursor:pointer!important;}
+ #content .toolbar,#content .row-actions,#modal .row-actions{gap:10px!important;align-items:center!important;}
+ #content .toolbar{padding:10px 0!important;}
+ .ks-billing-receipt-tools{
+   display:grid!important;grid-template-columns:auto minmax(170px,.9fr) minmax(145px,.65fr) minmax(230px,1.25fr) auto!important;
+   align-items:center!important;gap:10px!important;margin:0!important;padding:15px 18px!important;
+   border:0!important;border-top:1px solid #dbe8f3!important;border-bottom:1px solid #dbe8f3!important;
+   border-left:5px solid #0d998b!important;border-radius:0!important;background:linear-gradient(90deg,#effaf8,#f8fbff)!important;
+ }
+ .ks-billing-receipt-tools>span{white-space:nowrap;color:#0d3d70!important;font-size:15px!important;font-weight:900!important;}
+ .ks-billing-receipt-tools select,.ks-billing-receipt-tools input{width:100%!important;min-width:0!important;height:44px!important;}
+ #ksBillingReceiptClear{height:44px!important;padding:0 15px!important;border:1px solid #c9dced!important;border-radius:11px!important;background:#fff!important;color:#174d88!important;font-weight:900!important;box-shadow:none!important;white-space:nowrap!important;}
+ #ksBillingReceiptClear:hover{background:#edf8ff!important;border-color:#8bb8e2!important;}
+ .ks-billing-receipt-badge{margin:7px auto 0!important;padding:4px 9px!important;border-radius:999px!important;font-weight:900!important;}
+ .ks-daily-filter{display:flex!important;align-items:center!important;gap:10px!important;flex-wrap:wrap!important;padding:12px 15px!important;border:1px solid #cce6ea!important;border-left:5px solid #0d998b!important;border-radius:14px!important;background:linear-gradient(90deg,#f0fbf9,#f8fbff)!important;}
+ .ks-daily-filter>span{color:#0c3d70!important;font-size:15px!important;font-weight:900!important;}
+ .ks-daily-filter select{min-width:200px!important;background:#fff!important;}
+ .ks-daily-filter small{color:#647d97!important;font-weight:700!important;}
+ @media(max-width:980px){.ks-billing-receipt-tools{grid-template-columns:auto 1fr 1fr!important}.ks-billing-receipt-tools input{grid-column:2/4}.ks-billing-receipt-tools button{grid-column:2/3}}
+ @media(max-width:620px){.ks-billing-receipt-tools{grid-template-columns:1fr!important;padding:13px!important}.ks-billing-receipt-tools input,.ks-billing-receipt-tools button{grid-column:auto!important}.ks-billing-receipt-tools select,.ks-billing-receipt-tools input,#ksBillingReceiptClear{width:100%!important}.ks-daily-filter{align-items:stretch!important}.ks-daily-filter select{width:100%!important;min-width:0!important}}
+ `;document.head.appendChild(style);
+}
 </script>
 </body>
 </html>
