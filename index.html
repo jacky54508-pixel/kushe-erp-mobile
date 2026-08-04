@@ -2232,6 +2232,96 @@ ksShowCommissionDetails=function(key,month){
  modal.innerHTML=`<div class="modal-card ks-commission-detail" style="width:min(1080px,96vw)"><div class="modal-head"><div><h3>${esc(name)}｜業績抽成明細</h3><small>${esc(month||"全部月份")}・日期、案場、請款來源與抽成紀錄</small></div><button class="btn" id="closeModal">✕</button></div><div class="modal-body"><div class="ks-detail-summary"><div><span>紀錄筆數</span><b>${rows.length} 筆</b></div><div><span>未稅業績總和</span><b>${money(total)}</b></div><div><span>抽成總和</span><b>${money(commission)}</b></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>日期</th><th>案場</th><th>請款來源</th><th>未稅業績</th><th>抽成比例</th><th>抽成金額</th><th>備註</th><th>操作</th></tr></thead><tbody>${rows.map(row=>{const project=relLabel("projects",row.project)||row.projectName||"未指定案場";return `<tr><td><b>${esc(row.date||"－")}</b></td><td><span class="badge">${esc(project)}</span></td><td>${esc(row.sourceNo||"每日業績")}</td><td class="num">${money(row.untaxedAmount)}</td><td class="num">${num(row.rate)}%</td><td class="num"><b>${money(row.commission)}</b></td><td>${esc(row.note||"－")}</td><td><button class="btn" data-ks-commission-edit="${esc(row.id)}">編輯</button></td></tr>`}).join("")||`<tr><td colspan="8">沒有可顯示的抽成紀錄。</td></tr>`}</tbody><tfoot><tr><td colspan="3"><b>合計</b></td><td class="num"><b>${money(total)}</b></td><td></td><td class="num"><b>${money(commission)}</b></td><td colspan="2"></td></tr></tfoot></table></div></div><div class="modal-foot"><button class="btn primary" id="ksCommissionDetailClose">關閉</button></div></div>`;
  modal.classList.remove("hidden");document.getElementById("closeModal").onclick=closeModal;document.getElementById("ksCommissionDetailClose").onclick=closeModal;modal.querySelectorAll("[data-ks-commission-edit]").forEach(button=>button.onclick=()=>{closeModal();openForm("commissions",button.dataset.ksCommissionEdit)});
 };
+/* Unified project-item price linking: quotations are the primary price source. */
+function ksLinkedItemKey(value){
+ return String(value||"").normalize("NFKC").trim().toLocaleLowerCase("zh-Hant").replace(/[\s\-_—–－／/、，,。.．.()（）\[\]【】「」]/g,"");
+}
+function ksSameLinkedProject(source, projectValue){
+ const sourceProject=ksProjectPriceText(source?.project||source?.projectName||source?.projectLabel||source?.siteName||"");
+ const targetProject=ksProjectPriceText(projectValue);
+ return !!sourceProject&&projectNameKey(sourceProject)===projectNameKey(targetProject);
+}
+function ksFindLinkedProjectItem(projectValue,itemValue){
+ const itemKey=ksLinkedItemKey(itemValue);
+ if(!ksProjectPriceText(projectValue)||!itemKey)return null;
+ const newest=(rows)=>rows.sort((a,b)=>String(b._date||"").localeCompare(String(a._date||"")))[0]||null;
+ const fromDocuments=(collection,allow)=>newest((state[collection]||[])
+  .filter(doc=>allow(doc)&&ksSameLinkedProject(doc,projectValue))
+  .flatMap(doc=>(doc.lines||doc.items||[]).filter(line=>ksLinkedItemKey(line.item||line.name)===itemKey)
+   .map(line=>({line,_date:doc.updatedAt||doc.date||doc.createdAt||""}))));
+ const quotation=fromDocuments("quotations",doc=>doc.status!=="作廢");
+ if(quotation&&num(quotation.line.price??quotation.line.unitPrice)>0)return quotation.line;
+ const billing=fromDocuments("billings",doc=>doc.status!=="作廢");
+ if(billing&&num(billing.line.price??billing.line.unitPrice)>0)return billing.line;
+ const daily=newest((state.dailyLogs||[])
+  .filter(log=>ksSameLinkedProject(log,projectValue))
+  .flatMap(log=>(log.items||[]).filter(line=>ksLinkedItemKey(line.item||line.name)===itemKey)
+   .map(line=>({line,_date:log.updatedAt||log.date||log.createdAt||""}))));
+ return daily&&num(daily.line.price??daily.line.unitPrice)>0?daily.line:null;
+}
+function ksApplyLinkedDailyProjectItem(row,force){
+ if(!row)return;
+ const project=row.querySelector(".dm-project")?.value||"";
+ const item=row.querySelector(".dm-item")?.value||"";
+ const priceInput=row.querySelector(".dm-price");
+ const unitInput=row.querySelector(".dm-unit");
+ const linked=ksFindLinkedProjectItem(project,item);
+ if(!linked||!priceInput)return;
+ if(force||!String(priceInput.value||"").trim()||num(priceInput.value)===0){
+  priceInput.value=String(num(linked.price??linked.unitPrice));
+  if(unitInput&&String(linked.unit||"").trim())unitInput.value=String(linked.unit).trim();
+  priceInput.dispatchEvent(new Event("input",{bubbles:true}));
+ }
+}
+const __ksApplyProjectItemPriceLinked=ksApplyProjectItemPrice;
+ksApplyProjectItemPrice=function(row,force){
+ const linked=ksFindLinkedProjectItem(row?.querySelector(".dm-project")?.value||"",row?.querySelector(".dm-item")?.value||"");
+ if(linked)return ksApplyLinkedDailyProjectItem(row,force);
+ return __ksApplyProjectItemPriceLinked(row,force);
+};
+function ksRefreshDocumentItemList(){
+ const project=document.querySelector("#docForm [name='projectName']")?.value||"";
+ const list=document.getElementById("itemPresetList");
+ if(!list)return;
+ const names=new Set((state.itemPresets||[]).map(x=>String(x||"").trim()).filter(Boolean));
+ ["quotations","billings"].forEach(collection=>(state[collection]||[]).forEach(doc=>{
+  if(ksSameLinkedProject(doc,project))(doc.lines||doc.items||[]).forEach(line=>{
+   const name=String(line.item||line.name||"").trim();if(name)names.add(name);
+  });
+ }));
+ (state.dailyLogs||[]).forEach(log=>{if(ksSameLinkedProject(log,project))(log.items||[]).forEach(line=>{
+  const name=String(line.item||line.name||"").trim();if(name)names.add(name);
+ });});
+ list.innerHTML=[...names].sort((a,b)=>a.localeCompare(b,"zh-Hant")).map(name=>`<option value="${esc(name)}"></option>`).join("");
+}
+function ksApplyDocumentProjectItemPrice(force){
+ const project=document.querySelector("#docForm [name='projectName']")?.value||"";
+ const item=document.getElementById("lineItem")?.value||"";
+ const linked=ksFindLinkedProjectItem(project,item);
+ if(!linked)return;
+ const price=document.getElementById("linePrice"),unit=document.getElementById("lineUnit"),house=document.getElementById("lineHouse"),spec=document.getElementById("lineSpec");
+ if(!price)return;
+ if(force||!String(price.value||"").trim()||num(price.value)===0){
+  price.value=String(num(linked.price??linked.unitPrice));
+  if(unit&&String(linked.unit||"").trim())unit.value=String(linked.unit).trim();
+  if(house&&!String(house.value||"").trim()&&String(linked.house||"").trim())house.value=String(linked.house).trim();
+  if(spec&&!String(spec.value||"").trim()&&String(linked.spec||"").trim())spec.value=String(linked.spec).trim();
+  price.dispatchEvent(new Event("input",{bubbles:true}));
+ }
+}
+const __ksOpenDocumentFormLinked=openDocumentForm;
+openDocumentForm=function(module,id){
+ __ksOpenDocumentFormLinked(module,id);
+ setTimeout(()=>{
+  const form=document.getElementById("docForm"),project=form?.querySelector("[name='projectName']"),item=document.getElementById("lineItem");
+  if(!form||!project||!item)return;
+  ksRefreshDocumentItemList();
+  project.addEventListener("input",()=>{ksRefreshDocumentItemList();ksApplyDocumentProjectItemPrice(false)});
+  project.addEventListener("change",()=>{ksRefreshDocumentItemList();ksApplyDocumentProjectItemPrice(true)});
+  item.addEventListener("input",()=>ksApplyDocumentProjectItemPrice(false));
+  item.addEventListener("change",()=>ksApplyDocumentProjectItemPrice(true));
+ },0);
+};
 </script>
 </body>
 </html>
