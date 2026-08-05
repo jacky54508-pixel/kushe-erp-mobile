@@ -2833,6 +2833,24 @@ render=function(){
   return result;
 };
 ksMasterV2Style();
+
+/* Text fields are marked as Traditional Chinese. The operating system still controls the IME. */
+function ksApplyTraditionalChineseFields(root=document){
+  if(!root)return;
+  root.querySelectorAll("input:not([type]),input[type='text'],input[type='search'],textarea").forEach(field=>{
+    field.setAttribute("lang","zh-Hant");
+    field.setAttribute("spellcheck","false");
+    field.setAttribute("autocapitalize","off");
+  });
+}
+document.addEventListener("focusin",event=>{
+  const field=event.target;
+  if(field&&field.matches&&field.matches("input:not([type]),input[type='text'],input[type='search'],textarea")){
+    field.setAttribute("lang","zh-Hant");
+    field.setAttribute("spellcheck","false");
+  }
+});
+ksApplyTraditionalChineseFields();
 </script>
 </body>
 </html>
