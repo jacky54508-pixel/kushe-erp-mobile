@@ -190,6 +190,7 @@ const modules=[
  ["attendance","📅","出勤點工"],["dailyLogs","📝","每日業績／點工"],["commissions","📈","員工業績抽成"],["materials","📦","材料管理"],["materialUsages","🧱","案場材料用量"],["calendar","🗓️","工程行事曆"],["tax","🧮","發票稅額"],["reports","📊","年度報表"],["monthClose","🔒","月結快照"],["settings","⚙️","系統設定"],["backups","🛡️","備份還原"]
 ];
 modules.splice(modules.findIndex(x=>x[0]==='banks')+1,0,['ownerDraws','👤','老闆往來']);
+modules.splice(modules.findIndex(x=>x[0]==='ownerDraws')+1,0,['masterData','🗂️','資料庫管理']);
 /* 案場主檔操作已整合到「案場總覽」，不另顯示重複選單。 */
 modules.splice(modules.findIndex(x=>x[0]==='projects'),1);
 /* 材料用量整合到「案場總覽」；保留既有資料與串聯，但不再另佔一個選單。 */
@@ -836,7 +837,7 @@ function openDocumentForm(module,id=null){
   <div class="doc-lines"><h3>明細項目</h3>
    <div class="doc-line-grid">
     <div class="field"><label>戶別</label><input id="lineHouse" placeholder="例如：D1"></div>
-    <div class="field"><label>項目</label><input id="lineItem" lang="zh-Hant" inputmode="text" list="itemPresetList" placeholder="${isQuote?"例如：鋁窗、欄杆、電梯軌道":"例如：工程款、追加款、材料款"}"><datalist id="itemPresetList">${(state.itemPresets||[]).map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div>
+    <div class="field"><label>項目</label><input id="lineItem" lang="zh-Hant" inputmode="text" list="itemPresetList" placeholder="${isQuote?"例如：鋁窗、欄杆、電梯軌道":"例如：工程款、追加款、材料款"}"><datalist id="itemPresetList">${(state.itemPresets||[]).filter(x=>typeof ksIsConstructionItemSuggestion!=="function"||ksIsConstructionItemSuggestion(x)).map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div>
     <div class="field"><label>規格／說明</label><input id="lineSpec"></div>
     <div class="field"><label>數量</label><input id="lineQty" type="number" step="0.01" value="1"></div>
     <div class="field"><label>單位</label><input id="lineUnit" value="式"></div>
@@ -2294,14 +2295,14 @@ function ksRefreshDocumentItemList(){
  const project=document.querySelector("#docForm [name='projectName']")?.value||"";
  const list=document.getElementById("itemPresetList");
  if(!list)return;
- const names=new Set((state.itemPresets||[]).map(x=>String(x||"").trim()).filter(Boolean));
+ const names=new Set((state.itemPresets||[]).map(ksSuggestionText).filter(ksIsConstructionItemSuggestion));
  ["quotations","billings"].forEach(collection=>(state[collection]||[]).forEach(doc=>{
   if(ksSameLinkedProject(doc,project))(doc.lines||doc.items||[]).forEach(line=>{
-   const name=String(line.item||line.name||"").trim();if(name)names.add(name);
+   const name=ksSuggestionText(line.item||line.name||"");if(ksIsConstructionItemSuggestion(name))names.add(name);
   });
  }));
  (state.dailyLogs||[]).forEach(log=>{if(ksSameLinkedProject(log,project))(log.items||[]).forEach(line=>{
-  const name=String(line.item||line.name||"").trim();if(name)names.add(name);
+  const name=ksSuggestionText(line.item||line.name||"");if(ksIsConstructionItemSuggestion(name))names.add(name);
  });});
  list.innerHTML=[...names].sort((a,b)=>a.localeCompare(b,"zh-Hant")).map(name=>`<option value="${esc(name)}"></option>`).join("");
 }
@@ -2451,13 +2452,31 @@ openDocumentForm=function(module,id){
 };
 /* 案場／施工品項下拉資料分流：避免案場誤出現在品項清單 */
 function ksSuggestionKey(value){return String(value||'').replace(/\s+/g,'').trim().toLowerCase()}
+function ksSuggestionText(value){return String(value||'').trim().replace(/\s+/g,' ')}
 function ksIsPlaceholderSuggestion(value){
   const text=String(value||'').trim();
   return !text || /^(例如|請選擇|施工品項|項目名稱|品項名稱|新案場|新項目|kushe-erp-cloud)$/i.test(text);
 }
+function ksMasterSuggestionNames(type){
+  const rows=state?.[type]||[];
+  return rows.map(row=>row?.name||row?.materialName||row?.item||row?.title||'').filter(Boolean);
+}
+function ksLooksLikeMasterSuggestion(value,masters){
+  const key=ksSuggestionKey(value);
+  return (masters||[]).some(raw=>{
+    const master=ksSuggestionKey(raw);
+    return master && (master===key || master.includes(key));
+  });
+}
+function ksIsConstructionItemSuggestion(value){
+  const name=ksSuggestionText(value),key=ksSuggestionKey(name);
+  if(!key || name.length<2 || ksIsPlaceholderSuggestion(name))return false;
+  if(ksLooksLikeMasterSuggestion(name,ksMasterSuggestionNames('projects')))return false;
+  if(ksLooksLikeMasterSuggestion(name,ksMasterSuggestionNames('materials')))return false;
+  return true;
+}
 function ksSeparateProjectAndItemSuggestions(){
   if(!state) return false;
-  const projectKeys=new Set((state.projects||[]).map(x=>ksSuggestionKey(x?.name)).filter(Boolean));
   const knownItems=[];
   const collectLines=list=>{(list||[]).forEach(doc=>(doc?.lines||[]).forEach(line=>knownItems.push(line?.item||line?.name||'')))};
   collectLines(state.quotations); collectLines(state.billings);
@@ -2465,8 +2484,8 @@ function ksSeparateProjectAndItemSuggestions(){
   const before=JSON.stringify(state.itemPresets||[]);
   const unique=new Map();
   [...(state.itemPresets||[]),...knownItems].forEach(raw=>{
-    const name=String(raw||'').trim().replace(/\s+/g,' '),key=ksSuggestionKey(name);
-    if(!key || ksIsPlaceholderSuggestion(name) || projectKeys.has(key) || unique.has(key)) return;
+    const name=ksSuggestionText(raw),key=ksSuggestionKey(name);
+    if(!ksIsConstructionItemSuggestion(name) || unique.has(key)) return;
     unique.set(key,name);
   });
   state.itemPresets=[...unique.values()].sort((a,b)=>a.localeCompare(b,'zh-Hant'));
@@ -2556,6 +2575,67 @@ ksUpgradeQuoteForm=function(){
     mode.dataset.ksPracticalMode='1';mode.addEventListener('change',()=>ksApplyQuoteModeDisplay(form));
   }
   ksApplyQuoteModeDisplay(form);ksEnhanceQuoteInputs();ksQuoteTableCompact(form);
+};
+
+/* 資料庫管理：案場、廠商、材料各自維護，新增後立即供全系統下拉選用。 */
+function ksMasterMeta(type){
+  return {
+    projects:{label:'案場',icon:'🏗️',hint:'案場名稱會串聯報價、請款、每日業績、出勤與材料用量。'},
+    vendors:{label:'廠商',icon:'🏭',hint:'廠商名稱會串聯材料、應付帳款與案場材料用量。'},
+    materials:{label:'材料',icon:'📦',hint:'材料名稱會串聯庫存、案場材料用量與應付帳款。'}
+  }[type];
+}
+function ksMasterReferenceCount(type,id){
+  const checks={
+    projects:[['quotations','project'],['billings','project'],['receivables','project'],['payables','project'],['attendance','project'],['commissions','project'],['materialUsages','project']],
+    vendors:[['materials','vendor'],['payables','vendor'],['materialUsages','vendor']],
+    materials:[['materialUsages','material'],['inventoryReceipts','material']]
+  }[type]||[];
+  let count=0;
+  checks.forEach(([collection,field])=>{count+=(state[collection]||[]).filter(row=>String(row?.[field]||'')===String(id)).length});
+  if(type==='projects')count+=(state.dailyLogs||[]).filter(log=>String(log?.project||'')===String(id)||(log.items||[]).some(line=>String(line?.project||'')===String(id))).length;
+  return count;
+}
+function renderMasterData(){
+  buildNav();
+  document.getElementById('pageTitle').textContent='資料庫管理';
+  const groups=['projects','vendors','materials'];
+  const block=type=>{
+    const meta=ksMasterMeta(type),rows=(state[type]||[]).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'zh-Hant'));
+    const list=rows.length?rows.map(row=>{
+      const refs=ksMasterReferenceCount(type,row.id);
+      return `<tr><td><strong>${esc(row.name||'未命名')}</strong>${row.note?`<small>${esc(row.note)}</small>`:''}</td><td>${refs?`已串聯 ${refs} 筆資料`:'尚未串聯資料'}</td><td class="ks-master-actions"><button class="btn" data-master-edit="${type}" data-id="${row.id}">編輯</button><button class="btn danger" data-master-delete="${type}" data-id="${row.id}">刪除</button></td></tr>`;
+    }).join(''):`<tr><td colspan="3" class="empty">尚無${meta.label}，可由右上方新增。</td></tr>`;
+    return `<section class="panel ks-master-panel"><div class="panel-head"><div><h3>${meta.icon} ${meta.label}資料庫</h3><p>${meta.hint}</p></div><button class="btn primary" data-master-add="${type}">＋ 新增${meta.label}</button></div><div class="table-wrap"><table class="ks-master-table"><thead><tr><th>${meta.label}名稱</th><th>串聯狀態</th><th>操作</th></tr></thead><tbody>${list}</tbody></table></div></section>`;
+  };
+  document.getElementById('content').innerHTML=`
+    <section class="ks-master-hero"><div><span>MASTER DATA</span><h2>資料庫管理中心</h2><p>在這裡維護名稱，輸入後會自動儲存，並同步帶入各功能的下拉選單。</p></div><div class="ks-master-counts">${groups.map(type=>`<div><b>${(state[type]||[]).length}</b><small>${ksMasterMeta(type).label}</small></div>`).join('')}</div></section>
+    ${groups.map(block).join('')}`;
+  document.querySelectorAll('[data-master-add]').forEach(btn=>btn.onclick=()=>openForm(btn.dataset.masterAdd));
+  document.querySelectorAll('[data-master-edit]').forEach(btn=>btn.onclick=()=>openForm(btn.dataset.masterEdit,btn.dataset.id));
+  document.querySelectorAll('[data-master-delete]').forEach(btn=>btn.onclick=()=>{
+    const type=btn.dataset.masterDelete,id=btn.dataset.id,row=(state[type]||[]).find(x=>String(x.id)===String(id)),meta=ksMasterMeta(type),refs=ksMasterReferenceCount(type,id);
+    if(!row)return;
+    if(refs){alert(`「${row.name}」已串聯 ${refs} 筆資料。為保護歷史紀錄，請先改名或先修改相關資料後再刪除。`);return;}
+    if(!confirm(`確定刪除${meta.label}「${row.name}」？`))return;
+    state[type]=(state[type]||[]).filter(x=>String(x.id)!==String(id));
+    if(type==='materials')state.itemPresets=ksSeparateProjectAndItemSuggestions()?(state.itemPresets||[]):(state.itemPresets||[]);
+    scheduleSave?.('更新資料庫管理');renderMasterData();
+  });
+}
+function ksInstallMasterDataStyle(){
+  if(document.getElementById('ksMasterDataStyle'))return;
+  const style=document.createElement('style');style.id='ksMasterDataStyle';style.textContent=`
+    .ks-master-hero{margin:0 0 18px;padding:25px 28px;border-radius:22px;color:#fff;background:linear-gradient(115deg,#092f67,#078a82);display:flex;align-items:center;justify-content:space-between;gap:24px;box-shadow:0 16px 36px rgba(7,61,112,.16)}
+    .ks-master-hero span{font-size:12px;font-weight:800;letter-spacing:1.7px;color:#a7f4e7}.ks-master-hero h2{margin:5px 0;font-size:26px}.ks-master-hero p{margin:0;color:#e0f6f2}.ks-master-counts{display:flex;gap:10px}.ks-master-counts>div{min-width:82px;padding:11px 14px;text-align:center;border:1px solid rgba(255,255,255,.25);border-radius:14px;background:rgba(255,255,255,.12)}.ks-master-counts b,.ks-master-counts small{display:block}.ks-master-counts b{font-size:22px}.ks-master-counts small{margin-top:2px;color:#d7f8f2}
+    .ks-master-panel{overflow:hidden}.ks-master-panel .panel-head{align-items:center}.ks-master-panel .panel-head h3{margin:0}.ks-master-panel .panel-head p{margin:5px 0 0;color:var(--muted);font-size:13px}.ks-master-table{width:100%;border-collapse:collapse}.ks-master-table th{padding:12px 16px;text-align:left;background:#edf5ff;color:#093c73}.ks-master-table td{padding:13px 16px;border-top:1px solid #dce9f5}.ks-master-table td strong,.ks-master-table td small{display:block}.ks-master-table td small{margin-top:4px;color:var(--muted)}.ks-master-actions{white-space:nowrap;text-align:right}.ks-master-actions .btn{margin-left:7px}
+    @media(max-width:760px){.ks-master-hero{padding:20px;display:block}.ks-master-counts{margin-top:18px}.ks-master-counts>div{flex:1;min-width:0}.ks-master-panel .panel-head{display:block}.ks-master-panel .panel-head .btn{margin-top:14px;width:100%}.ks-master-table th:nth-child(2),.ks-master-table td:nth-child(2){display:none}.ks-master-table td,.ks-master-table th{padding:12px}.ks-master-actions .btn{padding:8px 10px;margin-left:4px}}
+  `;document.head.appendChild(style);
+}
+const __ksRenderWithMasterData=render;
+render=function(){
+  if(currentModule==='masterData'){ksSeparateProjectAndItemSuggestions();ksInstallMasterDataStyle();renderMasterData();return;}
+  return __ksRenderWithMasterData.apply(this,arguments);
 };
 </script>
 </body>
