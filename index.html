@@ -2717,7 +2717,6 @@ function ksMasterV2Ensure(){
   const existing=(state.constructionItems||[]).map(ksMasterV2Text).filter(Boolean);
   const used=new Set(existing.map(ksMasterV2Key));
   legacy.forEach(name=>{if(!used.has(ksMasterV2Key(name))){state.constructionItems.push({id:ksMasterV2Id(),name});used.add(ksMasterV2Key(name))}});
-  ksMasterV2SyncConstructionItems();
 }
 function ksMasterV2Hidden(type,name){
   return (state?.masterHidden?.[type]||[]).some(x=>ksMasterV2Key(x)===ksMasterV2Key(name));
@@ -2733,7 +2732,8 @@ function ksMasterV2Rows(type){
 function ksMasterV2SyncConstructionItems(){
   if(!state)return;
   const seen=new Set();
-  state.itemPresets=ksMasterV2Rows("constructionItems").map(x=>x.name).filter(name=>{
+  const rows=(state.constructionItems||[]).map((raw,index)=>({name:ksMasterV2Text(raw),key:ksMasterV2Key(raw),index})).filter(row=>row.name&&!ksMasterV2Hidden("constructionItems",row.name));
+  state.itemPresets=rows.map(x=>x.name).filter(name=>{
     const key=ksMasterV2Key(name);
     if(!key||seen.has(key))return false;
     seen.add(key);return true;
