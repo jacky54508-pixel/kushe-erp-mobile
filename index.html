@@ -2696,6 +2696,143 @@ function ksInstallXlsxStyle(){if(document.getElementById("ksXlsxStyle"))return;c
 ksInstallXlsxStyle();
 const __ksOpenDocumentFormWithXlsxImport=openDocumentForm;
 openDocumentForm=function(module,id){const out=__ksOpenDocumentFormWithXlsxImport.apply(this,arguments);if(module==="quotations")setTimeout(ksInstallXlsxImport,0);return out};
+
+/* Master data v2: keep projects, construction items, materials and vendors separate. */
+const KS_MASTER_V2={
+  projects:{label:"\u6848\u5834"},
+  constructionItems:{label:"\u65bd\u5de5\u9805\u76ee"},
+  materials:{label:"\u6750\u6599"},
+  vendors:{label:"\u5ee0\u5546"}
+};
+let ksMasterV2Tab="projects";
+const ksMasterV2Text=v=>String(v==null?"":(typeof v==="object"?(v.name||v.label||""):v)).trim().replace(/\s+/g," ");
+const ksMasterV2Key=v=>ksMasterV2Text(v).toLowerCase().replace(/[\s\u3000\-_\\/.,\u3001\uff0c\uff0e]/g,"");
+const ksMasterV2Id=()=>typeof uid==="function"?uid():("md"+Date.now()+Math.random().toString(36).slice(2));
+function ksMasterV2Ensure(){
+  if(!state)return;
+  ["projects","materials","vendors","constructionItems","itemPresets"].forEach(k=>{if(!Array.isArray(state[k]))state[k]=[]});
+  if(!state.masterHidden||typeof state.masterHidden!=="object")state.masterHidden={};
+  Object.keys(KS_MASTER_V2).forEach(k=>{if(!Array.isArray(state.masterHidden[k]))state.masterHidden[k]=[]});
+  const legacy=(state.itemPresets||[]).map(ksMasterV2Text).filter(Boolean);
+  const existing=(state.constructionItems||[]).map(ksMasterV2Text).filter(Boolean);
+  const used=new Set(existing.map(ksMasterV2Key));
+  legacy.forEach(name=>{if(!used.has(ksMasterV2Key(name))){state.constructionItems.push({id:ksMasterV2Id(),name});used.add(ksMasterV2Key(name))}});
+  ksMasterV2SyncConstructionItems();
+}
+function ksMasterV2Hidden(type,name){
+  return (state?.masterHidden?.[type]||[]).some(x=>ksMasterV2Key(x)===ksMasterV2Key(name));
+}
+function ksMasterV2Rows(type){
+  ksMasterV2Ensure();
+  const seen=new Set();
+  return (state[type]||[]).map((raw,index)=>{
+    const name=ksMasterV2Text(raw),id=(raw&&typeof raw==="object"&&raw.id)?raw.id:("legacy-"+type+"-"+index);
+    return {raw,index,id,name,key:ksMasterV2Key(name)};
+  }).filter(row=>row.name&&!ksMasterV2Hidden(type,row.name)&&!seen.has(row.key)&&(seen.add(row.key),true));
+}
+function ksMasterV2SyncConstructionItems(){
+  if(!state)return;
+  const seen=new Set();
+  state.itemPresets=ksMasterV2Rows("constructionItems").map(x=>x.name).filter(name=>{
+    const key=ksMasterV2Key(name);
+    if(!key||seen.has(key))return false;
+    seen.add(key);return true;
+  });
+}
+function ksMasterV2ReferenceCount(type,name){
+  const key=ksMasterV2Key(name);
+  const source={
+    projects:[["quotations","projectName"],["billings","projectName"],["receivables","projectName"],["payables","projectName"],["attendance","projectName"],["dailyLogs","projectName"],["materialUsages","projectName"]],
+    vendors:[["materials","vendorName"],["materialUsages","vendorName"],["payables","vendorName"]],
+    materials:[["materialUsages","materialName"],["materials","name"]],
+    constructionItems:[["quotations","lines"],["billings","lines"],["dailyLogs","items"]]
+  }[type]||[];
+  let count=0;
+  source.forEach(([collection,field])=>(state[collection]||[]).forEach(record=>{
+    if(Array.isArray(record?.[field]))record[field].forEach(line=>{if(ksMasterV2Key(line?.item||line?.name)===key)count++});
+    else if(ksMasterV2Key(record?.[field]||record?.project||record?.vendor)===key)count++;
+  }));
+  return count;
+}
+function ksMasterV2Add(type,value){
+  const name=ksMasterV2Text(value),key=ksMasterV2Key(name);
+  if(!name)return alert("\u8acb\u8f38\u5165\u540d\u7a31\u3002");
+  if(ksMasterV2Rows(type).some(x=>x.key===key))return alert("\u6b64\u540d\u7a31\u5df2\u5728\u8cc7\u6599\u5eab\u4e2d\u3002");
+  state[type].push({id:ksMasterV2Id(),name});
+  state.masterHidden[type]=(state.masterHidden[type]||[]).filter(x=>ksMasterV2Key(x)!==key);
+  if(type==="constructionItems")ksMasterV2SyncConstructionItems();
+  scheduleSave?.();render();
+}
+function ksMasterV2Delete(type,row){
+  const refs=ksMasterV2ReferenceCount(type,row.name);
+  const action=refs?"\u96b1\u85cf\u5019\u9078":"\u522a\u9664";
+  if(!confirm(action+"\u300c"+row.name+"\u300d"+(refs?"\uff1f\n\u5df2\u5b58\u55ae\u64da\u4e0d\u6703\u88ab\u522a\u9664\uff0c\u53ea\u6703\u5f9e\u4e0b\u62c9\u5019\u9078\u79fb\u9664\u3002":"\uff1f")))return;
+  state[type]=(state[type]||[]).filter((raw,index)=>{
+    const id=(raw&&typeof raw==="object"&&raw.id)?raw.id:("legacy-"+type+"-"+index);
+    return id!==row.id;
+  });
+  if(refs)state.masterHidden[type]=[...(state.masterHidden[type]||[]),row.name];
+  if(type==="constructionItems")ksMasterV2SyncConstructionItems();
+  scheduleSave?.();render();
+}
+function ksMasterV2Edit(type,row){
+  const next=prompt("\u8acb\u8f38\u5165\u65b0\u540d\u7a31",row.name);
+  if(next==null)return;
+  const name=ksMasterV2Text(next);
+  if(!name)return;
+  if(ksMasterV2Rows(type).some(x=>x.id!==row.id&&x.key===ksMasterV2Key(name)))return alert("\u540d\u7a31\u5df2\u5b58\u5728\u3002");
+  const item=(state[type]||[]).find((raw,index)=>((raw&&typeof raw==="object"&&raw.id)?raw.id:("legacy-"+type+"-"+index))===row.id);
+  if(item&&typeof item==="object")item.name=name;
+  else if(item!=null)state[type][state[type].indexOf(item)]=name;
+  if(type==="constructionItems")ksMasterV2SyncConstructionItems();
+  scheduleSave?.();render();
+}
+function ksMasterV2Render(){
+  ksMasterV2Ensure();buildNav();
+  const page=document.getElementById("pageTitle"),content=document.getElementById("content");
+  if(page)page.textContent="\u8cc7\u6599\u7ba1\u7406";
+  if(!content)return;
+  const tab=KS_MASTER_V2[ksMasterV2Tab]?ksMasterV2Tab:"projects";
+  const rows=ksMasterV2Rows(tab);
+  content.innerHTML='<div class="ks-mdv2">'+
+    '<section class="ks-mdv2-hero"><div><span>ERP MASTER DATA</span><h2>\u8cc7\u6599\u7ba1\u7406</h2><p>\u6848\u5834\u3001\u65bd\u5de5\u9805\u76ee\u3001\u6750\u6599\u8207\u5ee0\u5546\u5206\u958b\u7ba1\u7406\uff0c\u4e0b\u62c9\u9078\u55ae\u6703\u81ea\u52d5\u4e32\u806f\u3002</p></div><div class="ks-mdv2-stat">'+rows.length+'<small>\u7b46\u53ef\u7528\u8cc7\u6599</small></div></section>'+
+    '<div class="ks-mdv2-tabs">'+Object.entries(KS_MASTER_V2).map(([key,meta])=>'<button class="'+(key===tab?"active":"")+'" data-md-tab="'+key+'">'+meta.label+'</button>').join("")+'</div>'+
+    '<section class="ks-mdv2-card"><div class="ks-mdv2-tools"><div><h3>'+KS_MASTER_V2[tab].label+'\u8cc7\u6599\u5eab</h3><p>\u522a\u9664\u932f\u8aa4\u540d\u7a31\u4e0d\u6703\u5f71\u97ff\u5df2\u5b58\u55ae\u64da\uff1b\u6709\u6b77\u53f2\u8cc7\u6599\u7684\u540d\u7a31\u6703\u6539\u70ba\u96b1\u85cf\u5019\u9078\u3002</p></div><div class="ks-mdv2-add"><input id="ksMdV2New" lang="zh-Hant" placeholder="\u8f38\u5165\u65b0\u7684'+KS_MASTER_V2[tab].label+'"><button class="btn teal" id="ksMdV2Add">+ \u65b0\u589e</button></div></div>'+
+    '<input class="ks-mdv2-search" id="ksMdV2Search" lang="zh-Hant" placeholder="\u641c\u5c0b'+KS_MASTER_V2[tab].label+'...">'+
+    '<div class="ks-mdv2-list" id="ksMdV2List">'+ksMasterV2Table(rows,tab)+'</div></section></div>';
+  content.querySelectorAll("[data-md-tab]").forEach(btn=>btn.onclick=()=>{ksMasterV2Tab=btn.dataset.mdTab;ksMasterV2Render()});
+  content.querySelector("#ksMdV2Add").onclick=()=>ksMasterV2Add(tab,content.querySelector("#ksMdV2New").value);
+  content.querySelector("#ksMdV2New").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();ksMasterV2Add(tab,e.currentTarget.value)}};
+  content.querySelector("#ksMdV2Search").oninput=e=>{const q=ksMasterV2Key(e.currentTarget.value);content.querySelector("#ksMdV2List").innerHTML=ksMasterV2Table(rows.filter(row=>!q||row.key.includes(q)),tab);ksMasterV2BindActions(content,tab)};
+  ksMasterV2BindActions(content,tab);
+}
+function ksMasterV2Table(rows,type){
+  if(!rows.length)return '<div class="ks-mdv2-empty">\u76ee\u524d\u6c92\u6709\u8cc7\u6599\uff0c\u53ef\u4ee5\u5f9e\u4e0a\u65b9\u65b0\u589e\u3002</div>';
+  return '<table><thead><tr><th>\u540d\u7a31</th><th>\u55ae\u64da\u53c3\u8003</th><th>\u64cd\u4f5c</th></tr></thead><tbody>'+rows.map(row=>{const refs=ksMasterV2ReferenceCount(type,row.name);return '<tr><td><strong>'+esc(row.name)+'</strong></td><td>'+(refs?refs+' \u7b46\u5df2\u4f7f\u7528':'\u5c1a\u672a\u4f7f\u7528')+'</td><td><button class="btn small" data-md-edit="'+esc(row.id)+'">\u7de8\u8f2f</button><button class="btn small danger" data-md-del="'+esc(row.id)+'">'+(refs?'\u96b1\u85cf':'\u522a\u9664')+'</button></td></tr>'}).join("")+'</tbody></table>';
+}
+function ksMasterV2BindActions(root,type){
+  const rows=ksMasterV2Rows(type);
+  root.querySelectorAll("[data-md-edit]").forEach(btn=>btn.onclick=()=>{const row=rows.find(x=>x.id===btn.dataset.mdEdit);if(row)ksMasterV2Edit(type,row)});
+  root.querySelectorAll("[data-md-del]").forEach(btn=>btn.onclick=()=>{const row=rows.find(x=>x.id===btn.dataset.mdDel);if(row)ksMasterV2Delete(type,row)});
+}
+function ksMasterV2Style(){
+  if(document.getElementById("ksMasterV2Style"))return;
+  const s=document.createElement("style");s.id="ksMasterV2Style";s.textContent=".ks-mdv2{max-width:1320px;margin:0 auto;padding:26px}.ks-mdv2-hero{display:flex;align-items:center;justify-content:space-between;gap:22px;padding:25px 30px;border-radius:23px;background:linear-gradient(115deg,#062a5c,#008a83);color:#fff;box-shadow:0 16px 38px rgba(5,41,84,.18)}.ks-mdv2-hero span{font-size:12px;letter-spacing:1.6px;opacity:.72}.ks-mdv2-hero h2{margin:4px 0 6px;font-size:29px}.ks-mdv2-hero p{margin:0;color:#d9f5f1}.ks-mdv2-stat{min-width:120px;padding:13px 18px;border:1px solid rgba(255,255,255,.27);border-radius:16px;background:rgba(255,255,255,.12);font-size:30px;font-weight:800;text-align:center}.ks-mdv2-stat small{display:block;font-size:12px;font-weight:500}.ks-mdv2-tabs{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0}.ks-mdv2-tabs button{border:1px solid #cae0ef;border-radius:12px;background:#fff;padding:11px 19px;color:#083c70;font-weight:800;cursor:pointer}.ks-mdv2-tabs button.active{border-color:#078d84;background:#e9faf7;color:#087c74;box-shadow:0 5px 15px rgba(0,132,122,.13)}.ks-mdv2-card{padding:23px;border:1px solid #d6e5f2;border-radius:22px;background:#fff;box-shadow:0 12px 30px rgba(15,46,83,.06)}.ks-mdv2-tools{display:flex;justify-content:space-between;align-items:center;gap:20px}.ks-mdv2-tools h3{margin:0;color:#082f64;font-size:22px}.ks-mdv2-tools p{margin:5px 0 0;color:#617b96;font-size:13px}.ks-mdv2-add{display:flex;gap:9px}.ks-mdv2-add input,.ks-mdv2-search{border:1px solid #bed7ec;border-radius:11px;padding:11px 13px;font:inherit;outline:0}.ks-mdv2-add input:focus,.ks-mdv2-search:focus{border-color:#07998e;box-shadow:0 0 0 3px rgba(7,153,142,.12)}.ks-mdv2-search{width:100%;margin:19px 0 12px}.ks-mdv2-list{border:1px solid #d9e7f4;border-radius:14px;overflow:hidden}.ks-mdv2-list table{width:100%;border-collapse:collapse}.ks-mdv2-list th{padding:12px 15px;background:#eef6fd;color:#0b3e72;text-align:left;font-size:13px}.ks-mdv2-list td{padding:13px 15px;border-top:1px solid #e4edf5}.ks-mdv2-list tr:nth-child(even){background:#f9fcff}.ks-mdv2-list .btn{margin-right:7px}.ks-mdv2-empty{padding:37px;text-align:center;color:#6b849d}.ks-mdv2 .danger{color:#c43d31;border-color:#f2c7c0;background:#fff8f6}@media(max-width:720px){.ks-mdv2{padding:15px}.ks-mdv2-hero{padding:20px;align-items:flex-start}.ks-mdv2-hero h2{font-size:24px}.ks-mdv2-stat{min-width:88px;font-size:24px}.ks-mdv2-tools{display:block}.ks-mdv2-add{margin-top:15px}.ks-mdv2-add input{min-width:0;width:100%}.ks-mdv2-list{overflow:auto}.ks-mdv2-list table{min-width:530px}}";document.head.appendChild(s);
+}
+const __ksMasterSuggestionNamesV2=typeof ksMasterSuggestionNames==="function"?ksMasterSuggestionNames:null;
+ksMasterSuggestionNames=function(type){
+  const result=__ksMasterSuggestionNamesV2?__ksMasterSuggestionNamesV2.apply(this,arguments):[];
+  return (result||[]).filter(name=>!ksMasterV2Hidden(type,name));
+};
+const __ksRenderMasterV2=render;
+render=function(){
+  ksMasterV2Ensure();
+  if(currentModule==="masterData"){ksMasterV2Style();ksMasterV2Render();return;}
+  const result=__ksRenderMasterV2.apply(this,arguments);
+  setTimeout(()=>{ksMasterV2Ensure();document.querySelectorAll("#itemPresetList,#dmItemPresetList").forEach(list=>{list.innerHTML=ksMasterV2Rows("constructionItems").map(row=>'<option value="'+esc(row.name)+'"></option>').join("")});document.querySelectorAll("input[list='itemPresetList'],input[list='dmItemPresetList']").forEach(input=>input.setAttribute("lang","zh-Hant"));},0);
+  return result;
+};
+ksMasterV2Style();
 </script>
 </body>
 </html>
