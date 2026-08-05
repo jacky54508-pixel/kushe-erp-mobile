@@ -836,7 +836,7 @@ function openDocumentForm(module,id=null){
   <div class="doc-lines"><h3>明細項目</h3>
    <div class="doc-line-grid">
     <div class="field"><label>戶別</label><input id="lineHouse" placeholder="例如：D1"></div>
-    <div class="field"><label>項目</label><input id="lineItem" list="itemPresetList" placeholder="例如：工程款、追加款、材料款"><datalist id="itemPresetList">${(state.itemPresets||[]).map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div>
+    <div class="field"><label>項目</label><input id="lineItem" lang="zh-Hant" inputmode="text" list="itemPresetList" placeholder="${isQuote?"例如：鋁窗、欄杆、電梯軌道":"例如：工程款、追加款、材料款"}"><datalist id="itemPresetList">${(state.itemPresets||[]).map(x=>`<option value="${esc(x)}">`).join("")}</datalist></div>
     <div class="field"><label>規格／說明</label><input id="lineSpec"></div>
     <div class="field"><label>數量</label><input id="lineQty" type="number" step="0.01" value="1"></div>
     <div class="field"><label>單位</label><input id="lineUnit" value="式"></div>
@@ -2386,6 +2386,8 @@ function ksInstallQuoteFormStyle(){
     .ks-quote-pro-form .doc-lines-table tfoot{background:#f2fbf9;color:#073d70;font-weight:800}
     .ks-quote-pro-form .doc-summary-grid{grid-template-columns:repeat(2,minmax(180px,1fr))!important;max-width:600px;margin:22px 0 0 auto}
     .ks-quote-pro-form .doc-summary-box{border-radius:15px!important;border-left:5px solid #0c9b8e!important;background:#f6fbff!important;box-shadow:0 8px 20px rgba(7,61,112,.06)}
+    /* 實做實算只作為施工項目清單使用，不在輸入畫面顯示稅額或含稅總價 */
+    .ks-quote-pro-form.ks-quote-practical .doc-summary-grid{display:none!important}
     .ks-quote-hidden-total{display:none!important}
     .ks-quote-mode-help{grid-column:1/-1;margin:-3px 0 3px;padding:10px 13px;border-radius:11px;background:#effaf8;color:#16716b;font-size:13px;font-weight:700}
     @media(max-width:760px){.ks-quote-pro-form .modal-body{padding:16px}.ks-quote-pro-form .doc-line-grid{grid-template-columns:1fr 1fr!important}.ks-quote-pro-form .doc-line-grid .field:first-child{grid-column:1/-1}.ks-quote-pro-form .doc-line-grid .btn{grid-column:1/-1}.ks-quote-pro-form .doc-summary-grid{grid-template-columns:1fr!important;max-width:none}.ks-quote-pro-form .doc-lines{padding:15px}}
@@ -2452,7 +2454,6 @@ function ksSeparateProjectAndItemSuggestions(){
   const collectLines=list=>{(list||[]).forEach(doc=>(doc?.lines||[]).forEach(line=>knownItems.push(line?.item||line?.name||'')))};
   collectLines(state.quotations); collectLines(state.billings);
   (state.dailyLogs||[]).forEach(log=>(log?.items||[]).forEach(line=>knownItems.push(line?.item||line?.name||'')));
-  (state.materials||[]).forEach(item=>knownItems.push(item?.name||item?.item||''));
   const before=JSON.stringify(state.itemPresets||[]);
   const unique=new Map();
   [...(state.itemPresets||[]),...knownItems].forEach(raw=>{
@@ -2508,7 +2509,9 @@ function ksQuoteTableCompact(form){
 }
 function ksApplyQuoteModeDisplay(form){
   const mode=form.querySelector('[name="format"]'); if(!mode)return;
-  form.classList.toggle('ks-quote-practical',mode.value==='實做實算');
+  const practical=String(mode.value||'').includes('實做實算');
+  form.classList.toggle('ks-quote-practical',practical);
+  form.querySelectorAll('.doc-summary-grid').forEach(box=>box.style.display=practical?'none':'');
 }
 function ksEnhanceQuoteInputs(){
   const form=document.getElementById('docForm'); if(!form)return;
