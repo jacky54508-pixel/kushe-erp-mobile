@@ -2056,7 +2056,9 @@ function renderProjectOverview(){
  document.getElementById("addProjectOverview").onclick=()=>openProjectForm();
  document.getElementById("projectMonthPick").onchange=e=>{if(/^\d{4}-\d{2}$/.test(e.target.value||"")){window.__ksQueryMonth=e.target.value;renderProjectOverview()}};
  const search=document.getElementById("projectOverviewSearch");
- search.oninput=()=>{window.__ksProjectQuery=search.value;renderProjectOverview()};
+ /* 搜尋欄不可在每一個字元輸入時整頁重繪，否則焦點會跳走。改為按 Enter 或離開欄位才查詢。 */
+ search.onchange=()=>{window.__ksProjectQuery=search.value;renderProjectOverview()};
+ search.onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();window.__ksProjectQuery=search.value;renderProjectOverview()}};
  document.getElementById("clearProjectOverviewSearch").onclick=()=>{window.__ksProjectQuery="";renderProjectOverview()};
  document.getElementById("projectOpenReceivables").onclick=showAllProjectOpenReceivableDetails;
  document.querySelectorAll("[data-project-edit]").forEach(b=>b.onclick=()=>openProjectForm(b.dataset.projectEdit));
