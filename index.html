@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#061d3b">
+  <title>酷舍 ERP｜首頁總覽</title>
+  <link rel="stylesheet" href="assets/css/app.css?v=20260809-projects4">
+</head>
+<body>
+  <div class="app-shell" id="appShell">
+    <aside class="sidebar" id="sidebar" aria-label="主選單">
+      <div class="brand sidebar-header">
+        <div class="brand-mark" aria-hidden="true"><span></span></div>
+        <div class="brand-copy"><strong>酷舍 ERP</strong><small>企業管理系統</small></div>
+      </div>
+      <nav class="main-nav" id="mainNav">
+        <a class="nav-item active" href="#dashboard" data-module="dashboard" data-tooltip="首頁總覽" aria-label="首頁總覽"><i class="nav-icon" data-icon="layout-dashboard"></i><b>首頁總覽</b></a>
+        <p class="nav-section">經營管理</p>
+        <a class="nav-item" href="#projects" data-module="projects" data-tooltip="客戶／案場" aria-label="客戶／案場"><i class="nav-icon" data-icon="map-pin"></i><b>客戶／案場</b></a>
+        <a class="nav-item" href="#quotations" data-module="quotations" data-tooltip="報價單管理" aria-label="報價單管理"><i class="nav-icon" data-icon="file-text"></i><b>報價單管理</b></a>
+        <a class="nav-item" href="#billings" data-module="billings" data-tooltip="請款單管理" aria-label="請款單管理"><i class="nav-icon" data-icon="clipboard-list"></i><b>請款單管理</b></a>
+        <a class="nav-item" href="#receivables" data-module="receivables" data-tooltip="應收帳款" aria-label="應收帳款"><i class="nav-icon" data-icon="arrow-down-to-line"></i><b>應收帳款</b></a>
+        <a class="nav-item" href="#payables" data-module="payables" data-tooltip="應付帳款" aria-label="應付帳款"><i class="nav-icon" data-icon="arrow-up-from-line"></i><b>應付帳款</b></a>
+        <a class="nav-item" href="#banks" data-module="banks" data-tooltip="銀行帳戶" aria-label="銀行帳戶"><i class="nav-icon" data-icon="landmark"></i><b>銀行帳戶</b></a>
+        <a class="nav-item" href="#invoices" data-module="invoices" data-tooltip="發票管理" aria-label="發票管理"><i class="nav-icon" data-icon="receipt"></i><b>發票管理</b></a>
+        <a class="nav-item" href="#materials" data-module="materials" data-tooltip="材料管理" aria-label="材料管理"><i class="nav-icon" data-icon="boxes"></i><b>材料管理</b></a>
+        <p class="nav-section">人員與成本</p>
+        <a class="nav-item" href="#employees" data-module="employees" data-tooltip="員工管理" aria-label="員工管理"><i class="nav-icon" data-icon="user-round"></i><b>員工管理</b></a>
+        <a class="nav-item" href="#attendance" data-module="attendance" data-tooltip="出勤點工" aria-label="出勤點工"><i class="nav-icon" data-icon="calendar-check"></i><b>出勤點工</b></a>
+        <a class="nav-item" href="#commissions" data-module="commissions" data-tooltip="員工業績／抽成" aria-label="員工業績／抽成"><i class="nav-icon" data-icon="chart-no-axes-combined"></i><b>員工業績／抽成</b></a>
+        <a class="nav-item" href="#unbilled-work" data-module="unbilled-work" data-tooltip="待請款施工" aria-label="待請款施工"><i class="nav-icon" data-icon="clipboard-list"></i><b>待請款施工</b></a>
+        <a class="nav-item" href="#payroll" data-module="payroll" data-tooltip="薪資管理" aria-label="薪資管理"><i class="nav-icon" data-icon="wallet"></i><b>薪資管理</b></a>
+        <p class="nav-section">分析報表</p>
+        <a class="nav-item" href="#reports" data-module="reports" data-tooltip="統計報表" aria-label="統計報表"><i class="nav-icon" data-icon="bar-chart-3"></i><b>統計報表</b></a>
+        <p class="nav-section">系統設定</p>
+        <a class="nav-item" href="#settings" data-module="settings" data-tooltip="系統設定" aria-label="系統設定"><i class="nav-icon" data-icon="settings"></i><b>系統設定</b></a>
+      </nav>
+      <div class="sidebar-footer"><button class="collapse-button" id="sidebarToggle" type="button" aria-label="收合選單"><i data-icon="panel-left-close"></i><b>收合選單</b></button></div>
+    </aside>
+
+    <div class="page-frame">
+      <header class="topbar">
+        <div class="welcome">
+          <button class="top-icon menu-button" id="mobileMenuButton" type="button" aria-label="開啟選單" aria-expanded="false"><i data-icon="menu"></i></button>
+          <div><h1 id="welcomeTitle">早安！<span>👋</span></h1><p>掌握公司即時營運狀況，做出最佳決策</p></div>
+        </div>
+        <div class="topbar-center global-search-wrap">
+          <label class="global-search"><i data-icon="search"></i><input id="globalSearch" type="search" placeholder="快速搜尋案場、客戶、單號、發票…" autocomplete="off"><kbd>Ctrl K</kbd></label>
+          <div class="topbar-popover search-popover" id="searchPopover"></div>
+        </div>
+        <div class="top-actions">
+          <div class="topbar-action-wrap"><button class="top-icon" id="notificationButton" type="button" aria-label="通知"><i data-icon="bell"></i><b class="badge" id="notificationCount">0</b></button><div class="topbar-popover notice-popover" id="notificationPopover"><div class="popover-head"><b>需要處理</b><span id="noticeTotal">0 筆</span></div><div id="notificationItems"></div></div></div>
+          <div class="topbar-action-wrap"><button class="top-icon" id="messageButton" type="button" aria-label="訊息"><i data-icon="message-circle"></i><b class="badge">0</b></button></div>
+          <div class="topbar-action-wrap"><button class="user-menu" id="userMenuButton" type="button"><span class="avatar">酷</span><span><b>酷舍管理者</b><small>公司帳戶 <i data-icon="chevron-down"></i></small></span></button><div class="topbar-popover user-popover" id="userPopover"><button type="button" data-module="settings">系統設定</button><button type="button" data-backup>系統與備份</button></div></div>
+        </div>
+        <div class="period-toolbar">
+          <label class="date-display"><i data-icon="calendar-check"></i><span id="todayLabel">—</span><select id="dashboardMonth" aria-label="查詢月份"></select></label>
+          <select id="periodMode" class="period-mode" aria-label="統計週期"><option value="month">本月</option><option value="quarter">本季</option><option value="year">本年</option></select>
+        </div>
+      </header>
+
+      <main class="dashboard app-view is-active" id="dashboard" data-view="dashboard">
+        <section class="kpi-grid" id="kpiGrid" aria-label="核心指標"></section>
+
+        <section class="analysis-grid">
+          <article class="panel trend-panel">
+            <header class="panel-header"><div><h2>營業額趨勢 <button class="info-button" type="button" title="依既有請款單未稅金額計算"><i data-icon="info"></i></button></h2></div><div class="segmented" id="trendRange"><button class="is-active" type="button" data-range="12">月</button><button type="button" data-range="4">季</button><button type="button" data-range="3">年</button></div></header>
+            <div class="trend-summary"><b>本月營業額 <strong id="trendCurrent">$0</strong></b><span>較上月 <em id="trendDelta">—</em></span></div>
+            <div class="chart-wrap"><canvas id="trendChart" aria-label="營業額趨勢圖"></canvas><div class="chart-tooltip" id="chartTooltip" hidden></div></div>
+          </article>
+          <article class="panel structure-panel">
+            <header class="panel-header"><h2>收支結構（本月）</h2><button class="text-button" type="button" data-module="reports">查看全部</button></header>
+            <div class="structure-body">
+              <div class="donut" id="collectionDonut"><div><span>收入總額</span><strong id="structureTotal">$0</strong></div></div>
+              <div class="structure-details">
+                <div class="legend-row"><span><i class="dot green"></i>已收款</span><b id="structurePaid">$0</b></div>
+                <div class="legend-row"><span><i class="dot orange"></i>未收款</span><b id="structureOpen">$0</b></div>
+                <hr>
+                <div class="progress-row"><div><span>收款進度</span><b id="collectionRate">0%</b></div><div class="progress"><i id="collectionBar"></i></div></div>
+                <div class="progress-row"><div><span>應收回收率</span><b id="recoveryRate">0%</b></div><div class="progress"><i id="recoveryBar"></i></div></div>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section class="middle-grid">
+          <article class="panel projects-panel">
+            <header class="panel-header"><h2>案場經營狀況 TOP 6</h2><button class="text-button" type="button" data-module="projects">查看全部</button></header>
+            <div class="table-wrap"><table class="project-table"><thead><tr><th>案場名稱</th><th>合約／請款金額</th><th>已收金額</th><th>未收金額</th><th>材料成本</th><th>人工成本</th><th>毛利</th><th>毛利率</th><th>狀態</th></tr></thead><tbody id="projectRows"></tbody></table></div>
+          </article>
+          <article class="panel attention-panel">
+            <header class="panel-header"><h2>需要處理</h2><button class="text-button" type="button" id="viewAllAttention">查看全部</button></header>
+            <div class="attention-list" id="attentionList"></div>
+          </article>
+        </section>
+
+        <section class="bottom-grid">
+          <article class="panel quick-panel">
+            <header class="panel-header"><h2>快速操作</h2></header>
+            <div class="quick-actions">
+              <button type="button" data-module="billings"><i class="blue" data-icon="clipboard-list"></i><b>新增請款單</b></button>
+              <button type="button" data-module="quotations"><i class="green" data-icon="file-text"></i><b>新增報價單</b></button>
+              <button type="button" data-module="receivables"><i class="violet" data-icon="arrow-down-to-line"></i><b>新增收款</b></button>
+              <button type="button" data-module="payables"><i class="orange" data-icon="arrow-up-from-line"></i><b>新增付款</b></button>
+              <button type="button" data-module="projects"><i class="blue" data-icon="building-2"></i><b>新增案場</b></button>
+              <button type="button" data-module="customers"><i class="green" data-icon="contact"></i><b>新增客戶</b></button>
+              <button type="button" data-module="attendance"><i class="violet" data-icon="clock"></i><b>新增點工</b></button>
+              <button type="button" data-module="payroll"><i class="orange" data-icon="calculator"></i><b>薪資計算</b></button>
+            </div>
+          </article>
+          <article class="panel payroll-panel">
+            <header class="panel-header"><h2>本月人事成本概況</h2></header>
+            <div class="payroll-summary" id="payrollSummary"></div>
+          </article>
+        </section>
+
+        <footer class="page-footer"><span id="dataSourceLabel">正在讀取現有 ERP 資料…</span><span>Copyright © 2026 酷舍企業有限公司 Kushe Enterprise Co., Ltd.</span></footer>
+      </main>
+
+      <main class="module-view app-view" id="moduleView" data-view="module" hidden>
+        <nav class="view-breadcrumb" aria-label="麵包屑"><button type="button" data-route="dashboard">首頁總覽</button><span>/</span><b id="moduleBreadcrumb">模組</b></nav>
+        <section class="module-placeholder" aria-labelledby="moduleTitle">
+          <div class="placeholder-icon" id="moduleIcon"></div>
+          <p class="placeholder-eyebrow">新版 ERP 模組</p>
+          <h2 id="moduleTitle">模組名稱</h2>
+          <h3>此模組新版介面建置中</h3>
+          <p>此頁已納入新版 ERP Shell；既有資料、自動儲存、計算公式與模組連動仍由舊正式版安全保留。</p>
+          <div class="placeholder-actions">
+            <button class="shell-primary" type="button" data-route="dashboard"><i data-icon="arrow-left"></i>返回首頁</button>
+            <button class="shell-secondary" id="openLegacyModule" type="button"><i data-icon="external-link"></i>暫時開啟舊版功能</button>
+          </div>
+        </section>
+      </main>
+
+      <main class="commissions-view app-view" id="commissionsView" data-view="commissions" hidden>
+        <nav class="view-breadcrumb" aria-label="麵包屑"><button type="button" data-route="dashboard">首頁總覽</button><span>/</span><b>員工業績／抽成</b></nav>
+        <div id="commissionsApp" aria-live="polite"></div>
+      </main>
+
+      <main class="commissions-view app-view" id="projectsView" data-view="projects" hidden>
+        <nav class="view-breadcrumb" aria-label="麵包屑"><button type="button" data-route="dashboard">首頁總覽</button><span>/</span><b>客戶／案場</b></nav>
+        <div id="projectsApp" aria-live="polite"></div>
+      </main>
+
+      <main class="commissions-view app-view" id="unbilledWorkView" data-view="unbilled-work" hidden>
+        <nav class="view-breadcrumb" aria-label="麵包屑"><button type="button" data-route="dashboard">首頁總覽</button><span>/</span><b>待請款施工</b></nav>
+        <div id="unbilledWorkApp" aria-live="polite"></div>
+      </main>
+
+      <main class="commissions-view app-view" id="billingsView" data-view="billings" hidden>
+        <nav class="view-breadcrumb" aria-label="麵包屑"><button type="button" data-route="dashboard">首頁總覽</button><span>/</span><b>請款單管理</b></nav>
+        <div id="billingsApp" aria-live="polite"></div>
+      </main>
+
+      <main class="commissions-view app-view" id="billingDraftView" data-view="billing-draft" hidden>
+        <nav class="view-breadcrumb" aria-label="麵包屑"><button type="button" data-route="unbilled-work">待請款施工</button><span>/</span><b>建立請款單</b></nav>
+        <div id="billingDraftApp" aria-live="polite"></div>
+      </main>
+
+      <main class="commissions-view app-view" id="receivablesView" data-view="receivables" hidden>
+        <nav class="view-breadcrumb" aria-label="麵包屑"><button type="button" data-route="dashboard">首頁總覽</button><span>/</span><b>應收帳款</b></nav>
+        <div id="receivablesApp" aria-live="polite"></div>
+      </main>
+
+      <main class="commissions-view app-view" id="payablesView" data-view="payables" hidden>
+        <nav class="view-breadcrumb" aria-label="麵包屑"><button type="button" data-route="dashboard">首頁總覽</button><span>/</span><b>應付帳款</b></nav>
+        <div id="payablesApp" aria-live="polite"></div>
+      </main>
+    </div>
+    <button class="mobile-backdrop" id="mobileNavBackdrop" type="button" aria-label="關閉選單"></button>
+  </div>
+  <div class="toast-host" id="toastHost" aria-live="polite"></div>
+  <script src="assets/js/lucide.min.js?v=20260809-commissions1"></script>
+  <script src="assets/js/backup-snapshot.js?v=20260805"></script>
+  <script src="assets/js/config.js?v=20260809-billing1"></script>
+  <script src="assets/js/legacy-adapter.js?v=20260809-nav4"></script>
+  <script src="assets/js/erp-store.js?v=20260809-projects1"></script>
+  <script src="assets/js/dashboard.js?v=20260809-projects1"></script>
+  <script src="assets/js/commissions.js?v=20260809-dailywork1"></script>
+  <script src="assets/js/unbilled-work.js?v=20260809-billing1"></script>
+  <script src="assets/js/billing.js?v=20260809-projects2"></script>
+  <script src="assets/js/payables.js?v=20260809-payable-scroll4"></script>
+  <script src="assets/js/projects.js?v=20260809-projects4"></script>
+  <script src="assets/js/table-scroll.js?v=20260809-global1"></script>
+  <script src="assets/js/billing-print.js?v=20260809-print1"></script>
+  <script src="assets/js/app.js?v=20260809-projects1"></script>
+</body>
+</html>
