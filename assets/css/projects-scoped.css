@@ -1,0 +1,56 @@
+/* Scoped fixes for the customer/project module only. */
+.project-master-modal .project-setting-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+}
+
+.project-master-modal .project-invoice-default-block {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.project-master-modal .project-invoice-default-block fieldset {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.project-master-modal .project-invoice-default-block > label {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.project-master-modal .project-invoice-default-block > label > span {
+  color: #63748a;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.project-master-modal #projectTaxModeWrap[hidden],
+#projectsView #detailTaxMode[hidden] {
+  display: none !important;
+}
+
+#projectsView .project-billing-setting-block fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+#projectsView #detailTaxMode {
+  width: 100%;
+  margin-top: 14px;
+}
+
+@media (max-width: 900px) {
+  .project-master-modal .project-setting-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .project-master-modal .project-setting-grid {
+    grid-template-columns: 1fr;
+  }
+}
