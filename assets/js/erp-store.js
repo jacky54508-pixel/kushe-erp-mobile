@@ -326,7 +326,7 @@
       });
     });
     state.dailyItemPresets = state.dailyItemPresets || [];
-    prepared.filter((line)=>line.sourceType==='manual').forEach((line) => { const existing = state.dailyItemPresets.find((row) => String(row.item||'').trim() === String(line.item||'').trim()); const preset={item:line.item,unit:line.unit||'式',qty:line.qty,price:line.price}; if(existing)Object.assign(existing,preset);else state.dailyItemPresets.push(preset); });
+    prepared.filter((line)=>line.sourceType==='manual').forEach((line) => { const existing = state.dailyItemPresets.find((row) => String(row.projectId||'') === String(line.project||'') && String(row.item||'').trim() === String(line.item||'').trim()); const preset={projectId:line.project,item:line.item,unit:line.unit||'式',qty:line.qty,inputPrice:line.inputPrice,price:line.inputPrice,taxMode:line.taxMode||'未稅',pricingType:line.pricingType||'actual',updatedAt:now}; if(existing)Object.assign(existing,preset);else state.dailyItemPresets.push({id:uid(),...preset}); });
     await persist(`${previous.length?'修改':'新增'}多案場每日施工紀錄`);
     return batchId;
   }
@@ -336,6 +336,13 @@
     rows.forEach((log) => syncDailyLogLinks({...log,performance:0,workMode:'none'}, log));
     state.dailyLogs = state.dailyLogs.filter((log) => (log.batchId || log.id) !== batchId);
     await persist('刪除多案場每日施工紀錄'); return true;
+  }
+  function dailyManualItems(projectId) {
+    if(!projectId)return [];
+    const items=new Map(),remember=(row,date='')=>{const name=clean(row.itemName||row.item);if(!name)return;const key=name.toLocaleLowerCase('zh-Hant'),candidate={projectId,item:name,itemName:name,unit:clean(row.unit)||'式',price:num(row.inputPrice??row.unitPrice??row.price),unitPrice:num(row.inputPrice??row.unitPrice??row.price),taxMode:row.taxMode||'未稅',pricingType:row.pricingType==='lump_sum'?'lump_sum':'actual',sourceType:'manual',updatedAt:row.updatedAt||date||''},current=items.get(key);if(!current||String(candidate.updatedAt)>=String(current.updatedAt))items.set(key,candidate)};
+    state.dailyLogs.filter((log)=>String(log.project)===String(projectId)).forEach((log)=>(log.items||[]).filter((item)=>!item.quotationId&&!item.quoteId&&item.sourceType!=='quotation').forEach((item)=>remember(item,log.updatedAt||log.date)));
+    state.dailyItemPresets.filter((row)=>String(row.projectId||'')===String(projectId)).forEach((row)=>remember(row,row.updatedAt));
+    return [...items.values()].sort((a,b)=>a.item.localeCompare(b.item,'zh-Hant'));
   }
   async function saveCommission(values, id) {
     await load();
@@ -685,7 +692,31 @@
   async function setQuotationStatus(id,status) {
     await load(); const row=state.quotations.find((item)=>item.id===id); if(!row)throw new Error('找不到報價單');
     if(!['草稿','已送出','已確認','作廢'].includes(status))throw new Error('無效的報價狀態');
+    if(row.status==='已確認'&&status!=='已確認')throw new Error('已確認報價請使用「取消確認」或「建立修訂版」');
     row.status=status;row.updatedAt=new Date().toISOString();await persist(`報價單 ${row.number} 狀態改為 ${status}`);return row;
+  }
+  function quotationUsage(id) {
+    const daily=[];state.dailyLogs.forEach((log)=>(log.items||[]).forEach((item)=>{if(String(item.quotationId||item.quoteId||'')===String(id))daily.push({logId:log.id,workItemId:item.workItemId||''})}));
+    const billings=state.billings.filter((billing)=>String(billing.quotationId||billing.quoteId||'')===String(id)||(billing.sourceContractRefs||[]).some((ref)=>String(ref.quotationId||ref.quoteId||'')===String(id))||(billing.sourceRefs||[]).some((ref)=>String(ref.quotationId||ref.quoteId||'')===String(id))||(billing.lines||[]).some((line)=>String(line.quotationId||line.quoteId||'')===String(id)));
+    const billingIds=new Set(billings.map((row)=>String(row.id))),receivables=state.receivables.filter((row)=>billingIds.has(String(row.billingId||row.sourceId||''))||String(row.quotationId||row.quoteId||'')===String(id));
+    return {used:daily.length>0||billings.length>0||receivables.length>0,dailyCount:daily.length,billingCount:billings.length,receivableCount:receivables.length};
+  }
+  async function deleteQuotation(id) {
+    await load();const row=state.quotations.find((item)=>item.id===id);if(!row)throw new Error('找不到報價單');const usage=quotationUsage(id);
+    if(usage.used)throw new Error('此報價已被施工或請款資料使用，為保留歷史紀錄無法刪除。請使用「建立修訂版」。');
+    if(row.status==='已確認')throw new Error('已確認報價請先取消確認，再回到草稿刪除');
+    if(!['草稿','已送出'].includes(row.status))throw new Error('此狀態的報價不可刪除');
+    state.quotations=state.quotations.filter((item)=>item.id!==id);await persist(`刪除報價單 ${row.number}`);return true;
+  }
+  async function cancelQuotationConfirmation(id) {
+    await load();const row=state.quotations.find((item)=>item.id===id);if(!row)throw new Error('找不到報價單');if(row.status!=='已確認')throw new Error('只有已確認報價可以取消確認');
+    if(quotationUsage(id).used)throw new Error('此報價已被施工或請款資料使用，無法取消確認。請使用「建立修訂版」。');
+    row.status='草稿';row.updatedAt=new Date().toISOString();await persist(`取消確認報價單 ${row.number}`);return row;
+  }
+  async function createQuotationRevision(id) {
+    await load();const source=state.quotations.find((item)=>item.id===id);if(!source)throw new Error('找不到報價單');if(source.status!=='已確認')throw new Error('只有已確認報價可以建立修訂版');if(!quotationUsage(id).used)throw new Error('此報價尚未被使用，可先取消確認後編輯');
+    const rootId=source.revisionOf||source.id,siblings=state.quotations.filter((row)=>String(row.revisionOf||'')===String(rootId)),revisionNumber=Math.max(0,...siblings.map((row)=>num(row.revisionNumber)))+1,now=new Date().toISOString(),row={...source,id:uid(),number:`${String(source.number||'報價單').replace(/\s+Rev\.\d+$/i,'')} Rev.${revisionNumber}`,status:'草稿',revisionOf:rootId,revisionNumber,lines:(source.lines||[]).map((line)=>({...line,id:uid()})),createdAt:now,updatedAt:now};
+    state.quotations.unshift(row);await persist(`建立報價修訂版 ${row.number}`);return row;
   }
   async function saveQuotationTemplate(values,id='') {
     await load(); const customer=state.customers.find((row)=>row.id===values.customerId);if(!customer)throw new Error('請選擇客戶／建設公司');if(!clean(values.name))throw new Error('請輸入模板名稱');
@@ -706,5 +737,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, nextPayableNumber, savePayable, addPayablePayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, nextPayableNumber, savePayable, addPayablePayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
