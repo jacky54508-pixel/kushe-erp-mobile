@@ -1,0 +1,693 @@
+(function () {
+  'use strict';
+  const DB_NAME = 'KuSheERP25_Core34_DB';
+  const DB_STORE = 'erp';
+  const STATE_KEY = 'main';
+  const EMERGENCY_KEY = 'KuSheERP25_EMERGENCY';
+  let state = null;
+  let db = null;
+
+  const num = (value) => Number(value) || 0;
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const monthOf = (value) => String(value || '').slice(0, 7);
+  function retentionState(amount, received, current) {
+    const total=num(amount),paid=num(received);
+    if(total<=0)return 'no_retention';
+    if(paid>=total)return 'collected';
+    if(paid>0)return 'partial';
+    return current==='claimable'?'claimable':'holding';
+  }
+  const score = (value) => ['commissions','employees','customers','projects','billings','payroll','attendance','dailyLogs'].reduce((sum, key) => sum + (Array.isArray(value?.[key]) ? value[key].length : 0), 0);
+  function openDB() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, 1);
+      request.onupgradeneeded = () => { if (!request.result.objectStoreNames.contains(DB_STORE)) request.result.createObjectStore(DB_STORE); };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+  function dbGet(key) {
+    return new Promise((resolve, reject) => {
+      const request = db.transaction(DB_STORE, 'readonly').objectStore(DB_STORE).get(key);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+  function dbSet(key, value) {
+    return new Promise((resolve, reject) => {
+      const request = db.transaction(DB_STORE, 'readwrite').objectStore(DB_STORE).put(value, key);
+      request.onsuccess = () => resolve(true);
+      request.onerror = () => reject(request.error);
+    });
+  }
+  async function load() {
+    if (state) return state;
+    try {
+      db = await openDB();
+      state = await dbGet(STATE_KEY);
+    } catch (_) { db = null; }
+    if (!score(state)) {
+      try { const emergency = JSON.parse(localStorage.getItem(EMERGENCY_KEY) || 'null'); if (score(emergency)) state = emergency; } catch (_) {}
+    }
+    if (!score(state)) state = window.KuSheLegacyData?.getState() || window.KUSHE_PHASE1_BACKUP || {};
+    ['commissions','employees','customers','projects','vendors','materials','materialUsages','projectCosts','billings','receivables','payables','invoices','receipts','payments','banks','bankTransactions','payroll','attendance','dailyLogs','dailyItemPresets','quotations','quotationPrices','quotationTemplates','audit'].forEach((key) => { if (!Array.isArray(state[key])) state[key] = []; });
+    if (!state.settings) state.settings = {};
+    if (!state.meta) state.meta = {};
+    state.quotations.forEach((quote) => {
+      if (!quote.number) quote.number = `Q-${String(quote.date || '').replaceAll('-','') || 'LEGACY'}`;
+      if (!['草稿','已送出','已確認','作廢'].includes(quote.status)) quote.status = '草稿';
+      if (!quote.publicNote) quote.publicNote = quote.note || '';
+      if (!quote.internalNote) quote.internalNote = '';
+      if (!Array.isArray(quote.lines)) quote.lines = [];
+      quote.lines.forEach((line) => {
+        if (!line.id) line.id = uid();
+        if (line.subtotal === undefined) line.subtotal = num(line.qty) * num(line.price);
+        if (!line.priceSource) line.priceSource = 'legacy';
+      });
+    });
+    if (!state.meta.quotationPriceMigrated && state.projectItemPrices && typeof state.projectItemPrices === 'object') {
+      Object.entries(state.projectItemPrices).forEach(([key, price], index) => {
+        const split = key.indexOf('::'), projectKey = split >= 0 ? key.slice(0, split) : '', item = split >= 0 ? key.slice(split + 2) : key;
+        const project = state.projects.find((row) => String(row.id) === projectKey || sameName(row.name, projectKey));
+        if (!project || !item || num(price) < 0) return;
+        const exists = state.quotationPrices.some((row) => row.scope === 'project' && row.projectId === project.id && sameName(row.item,item));
+        if (!exists) state.quotationPrices.push({id:`legacy-price-${index}-${project.id}`,scope:'project',customerId:project.customer||'',projectId:project.id,item,unit:'',price:num(price),effectiveDate:'2000-01-01',createdSource:'legacy-project-price',createdAt:project.createdAt||new Date().toISOString()});
+      });
+      state.meta.quotationPriceMigrated = true;
+    }
+    state.dailyLogs.forEach((log) => {
+      const billable = log.billable !== false && !log.noInvoice && (num(log.groupTotal) > 0 || num(log.performance) > 0 || (log.items || []).some((item) => num(item.qty) * num(item.price) > 0));
+      if (log.billable === undefined) log.billable = billable;
+      if (billable && !log.billingStatus) log.billingStatus = log.billingId ? '已請款' : '未請款';
+      if (!log.billingId) log.billingId = '';
+      (log.items || []).forEach((item) => {
+        if (!item.workItemId) item.workItemId = uid();
+        if (item.billable === undefined) item.billable = billable;
+        if (item.billable && !item.billingStatus) item.billingStatus = log.billingId ? '已請款' : '未請款';
+        if (!item.billingId) item.billingId = log.billingId || '';
+        if (!item.taxMode) item.taxMode = '未稅';
+        if (item.inputPrice === undefined) item.inputPrice = num(item.price);
+        if (item.untaxedSubtotal === undefined) item.untaxedSubtotal = num(item.qty) * num(item.price);
+        if (item.subtotal === undefined) item.subtotal = item.taxMode === '含稅' ? grossFromUntaxed(item.untaxedSubtotal) : item.untaxedSubtotal;
+      });
+    });
+    state.billings.forEach((billing) => {
+      if (billing.grossTotal === undefined) billing.grossTotal = num(billing.amount) + num(billing.tax);
+      if (billing.retentionRate === undefined) billing.retentionRate = 0;
+      if (billing.retentionReceived === undefined) billing.retentionReceived = 0;
+      billing.retentionStatus = retentionState(billing.retention,billing.retentionReceived,billing.retentionStatus);
+      if (!['no_invoice','invoice_pending','invoiced'].includes(billing.invoiceStatus)) billing.invoiceStatus = billing.invoiceNo ? 'invoiced' : (billing.sourceType === 'daily-work' && billing.hasInvoice === false ? 'no_invoice' : 'invoice_pending');
+      billing.hasInvoice = billing.invoiceStatus !== 'no_invoice';
+      if (!Array.isArray(billing.sourceItemRefs)) billing.sourceItemRefs = [];
+      if (!Array.isArray(billing.sourceContractRefs)) billing.sourceContractRefs = [];
+      const receivable = state.receivables.find((row) => row.billingId === billing.id || String(row.sourceNo||'') === String(billing.number||''));
+      if (receivable && !receivable.billingId) receivable.billingId = billing.id;
+      if (receivable && !billing.receivableId) billing.receivableId = receivable.id;
+      if (receivable) {
+        if (receivable.retentionReceived === undefined) receivable.retentionReceived = num(billing.retentionReceived);
+        receivable.retentionStatus = retentionState(receivable.retention ?? billing.retention,receivable.retentionReceived,receivable.retentionStatus || billing.retentionStatus);
+      }
+      if (billing.invoiceStatus === 'no_invoice' && Array.isArray(billing.lines) && billing.lines.length) {
+        const totals = calculateBilling({lines:billing.lines,taxMode:billing.taxMode,invoiceStatus:'no_invoice',retentionMode:billing.retentionMode,retentionRate:billing.retentionRate,retentionCustom:billing.retentionMode==='custom'?billing.retention:undefined});
+        if (!receivable || num(receivable.received) <= totals.receivable) {
+          Object.assign(billing,{amount:totals.untaxed,tax:0,grossTotal:totals.grossTotal,retention:totals.retention,total:totals.receivable});
+          if (receivable) Object.assign(receivable,{taxMode:billing.taxMode,untaxedAmount:totals.untaxed,tax:0,grossTotal:totals.grossTotal,retention:totals.retention,amount:totals.receivable,status:num(receivable.received)>=totals.receivable&&totals.receivable>0?'已收':num(receivable.received)>0?'部分收款':'未收'});
+        }
+      }
+    });
+    state.receipts.forEach((receipt) => {
+      if (receipt.fee === undefined) receipt.fee = 0;
+      if (receipt.netAmount === undefined) receipt.netAmount = Math.max(0, num(receipt.amount) - num(receipt.fee));
+      if (!receipt.paymentMethod) receipt.paymentMethod = '銀行轉帳';
+    });
+    state.payables.forEach((payable, index) => {
+      if (!payable.payableNo) payable.payableNo = payable.number || `AP-${String(payable.date || '').replaceAll('-','') || 'LEGACY'}-${String(index + 1).padStart(3,'0')}`;
+      if (!payable.category) payable.category = /material|inventory/i.test(payable.sourceType || '') ? '材料採購' : '廠商款項';
+      if (!payable.item) payable.item = payable.description || payable.sourceNo || payable.note || '';
+      if (!payable.dueDate) payable.dueDate = '';
+      if (!payable.sourceId) payable.sourceId = Array.isArray(payable.usageIds) && payable.usageIds.length ? payable.usageIds.join(',') : payable.id;
+      payable.paid = Math.min(Math.max(0,num(payable.paid)),Math.max(0,num(payable.amount)));
+      payable.status = payable.paid >= num(payable.amount) && num(payable.amount) > 0 ? '已付清' : payable.paid > 0 ? '部分付款' : '未付款';
+      const hasHistory = state.payments.some((payment) => payment.payableId === payable.id);
+      if (payable.paid > 0 && !hasHistory) {
+        const tx = state.bankTransactions.find((row) => row.id === payable.paymentTransactionId || (row.sourceType === 'payable' && row.sourceId === payable.id));
+        state.payments.push({id:`legacy-${payable.id}`,idempotencyKey:`legacy-${payable.id}`,payableId:payable.id,date:payable.payDate||tx?.date||payable.date||'',amount:payable.paid,fee:num(payable.fee),actualDebit:num(tx?.amount)||payable.paid,bankId:payable.bankId||tx?.bankId||'',paymentMethod:payable.paymentMethod||'銀行轉帳',feePayer:payable.feeParty==='公司負擔'?'company':'recipient',note:payable.note||'',bankTransactionId:tx?.id||payable.paymentTransactionId||'',legacy:true,createdAt:payable.updatedAt||payable.createdAt||new Date().toISOString()});
+      }
+    });
+    state.payables.filter((payable) => Array.isArray(payable.usageIds)).forEach((payable) => {
+      payable.usageIds.forEach((usageId) => {
+        const usage = state.materialUsages.find((row) => String(row.id) === String(usageId));
+        if (usage && !usage.payableId) usage.payableId = payable.id;
+      });
+    });
+    state.billings.filter((billing)=>['daily-work','mixed-pricing'].includes(billing.sourceType)).forEach((billing)=>{
+      (billing.sourceItemRefs||[]).filter((ref)=>ref.sourceGroupKey).forEach((ref)=>availableSourceCopies(ref).forEach(({log,item})=>{item.billingStatus='已請款';item.billingId=billing.id;item.billingNo=billing.number||'';syncLogBillingState(log)}));
+    });
+    return state;
+  }
+  function payrollNet(p) {
+    return num(p.baseSalary)+num(p.commission)+num(p.fuel)+num(p.meal)+num(p.other)+num(p.overtime)+num(p.bonus)+num(p.allowance)-num(p.advance)-num(p.laborInsurance)-num(p.incomeTax)-num(p.deduction);
+  }
+  function rebuildPayrollFor(month, employee) {
+    if (!month || !employee) return;
+    const atts = state.attendance.filter((x) => monthOf(x.date) === month && x.employee === employee);
+    const comms = state.commissions.filter((x) => monthOf(x.date) === month && x.employee === employee && x.status === '已列入薪資');
+    let payroll = state.payroll.find((x) => x.month === month && x.employee === employee && x.status !== '已付款');
+    if (!payroll) {
+      payroll = {id:uid(),month,employee,days:0,baseSalary:0,commission:0,fuel:0,meal:0,other:0,overtime:0,bonus:0,allowance:0,advance:0,laborInsurance:0,incomeTax:0,deduction:0,total:0,payDate:'',bankId:'',paymentTransactionId:'',paidAt:'',status:'未付款',note:'由請款單、抽成與點工自動彙整',createdAt:new Date().toISOString()};
+      state.payroll.unshift(payroll);
+    }
+    payroll.days = atts.reduce((sum, x) => sum + num(x.days), 0);
+    payroll.hours = atts.reduce((sum, x) => sum + num(x.hours), 0);
+    payroll.baseSalary = atts.reduce((sum, x) => sum + num(x.amount), 0);
+    payroll.fuel = atts.reduce((sum, x) => sum + num(x.fuel), 0);
+    payroll.commission = comms.reduce((sum, x) => sum + num(x.commission), 0);
+    payroll.total = payrollNet(payroll);
+    payroll.updatedAt = new Date().toISOString();
+    const otherValues = ['fuel','meal','other','overtime','bonus','allowance','advance','laborInsurance','incomeTax','deduction'].some((key) => num(payroll[key]));
+    if (!atts.length && !comms.length && !otherValues && payroll.status !== '已付款') state.payroll = state.payroll.filter((x) => x.id !== payroll.id);
+  }
+  async function persist(action) {
+    state.meta.updatedAt = new Date().toISOString();
+    if (action) {
+      state.audit.unshift({ id: uid(), time: new Date().toISOString(), action });
+      state.audit = state.audit.slice(0, 300);
+    }
+    if (!db) { try { db = await openDB(); } catch (_) { db = null; } }
+    if (db) await dbSet(STATE_KEY, state);
+    localStorage.setItem(EMERGENCY_KEY, JSON.stringify(state));
+    window.KuSheLegacyData?.refresh();
+    window.dispatchEvent(new CustomEvent('kushe:data-updated', { detail: { action } }));
+  }
+  function taxValues(gross) {
+    const rate = num(state.settings.defaultTax) || 5;
+    const total = Math.max(0, num(gross));
+    const untaxed = Math.round(total / (1 + rate / 100));
+    return { total, untaxed, tax: total - untaxed, rate };
+  }
+  function grossFromUntaxed(untaxed) {
+    const value = Math.max(0, num(untaxed));
+    return value + Math.round(value * (num(state.settings.defaultTax) || 5) / 100);
+  }
+  function dailyWorkAmount(log) {
+    if (!log || log.isPrimaryWork === false || log.workMode === 'none') return 0;
+    return Math.round(num(log.workQty) * num(log.workRate));
+  }
+  function syncDailyLogLinks(log, oldLog = null) {
+    const pairs = [];
+    if (oldLog?.employee) pairs.push([monthOf(oldLog.date), oldLog.employee]);
+    if (log?.employee) pairs.push([monthOf(log.date), log.employee]);
+    state.commissions = state.commissions.filter((row) => !(row.sourceType === 'daily-log' && row.sourceId === log.id));
+    state.attendance = state.attendance.filter((row) => !(row.sourceType === 'daily-log' && row.sourceId === log.id));
+    const now = new Date().toISOString();
+    if (num(log.performance) > 0) {
+      state.commissions.unshift({id:uid(),date:log.date,employee:log.employee,employeeName:log.employeeName||'',customer:log.customer||'',project:log.project,projectName:log.projectName||'',sourceNo:log.billingNo||'每日業績',sourceType:'daily-log',sourceId:log.id,untaxedAmount:num(log.performance),rate:num(log.rate),commission:Math.round(num(log.performance)*num(log.rate)/100),status:'已列入薪資',note:`每日業績：${log.note||''}`,createdAt:now,updatedAt:now});
+    }
+    const workAmount = dailyWorkAmount(log);
+    if (workAmount > 0) {
+      state.attendance.unshift({id:uid(),date:log.date,employee:log.employee,employeeName:log.employeeName||'',customer:log.customer||'',project:log.project,projectName:log.projectName||'',sourceNo:log.billingNo||'每日點工',sourceType:'daily-log',sourceId:log.id,workMode:log.workMode,days:log.workMode==='daily'?num(log.workQty):0,hours:log.workMode==='hourly'?num(log.workQty):0,dailyRate:num(log.workRate),hourlyRate:log.workMode==='hourly'?num(log.workRate):0,amount:workAmount,fuel:0,status:'已列入薪資',note:`每日點工：${log.note||''}`,createdAt:now,updatedAt:now});
+    }
+    const seen = new Set();
+    pairs.forEach(([month, employee]) => { const key = `${month}__${employee}`; if (month && employee && !seen.has(key)) { seen.add(key); rebuildPayrollFor(month, employee); } });
+  }
+  function batchRows(batchId) {
+    return state.dailyLogs.filter((log) => (log.batchId || log.id) === batchId);
+  }
+  const pricingModes = ['actual','lump_sum','mixed'];
+  function pricingMode(value) { return pricingModes.includes(value) ? value : ''; }
+  function pricingTypeFor(quote, line) {
+    const mode=pricingMode(quote?.pricingMode);
+    if(mode==='mixed')return line?.pricingType==='lump_sum'?'lump_sum':'actual';
+    return mode;
+  }
+  function confirmedQuoteForProject(projectId) {
+    return [...state.quotations].filter((row)=>row.status==='已確認'&&String(row.project)===String(projectId)&&pricingMode(row.pricingMode)).sort((a,b)=>String(b.date||b.updatedAt||'').localeCompare(String(a.date||a.updatedAt||'')))[0]||null;
+  }
+  function projectPricingMode(projectId) {
+    const quote=confirmedQuoteForProject(projectId),project=state.projects.find((row)=>String(row.id)===String(projectId));
+    return pricingMode(quote?.pricingMode)||pricingMode(project?.defaultPricingMode);
+  }
+  function contractSources(quote) {
+    const mode=pricingMode(quote?.pricingMode);if(!quote||!['lump_sum','mixed'].includes(mode))return [];
+    if(mode==='lump_sum')return [{contractKey:`${quote.id}:contract`,quotationId:quote.id,quotationNo:quote.number||'',quotationLineId:'',item:'總價承攬',unit:'式',contractAmount:Math.max(0,num(quote.lumpSumTotal??quote.amount)),pricingType:'lump_sum'}];
+    return (quote.lines||[]).filter((line)=>pricingTypeFor(quote,line)==='lump_sum').map((line)=>({contractKey:`${quote.id}:${line.id}`,quotationId:quote.id,quotationNo:quote.number||'',quotationLineId:line.id,item:line.item||'總價工程',unit:line.unit||'式',contractAmount:Math.max(0,num(line.lumpSumAmount??line.subtotal)),pricingType:'lump_sum'}));
+  }
+  function billedContractAmount(contractKey) {
+    return state.billings.reduce((sum,billing)=>sum+(billing.sourceContractRefs||[]).filter((ref)=>ref.contractKey===contractKey).reduce((part,ref)=>part+num(ref.billingAmount),0),0);
+  }
+  function contractSourceByKey(contractKey) {
+    for(const quote of state.quotations){const found=contractSources(quote).find((source)=>source.contractKey===contractKey);if(found)return {...found,quote};}return null;
+  }
+  function unbilledWork(filters = {}) {
+    const groups = new Map();
+    state.dailyLogs.forEach((log) => {
+      if (filters.month && monthOf(log.date) !== filters.month) return;
+      if (filters.customer && String(log.customer || '') !== String(filters.customer)) return;
+      if (filters.project && String(log.project || '') !== String(filters.project)) return;
+      const groupKey = log.groupId || log.id;
+      if (!groups.has(groupKey)) groups.set(groupKey, { logs: [], items: new Map() });
+      const group = groups.get(groupKey); group.logs.push(log);
+      (log.items || []).forEach((item, index) => {
+        const status = item.billingStatus || log.billingStatus || (log.billingId ? '已請款' : '未請款');
+        const billable = item.billable !== false && log.billable !== false && !log.noInvoice;
+        if (!billable || item.pricingType==='lump_sum' || status !== '未請款' || item.billingId) return;
+        const itemKey = `${groupKey}:${index}`;
+        if (!group.items.has(itemKey)) group.items.set(itemKey, { item, index, groupKey });
+      });
+    });
+    const projects = new Map();
+    groups.forEach((group) => {
+      if (!group.items.size) return;
+      const first = group.logs[0] || {};
+      const project = state.projects.find((row) => String(row.id) === String(first.project)) || {};
+      const customerId = first.customer || project.customer || '';
+      const customer = state.customers.find((row) => String(row.id) === String(customerId)) || {};
+      const key = `${customerId}__${first.project || first.projectName || ''}`;
+      if (!projects.has(key)) projects.set(key, {key,customerId,customerName:customer.name||first.customerName||project.customerName||'未指定客戶',projectId:first.project||'',projectName:project.name||first.projectName||'未指定案場',pricingMode:projectPricingMode(first.project),amount:0,actualAmount:0,contractAmount:0,count:0,dates:[],details:[],contractDetails:[]});
+      const target = projects.get(key);
+      const employees = [...new Set(group.logs.map((log) => state.employees.find((row) => row.id === log.employee)?.name || log.employeeName).filter(Boolean))].join('、') || '—';
+      group.items.forEach(({item,index,groupKey}) => {
+        const amount = num(item.untaxedSubtotal) || num(item.qty) * num(item.price);
+        target.amount += amount; target.actualAmount += amount; target.count += 1; target.dates.push(first.date || '');
+        target.details.push({sourceType:'daily-work',pricingType:'actual',quotationId:item.quotationId||'',quotationLineId:item.quotationLineId||'',date:first.date||'',employees,item:item.item||'',unit:item.unit||'式',price:num(item.price),inputPrice:num(item.inputPrice??item.price),qty:num(item.qty),subtotal:amount,grossSubtotal:num(item.subtotal)||amount,taxMode:item.taxMode||'未稅',note:first.note||'',workItemId:item.workItemId||'',sourceGroupKey:groupKey,sourceItemIndex:index,dailyLogIds:group.logs.map((log)=>log.id)});
+      });
+    });
+    state.quotations.filter((quote)=>quote.status==='已確認'&&['lump_sum','mixed'].includes(pricingMode(quote.pricingMode))).forEach((quote)=>{
+      if(filters.customer&&String(quote.customer)!==String(filters.customer))return;if(filters.project&&String(quote.project)!==String(filters.project))return;
+      const project=state.projects.find((row)=>String(row.id)===String(quote.project))||{},customer=state.customers.find((row)=>String(row.id)===String(quote.customer||project.customer))||{},key=`${quote.customer||project.customer||''}__${quote.project||project.name||''}`;
+      const sources=contractSources(quote).map((source)=>{const billedAmount=billedContractAmount(source.contractKey),remainingAmount=Math.max(0,source.contractAmount-billedAmount);return {...source,billedAmount,remainingAmount,date:quote.date||''};}).filter((source)=>source.remainingAmount>0);
+      if(!sources.length)return;
+      if(!projects.has(key))projects.set(key,{key,customerId:quote.customer||project.customer||'',customerName:quote.customerName||customer.name||project.customerName||'未指定客戶',projectId:quote.project||'',projectName:quote.projectName||project.name||'未指定案場',pricingMode:pricingMode(quote.pricingMode),amount:0,actualAmount:0,contractAmount:0,count:0,dates:[],details:[],contractDetails:[]});
+      const target=projects.get(key);sources.forEach((source)=>{target.contractDetails.push(source);target.contractAmount+=source.remainingAmount;target.amount+=source.remainingAmount;target.count+=1;target.dates.push(source.date)});
+    });
+    return [...projects.values()].map((row) => ({...row,earliest:row.dates.filter(Boolean).sort()[0]||'—',latest:row.dates.filter(Boolean).sort().at(-1)||'—'})).sort((a,b) => String(a.earliest).localeCompare(String(b.earliest)));
+  }
+  async function saveDailyBatch(values, editingBatchId = '') {
+    await load();
+    const previous = editingBatchId ? batchRows(editingBatchId) : [];
+    if (previous.some((log) => log.billingId || (log.billingStatus && log.billingStatus !== '未請款'))) throw new Error('已進入請款流程的施工紀錄不可直接修改');
+    previous.forEach((log) => syncDailyLogLinks({...log,performance:0,workMode:'none'}, log));
+    if (previous.length) state.dailyLogs = state.dailyLogs.filter((log) => (log.batchId || log.id) !== editingBatchId);
+    const date = values.date;
+    const employeeIds = values.employeeIds || [];
+    const lines = (values.lines || []).filter((line) => line.project && line.item && num(line.qty) > 0);
+    if (!employeeIds.length || !lines.length) throw new Error('請至少選擇一位員工並填寫一筆施工項目');
+    const prepared = lines.map((line) => {
+      const quoteItem=confirmedQuotationItems(line.project).find((item)=>sameName(item.item,line.item)),mode=projectPricingMode(line.project),type=quoteItem?.pricingType||(mode==='lump_sum'?'lump_sum':mode==='mixed'?'lump_sum':'actual');
+      const qty = num(line.qty), inputPrice = type==='actual'&&quoteItem?num(quoteItem.price):num(line.inputPrice), gross = qty * inputPrice;
+      const untaxedSubtotal = line.taxMode === '含稅' ? Math.round(gross / (1 + (num(state.settings.defaultTax)||5) / 100)) : gross;
+      const billable=type==='actual'&&line.billable!==false;
+      return {...line,unit:quoteItem?.unit||line.unit,qty,inputPrice,price:qty?untaxedSubtotal/qty:0,subtotal:gross,untaxedSubtotal,pricingType:type,quotationId:quoteItem?.quotationId||'',quotationLineId:quoteItem?.quotationLineId||'',workItemId:line.workItemId||uid(),billable,billingStatus:billable?'未請款':'',billingId:''};
+    });
+    const byProject = new Map();
+    prepared.forEach((line) => { if (!byProject.has(line.project)) byProject.set(line.project, []); byProject.get(line.project).push(line); });
+    const batchId = editingBatchId || uid(), now = new Date().toISOString();
+    employeeIds.forEach((employeeId) => {
+      const employee = state.employees.find((row) => row.id === employeeId) || {};
+      const hasDaily = state.dailyLogs.some((row) => row.employee === employeeId && row.date === date && row.workMode === 'daily' && row.isPrimaryWork !== false);
+      let firstProject = true;
+      byProject.forEach((projectLines, projectId) => {
+        const project = state.projects.find((row) => row.id === projectId) || {};
+        const customer = state.customers.find((row) => row.id === project.customer) || {};
+        const total = projectLines.reduce((sum, line) => sum + num(line.untaxedSubtotal), 0);
+        const billableTotal = projectLines.filter((line) => line.billable).reduce((sum, line) => sum + num(line.untaxedSubtotal), 0);
+        const canAddWork = firstProject && !(values.workMode === 'daily' && hasDaily);
+        const performance = values.commissionEnabled === false ? 0 : total;
+        const workMode = canAddWork ? values.workMode : 'none';
+        const log = {id:uid(),batchId,groupId:`${batchId}:${projectId}`,date,employee:employeeId,employeeName:employee.name||'',customer:project.customer||'',customerName:customer.name||project.customerName||'',project:projectId,projectName:project.name||'',payType:performance>0&&workMode!=='none'?'業績抽成／點工':performance>0?'業績抽成':'點工',items:projectLines.map((line)=>({...line})),groupTotal:total,grossTotal:projectLines.reduce((sum,line)=>sum+num(line.subtotal),0),billingTotal:billableTotal,billable:billableTotal>0,billingStatus:billableTotal>0?'未請款':'',billingId:'',billingNo:'',performance,rate:num(employee.commissionRate),commission:Math.round(performance*num(employee.commissionRate)/100),workMode,workQty:canAddWork?num(values.workQty):0,workRate:canAddWork?num(values.workRate):0,isPrimaryWork:canAddWork,note:values.note||'',createdAt:previous[0]?.createdAt||now,updatedAt:now};
+        state.dailyLogs.unshift(log); syncDailyLogLinks(log); firstProject = false;
+      });
+    });
+    state.dailyItemPresets = state.dailyItemPresets || [];
+    prepared.forEach((line) => { const existing = state.dailyItemPresets.find((row) => String(row.item||'').trim() === String(line.item||'').trim()); const preset={item:line.item,unit:line.unit||'式',qty:line.qty,price:line.price}; if(existing)Object.assign(existing,preset);else state.dailyItemPresets.push(preset); });
+    await persist(`${previous.length?'修改':'新增'}多案場每日施工紀錄`);
+    return batchId;
+  }
+  async function deleteDailyBatch(batchId) {
+    await load(); const rows = batchRows(batchId); if (!rows.length) return false;
+    if (rows.some((log) => log.billingId || (log.billingStatus && log.billingStatus !== '未請款'))) throw new Error('已進入請款流程的施工紀錄不可刪除');
+    rows.forEach((log) => syncDailyLogLinks({...log,performance:0,workMode:'none'}, log));
+    state.dailyLogs = state.dailyLogs.filter((log) => (log.batchId || log.id) !== batchId);
+    await persist('刪除多案場每日施工紀錄'); return true;
+  }
+  async function saveCommission(values, id) {
+    await load();
+    const existing = id ? state.commissions.find((x) => x.id === id) : null;
+    const before = existing ? { date: existing.date, employee: existing.employee } : null;
+    const row = existing || { id: uid(), createdAt: new Date().toISOString() };
+    Object.assign(row, {
+      date: values.date,
+      employee: values.employee,
+      project: values.project,
+      sourceNo: values.sourceNo || '',
+      untaxedAmount: num(values.untaxedAmount),
+      rate: num(values.rate),
+      commission: Math.round(num(values.untaxedAmount) * num(values.rate) / 100),
+      status: values.status === '已列入薪資' ? '已列入薪資' : '未列入薪資',
+      note: values.note || '',
+      updatedAt: new Date().toISOString()
+    });
+    if (!existing) state.commissions.unshift(row);
+    if (before?.employee) rebuildPayrollFor(monthOf(before.date), before.employee);
+    rebuildPayrollFor(monthOf(row.date), row.employee);
+    await persist(`${existing ? '修改' : '新增'}員工業績抽成`);
+    return row;
+  }
+  async function deleteCommission(id) {
+    await load();
+    const row = state.commissions.find((x) => x.id === id);
+    if (!row) return false;
+    state.commissions = state.commissions.filter((x) => x.id !== id);
+    rebuildPayrollFor(monthOf(row.date), row.employee);
+    await persist('刪除員工業績抽成');
+    return true;
+  }
+  function nextBillingNumber(date) {
+    const compact = String(date || new Date().toISOString().slice(0,10)).replaceAll('-','');
+    const prefix = `B${compact}-`;
+    const max = state.billings.reduce((value, row) => {
+      const number = String(row.number || '');
+      return number.startsWith(prefix) ? Math.max(value, num(number.slice(prefix.length))) : value;
+    }, 0);
+    return `${prefix}${String(max + 1).padStart(3,'0')}`;
+  }
+  function calculateBilling(values = {}) {
+    const rate = num(state.settings.defaultTax) || 5;
+    const constructionAmount = Math.round((values.lines || []).reduce((sum, line) => sum + num(line.qty) * num(line.price), 0));
+    const taxMode = values.taxMode === '含稅' ? '含稅' : '未稅';
+    const noInvoice = values.invoiceStatus === 'no_invoice';
+    const untaxed = noInvoice ? constructionAmount : taxMode === '含稅' ? Math.round(constructionAmount / (1 + rate / 100)) : constructionAmount;
+    const tax = noInvoice ? 0 : taxMode === '含稅' ? constructionAmount - untaxed : Math.round(untaxed * rate / 100);
+    const grossTotal = noInvoice ? constructionAmount : taxMode === '含稅' ? constructionAmount : untaxed + tax;
+    const retentionMode = values.retentionMode || 'none';
+    const retentionRate = retentionMode === '5' ? 5 : retentionMode === '10' ? 10 : retentionMode === 'custom' ? num(values.retentionRate) : 0;
+    const retention = retentionMode === 'custom' && num(values.retentionCustom) > 0
+      ? Math.max(0, Math.round(num(values.retentionCustom)))
+      : Math.max(0, Math.round(grossTotal * retentionRate / 100));
+    return { constructionAmount, untaxed, tax, grossTotal, retention: Math.min(retention, grossTotal), retentionRate, receivable: Math.max(0, grossTotal - retention), rate, taxMode };
+  }
+  function sourceMatches(ref, log, item, index) {
+    const groupKey = log.groupId || log.id;
+    if (ref.sourceGroupKey && ref.sourceGroupKey !== groupKey) return false;
+    if (ref.sourceItemIndex !== undefined && ref.sourceItemIndex !== null) return num(ref.sourceItemIndex) === index;
+    return Boolean(ref.workItemId) && ref.workItemId === item.workItemId;
+  }
+  function availableSourceCopies(ref) {
+    const rows = [];
+    state.dailyLogs.forEach((log) => (log.items || []).forEach((item,index) => {
+      if (sourceMatches(ref,log,item,index)) rows.push({log,item,index});
+    }));
+    return rows;
+  }
+  function syncLogBillingState(log) {
+    const billable = (log.items || []).filter((item) => item.billable !== false);
+    const billed = billable.filter((item) => item.billingStatus === '已請款' && item.billingId);
+    const ids = [...new Set(billed.map((item) => item.billingId).filter(Boolean))];
+    log.billingIds = ids;
+    log.billingId = ids[0] || '';
+    log.billingNo = ids.length ? (state.billings.find((row) => row.id === ids[0])?.number || '') : '';
+    log.billingStatus = billable.length && billed.length === billable.length ? '已請款' : '未請款';
+    log.updatedAt = new Date().toISOString();
+  }
+  async function createBilling(values) {
+    await load();
+    const sourceRefs = (values.sourceItemRefs || []).filter(Boolean);
+    const sourceContractRefs=(values.sourceContractRefs||[]).filter((ref)=>ref&&ref.contractKey&&num(ref.billingAmount)>0);
+    if (!sourceRefs.length&&!sourceContractRefs.length) throw new Error('請至少選擇一筆施工紀錄或總價進度款');
+    const canonical = [];
+    sourceRefs.forEach((ref) => {
+      const copies = availableSourceCopies(ref);
+      if (!copies.length) throw new Error('找不到施工來源，請重新開啟請款草稿');
+      if (copies.some(({item}) => item.billingStatus !== '未請款' || item.billingId)) throw new Error('部分施工紀錄已被請款，請重新整理後再試');
+      canonical.push({ref,copies});
+    });
+    const canonicalContracts=sourceContractRefs.map((ref)=>{const source=contractSourceByKey(ref.contractKey);if(!source)throw new Error('找不到總價報價來源，請重新開啟請款草稿');const billed=billedContractAmount(ref.contractKey),available=Math.max(0,source.contractAmount-billed),amount=Math.round(num(ref.billingAmount));if(amount<=0)throw new Error('總價進度請款金額必須大於 0');if(amount>available)throw new Error(`${source.item} 累計請款不可超過合約總價`);return {...ref,quotationId:source.quotationId,quotationLineId:source.quotationLineId,contractKey:source.contractKey,item:source.item,contractAmount:source.contractAmount,priorBilled:billed,billingAmount:amount,pricingType:'lump_sum'};});
+    const date = values.date || new Date().toISOString().slice(0,10);
+    const number = String(values.number || '').trim() || nextBillingNumber(date);
+    if (state.billings.some((row) => String(row.number||'').trim() === number)) throw new Error('請款單號已存在');
+    const totals = calculateBilling(values), now = new Date().toISOString(), id = uid();
+    const billing = {
+      id, date, number, customer:values.customer||'', customerName:values.customerName||'', project:values.project||'', projectName:values.projectName||'',
+      billingMonth:values.billingMonth||monthOf(date), periodStart:values.periodStart||'', periodEnd:values.periodEnd||'', taxMode:totals.taxMode,
+      lines:(values.lines||[]).map((line)=>({...line,qty:num(line.qty),price:num(line.price),subtotal:Math.round(num(line.qty)*num(line.price)),sourceRefs:(line.sourceRefs||[]).map((ref)=>({...ref}))})),
+      amount:totals.untaxed, tax:totals.tax, grossTotal:totals.grossTotal, retention:totals.retention, retentionRate:totals.retentionRate,
+      retentionMode:values.retentionMode||'none', retentionReceived:0, retentionStatus:retentionState(totals.retention,0), total:totals.receivable,
+      invoiceStatus:values.invoiceStatus==='no_invoice'?'no_invoice':String(values.invoiceNo||'').trim()?'invoiced':'invoice_pending',
+      hasInvoice:values.invoiceStatus!=='no_invoice', invoiceNo:values.invoiceStatus==='no_invoice'?'':String(values.invoiceNo||'').trim(), invoiceDate:values.invoiceStatus==='no_invoice'?'':values.invoiceDate||'', status:'未收款', note:values.note||'',
+      sourceType:sourceRefs.length&&canonicalContracts.length?'mixed-pricing':canonicalContracts.length?'quotation-progress':'daily-work', sourceItemRefs:sourceRefs.map((ref)=>({...ref})),sourceContractRefs:canonicalContracts.map((ref)=>({...ref})), createdAt:now, updatedAt:now
+    };
+    const receivable = {id:uid(),billingId:id,date,customer:billing.customer,customerName:billing.customerName,project:billing.project,projectName:billing.projectName,sourceNo:number,invoiceNo:billing.invoiceNo,taxMode:billing.taxMode,untaxedAmount:billing.amount,tax:billing.tax,grossTotal:billing.grossTotal,retention:billing.retention,retentionReceived:0,retentionStatus:billing.retentionStatus,amount:billing.total,received:0,bankId:'',receiptDate:'',dueDate:values.dueDate||'',status:'未收',note:'由新版請款單自動建立',createdAt:now,updatedAt:now};
+    billing.receivableId = receivable.id;
+    state.billings.unshift(billing); state.receivables.unshift(receivable);
+    if(values.saveProjectRetentionDefault){const project=state.projects.find((row)=>row.id===billing.project);if(project){project.defaultRetentionMode=totals.retention>0?(values.retentionMode||'none'):'none';project.defaultRetentionRate=totals.retention>0?totals.retentionRate:0;project.defaultRetentionAmount=values.retentionMode==='custom'?num(values.retentionCustom):0;project.updatedAt=now}}
+    if (billing.invoiceStatus === 'invoiced' && billing.invoiceNo) {
+      state.invoices.unshift({id:uid(),date:billing.invoiceDate||billing.date,number:billing.invoiceNo,type:'銷項',party:billing.customerName,customer:billing.customer,project:billing.project,amount:billing.amount,tax:billing.tax,total:billing.grossTotal,sourceNo:number,billingId:id,note:'由新版請款單自動串聯',createdAt:now,updatedAt:now});
+    }
+    canonical.forEach(({copies}) => copies.forEach(({log,item}) => { item.billingStatus='已請款'; item.billingId=id; item.billingNo=number; syncLogBillingState(log); }));
+    await persist(`建立新版請款單 ${number}`);
+    return billing;
+  }
+  function billingReceiptState(billing) {
+    const ar = state.receivables.find((row) => row.id === billing.receivableId || row.billingId === billing.id || String(row.sourceNo||'') === String(billing.number||''));
+    const received = num(ar?.received), amount = num(ar?.amount ?? billing.total);
+    return {receivable:ar,received,unreceived:Math.max(0,amount-received),status:amount>0&&received>=amount?'已收':received>0?'部分收款':'未收'};
+  }
+  async function addReceipt(values) {
+    await load();
+    const idempotencyKey = String(values.idempotencyKey || '').trim();
+    if (idempotencyKey) {
+      const existing = state.receipts.find((row) => row.idempotencyKey === idempotencyKey);
+      if (existing) return existing;
+    }
+    const ar = state.receivables.find((row) => row.id === values.receivableId);
+    if (!ar) throw new Error('找不到對應應收帳款');
+    const amount = Math.round(num(values.amount)), fee = Math.max(0,Math.round(num(values.fee))), netAmount = amount - fee, outstanding = Math.max(0,num(ar.amount)-num(ar.received));
+    if (amount <= 0 || amount > outstanding) throw new Error('本次收款金額不可超過未收餘額');
+    if (fee > amount) throw new Error('手續費不可超過本次收款金額');
+    const bank = state.banks.find((row) => row.id === values.bankId);
+    if (!bank) throw new Error('請選擇收款銀行帳戶');
+    const now = new Date().toISOString(), receipt = {id:uid(),idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:ar.billingId||'',date:values.date||now.slice(0,10),amount,fee,netAmount,bankId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:values.note||'',createdAt:now};
+    state.receipts.unshift(receipt); ar.received=num(ar.received)+amount; ar.bankId=bank.id; ar.receiptDate=receipt.date; ar.status=ar.received>=num(ar.amount)?'已收':'部分收款'; ar.updatedAt=now;
+    bank.income=num(bank.income)+netAmount; bank.balance=num(bank.openingBalance)+num(bank.income)-num(bank.expense); bank.updatedAt=now;
+    state.bankTransactions.unshift({id:uid(),date:receipt.date,bankId:bank.id,type:'收入',category:'應收帳款收款',amount:netAmount,receiptAmount:amount,fee,netAmount,paymentMethod:receipt.paymentMethod,sourceType:'receipt',sourceId:receipt.id,customer:ar.customer,customerName:ar.customerName||'',project:ar.project,projectName:ar.projectName||'',sourceNo:ar.sourceNo,note:receipt.note||`${ar.sourceNo} 收款`,createdAt:now,updatedAt:now});
+    const billing = state.billings.find((row) => row.id === ar.billingId || String(row.number||'') === String(ar.sourceNo||''));
+    if (billing) { billing.status=ar.status==='已收'?'已收款':'部分收款'; billing.updatedAt=now; }
+    await persist(`新增分次收款 ${ar.sourceNo}`); return receipt;
+  }
+  function nextPayableNumber(date) {
+    const compact = String(date || new Date().toISOString().slice(0,10)).replaceAll('-','');
+    const prefix = `AP-${compact}-`;
+    const max = state.payables.reduce((value, row) => {
+      const number = String(row.payableNo || row.number || '');
+      return number.startsWith(prefix) ? Math.max(value,num(number.slice(prefix.length))) : value;
+    },0);
+    return `${prefix}${String(max + 1).padStart(3,'0')}`;
+  }
+  async function savePayable(values) {
+    await load();
+    const amount = Math.max(0,Math.round(num(values.amount)));
+    if (!amount) throw new Error('應付金額必須大於 0');
+    let vendor = state.vendors.find((row) => row.id === values.vendorId);
+    const payeeName = String(values.payeeName || vendor?.name || '').trim();
+    if (!vendor && payeeName) {
+      vendor = state.vendors.find((row) => String(row.name||'').trim().toLocaleLowerCase('zh-Hant') === payeeName.toLocaleLowerCase('zh-Hant'));
+      if (!vendor) { vendor={id:uid(),name:payeeName,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}; state.vendors.unshift(vendor); }
+    }
+    if (!vendor && !payeeName) throw new Error('請選擇或輸入廠商／收款人');
+    const project = state.projects.find((row) => row.id === values.projectId), now = new Date().toISOString(), date = values.date || now.slice(0,10), id=uid();
+    const row = {id,payableNo:nextPayableNumber(date),date,vendor:vendor?.id||'',vendorName:vendor?.name||payeeName,project:project?.id||'',projectName:project?.name||'',category:values.category||'其他',item:String(values.item||'').trim(),amount,paid:0,dueDate:values.dueDate||'',status:'未付款',note:values.note||'',sourceType:'manual-payable',sourceId:values.sourceId||id,createdAt:now,updatedAt:now};
+    state.payables.unshift(row); await persist(`新增應付 ${row.payableNo}`); return row;
+  }
+  async function addPayablePayment(values) {
+    await load();
+    const idempotencyKey = String(values.idempotencyKey || '').trim();
+    if (idempotencyKey) { const existing=state.payments.find((row)=>row.idempotencyKey===idempotencyKey); if(existing)return existing; }
+    const payable = state.payables.find((row) => row.id === values.payableId);
+    if (!payable) throw new Error('找不到這筆應付帳款');
+    const amount=Math.round(num(values.amount)),fee=Math.max(0,Math.round(num(values.fee))),outstanding=Math.max(0,num(payable.amount)-num(payable.paid));
+    if (amount<=0 || amount>outstanding) throw new Error('本次付款不可超過未付金額');
+    const bank=state.banks.find((row)=>row.id===values.bankId);if(!bank)throw new Error('請選擇付款銀行帳戶');
+    const feePayer=values.feePayer==='recipient'?'recipient':'company';
+    if(feePayer==='recipient'&&fee>amount)throw new Error('收款人負擔的手續費不可高於本次付款');
+    const actualDebit=feePayer==='company'?amount+fee:amount,now=new Date().toISOString(),paymentId=uid(),transactionId=uid();
+    const payment={id:paymentId,idempotencyKey:idempotencyKey||uid(),payableId:payable.id,date:values.date||now.slice(0,10),amount,fee,actualDebit,bankId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',feePayer,note:values.note||'',bankTransactionId:transactionId,createdAt:now};
+    state.payments.unshift(payment);
+    payable.paid=num(payable.paid)+amount;payable.bankId=bank.id;payable.payDate=payment.date;payable.fee=num(payable.fee)+fee;payable.feeParty=feePayer==='company'?'公司負擔':'收款人負擔';payable.status=payable.paid>=num(payable.amount)?'已付清':'部分付款';payable.updatedAt=now;
+    bank.expense=num(bank.expense)+actualDebit;bank.balance=num(bank.openingBalance)+num(bank.income)-num(bank.expense);bank.updatedAt=now;
+    state.bankTransactions.unshift({id:transactionId,date:payment.date,bankId:bank.id,type:'支出',category:'應付帳款付款',amount:actualDebit,payableAmount:amount,fee,actualDebit,feePayer,paymentMethod:payment.paymentMethod,sourceType:'payable-payment',sourceId:payment.id,payableId:payable.id,vendor:payable.vendor,vendorName:payable.vendorName||'',project:payable.project,projectName:payable.projectName||'',sourceNo:payable.payableNo||payable.sourceNo||'',note:payment.note||`${payable.payableNo||''} 付款`,createdAt:now,updatedAt:now});
+    await persist(`新增應付付款 ${payable.payableNo||payable.sourceNo||''}`); return payment;
+  }
+  async function updateBillingInvoice(id, values = {}) {
+    await load(); const billing=state.billings.find((row)=>row.id===id);if(!billing)throw new Error('找不到請款單');
+    const now=new Date().toISOString(),choice=values.invoiceChoice==='invoice_required'?'invoice_required':'no_invoice',number=choice==='no_invoice'?'':String(values.invoiceNo||'').trim(),date=choice==='no_invoice'?'':values.invoiceDate||billing.date||now.slice(0,10);
+    const nextInvoiceStatus=choice==='no_invoice'?'no_invoice':number?'invoiced':'invoice_pending';
+    const totals=calculateBilling({lines:billing.lines||[],taxMode:billing.taxMode,invoiceStatus:nextInvoiceStatus,retentionMode:billing.retentionMode,retentionRate:billing.retentionRate,retentionCustom:billing.retentionMode==='custom'?billing.retention:undefined});
+    const ar=state.receivables.find((row)=>row.id===billing.receivableId||row.billingId===billing.id||String(row.sourceNo||'')===String(billing.number||''));
+    if(ar&&num(ar.received)>totals.receivable)throw new Error('切換後應收金額低於既有收款，請先確認收款紀錄');
+    Object.assign(billing,{invoiceStatus:nextInvoiceStatus,hasInvoice:nextInvoiceStatus!=='no_invoice',invoiceNo:number,invoiceDate:date,amount:totals.untaxed,tax:totals.tax,grossTotal:totals.grossTotal,retention:totals.retention,retentionStatus:retentionState(totals.retention,billing.retentionReceived,billing.retentionStatus),total:totals.receivable,updatedAt:now});
+    if(ar){Object.assign(ar,{invoiceNo:number,taxMode:billing.taxMode,untaxedAmount:totals.untaxed,tax:totals.tax,grossTotal:totals.grossTotal,retention:totals.retention,retentionStatus:retentionState(totals.retention,ar.retentionReceived,ar.retentionStatus),amount:totals.receivable,status:num(ar.received)>=totals.receivable&&totals.receivable>0?'已收':num(ar.received)>0?'部分收款':'未收',updatedAt:now})}
+    let invoice=state.invoices.find((row)=>row.billingId===billing.id||(row.sourceNo===billing.number&&row.note==='由新版請款單自動串聯'));
+    if(billing.invoiceStatus==='invoiced'&&number){if(!invoice){invoice={id:uid(),type:'銷項',billingId:billing.id,sourceNo:billing.number,note:'由新版請款單自動串聯',createdAt:now};state.invoices.unshift(invoice)}Object.assign(invoice,{date,number,party:billing.customerName,customer:billing.customer,project:billing.project,amount:num(billing.amount),tax:num(billing.tax),total:num(billing.grossTotal)||num(billing.amount)+num(billing.tax),updatedAt:now})}else if(invoice){state.invoices=state.invoices.filter((row)=>row.id!==invoice.id)}
+    await persist(`更新請款單發票 ${billing.number}`);return billing;
+  }
+  const clean = (value) => String(value ?? '').trim();
+  const sameName = (left, right) => clean(left).replace(/\s+/g,' ').toLocaleLowerCase('zh-Hant') === clean(right).replace(/\s+/g,' ').toLocaleLowerCase('zh-Hant');
+  function payableForUsage(usage) {
+    return state.payables.find((row) => row.id === usage?.payableId || (row.usageIds || []).some((id) => String(id) === String(usage?.id)));
+  }
+  function payableLocked(payable) {
+    return Boolean(payable && (num(payable.paid) > 0 || state.payments.some((payment) => payment.payableId === payable.id)));
+  }
+  function syncMaterialPayable(payable) {
+    if (!payable) return;
+    const ids = new Set((payable.usageIds || []).map(String));
+    const usages = state.materialUsages.filter((row) => ids.has(String(row.id)));
+    if (!usages.length) {
+      if (payableLocked(payable)) throw new Error('此材料應付已有付款紀錄，不能移除其全部來源');
+      state.payables = state.payables.filter((row) => row.id !== payable.id);
+      return;
+    }
+    const amount = Math.round(usages.reduce((sum, row) => sum + num(row.amount ?? num(row.quantity) * num(row.unitPrice)), 0));
+    if (amount < num(payable.paid)) throw new Error('材料調整後金額低於已付款金額，為避免帳務不一致已停止修改');
+    const projects = new Set(usages.map((row) => row.project).filter(Boolean));
+    payable.usageIds = usages.map((row) => row.id);
+    payable.amount = amount;
+    payable.date = usages.map((row) => row.date || '').sort().at(-1) || payable.date;
+    payable.status = num(payable.paid) >= amount && amount > 0 ? '已付清' : num(payable.paid) > 0 ? '部分付款' : '未付款';
+    payable.note = `依材料使用紀錄彙總 ${usages.length} 筆，涵蓋 ${projects.size} 個案場`;
+    payable.updatedAt = new Date().toISOString();
+    usages.forEach((usage) => { usage.payableId = payable.id; });
+  }
+  function assignMaterialUsage(usage) {
+    let payable = state.payables.find((row) => row.id === usage.payableId);
+    if (!payable) {
+      payable = state.payables.find((row) => /material/i.test(row.sourceType || '') && row.vendor === usage.vendor && !payableLocked(row));
+    }
+    if (!payable) {
+      const vendor = state.vendors.find((row) => row.id === usage.vendor) || {};
+      payable = {id:uid(),payableNo:nextPayableNumber(usage.date),date:usage.date,vendor:usage.vendor,vendorName:vendor.name||usage.vendorName||'',project:'',projectName:'',category:'材料採購',item:'案場材料使用',amount:0,paid:0,dueDate:'',status:'未付款',note:'',sourceType:'material-project',sourceId:usage.id,usageIds:[],createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
+      state.payables.unshift(payable);
+    }
+    if (!Array.isArray(payable.usageIds)) payable.usageIds = [];
+    if (!payable.usageIds.some((id) => String(id) === String(usage.id))) payable.usageIds.push(usage.id);
+    usage.payableId = payable.id;
+    syncMaterialPayable(payable);
+    return payable;
+  }
+  async function saveCustomer(values, id = '') {
+    await load();
+    const name = clean(values.name); if (!name) throw new Error('請輸入客戶／建設公司名稱');
+    const duplicate = state.customers.find((row) => row.id !== id && sameName(row.name,name));
+    if (duplicate) throw new Error('客戶名稱已存在，請直接編輯既有客戶');
+    const now = new Date().toISOString();
+    const row = state.customers.find((item) => item.id === id) || {id:uid(),createdAt:now};
+    Object.assign(row,{name,taxId:clean(values.taxId),contact:clean(values.contact),phone:clean(values.phone),email:clean(values.email),address:clean(values.address),note:clean(values.note),updatedAt:now});
+    if (!id) state.customers.unshift(row);
+    state.projects.filter((project) => project.customer === row.id).forEach((project) => { project.customerName=row.name; });
+    await persist(`${id?'修改':'新增'}客戶 ${row.name}`); return row;
+  }
+  async function saveProject(values, id = '') {
+    await load();
+    const name=clean(values.name),customer=state.customers.find((row)=>row.id===values.customer);
+    if(!name)throw new Error('請輸入案場名稱'); if(!customer)throw new Error('請選擇所屬客戶');
+    const duplicate=state.projects.find((row)=>row.id!==id&&sameName(row.name,name)&&row.customer===customer.id);
+    if(duplicate)throw new Error('此客戶已有同名案場，請直接編輯既有案場');
+    const now=new Date().toISOString(),row=state.projects.find((item)=>item.id===id)||{id:uid(),createdAt:now};
+    const retentionMode=['5','10','custom'].includes(values.defaultRetentionMode)?values.defaultRetentionMode:'none';
+    Object.assign(row,{name,customer:customer.id,customerName:customer.name,address:clean(values.address),startDate:values.startDate||'',expectedEndDate:values.expectedEndDate||'',actualEndDate:values.actualEndDate||'',status:['進行中','已完工','暫停'].includes(values.status)?values.status:'進行中',contractAmount:Math.max(0,num(values.contractAmount)),note:clean(values.note),defaultRetentionMode:retentionMode,defaultRetentionRate:retentionMode==='5'?5:retentionMode==='10'?10:retentionMode==='custom'?Math.max(0,num(values.defaultRetentionRate)):0,defaultRetentionAmount:0,defaultInvoiceChoice:values.defaultInvoiceChoice==='invoice_required'?'invoice_required':'no_invoice',defaultTaxMode:values.defaultTaxMode==='含稅'?'含稅':'未稅',defaultPricingMode:pricingMode(values.defaultPricingMode)||row.defaultPricingMode||'',updatedAt:now});
+    if(!id)state.projects.unshift(row); await persist(`${id?'修改':'新增'}案場 ${row.name}`); return row;
+  }
+  async function saveMaterialUsage(values, id = '') {
+    await load();
+    const project=state.projects.find((row)=>row.id===values.project),material=state.materials.find((row)=>row.id===values.material),vendor=state.vendors.find((row)=>row.id===(values.vendor||material?.vendor));
+    const quantity=num(values.quantity),unitPrice=num(values.unitPrice);
+    if(!project)throw new Error('找不到案場'); if(!material)throw new Error('請選擇既有材料'); if(!vendor)throw new Error('請選擇材料廠商'); if(quantity<=0)throw new Error('數量必須大於 0'); if(unitPrice<0)throw new Error('單價不可小於 0');
+    const now=new Date().toISOString(),existing=state.materialUsages.find((row)=>row.id===id),oldPayable=payableForUsage(existing);
+    if(existing&&payableLocked(oldPayable))throw new Error('此材料來源的應付已付款，不能直接修改；請先以正式帳務方式處理');
+    const row=existing||{id:uid(),createdAt:now,status:'未付'};
+    if(existing&&oldPayable){oldPayable.usageIds=(oldPayable.usageIds||[]).filter((usageId)=>String(usageId)!==String(existing.id));}
+    Object.assign(row,{date:values.date||now.slice(0,10),project:project.id,projectName:project.name,material:material.id,materialName:material.name||'',vendor:vendor.id,vendorName:vendor.name||'',quantity,unitPrice,amount:Math.round(quantity*unitPrice),unit:material.unit||'',model:material.model||'',note:clean(values.note),updatedAt:now,payableId:''});
+    if(!existing)state.materialUsages.unshift(row);
+    if(oldPayable)syncMaterialPayable(oldPayable); assignMaterialUsage(row);
+    await persist(`${id?'修改':'新增'}案場材料 ${project.name}`); return row;
+  }
+  async function deleteMaterialUsage(id) {
+    await load(); const row=state.materialUsages.find((item)=>item.id===id); if(!row)return false;
+    const payable=payableForUsage(row); if(payableLocked(payable))throw new Error('此材料來源的應付已有付款紀錄，不能直接刪除');
+    state.materialUsages=state.materialUsages.filter((item)=>item.id!==id);
+    if(payable){payable.usageIds=(payable.usageIds||[]).filter((usageId)=>String(usageId)!==String(id));syncMaterialPayable(payable)}
+    await persist('刪除案場材料使用'); return true;
+  }
+  async function saveProjectCost(values, id = '') {
+    await load(); const project=state.projects.find((row)=>row.id===values.project),amount=Math.max(0,Math.round(num(values.amount)));
+    if(!project)throw new Error('找不到案場'); if(!amount)throw new Error('成本金額必須大於 0');
+    const now=new Date().toISOString(),row=state.projectCosts.find((item)=>item.id===id)||{id:uid(),createdAt:now,payableId:''};
+    const linked=state.payables.find((item)=>item.id===row.payableId); if(linked&&payableLocked(linked))throw new Error('此成本的應付已有付款紀錄，不能直接修改');
+    let vendor=state.vendors.find((item)=>item.id===values.vendor),payeeName=clean(values.payeeName||vendor?.name);
+    if(values.createPayable&&!vendor){if(!payeeName)throw new Error('產生應付時請選擇或輸入廠商／收款人');vendor=state.vendors.find((item)=>sameName(item.name,payeeName));if(!vendor){vendor={id:uid(),name:payeeName,createdAt:now,updatedAt:now};state.vendors.unshift(vendor)}}
+    Object.assign(row,{date:values.date||now.slice(0,10),project:project.id,projectName:project.name,category:clean(values.category)||'其他工程費用',description:clean(values.description),amount,vendor:vendor?.id||'',vendorName:vendor?.name||payeeName||'',createPayable:Boolean(values.createPayable),note:clean(values.note),updatedAt:now});
+    if(!id)state.projectCosts.unshift(row);
+    if(row.createPayable){const payable=linked||{id:uid(),payableNo:nextPayableNumber(row.date),paid:0,status:'未付款',sourceType:'project-cost',sourceId:row.id,createdAt:now};Object.assign(payable,{date:row.date,vendor:row.vendor,vendorName:row.vendorName,project:project.id,projectName:project.name,category:row.category,item:row.description||row.category,amount:row.amount,dueDate:'',note:row.note,status:'未付款',updatedAt:now});if(!linked)state.payables.unshift(payable);row.payableId=payable.id}else if(linked){state.payables=state.payables.filter((item)=>item.id!==linked.id);row.payableId=''}
+    await persist(`${id?'修改':'新增'}案場其他成本 ${project.name}`); return row;
+  }
+  async function deleteProjectCost(id) {
+    await load();const row=state.projectCosts.find((item)=>item.id===id);if(!row)return false;const payable=state.payables.find((item)=>item.id===row.payableId);if(payableLocked(payable))throw new Error('此成本的應付已有付款紀錄，不能直接刪除');state.projectCosts=state.projectCosts.filter((item)=>item.id!==id);if(payable)state.payables=state.payables.filter((item)=>item.id!==payable.id);await persist('刪除案場其他成本');return true;
+  }
+  function quotationTotals(lines, taxMode = '未稅', mode = '', lumpSumTotal = 0) {
+    const normalized=pricingMode(mode),entered = Math.round(normalized==='lump_sum'?num(lumpSumTotal):(lines || []).reduce((sum, line) => sum + (line.pricingType==='lump_sum'?num(line.lumpSumAmount??line.subtotal):num(line.subtotal ?? num(line.qty) * num(line.price))), 0));
+    if (taxMode === '含稅') {
+      const values = taxValues(entered);
+      return {amount:values.untaxed,tax:values.tax,total:values.total};
+    }
+    return {amount:entered,tax:Math.round(entered * (num(state.settings.defaultTax) || 5) / 100),total:entered + Math.round(entered * (num(state.settings.defaultTax) || 5) / 100)};
+  }
+  function nextQuotationNumber(date = new Date().toISOString().slice(0,10)) {
+    const stem=`Q-${String(date).replaceAll('-','')}`,count=state.quotations.filter((row)=>String(row.number||'').startsWith(stem)).length+1;
+    return `${stem}-${String(count).padStart(3,'0')}`;
+  }
+  function quotationPriceFor({item,customerId='',projectId='',date=''}) {
+    const key=clean(item),at=date||new Date().toISOString().slice(0,10);
+    const matching=(state.quotationPrices||[]).filter((row)=>sameName(row.item,key)&&(!row.effectiveDate||row.effectiveDate<=at));
+    const newest=(rows)=>rows.sort((a,b)=>String(b.effectiveDate||'').localeCompare(String(a.effectiveDate||''))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')))[0];
+    const project=newest(matching.filter((row)=>row.scope==='project'&&String(row.projectId)===String(projectId)));
+    const customer=newest(matching.filter((row)=>row.scope==='customer'&&String(row.customerId)===String(customerId)&&!row.projectId));
+    const company=newest(matching.filter((row)=>row.scope==='company'&&!row.customerId&&!row.projectId));
+    const row=project||customer||company;
+    return row?{...row,source:project?'project':customer?'customer':'company'}:null;
+  }
+  async function saveQuotationPrice(values) {
+    await load(); const item=clean(values.item),price=Math.max(0,num(values.price)),scope=['company','customer','project'].includes(values.scope)?values.scope:'company';
+    if(!item)throw new Error('請輸入施工項目'); if(!clean(values.unit))throw new Error('請輸入單位');
+    if(scope==='customer'&&!values.customerId)throw new Error('請選擇客戶'); if(scope==='project'&&!values.projectId)throw new Error('請選擇案場');
+    const row={id:uid(),scope,customerId:scope==='company'?'':values.customerId||'',projectId:scope==='project'?values.projectId||'':'',item,unit:clean(values.unit),price,effectiveDate:values.effectiveDate||new Date().toISOString().slice(0,10),createdSource:clean(values.createdSource)||'manual',createdAt:new Date().toISOString()};
+    state.quotationPrices.unshift(row); await persist(`新增報價價格歷史 ${item}`); return row;
+  }
+  async function saveQuotation(values, id = '') {
+    await load(); const customer=state.customers.find((row)=>String(row.id)===String(values.customer)),project=state.projects.find((row)=>String(row.id)===String(values.project));
+    if(!customer)throw new Error('請選擇客戶／建設公司'); if(!project)throw new Error('請選擇案場');
+    const mode=pricingMode(values.pricingMode)||pricingMode(project.defaultPricingMode)||(String(values.sourceType||'').startsWith('import-')?'actual':'');if(!mode)throw new Error('請選擇計價方式');
+    const lines=(values.lines||[]).filter((line)=>clean(line.item)).map((line)=>{const type=mode==='mixed'?(line.pricingType==='lump_sum'?'lump_sum':'actual'):mode,qty=String(line.qty??'').trim()===''?null:Math.max(0,num(line.qty)),price=Math.max(0,num(line.price)),lumpSumAmount=type==='lump_sum'?Math.max(0,num(line.lumpSumAmount??line.price)):0;return {id:line.id||uid(),house:clean(line.house),item:clean(line.item),spec:clean(line.spec),unit:clean(line.unit)||'式',pricingType:type,qty,estimatedQty:qty,price:type==='actual'?price:0,lumpSumAmount,subtotal:type==='lump_sum'?Math.round(lumpSumAmount):qty===null?0:Math.round(qty*price),priceSource:line.priceSource||'manual',priceId:line.priceId||'',scope:clean(line.scope),note:clean(line.note)};});
+    if(!lines.length)throw new Error('請至少新增一筆報價明細');
+    const now=new Date().toISOString(),existing=state.quotations.find((row)=>row.id===id);
+    if(existing?.status==='已確認'&&values.allowConfirmedEdit!==true)throw new Error('已確認報價不可直接修改歷史內容');
+    const lumpSumTotal=mode==='lump_sum'?Math.max(0,num(values.lumpSumTotal)):0;if(mode==='lump_sum'&&lumpSumTotal<=0)throw new Error('請輸入合約／報價總價');
+    const totals=quotationTotals(lines,values.taxMode,mode,lumpSumTotal),row=existing||{id:uid(),number:nextQuotationNumber(values.date),createdAt:now};
+    Object.assign(row,{customer:customer.id,customerName:customer.name,project:project.id,projectName:project.name,date:values.date||now.slice(0,10),dueDate:values.dueDate||'',pricingMode:mode,lumpSumTotal,billingPlan:values.billingPlan||row.billingPlan||'one_time',billingMilestones:Array.isArray(row.billingMilestones)?row.billingMilestones:[],taxMode:values.taxMode==='含稅'?'含稅':'未稅',lines,amount:totals.amount,tax:totals.tax,total:totals.total,status:['草稿','已送出','已確認','作廢'].includes(values.status)?values.status:(row.status||'草稿'),internalNote:clean(values.internalNote),publicNote:clean(values.publicNote),note:clean(values.publicNote),sourceType:values.sourceType||row.sourceType||'manual',importTemplateId:values.importTemplateId||row.importTemplateId||'',updatedAt:now});
+    if(!existing)state.quotations.unshift(row); await persist(`${id?'修改':'新增'}報價單 ${row.number}`); return row;
+  }
+  async function setQuotationStatus(id,status) {
+    await load(); const row=state.quotations.find((item)=>item.id===id); if(!row)throw new Error('找不到報價單');
+    if(!['草稿','已送出','已確認','作廢'].includes(status))throw new Error('無效的報價狀態');
+    row.status=status;row.updatedAt=new Date().toISOString();await persist(`報價單 ${row.number} 狀態改為 ${status}`);return row;
+  }
+  async function saveQuotationTemplate(values,id='') {
+    await load(); const customer=state.customers.find((row)=>row.id===values.customerId);if(!customer)throw new Error('請選擇客戶／建設公司');if(!clean(values.name))throw new Error('請輸入模板名稱');
+    const now=new Date().toISOString(),row=state.quotationTemplates.find((item)=>item.id===id)||{id:uid(),createdAt:now};
+    Object.assign(row,{name:clean(values.name),customerId:customer.id,customerName:customer.name,fileFormat:clean(values.fileFormat)||'excel',headerRow:Math.max(1,num(values.headerRow)||1),detailStartRow:Math.max(1,num(values.detailStartRow)||2),mapping:{house:clean(values.mapping?.house),item:clean(values.mapping?.item),unit:clean(values.mapping?.unit),qty:clean(values.mapping?.qty),price:clean(values.mapping?.price),amount:clean(values.mapping?.amount),note:clean(values.mapping?.note)},updatedAt:now});
+    if(!id)state.quotationTemplates.unshift(row);await persist(`${id?'修改':'新增'}報價模板 ${row.name}`);return row;
+  }
+  function confirmedQuotationItems(projectId) {
+    const map=new Map();[...state.quotations].filter((row)=>row.status==='已確認'&&(!projectId||String(row.project)===String(projectId))).sort((a,b)=>String(b.date||b.updatedAt||'').localeCompare(String(a.date||a.updatedAt||''))).forEach((quote)=>(quote.lines||[]).forEach((line)=>{const type=pricingTypeFor(quote,line);if(!type)return;const key=`${quote.project}__${line.item}`;if(!map.has(key))map.set(key,{quotationId:quote.id,quotationNo:quote.number,quotationLineId:line.id,projectId:quote.project,house:line.house||'',item:line.item,unit:line.unit,price:num(line.price),pricingMode:quote.pricingMode,pricingType:type,lumpSumAmount:num(line.lumpSumAmount)})}));return [...map.values()];
+  }
+  window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, nextPayableNumber, savePayable, addPayablePayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+}());
