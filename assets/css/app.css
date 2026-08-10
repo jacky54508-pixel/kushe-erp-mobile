@@ -191,3 +191,24 @@ html,body{height:100%;overflow:hidden}
 .quotation-drawer>.commission-drawer-body{display:block}
 .quotation-pricing-badge{display:inline-flex;padding:5px 9px;border-radius:99px;background:#e8f7f4;color:#087c70;font-size:9px;font-weight:850;white-space:nowrap}.quotation-pricing-badge.lump_sum{background:#fff2df;color:#a45b08}.quotation-pricing-badge.mixed{background:#eeeaff;color:#6351b7}.quotation-pricing-badge.unset{background:#eef2f6;color:#6b7b8e}.quotation-pricing-choice{display:flex;grid-column:span 2;align-items:center;gap:16px;min-height:64px;margin:0;padding:9px 12px;border:1px solid #d8e3ee;border-radius:9px}.quotation-pricing-choice legend{padding:0 5px;color:#63748a;font-size:10px;font-weight:850}.quotation-pricing-choice label{display:flex;align-items:center;gap:5px;font-size:10px;font-weight:800;white-space:nowrap}.quotation-pricing-choice input{width:auto;height:auto;accent-color:#075bd8}.quotation-lines-table{min-width:1460px}.quotation-lines-table td:nth-child(1){min-width:105px}.quotation-lines-table td:nth-child(2){min-width:90px}.quotation-lines-table td:nth-child(3){min-width:175px}.quotation-lines-table td:nth-child(4){min-width:72px}.quotation-lines-table td:nth-child(5){min-width:92px}.quotation-lines-table td:nth-child(6),.quotation-lines-table td:nth-child(7){min-width:110px}.quotation-lines-table td:nth-child(8){min-width:98px}.quotation-lines-table td:nth-child(9){min-width:125px}.quotation-lines-table td:nth-child(10){min-width:175px}.quotation-lines-table select{width:100%;height:35px;border:1px solid #d8e2ec;border-radius:7px;background:#fff;padding:0 7px;font-size:10px}.quote-actual-field[hidden],.quote-lump-field[hidden],#quotationLumpTotal[hidden]{display:none!important}.billing-contract-table{min-width:940px}.billing-contract-table input[type="number"]{width:120px;height:35px;border:1px solid #d7e1ec;border-radius:7px;padding:0 8px}.billing-contract-table td small{display:block;margin-top:3px;color:#718197;font-size:8px}.billing-source-count{margin:10px 3px 0;color:#64748b;font-size:10px}.unbilled-source-section+.unbilled-source-section{margin-top:16px}.unbilled-source-section h3{margin:0;padding:10px 13px;background:#f5f8fc;color:#174b78;font-size:11px}
 @media(max-width:620px){.quotation-pricing-choice{grid-column:auto;align-items:flex-start;flex-direction:column;gap:9px}}
+
+/* Keep the long project master form actions visible inside the modal viewport. */
+.project-master-modal.large>form{min-height:0;flex:1;display:flex;flex-direction:column;overflow:hidden}
+.project-master-modal.large>form>.erp-detail-body{min-height:0;flex:1 1 auto;overflow-y:auto}
+.project-master-modal.large>form>footer{position:sticky;z-index:2;bottom:0;flex:0 0 auto;background:#fff;box-shadow:0 -5px 16px rgba(8,45,98,.08)}
+
+/* Fit the project overview into normal desktop widths; smaller viewports keep horizontal scrolling. */
+@media(min-width:1200px){
+  .project-master-table{width:100%;min-width:0!important;table-layout:fixed}
+  .project-master-table th,.project-master-table td{padding:8px 5px;font-size:9.5px}
+  .project-master-table th{white-space:nowrap}
+  .project-master-table th:first-child,.project-master-table td:first-child{width:18%!important;min-width:0!important}
+  .project-master-table th:nth-child(2),.project-master-table td:nth-child(2){width:7.5%}
+  .project-master-table th:nth-child(3),.project-master-table td:nth-child(3){width:12.5%}
+  .project-master-table th:nth-child(n+4):nth-child(-n+8),.project-master-table td:nth-child(n+4):nth-child(-n+8){width:8.5%;white-space:nowrap}
+  .project-master-table th:nth-child(9),.project-master-table td:nth-child(9){width:10%;white-space:nowrap}
+  .project-master-table th:nth-child(10),.project-master-table td:nth-child(10){width:9.5%;white-space:nowrap}
+  .project-master-table td:first-child small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .project-master-table .project-master-status,.project-master-table .project-billing-condition{max-width:100%;padding:4px 6px;font-size:8.5px;overflow:hidden;text-overflow:ellipsis}
+  .project-master-table .commission-primary.compact{height:28px;padding:0 8px;font-size:8.5px}
+}
