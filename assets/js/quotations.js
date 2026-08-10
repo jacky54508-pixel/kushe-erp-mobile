@@ -76,11 +76,6 @@
   }
   async function activate(){active=true;if(!ready){await store.load();ready=true}render()}
   function deactivate(){active=false;closeLayer()}
-  function ensureDailyQuotationList(input){let list=$('#confirmedQuotationItems');if(!list){list=document.createElement('datalist');list.id='confirmedQuotationItems';document.body.appendChild(list)}const items=store.confirmedQuotationItems?.()||[];list.innerHTML=[...new Set(items.map(row=>row.item))].map(item=>`<option value="${esc(item)}"></option>`).join('');input.setAttribute('list','confirmedQuotationItems')}
-  document.addEventListener('focusin',(event)=>{if(event.target.matches?.('.daily-line-item'))ensureDailyQuotationList(event.target)});
-  function applyDailyQuotationPrice(target){const row=target.closest?.('.daily-line');if(!row)return;const project=$('.daily-line-project',row)?.value,item=$('.daily-line-item',row)?.value.trim(),matched=(store.confirmedQuotationItems?.(project)||[]).find(x=>x.item===item);if(!matched)return;const unit=$('.daily-line-unit',row),price=$('.daily-line-price',row);if(unit)unit.value=matched.unit||unit.value;if(price)price.value=matched.price;price?.dispatchEvent(new Event('input',{bubbles:true}))}
-  document.addEventListener('change',(event)=>{if(event.target.matches?.('.daily-line-item,.daily-line-project'))applyDailyQuotationPrice(event.target)});
-  document.addEventListener('input',(event)=>{if(!event.target.matches?.('.daily-line-item'))return;clearTimeout(event.target._quotationTimer);event.target._quotationTimer=setTimeout(()=>applyDailyQuotationPrice(event.target),90)});
   async function savePriceClick(event){event.preventDefault();event.stopImmediatePropagation();const button=event.currentTarget||event.target.closest('#priceForm button[type="submit"]'),form=button.form;button.disabled=true;try{await store.saveQuotationPrice(Object.fromEntries(new FormData(form)));closeLayer();setTimeout(openPrices,130);window.KushePhase1.toast('新價格已加入歷史')}catch(error){button.disabled=false;window.KushePhase1.toast(error.message)}}
   function bindPriceSaveButton(){const button=$('#priceForm button[type="submit"]');if(button&&!button.dataset.directSave){button.dataset.directSave='1';button.onclick=savePriceClick}}
   new MutationObserver(bindPriceSaveButton).observe(document.documentElement,{childList:true,subtree:true});

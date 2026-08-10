@@ -293,11 +293,18 @@
     const lines = (values.lines || []).filter((line) => line.project && line.item && num(line.qty) > 0);
     if (!employeeIds.length || !lines.length) throw new Error('請至少選擇一位員工並填寫一筆施工項目');
     const prepared = lines.map((line) => {
-      const quoteItem=confirmedQuotationItems(line.project).find((item)=>sameName(item.item,line.item)),mode=projectPricingMode(line.project),type=quoteItem?.pricingType||(mode==='lump_sum'?'lump_sum':mode==='mixed'?'lump_sum':'actual');
-      const qty = num(line.qty), inputPrice = type==='actual'&&quoteItem?num(quoteItem.price):num(line.inputPrice), gross = qty * inputPrice;
-      const untaxedSubtotal = line.taxMode === '含稅' ? Math.round(gross / (1 + (num(state.settings.defaultTax)||5) / 100)) : gross;
+      const project=state.projects.find((row)=>String(row.id)===String(line.project))||{};
+      const quotationId=line.quotationId||line.quoteId||'',quotationLineId=line.quotationLineId||line.quoteLineId||'';
+      const quoteItem=quotationId&&quotationLineId
+        ? confirmedQuotationItems(line.project,project.customer).find((item)=>String(item.quotationId)===String(quotationId)&&String(item.quotationLineId)===String(quotationLineId))
+        : null;
+      if((line.sourceType==='quotation'||quotationId||quotationLineId)&&!quoteItem)throw new Error('選取的報價項目已失效，請重新選擇已確認報價項目');
+      const type=quoteItem?.pricingType||(line.pricingType==='lump_sum'?'lump_sum':'actual');
+      const qty=num(line.qty),inputPrice=quoteItem?(type==='actual'?num(quoteItem.price):num(quoteItem.lumpSumAmount)):num(line.inputPrice);
+      const gross=type==='actual'?qty*inputPrice:0,taxMode=quoteItem?.taxMode||line.taxMode||'未稅';
+      const untaxedSubtotal=taxMode==='含稅'?Math.round(gross/(1+(num(state.settings.defaultTax)||5)/100)):gross;
       const billable=type==='actual'&&line.billable!==false;
-      return {...line,unit:quoteItem?.unit||line.unit,qty,inputPrice,price:qty?untaxedSubtotal/qty:0,subtotal:gross,untaxedSubtotal,pricingType:type,quotationId:quoteItem?.quotationId||'',quotationLineId:quoteItem?.quotationLineId||'',workItemId:line.workItemId||uid(),billable,billingStatus:billable?'未請款':'',billingId:''};
+      return {...line,item:quoteItem?.item||line.item,itemName:quoteItem?.item||line.item,unit:quoteItem?.unit||line.unit,qty,inputPrice,unitPrice:inputPrice,price:qty&&type==='actual'?untaxedSubtotal/qty:0,subtotal:gross,untaxedSubtotal,taxMode,pricingType:type,sourceType:quoteItem?'quotation':'manual',quotationId:quoteItem?.quotationId||'',quotationLineId:quoteItem?.quotationLineId||'',quoteId:quoteItem?.quotationId||'',quoteLineId:quoteItem?.quotationLineId||'',quotationNo:quoteItem?.quotationNo||'',lumpSumAmount:num(quoteItem?.lumpSumAmount),workItemId:line.workItemId||uid(),billable,billingStatus:billable?'未請款':'',billingId:''};
     });
     const byProject = new Map();
     prepared.forEach((line) => { if (!byProject.has(line.project)) byProject.set(line.project, []); byProject.get(line.project).push(line); });
@@ -319,7 +326,7 @@
       });
     });
     state.dailyItemPresets = state.dailyItemPresets || [];
-    prepared.forEach((line) => { const existing = state.dailyItemPresets.find((row) => String(row.item||'').trim() === String(line.item||'').trim()); const preset={item:line.item,unit:line.unit||'式',qty:line.qty,price:line.price}; if(existing)Object.assign(existing,preset);else state.dailyItemPresets.push(preset); });
+    prepared.filter((line)=>line.sourceType==='manual').forEach((line) => { const existing = state.dailyItemPresets.find((row) => String(row.item||'').trim() === String(line.item||'').trim()); const preset={item:line.item,unit:line.unit||'式',qty:line.qty,price:line.price}; if(existing)Object.assign(existing,preset);else state.dailyItemPresets.push(preset); });
     await persist(`${previous.length?'修改':'新增'}多案場每日施工紀錄`);
     return batchId;
   }
@@ -686,8 +693,18 @@
     Object.assign(row,{name:clean(values.name),customerId:customer.id,customerName:customer.name,fileFormat:clean(values.fileFormat)||'excel',headerRow:Math.max(1,num(values.headerRow)||1),detailStartRow:Math.max(1,num(values.detailStartRow)||2),mapping:{house:clean(values.mapping?.house),item:clean(values.mapping?.item),unit:clean(values.mapping?.unit),qty:clean(values.mapping?.qty),price:clean(values.mapping?.price),amount:clean(values.mapping?.amount),note:clean(values.mapping?.note)},updatedAt:now});
     if(!id)state.quotationTemplates.unshift(row);await persist(`${id?'修改':'新增'}報價模板 ${row.name}`);return row;
   }
-  function confirmedQuotationItems(projectId) {
-    const map=new Map();[...state.quotations].filter((row)=>row.status==='已確認'&&(!projectId||String(row.project)===String(projectId))).sort((a,b)=>String(b.date||b.updatedAt||'').localeCompare(String(a.date||a.updatedAt||''))).forEach((quote)=>(quote.lines||[]).forEach((line)=>{const type=pricingTypeFor(quote,line);if(!type)return;const key=`${quote.project}__${line.item}`;if(!map.has(key))map.set(key,{quotationId:quote.id,quotationNo:quote.number,quotationLineId:line.id,projectId:quote.project,house:line.house||'',item:line.item,unit:line.unit,price:num(line.price),pricingMode:quote.pricingMode,pricingType:type,lumpSumAmount:num(line.lumpSumAmount)})}));return [...map.values()];
+  function confirmedQuotationItems(projectId, customerId) {
+    const rows=[],seen=new Set();
+    [...state.quotations]
+      .filter((quote)=>quote.status==='已確認'&&(!projectId||String(quote.project)===String(projectId))&&(!customerId||String(quote.customer)===String(customerId)))
+      .sort((a,b)=>String(b.date||b.updatedAt||'').localeCompare(String(a.date||a.updatedAt||'')))
+      .forEach((quote)=>(quote.lines||[]).forEach((line,index)=>{
+        const type=pricingTypeFor(quote,line);if(!type)return;
+        const lineId=line.id||`${quote.id}:line:${index}`,key=`${quote.id}__${lineId}`;if(seen.has(key))return;seen.add(key);
+        const lumpSumAmount=type==='lump_sum'&&pricingMode(quote.pricingMode)==='lump_sum'?num(quote.lumpSumTotal??quote.amount):num(line.lumpSumAmount);
+        rows.push({quotationId:quote.id,quoteId:quote.id,quotationNo:quote.number||'',quotationLineId:lineId,quoteLineId:lineId,quoteDate:quote.date||'',customerId:quote.customer||'',projectId:quote.project,house:line.house||'',item:line.item||'',itemName:line.item||'',unit:line.unit||'式',price:num(line.price),unitPrice:num(line.price),taxMode:quote.taxMode||'未稅',pricingMode:quote.pricingMode,pricingType:type,lumpSumAmount});
+      }));
+    return rows;
   }
   window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, nextPayableNumber, savePayable, addPayablePayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
