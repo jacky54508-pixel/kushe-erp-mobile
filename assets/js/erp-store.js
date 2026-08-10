@@ -50,9 +50,31 @@
       try { const emergency = JSON.parse(localStorage.getItem(EMERGENCY_KEY) || 'null'); if (score(emergency)) state = emergency; } catch (_) {}
     }
     if (!score(state)) state = window.KuSheLegacyData?.getState() || window.KUSHE_PHASE1_BACKUP || {};
-    ['commissions','employees','customers','projects','vendors','materials','materialUsages','projectCosts','billings','receivables','payables','invoices','receipts','payments','banks','bankTransactions','payroll','attendance','dailyLogs','dailyItemPresets','audit'].forEach((key) => { if (!Array.isArray(state[key])) state[key] = []; });
+    ['commissions','employees','customers','projects','vendors','materials','materialUsages','projectCosts','billings','receivables','payables','invoices','receipts','payments','banks','bankTransactions','payroll','attendance','dailyLogs','dailyItemPresets','quotations','quotationPrices','quotationTemplates','audit'].forEach((key) => { if (!Array.isArray(state[key])) state[key] = []; });
     if (!state.settings) state.settings = {};
     if (!state.meta) state.meta = {};
+    state.quotations.forEach((quote) => {
+      if (!quote.number) quote.number = `Q-${String(quote.date || '').replaceAll('-','') || 'LEGACY'}`;
+      if (!['草稿','已送出','已確認','作廢'].includes(quote.status)) quote.status = '草稿';
+      if (!quote.publicNote) quote.publicNote = quote.note || '';
+      if (!quote.internalNote) quote.internalNote = '';
+      if (!Array.isArray(quote.lines)) quote.lines = [];
+      quote.lines.forEach((line) => {
+        if (!line.id) line.id = uid();
+        if (line.subtotal === undefined) line.subtotal = num(line.qty) * num(line.price);
+        if (!line.priceSource) line.priceSource = 'legacy';
+      });
+    });
+    if (!state.meta.quotationPriceMigrated && state.projectItemPrices && typeof state.projectItemPrices === 'object') {
+      Object.entries(state.projectItemPrices).forEach(([key, price], index) => {
+        const split = key.indexOf('::'), projectKey = split >= 0 ? key.slice(0, split) : '', item = split >= 0 ? key.slice(split + 2) : key;
+        const project = state.projects.find((row) => String(row.id) === projectKey || sameName(row.name, projectKey));
+        if (!project || !item || num(price) < 0) return;
+        const exists = state.quotationPrices.some((row) => row.scope === 'project' && row.projectId === project.id && sameName(row.item,item));
+        if (!exists) state.quotationPrices.push({id:`legacy-price-${index}-${project.id}`,scope:'project',customerId:project.customer||'',projectId:project.id,item,unit:'',price:num(price),effectiveDate:'2000-01-01',createdSource:'legacy-project-price',createdAt:project.createdAt||new Date().toISOString()});
+      });
+      state.meta.quotationPriceMigrated = true;
+    }
     state.dailyLogs.forEach((log) => {
       const billable = log.billable !== false && !log.noInvoice && (num(log.groupTotal) > 0 || num(log.performance) > 0 || (log.items || []).some((item) => num(item.qty) * num(item.price) > 0));
       if (log.billable === undefined) log.billable = billable;
@@ -573,5 +595,59 @@
   async function deleteProjectCost(id) {
     await load();const row=state.projectCosts.find((item)=>item.id===id);if(!row)return false;const payable=state.payables.find((item)=>item.id===row.payableId);if(payableLocked(payable))throw new Error('此成本的應付已有付款紀錄，不能直接刪除');state.projectCosts=state.projectCosts.filter((item)=>item.id!==id);if(payable)state.payables=state.payables.filter((item)=>item.id!==payable.id);await persist('刪除案場其他成本');return true;
   }
-  window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, nextPayableNumber, savePayable, addPayablePayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, persist, num };
+  function quotationTotals(lines, taxMode = '未稅') {
+    const entered = Math.round((lines || []).reduce((sum, line) => sum + num(line.subtotal ?? num(line.qty) * num(line.price)), 0));
+    if (taxMode === '含稅') {
+      const values = taxValues(entered);
+      return {amount:values.untaxed,tax:values.tax,total:values.total};
+    }
+    return {amount:entered,tax:Math.round(entered * (num(state.settings.defaultTax) || 5) / 100),total:entered + Math.round(entered * (num(state.settings.defaultTax) || 5) / 100)};
+  }
+  function nextQuotationNumber(date = new Date().toISOString().slice(0,10)) {
+    const stem=`Q-${String(date).replaceAll('-','')}`,count=state.quotations.filter((row)=>String(row.number||'').startsWith(stem)).length+1;
+    return `${stem}-${String(count).padStart(3,'0')}`;
+  }
+  function quotationPriceFor({item,customerId='',projectId='',date=''}) {
+    const key=clean(item),at=date||new Date().toISOString().slice(0,10);
+    const matching=(state.quotationPrices||[]).filter((row)=>sameName(row.item,key)&&(!row.effectiveDate||row.effectiveDate<=at));
+    const newest=(rows)=>rows.sort((a,b)=>String(b.effectiveDate||'').localeCompare(String(a.effectiveDate||''))||String(b.createdAt||'').localeCompare(String(a.createdAt||'')))[0];
+    const project=newest(matching.filter((row)=>row.scope==='project'&&String(row.projectId)===String(projectId)));
+    const customer=newest(matching.filter((row)=>row.scope==='customer'&&String(row.customerId)===String(customerId)&&!row.projectId));
+    const company=newest(matching.filter((row)=>row.scope==='company'&&!row.customerId&&!row.projectId));
+    const row=project||customer||company;
+    return row?{...row,source:project?'project':customer?'customer':'company'}:null;
+  }
+  async function saveQuotationPrice(values) {
+    await load(); const item=clean(values.item),price=Math.max(0,num(values.price)),scope=['company','customer','project'].includes(values.scope)?values.scope:'company';
+    if(!item)throw new Error('請輸入施工項目'); if(!clean(values.unit))throw new Error('請輸入單位');
+    if(scope==='customer'&&!values.customerId)throw new Error('請選擇客戶'); if(scope==='project'&&!values.projectId)throw new Error('請選擇案場');
+    const row={id:uid(),scope,customerId:scope==='company'?'':values.customerId||'',projectId:scope==='project'?values.projectId||'':'',item,unit:clean(values.unit),price,effectiveDate:values.effectiveDate||new Date().toISOString().slice(0,10),createdSource:clean(values.createdSource)||'manual',createdAt:new Date().toISOString()};
+    state.quotationPrices.unshift(row); await persist(`新增報價價格歷史 ${item}`); return row;
+  }
+  async function saveQuotation(values, id = '') {
+    await load(); const customer=state.customers.find((row)=>String(row.id)===String(values.customer)),project=state.projects.find((row)=>String(row.id)===String(values.project));
+    if(!customer)throw new Error('請選擇客戶／建設公司'); if(!project)throw new Error('請選擇案場');
+    const lines=(values.lines||[]).filter((line)=>clean(line.item)&&num(line.qty)>0).map((line)=>({id:line.id||uid(),house:clean(line.house),item:clean(line.item),spec:clean(line.spec),unit:clean(line.unit)||'式',qty:num(line.qty),price:num(line.price),subtotal:Math.round(num(line.qty)*num(line.price)),priceSource:line.priceSource||'manual',priceId:line.priceId||'',note:clean(line.note)}));
+    if(!lines.length)throw new Error('請至少新增一筆報價明細');
+    const now=new Date().toISOString(),existing=state.quotations.find((row)=>row.id===id);
+    if(existing?.status==='已確認'&&values.allowConfirmedEdit!==true)throw new Error('已確認報價不可直接修改歷史內容');
+    const totals=quotationTotals(lines,values.taxMode),row=existing||{id:uid(),number:nextQuotationNumber(values.date),createdAt:now};
+    Object.assign(row,{customer:customer.id,customerName:customer.name,project:project.id,projectName:project.name,date:values.date||now.slice(0,10),dueDate:values.dueDate||'',taxMode:values.taxMode==='含稅'?'含稅':'未稅',lines,amount:totals.amount,tax:totals.tax,total:totals.total,status:['草稿','已送出','已確認','作廢'].includes(values.status)?values.status:(row.status||'草稿'),internalNote:clean(values.internalNote),publicNote:clean(values.publicNote),note:clean(values.publicNote),sourceType:values.sourceType||row.sourceType||'manual',importTemplateId:values.importTemplateId||row.importTemplateId||'',updatedAt:now});
+    if(!existing)state.quotations.unshift(row); await persist(`${id?'修改':'新增'}報價單 ${row.number}`); return row;
+  }
+  async function setQuotationStatus(id,status) {
+    await load(); const row=state.quotations.find((item)=>item.id===id); if(!row)throw new Error('找不到報價單');
+    if(!['草稿','已送出','已確認','作廢'].includes(status))throw new Error('無效的報價狀態');
+    row.status=status;row.updatedAt=new Date().toISOString();await persist(`報價單 ${row.number} 狀態改為 ${status}`);return row;
+  }
+  async function saveQuotationTemplate(values,id='') {
+    await load(); const customer=state.customers.find((row)=>row.id===values.customerId);if(!customer)throw new Error('請選擇客戶／建設公司');if(!clean(values.name))throw new Error('請輸入模板名稱');
+    const now=new Date().toISOString(),row=state.quotationTemplates.find((item)=>item.id===id)||{id:uid(),createdAt:now};
+    Object.assign(row,{name:clean(values.name),customerId:customer.id,customerName:customer.name,fileFormat:clean(values.fileFormat)||'excel',headerRow:Math.max(1,num(values.headerRow)||1),detailStartRow:Math.max(1,num(values.detailStartRow)||2),mapping:{house:clean(values.mapping?.house),item:clean(values.mapping?.item),unit:clean(values.mapping?.unit),qty:clean(values.mapping?.qty),price:clean(values.mapping?.price),amount:clean(values.mapping?.amount),note:clean(values.mapping?.note)},updatedAt:now});
+    if(!id)state.quotationTemplates.unshift(row);await persist(`${id?'修改':'新增'}報價模板 ${row.name}`);return row;
+  }
+  function confirmedQuotationItems(projectId) {
+    const map=new Map();state.quotations.filter((row)=>row.status==='已確認'&&(!projectId||String(row.project)===String(projectId))).forEach((quote)=>(quote.lines||[]).forEach((line)=>{const key=`${line.item}__${line.unit}__${line.price}`;if(!map.has(key))map.set(key,{quotationId:quote.id,quotationNo:quote.number,projectId:quote.project,house:line.house||'',item:line.item,unit:line.unit,price:num(line.price)})}));return [...map.values()];
+  }
+  window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, nextPayableNumber, savePayable, addPayablePayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, saveQuotationTemplate, confirmedQuotationItems, persist, num };
 }());

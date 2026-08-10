@@ -39,6 +39,7 @@
     const isReceivables = route === 'receivables';
     const isPayables = route === 'payables';
     const isProjects = route === 'projects' || route === 'customers';
+    const isQuotations = route === 'quotations';
     $('#dashboard').hidden = !isDashboard;
     $('#commissionsView').hidden = !isCommissions;
     $('#unbilledWorkView').hidden = !isUnbilledWork;
@@ -47,7 +48,8 @@
     $('#receivablesView').hidden = !isReceivables;
     $('#payablesView').hidden = !isPayables;
     $('#projectsView').hidden = !isProjects;
-    $('#moduleView').hidden = isDashboard || isCommissions || isUnbilledWork || isBillings || isBillingDraft || isReceivables || isPayables || isProjects;
+    $('#quotationsView').hidden = !isQuotations;
+    $('#moduleView').hidden = isDashboard || isCommissions || isUnbilledWork || isBillings || isBillingDraft || isReceivables || isPayables || isProjects || isQuotations;
     document.body.dataset.route = route;
     $$('.nav-item[data-module]').forEach((node) => {
       const navRoute = node.dataset.module;
@@ -56,9 +58,13 @@
       node.setAttribute('aria-current', active ? 'page' : 'false');
     });
     if (!isProjects) window.KusheProjects?.deactivate();
+    if (!isQuotations) window.KusheQuotations?.deactivate();
     if (isProjects) {
       window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();
       window.KusheProjects?.activate({customer:route==='customers'});document.title = '酷舍 ERP｜客戶／案場';
+    } else if (isQuotations) {
+      window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();
+      window.KusheQuotations?.activate();document.title = '酷舍 ERP－報價單管理';
     } else if (isCommissions) {
       window.KusheCommissions?.activate();
       window.KusheUnbilledWork?.deactivate();
