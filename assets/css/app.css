@@ -197,18 +197,20 @@ html,body{height:100%;overflow:hidden}
 .project-master-modal.large>form>.erp-detail-body{min-height:0;flex:1 1 auto;overflow-y:auto}
 .project-master-modal.large>form>footer{position:sticky;z-index:2;bottom:0;flex:0 0 auto;background:#fff;box-shadow:0 -5px 16px rgba(8,45,98,.08)}
 
-/* Fit the project overview into normal desktop widths; smaller viewports keep horizontal scrolling. */
-@media(min-width:1200px){
+/* Fit the project overview by column density, while retaining the ERP's normal type scale. */
+@media(min-width:1280px){
   .project-master-table{width:100%;min-width:0!important;table-layout:fixed}
-  .project-master-table th,.project-master-table td{padding:8px 5px;font-size:9.5px}
-  .project-master-table th{white-space:nowrap}
-  .project-master-table th:first-child,.project-master-table td:first-child{width:18%!important;min-width:0!important}
-  .project-master-table th:nth-child(2),.project-master-table td:nth-child(2){width:7.5%}
-  .project-master-table th:nth-child(3),.project-master-table td:nth-child(3){width:12.5%}
-  .project-master-table th:nth-child(n+4):nth-child(-n+8),.project-master-table td:nth-child(n+4):nth-child(-n+8){width:8.5%;white-space:nowrap}
-  .project-master-table th:nth-child(9),.project-master-table td:nth-child(9){width:10%;white-space:nowrap}
-  .project-master-table th:nth-child(10),.project-master-table td:nth-child(10){width:9.5%;white-space:nowrap}
-  .project-master-table td:first-child small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .project-master-table .project-master-status,.project-master-table .project-billing-condition{max-width:100%;padding:4px 6px;font-size:8.5px;overflow:hidden;text-overflow:ellipsis}
-  .project-master-table .commission-primary.compact{height:28px;padding:0 8px;font-size:8.5px}
+  .project-master-table th,.project-master-table td{box-sizing:border-box;padding:10px 6px}
+  .project-master-table th{font-size:10px;white-space:nowrap}
+  .project-master-table td{font-size:12px}
+  .project-master-table th:first-child,.project-master-table td:first-child{width:20%!important;min-width:0!important;text-align:left}
+  .project-master-table th:nth-child(2),.project-master-table td:nth-child(2){width:8%;text-align:center}
+  .project-master-table th:nth-child(3),.project-master-table td:nth-child(3){width:11%;text-align:center}
+  .project-master-table th:nth-child(n+4):nth-child(-n+8),.project-master-table td:nth-child(n+4):nth-child(-n+8){width:7.8%;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .project-master-table th:nth-child(9),.project-master-table td:nth-child(9){width:10%;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .project-master-table th:nth-child(10),.project-master-table td:nth-child(10){width:9%;text-align:center;white-space:nowrap}
+  .project-master-table td:first-child b,.project-master-table td:first-child small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .project-master-table td:first-child small{font-size:10px}
+  .project-master-table .project-master-status,.project-master-table .project-billing-condition{max-width:100%;padding:5px 7px;font-size:9px;overflow:hidden;text-overflow:ellipsis}
+  .project-master-table .commission-primary.compact{width:auto;height:30px;min-height:30px;padding:0 9px;font-size:10px}
 }
