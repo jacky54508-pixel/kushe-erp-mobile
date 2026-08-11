@@ -1,0 +1,90 @@
+name: Deploy main and beta to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - beta
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout formal site from main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: site
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout Beta ERP from beta
+        uses: actions/checkout@v4
+        with:
+          ref: beta
+          path: beta-source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Assemble and verify Pages artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f site/index.html
+          test -f beta-source/index.html
+
+          hash_formal_root() {
+            find site \
+              -path 'site/.git' -prune -o \
+              -path 'site/.github' -prune -o \
+              -path 'site/beta' -prune -o \
+              -type f -print0 \
+              | sort -z \
+              | xargs -0 sha256sum \
+              | sha256sum \
+              | awk '{print $1}'
+          }
+
+          formal_hash_before="$(hash_formal_root)"
+
+          rm -rf site/beta
+          mkdir -p site/beta
+          rsync -a --delete \
+            --exclude='.git' \
+            --exclude='.github' \
+            beta-source/ site/beta/
+
+          formal_hash_after="$(hash_formal_root)"
+          test "$formal_hash_before" = "$formal_hash_after"
+          test -f site/index.html
+          test -f site/beta/index.html
+
+          rm -rf site/.git site/.github
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
