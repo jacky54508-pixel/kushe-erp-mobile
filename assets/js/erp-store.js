@@ -50,7 +50,7 @@
       try { const emergency = JSON.parse(localStorage.getItem(EMERGENCY_KEY) || 'null'); if (score(emergency)) state = emergency; } catch (_) {}
     }
     if (!score(state)) state = window.KuSheLegacyData?.getState() || window.KUSHE_PHASE1_BACKUP || {};
-    ['commissions','employees','customers','projects','vendors','materials','materialUsages','projectCosts','billings','receivables','payables','invoices','receipts','payments','banks','bankTransactions','payroll','attendance','dailyLogs','dailyItemPresets','quotations','quotationPrices','quotationTemplates','audit'].forEach((key) => { if (!Array.isArray(state[key])) state[key] = []; });
+    ['commissions','employees','customers','projects','vendors','materials','materialUsages','projectCosts','billings','receivables','payables','invoices','receipts','retentionReceipts','payments','banks','bankTransactions','payroll','attendance','dailyLogs','dailyItemPresets','quotations','quotationPrices','quotationTemplates','audit'].forEach((key) => { if (!Array.isArray(state[key])) state[key] = []; });
     if (!state.settings) state.settings = {};
     if (!state.meta) state.meta = {};
     state.quotations.forEach((quote) => {
@@ -95,6 +95,11 @@
       if (billing.grossTotal === undefined) billing.grossTotal = num(billing.amount) + num(billing.tax);
       if (billing.retentionRate === undefined) billing.retentionRate = 0;
       if (billing.retentionReceived === undefined) billing.retentionReceived = 0;
+      if (billing.retentionAmount === undefined) billing.retentionAmount = num(billing.retention);
+      if (billing.preTaxAmount === undefined) billing.preTaxAmount = num(billing.amount);
+      if (billing.taxAmount === undefined) billing.taxAmount = num(billing.tax);
+      if (billing.taxIncludedAmount === undefined) billing.taxIncludedAmount = num(billing.grossTotal);
+      if (billing.retentionEnabled === undefined) billing.retentionEnabled = num(billing.retention) > 0;
       billing.retentionStatus = retentionState(billing.retention,billing.retentionReceived,billing.retentionStatus);
       if (!['no_invoice','invoice_pending','invoiced'].includes(billing.invoiceStatus)) billing.invoiceStatus = billing.invoiceNo ? 'invoiced' : (billing.sourceType === 'daily-work' && billing.hasInvoice === false ? 'no_invoice' : 'invoice_pending');
       billing.hasInvoice = billing.invoiceStatus !== 'no_invoice';
@@ -104,7 +109,9 @@
       if (receivable && !receivable.billingId) receivable.billingId = billing.id;
       if (receivable && !billing.receivableId) billing.receivableId = receivable.id;
       if (receivable) {
+        if (receivable.retentionAmount === undefined) receivable.retentionAmount = num(receivable.retention ?? billing.retention);
         if (receivable.retentionReceived === undefined) receivable.retentionReceived = num(billing.retentionReceived);
+        receivable.remainingRetention = Math.max(0,num(receivable.retentionAmount)-num(receivable.retentionReceived));
         receivable.retentionStatus = retentionState(receivable.retention ?? billing.retention,receivable.retentionReceived,receivable.retentionStatus || billing.retentionStatus);
       }
       if (billing.invoiceStatus === 'no_invoice' && Array.isArray(billing.lines) && billing.lines.length) {
@@ -119,6 +126,20 @@
       if (receipt.fee === undefined) receipt.fee = 0;
       if (receipt.netAmount === undefined) receipt.netAmount = Math.max(0, num(receipt.amount) - num(receipt.fee));
       if (!receipt.paymentMethod) receipt.paymentMethod = '銀行轉帳';
+    });
+    state.retentionReceipts.forEach((receipt) => {
+      if (!receipt.retentionReceiptId) receipt.retentionReceiptId = receipt.id || uid();
+      if (!receipt.id) receipt.id = receipt.retentionReceiptId;
+      receipt.amount = Math.max(0,Math.round(num(receipt.amount)));
+      if (!receipt.paymentMethod) receipt.paymentMethod = '銀行轉帳';
+    });
+    state.receivables.forEach((receivable) => {
+      const billing=state.billings.find((row)=>row.id===receivable.billingId||String(row.number||'')===String(receivable.sourceNo||''));
+      const retentionAmount=num(receivable.retentionAmount ?? receivable.retention ?? billing?.retentionAmount ?? billing?.retention);
+      const recorded=state.retentionReceipts.filter((row)=>row.receivableId===receivable.id||row.billingId&&row.billingId===receivable.billingId).reduce((sum,row)=>sum+num(row.amount),0);
+      const received=Math.min(retentionAmount,Math.max(num(receivable.retentionReceived),num(billing?.retentionReceived),recorded));
+      receivable.retentionAmount=retentionAmount;receivable.retentionReceived=received;receivable.remainingRetention=Math.max(0,retentionAmount-received);receivable.retentionStatus=retentionState(retentionAmount,received,receivable.retentionStatus);
+      if(billing){billing.retentionAmount=num(billing.retentionAmount ?? billing.retention);billing.retentionReceived=received;billing.remainingRetention=Math.max(0,billing.retentionAmount-received);billing.retentionStatus=retentionState(billing.retentionAmount,received,billing.retentionStatus)}
     });
     state.payables.forEach((payable, index) => {
       if (!payable.payableNo) payable.payableNo = payable.number || `AP-${String(payable.date || '').replaceAll('-','') || 'LEGACY'}-${String(index + 1).padStart(3,'0')}`;
@@ -395,10 +416,12 @@
     const grossTotal = noInvoice ? constructionAmount : taxMode === '含稅' ? constructionAmount : untaxed + tax;
     const retentionMode = values.retentionMode || 'none';
     const retentionRate = retentionMode === '5' ? 5 : retentionMode === '10' ? 10 : retentionMode === 'custom' ? num(values.retentionRate) : 0;
+    const retentionBase = values.retentionBase === 'preTax' ? 'preTax' : 'taxIncluded';
+    const retentionBaseAmount = retentionBase === 'preTax' ? untaxed : grossTotal;
     const retention = retentionMode === 'custom' && num(values.retentionCustom) > 0
       ? Math.max(0, Math.round(num(values.retentionCustom)))
-      : Math.max(0, Math.round(grossTotal * retentionRate / 100));
-    return { constructionAmount, untaxed, tax, grossTotal, retention: Math.min(retention, grossTotal), retentionRate, receivable: Math.max(0, grossTotal - retention), rate, taxMode };
+      : Math.max(0, Math.round(retentionBaseAmount * retentionRate / 100));
+    return { constructionAmount, untaxed, tax, grossTotal, retention: Math.min(retention, grossTotal), retentionRate, retentionBase, retentionBaseAmount, receivable: Math.max(0, grossTotal - retention), rate, taxMode };
   }
   function sourceMatches(ref, log, item, index) {
     const groupKey = log.groupId || log.id;
@@ -444,16 +467,17 @@
       id, date, number, customer:values.customer||'', customerName:values.customerName||'', project:values.project||'', projectName:values.projectName||'',
       billingMonth:values.billingMonth||monthOf(date), periodStart:values.periodStart||'', periodEnd:values.periodEnd||'', taxMode:totals.taxMode,
       lines:(values.lines||[]).map((line)=>({...line,qty:num(line.qty),price:num(line.price),subtotal:Math.round(num(line.qty)*num(line.price)),sourceRefs:(line.sourceRefs||[]).map((ref)=>({...ref}))})),
-      amount:totals.untaxed, tax:totals.tax, grossTotal:totals.grossTotal, retention:totals.retention, retentionRate:totals.retentionRate,
-      retentionMode:values.retentionMode||'none', retentionReceived:0, retentionStatus:retentionState(totals.retention,0), total:totals.receivable,
+      amount:totals.untaxed, tax:totals.tax, grossTotal:totals.grossTotal, preTaxAmount:totals.untaxed, taxAmount:totals.tax, taxIncludedAmount:totals.grossTotal,
+      retention:totals.retention, retentionAmount:totals.retention, retentionRate:totals.retentionRate, retentionBase:totals.retentionBase, retentionEnabled:totals.retention>0,
+      retentionMode:values.retentionMode||'none', retentionReceived:0, remainingRetention:totals.retention, retentionStatus:retentionState(totals.retention,0), total:totals.receivable,
       invoiceStatus:values.invoiceStatus==='no_invoice'?'no_invoice':String(values.invoiceNo||'').trim()?'invoiced':'invoice_pending',
       hasInvoice:values.invoiceStatus!=='no_invoice', invoiceNo:values.invoiceStatus==='no_invoice'?'':String(values.invoiceNo||'').trim(), invoiceDate:values.invoiceStatus==='no_invoice'?'':values.invoiceDate||'', status:'未收款', note:values.note||'',
       sourceType:sourceRefs.length&&canonicalContracts.length?'mixed-pricing':canonicalContracts.length?'quotation-progress':'daily-work', sourceItemRefs:sourceRefs.map((ref)=>({...ref})),sourceContractRefs:canonicalContracts.map((ref)=>({...ref})), createdAt:now, updatedAt:now
     };
-    const receivable = {id:uid(),billingId:id,date,customer:billing.customer,customerName:billing.customerName,project:billing.project,projectName:billing.projectName,sourceNo:number,invoiceNo:billing.invoiceNo,taxMode:billing.taxMode,untaxedAmount:billing.amount,tax:billing.tax,grossTotal:billing.grossTotal,retention:billing.retention,retentionReceived:0,retentionStatus:billing.retentionStatus,amount:billing.total,received:0,bankId:'',receiptDate:'',dueDate:values.dueDate||'',status:'未收',note:'由新版請款單自動建立',createdAt:now,updatedAt:now};
+    const receivable = {id:uid(),billingId:id,date,customer:billing.customer,customerName:billing.customerName,project:billing.project,projectName:billing.projectName,sourceNo:number,invoiceNo:billing.invoiceNo,taxMode:billing.taxMode,untaxedAmount:billing.amount,tax:billing.tax,grossTotal:billing.grossTotal,preTaxAmount:billing.preTaxAmount,taxAmount:billing.taxAmount,taxIncludedAmount:billing.taxIncludedAmount,retention:billing.retention,retentionAmount:billing.retentionAmount,retentionRate:billing.retentionRate,retentionBase:billing.retentionBase,retentionEnabled:billing.retentionEnabled,retentionReceived:0,remainingRetention:billing.retentionAmount,retentionStatus:billing.retentionStatus,amount:billing.total,received:0,bankId:'',receiptDate:'',dueDate:values.dueDate||'',status:'未收',note:'由新版請款單自動建立',createdAt:now,updatedAt:now};
     billing.receivableId = receivable.id;
     state.billings.unshift(billing); state.receivables.unshift(receivable);
-    if(values.saveProjectRetentionDefault){const project=state.projects.find((row)=>row.id===billing.project);if(project){project.defaultRetentionMode=totals.retention>0?(values.retentionMode||'none'):'none';project.defaultRetentionRate=totals.retention>0?totals.retentionRate:0;project.defaultRetentionAmount=values.retentionMode==='custom'?num(values.retentionCustom):0;project.updatedAt=now}}
+    if(values.saveProjectRetentionDefault){const project=state.projects.find((row)=>row.id===billing.project);if(project){project.defaultRetentionMode=totals.retention>0?(values.retentionMode||'none'):'none';project.defaultRetentionRate=totals.retention>0?totals.retentionRate:0;project.defaultRetentionAmount=values.retentionMode==='custom'?num(values.retentionCustom):0;project.defaultRetentionBase=totals.retentionBase;project.updatedAt=now}}
     if (billing.invoiceStatus === 'invoiced' && billing.invoiceNo) {
       state.invoices.unshift({id:uid(),date:billing.invoiceDate||billing.date,number:billing.invoiceNo,type:'銷項',party:billing.customerName,customer:billing.customer,project:billing.project,amount:billing.amount,tax:billing.tax,total:billing.grossTotal,sourceNo:number,billingId:id,note:'由新版請款單自動串聯',createdAt:now,updatedAt:now});
     }
@@ -487,6 +511,24 @@
     const billing = state.billings.find((row) => row.id === ar.billingId || String(row.number||'') === String(ar.sourceNo||''));
     if (billing) { billing.status=ar.status==='已收'?'已收款':'部分收款'; billing.updatedAt=now; }
     await persist(`新增分次收款 ${ar.sourceNo}`); return receipt;
+  }
+  async function addRetentionReceipt(values) {
+    await load();
+    const idempotencyKey=String(values.idempotencyKey||'').trim();
+    if(idempotencyKey){const existing=state.retentionReceipts.find((row)=>row.idempotencyKey===idempotencyKey);if(existing)return existing}
+    const ar=state.receivables.find((row)=>row.id===values.receivableId);if(!ar)throw new Error('找不到對應應收帳款');
+    const billing=state.billings.find((row)=>row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||''));
+    const retentionAmount=Math.max(0,num(ar.retentionAmount ?? ar.retention ?? billing?.retentionAmount ?? billing?.retention));
+    const retentionReceived=Math.max(0,num(ar.retentionReceived ?? billing?.retentionReceived));
+    const remaining=Math.max(0,retentionAmount-retentionReceived),amount=Math.round(num(values.amount));
+    if(amount<=0)throw new Error('本次收回保留款必須大於 0');
+    if(amount>remaining)throw new Error('本次收回金額不可超過剩餘保留款');
+    const now=new Date().toISOString(),id=uid(),receipt={id,retentionReceiptId:id,idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:billing?.id||ar.billingId||'',projectId:ar.project||billing?.project||'',customerId:ar.customer||billing?.customer||'',date:values.date||now.slice(0,10),amount,paymentMethod:values.paymentMethod||'銀行轉帳',bankId:values.bankId||'',fee:Math.max(0,Math.round(num(values.fee))),note:String(values.note||''),createdAt:now};
+    state.retentionReceipts.unshift(receipt);
+    const nextReceived=retentionReceived+amount,nextRemaining=Math.max(0,retentionAmount-nextReceived),nextState=retentionState(retentionAmount,nextReceived,ar.retentionStatus);
+    Object.assign(ar,{retentionAmount,retention:retentionAmount,retentionReceived:nextReceived,remainingRetention:nextRemaining,retentionStatus:nextState,updatedAt:now});
+    if(billing){Object.assign(billing,{retentionAmount,retention:retentionAmount,retentionReceived:nextReceived,remainingRetention:nextRemaining,retentionStatus:nextState,updatedAt:now});if(num(ar.received)>=num(ar.amount)&&nextRemaining===0)billing.status='全部收清'}
+    await persist(`收回保留款 ${ar.sourceNo}`);return receipt;
   }
   function nextPayableNumber(date) {
     const compact = String(date || new Date().toISOString().slice(0,10)).replaceAll('-','');
@@ -535,11 +577,11 @@
     await load(); const billing=state.billings.find((row)=>row.id===id);if(!billing)throw new Error('找不到請款單');
     const now=new Date().toISOString(),choice=values.invoiceChoice==='invoice_required'?'invoice_required':'no_invoice',number=choice==='no_invoice'?'':String(values.invoiceNo||'').trim(),date=choice==='no_invoice'?'':values.invoiceDate||billing.date||now.slice(0,10);
     const nextInvoiceStatus=choice==='no_invoice'?'no_invoice':number?'invoiced':'invoice_pending';
-    const totals=calculateBilling({lines:billing.lines||[],taxMode:billing.taxMode,invoiceStatus:nextInvoiceStatus,retentionMode:billing.retentionMode,retentionRate:billing.retentionRate,retentionCustom:billing.retentionMode==='custom'?billing.retention:undefined});
+    const totals=calculateBilling({lines:billing.lines||[],taxMode:billing.taxMode,invoiceStatus:nextInvoiceStatus,retentionMode:billing.retentionMode,retentionRate:billing.retentionRate,retentionBase:billing.retentionBase||'taxIncluded',retentionCustom:!billing.retentionBase&&billing.retentionMode==='custom'?billing.retention:undefined});
     const ar=state.receivables.find((row)=>row.id===billing.receivableId||row.billingId===billing.id||String(row.sourceNo||'')===String(billing.number||''));
     if(ar&&num(ar.received)>totals.receivable)throw new Error('切換後應收金額低於既有收款，請先確認收款紀錄');
-    Object.assign(billing,{invoiceStatus:nextInvoiceStatus,hasInvoice:nextInvoiceStatus!=='no_invoice',invoiceNo:number,invoiceDate:date,amount:totals.untaxed,tax:totals.tax,grossTotal:totals.grossTotal,retention:totals.retention,retentionStatus:retentionState(totals.retention,billing.retentionReceived,billing.retentionStatus),total:totals.receivable,updatedAt:now});
-    if(ar){Object.assign(ar,{invoiceNo:number,taxMode:billing.taxMode,untaxedAmount:totals.untaxed,tax:totals.tax,grossTotal:totals.grossTotal,retention:totals.retention,retentionStatus:retentionState(totals.retention,ar.retentionReceived,ar.retentionStatus),amount:totals.receivable,status:num(ar.received)>=totals.receivable&&totals.receivable>0?'已收':num(ar.received)>0?'部分收款':'未收',updatedAt:now})}
+    Object.assign(billing,{invoiceStatus:nextInvoiceStatus,hasInvoice:nextInvoiceStatus!=='no_invoice',invoiceNo:number,invoiceDate:date,amount:totals.untaxed,tax:totals.tax,grossTotal:totals.grossTotal,preTaxAmount:totals.untaxed,taxAmount:totals.tax,taxIncludedAmount:totals.grossTotal,retention:totals.retention,retentionAmount:totals.retention,retentionBase:totals.retentionBase,retentionStatus:retentionState(totals.retention,billing.retentionReceived,billing.retentionStatus),remainingRetention:Math.max(0,totals.retention-num(billing.retentionReceived)),total:totals.receivable,updatedAt:now});
+    if(ar){Object.assign(ar,{invoiceNo:number,taxMode:billing.taxMode,untaxedAmount:totals.untaxed,tax:totals.tax,grossTotal:totals.grossTotal,preTaxAmount:totals.untaxed,taxAmount:totals.tax,taxIncludedAmount:totals.grossTotal,retention:totals.retention,retentionAmount:totals.retention,retentionBase:totals.retentionBase,retentionStatus:retentionState(totals.retention,ar.retentionReceived,ar.retentionStatus),remainingRetention:Math.max(0,totals.retention-num(ar.retentionReceived)),amount:totals.receivable,status:num(ar.received)>=totals.receivable&&totals.receivable>0?'已收':num(ar.received)>0?'部分收款':'未收',updatedAt:now})}
     let invoice=state.invoices.find((row)=>row.billingId===billing.id||(row.sourceNo===billing.number&&row.note==='由新版請款單自動串聯'));
     if(billing.invoiceStatus==='invoiced'&&number){if(!invoice){invoice={id:uid(),type:'銷項',billingId:billing.id,sourceNo:billing.number,note:'由新版請款單自動串聯',createdAt:now};state.invoices.unshift(invoice)}Object.assign(invoice,{date,number,party:billing.customerName,customer:billing.customer,project:billing.project,amount:num(billing.amount),tax:num(billing.tax),total:num(billing.grossTotal)||num(billing.amount)+num(billing.tax),updatedAt:now})}else if(invoice){state.invoices=state.invoices.filter((row)=>row.id!==invoice.id)}
     await persist(`更新請款單發票 ${billing.number}`);return billing;
@@ -608,7 +650,7 @@
     if(duplicate)throw new Error('此客戶已有同名案場，請直接編輯既有案場');
     const now=new Date().toISOString(),row=state.projects.find((item)=>item.id===id)||{id:uid(),createdAt:now};
     const retentionMode=['5','10','custom'].includes(values.defaultRetentionMode)?values.defaultRetentionMode:'none';
-    Object.assign(row,{name,customer:customer.id,customerName:customer.name,address:clean(values.address),startDate:values.startDate||'',expectedEndDate:values.expectedEndDate||'',actualEndDate:values.actualEndDate||'',status:['進行中','已完工','暫停'].includes(values.status)?values.status:'進行中',contractAmount:Math.max(0,num(values.contractAmount)),note:clean(values.note),defaultRetentionMode:retentionMode,defaultRetentionRate:retentionMode==='5'?5:retentionMode==='10'?10:retentionMode==='custom'?Math.max(0,num(values.defaultRetentionRate)):0,defaultRetentionAmount:0,defaultInvoiceChoice:values.defaultInvoiceChoice==='invoice_required'?'invoice_required':'no_invoice',defaultTaxMode:values.defaultTaxMode==='含稅'?'含稅':'未稅',defaultPricingMode:pricingMode(values.defaultPricingMode)||row.defaultPricingMode||'',updatedAt:now});
+    Object.assign(row,{name,customer:customer.id,customerName:customer.name,address:clean(values.address),startDate:values.startDate||'',expectedEndDate:values.expectedEndDate||'',actualEndDate:values.actualEndDate||'',status:['進行中','已完工','暫停'].includes(values.status)?values.status:'進行中',contractAmount:Math.max(0,num(values.contractAmount)),note:clean(values.note),defaultRetentionMode:retentionMode,defaultRetentionRate:retentionMode==='5'?5:retentionMode==='10'?10:retentionMode==='custom'?Math.max(0,num(values.defaultRetentionRate)):0,defaultRetentionAmount:0,defaultRetentionBase:values.defaultRetentionBase==='preTax'?'preTax':'taxIncluded',defaultInvoiceChoice:values.defaultInvoiceChoice==='invoice_required'?'invoice_required':'no_invoice',defaultTaxMode:values.defaultTaxMode==='含稅'?'含稅':'未稅',defaultPricingMode:pricingMode(values.defaultPricingMode)||row.defaultPricingMode||'',updatedAt:now});
     if(!id)state.projects.unshift(row); await persist(`${id?'修改':'新增'}案場 ${row.name}`); return row;
   }
   async function saveMaterialUsage(values, id = '') {
@@ -737,5 +779,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, nextPayableNumber, savePayable, addPayablePayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, addRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
