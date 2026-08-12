@@ -7,7 +7,7 @@
   function state(){return store.getState()}
   function vendorName(material,data){return data.vendors.find((row)=>row.id===material.vendor)?.name||material.vendorName||'—'}
   function optionRows(rows,selected,placeholder){return `<option value="">${esc(placeholder)}</option>${rows.map((row)=>`<option value="${esc(row.id)}" ${String(row.id)===String(selected||'')?'selected':''}>${esc(row.name||'—')}</option>`).join('')}`}
-  function overlay(markup){const node=document.createElement('div');node.className='detail-overlay is-open';node.innerHTML=markup;document.body.appendChild(node);const close=()=>node.remove();$$('[data-close-detail]',node).forEach((button)=>button.onclick=close);node.onclick=(event)=>{if(event.target===node)close()};return {node,close}}
+  function overlay(markup){const node=document.createElement('div');node.className='erp-detail-overlay';node.innerHTML=markup;document.body.appendChild(node);const close=()=>node.remove();$$('[data-close-detail]',node).forEach((button)=>button.onclick=close);node.onclick=(event)=>{if(event.target===node)close()};return {node,close}}
   async function render(){
     if(!active)return; await store.load(); const data=state(),host=$('#materialsApp');if(!host)return;
     const normalized=query.trim().toLocaleLowerCase('zh-Hant'),rows=data.materials.filter((row)=>!normalized||`${row.name||''} ${row.code||''} ${row.unit||''} ${vendorName(row,data)} ${row.note||''}`.toLocaleLowerCase('zh-Hant').includes(normalized));
