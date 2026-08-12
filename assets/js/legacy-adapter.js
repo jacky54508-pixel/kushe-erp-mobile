@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  const arrays = ['banks','receivables','payables','billings','receipts','payroll','projects','customers','vendors','dailyLogs','employees','materials','attendance','quotations','commissions','invoices','materialUsages','bankTransactions'];
+  const arrays = ['banks','receivables','payables','billings','receipts','payroll','salaryPayments','projects','customers','vendors','dailyLogs','employees','materials','attendance','quotations','commissions','invoices','materialUsages','bankTransactions'];
   const config = window.KUSHE_PHASE1_CONFIG || {};
   function normalize(value) {
     const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};

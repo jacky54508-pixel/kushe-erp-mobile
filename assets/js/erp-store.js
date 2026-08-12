@@ -50,7 +50,7 @@
       try { const emergency = JSON.parse(localStorage.getItem(EMERGENCY_KEY) || 'null'); if (score(emergency)) state = emergency; } catch (_) {}
     }
     if (!score(state)) state = window.KuSheLegacyData?.getState() || window.KUSHE_PHASE1_BACKUP || {};
-    ['commissions','employees','customers','projects','vendors','materials','materialUsages','projectCosts','billings','receivables','payables','invoices','receipts','retentionReceipts','payments','banks','bankTransactions','payroll','attendance','dailyLogs','dailyItemPresets','quotations','quotationPrices','quotationTemplates','audit'].forEach((key) => { if (!Array.isArray(state[key])) state[key] = []; });
+    ['commissions','employees','customers','projects','vendors','materials','materialUsages','projectCosts','billings','receivables','payables','invoices','receipts','retentionReceipts','payments','salaryPayments','banks','bankTransactions','payroll','attendance','dailyLogs','dailyItemPresets','quotations','quotationPrices','quotationTemplates','audit'].forEach((key) => { if (!Array.isArray(state[key])) state[key] = []; });
     if (!state.settings) state.settings = {};
     if (!state.meta) state.meta = {};
     state.quotations.forEach((quote) => {
@@ -178,6 +178,14 @@
       if (!payment.bankId && payment.bankAccountId) payment.bankId=payment.bankAccountId;
       if (!payment.bankTransactionId) {
         const transaction=state.bankTransactions.find((row)=>row.sourceId===payment.id&&['payable-payment','payable_payment'].includes(row.sourceType));
+        if(transaction)payment.bankTransactionId=transaction.id;
+      }
+    });
+    state.salaryPayments.forEach((payment) => {
+      if (!payment.bankAccountId && payment.bankId) payment.bankAccountId=payment.bankId;
+      if (!payment.bankId && payment.bankAccountId) payment.bankId=payment.bankAccountId;
+      if (!payment.bankTransactionId) {
+        const transaction=state.bankTransactions.find((row)=>row.sourceType==='salary_payment'&&row.sourceId===payment.id);
         if(transaction)payment.bankTransactionId=transaction.id;
       }
     });
@@ -722,6 +730,39 @@
     if(transaction){const bank=state.banks.find((row)=>row.id===(transaction.bankAccountId||transaction.bankId));adjustBankExpense(bank,-num(transaction.amount),now);state.bankTransactions=state.bankTransactions.filter((row)=>row.id!==transaction.id)}
     state.payments=state.payments.filter((row)=>row!==payment);syncPayableSummary(payable,now);await persist(`刪除應付付款 ${payable.payableNo||''}`);return true;
   }
+  function salaryPaymentSummary(payroll) {
+    const history=state.salaryPayments.filter((row)=>row.payrollId===payroll.id),legacyPaid=!history.length&&payroll.status==='已付款'?num(payroll.total):0,paid=Math.min(num(payroll.total),history.reduce((sum,row)=>sum+num(row.amount),legacyPaid));
+    return {history,paid,outstanding:Math.max(0,num(payroll.total)-paid),legacyPaid:Boolean(legacyPaid)};
+  }
+  function salaryPaymentTransaction(payment) {
+    return state.bankTransactions.find((row)=>row.id===payment.bankTransactionId||(row.sourceType==='salary_payment'&&row.sourceId===payment.id));
+  }
+  function syncSalarySummary(payroll, now) {
+    const summary=salaryPaymentSummary(payroll),latest=[...summary.history].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];
+    payroll.paidAmount=summary.paid;payroll.status=summary.outstanding<=0&&num(payroll.total)>0?'已付款':summary.paid>0?'部分付款':'未付款';payroll.bankId=latest?.bankAccountId||latest?.bankId||'';payroll.payDate=latest?.date||'';payroll.paymentTransactionId=summary.history.length===1?summary.history[0].bankTransactionId||'':'';payroll.paidAt=summary.outstanding<=0&&summary.paid>0?(payroll.paidAt||now):'';payroll.updatedAt=now;
+    return summary;
+  }
+  function syncSalaryBankTransaction(payment, payroll, now) {
+    const bankId=String(payment.bankAccountId||payment.bankId||''),bank=state.banks.find((row)=>row.id===bankId);if(!bank)throw new Error('請選擇薪資付款銀行帳戶');
+    const existing=salaryPaymentTransaction(payment);if(existing){const previousBank=state.banks.find((row)=>row.id===(existing.bankAccountId||existing.bankId));adjustBankExpense(previousBank,-num(existing.amount),now)}
+    const employee=state.employees.find((row)=>row.id===payroll.employee),employeeName=employee?.name||payroll.employeeName||'員工',transaction=existing||{id:uid(),createdAt:now};
+    Object.assign(transaction,{date:payment.date,bankId:bank.id,bankAccountId:bank.id,type:'支出',direction:'out',category:'員工薪資',amount:num(payment.amount),sourceType:'salary_payment',sourceId:payment.id,salaryPaymentId:payment.id,payrollId:payroll.id,employee:payroll.employee,employeeName,month:payroll.month,sourceNo:payroll.month||'',description:`${employeeName} ${payroll.month||''} 薪資付款`,note:payment.note||`${employeeName} ${payroll.month||''} 薪資付款`,updatedAt:now});
+    if(!existing)state.bankTransactions.unshift(transaction);payment.bankId=bank.id;payment.bankAccountId=bank.id;payment.bankTransactionId=transaction.id;adjustBankExpense(bank,num(payment.amount),now);return transaction;
+  }
+  async function addSalaryPayment(values) {
+    await load();const idempotencyKey=String(values.idempotencyKey||'').trim();if(idempotencyKey){const existing=state.salaryPayments.find((row)=>row.idempotencyKey===idempotencyKey);if(existing)return existing}
+    const payroll=state.payroll.find((row)=>row.id===values.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const summary=salaryPaymentSummary(payroll),amount=Math.round(num(values.amount));if(amount<=0||amount>summary.outstanding)throw new Error('本次付款不可超過未付薪資');
+    const bank=state.banks.find((row)=>row.id===String(values.bankAccountId||values.bankId||''));if(!bank)throw new Error('請選擇薪資付款銀行帳戶');const now=new Date().toISOString(),payment={id:uid(),idempotencyKey:idempotencyKey||uid(),payrollId:payroll.id,date:values.date||now.slice(0,10),amount,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:String(values.note||''),createdAt:now,updatedAt:now};
+    state.salaryPayments.unshift(payment);syncSalaryBankTransaction(payment,payroll,now);syncSalarySummary(payroll,now);await persist(`新增薪資付款 ${payroll.month||''}`);return payment;
+  }
+  async function updateSalaryPayment(id, values={}) {
+    await load();const payment=state.salaryPayments.find((row)=>row.id===id);if(!payment)throw new Error('找不到薪資付款紀錄');const payroll=state.payroll.find((row)=>row.id===payment.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const otherPaid=state.salaryPayments.filter((row)=>row!==payment&&row.payrollId===payroll.id).reduce((sum,row)=>sum+num(row.amount),0),amount=Math.round(num(values.amount)),bankId=String(values.bankAccountId||values.bankId||'');if(amount<=0||otherPaid+amount>num(payroll.total))throw new Error('本次付款不可超過未付薪資');if(!state.banks.some((row)=>row.id===bankId))throw new Error('請選擇薪資付款銀行帳戶');
+    const now=new Date().toISOString();Object.assign(payment,{date:values.date||payment.date||now.slice(0,10),amount,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||payment.paymentMethod||'銀行轉帳',note:values.note===undefined?payment.note:String(values.note||''),updatedAt:now});syncSalaryBankTransaction(payment,payroll,now);syncSalarySummary(payroll,now);await persist(`修改薪資付款 ${payroll.month||''}`);return payment;
+  }
+  async function deleteSalaryPayment(id) {
+    await load();const payment=state.salaryPayments.find((row)=>row.id===id);if(!payment)throw new Error('找不到薪資付款紀錄');const payroll=state.payroll.find((row)=>row.id===payment.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const now=new Date().toISOString(),transaction=salaryPaymentTransaction(payment);if(transaction){const bank=state.banks.find((row)=>row.id===(transaction.bankAccountId||transaction.bankId));adjustBankExpense(bank,-num(transaction.amount),now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==transaction)}
+    state.salaryPayments=state.salaryPayments.filter((row)=>row!==payment);syncSalarySummary(payroll,now);await persist(`刪除薪資付款 ${payroll.month||''}`);return true;
+  }
   async function updateBillingInvoice(id, values = {}) {
     await load(); const billing=state.billings.find((row)=>row.id===id);if(!billing)throw new Error('找不到請款單');
     const now=new Date().toISOString(),choice=values.invoiceChoice==='invoice_required'?'invoice_required':'no_invoice',number=choice==='no_invoice'?'':String(values.invoiceNo||'').trim(),date=choice==='no_invoice'?'':values.invoiceDate||billing.date||now.slice(0,10);
@@ -928,5 +969,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, salaryPaymentSummary, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());

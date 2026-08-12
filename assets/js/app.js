@@ -39,6 +39,7 @@
     const isReceivables = route === 'receivables';
     const isPayables = route === 'payables';
     const isBanks = route === 'banks';
+    const isPayroll = route === 'payroll';
     const isProjects = route === 'projects' || route === 'customers';
     const isQuotations = route === 'quotations';
     $('#dashboard').hidden = !isDashboard;
@@ -49,10 +50,12 @@
     $('#receivablesView').hidden = !isReceivables;
     $('#payablesView').hidden = !isPayables;
     $('#banksView').hidden = !isBanks;
+    $('#payrollView').hidden = !isPayroll;
     $('#projectsView').hidden = !isProjects;
     $('#quotationsView').hidden = !isQuotations;
-    $('#moduleView').hidden = isDashboard || isCommissions || isUnbilledWork || isBillings || isBillingDraft || isReceivables || isPayables || isBanks || isProjects || isQuotations;
+    $('#moduleView').hidden = isDashboard || isCommissions || isUnbilledWork || isBillings || isBillingDraft || isReceivables || isPayables || isBanks || isPayroll || isProjects || isQuotations;
     if (!isBanks) window.KusheBanks?.deactivate();
+    if (!isPayroll) window.KushePayroll?.deactivate();
     document.body.dataset.route = route;
     $$('.nav-item[data-module]').forEach((node) => {
       const navRoute = node.dataset.module;
@@ -93,6 +96,9 @@
     } else if (isBanks) {
       window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();
       window.KusheBanks?.activate();document.title = '酷舍 ERP｜銀行帳戶';
+    } else if (isPayroll) {
+      window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();window.KusheBanks?.deactivate();
+      window.KushePayroll?.activate();document.title = '酷舍 ERP｜薪資管理';
     } else if (!isDashboard) {
       window.KusheCommissions?.deactivate();
       window.KusheUnbilledWork?.deactivate();
@@ -142,7 +148,7 @@
     window.addEventListener('popstate',()=>renderRoute(currentHashRoute()));
   }
   function dateKeys(data) {
-    const values=[]; ['billings','receivables','payables','receipts','bankTransactions','dailyLogs','attendance','materialUsages','invoices'].forEach((key)=>(data[key]||[]).forEach((row)=>{const value=String(row.date||row.month||'').slice(0,7);if(/^\d{4}-\d{2}$/.test(value))values.push(value)}));
+    const values=[]; ['billings','receivables','payables','receipts','salaryPayments','bankTransactions','dailyLogs','attendance','materialUsages','invoices'].forEach((key)=>(data[key]||[]).forEach((row)=>{const value=String(row.date||row.month||'').slice(0,7);if(/^\d{4}-\d{2}$/.test(value))values.push(value)}));
     (data.payroll||[]).forEach((row)=>{if(/^\d{4}-\d{2}$/.test(row.month||''))values.push(row.month)}); return values;
   }
   function setupPeriod() {

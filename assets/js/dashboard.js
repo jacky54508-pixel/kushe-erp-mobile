@@ -19,6 +19,7 @@
   const invoiceState = (row) => ['no_invoice','invoice_pending','invoiced'].includes(row?.invoiceStatus) ? row.invoiceStatus : text(row?.invoiceNo) ? 'invoiced' : row?.sourceType === 'daily-work' && row?.hasInvoice === false ? 'no_invoice' : 'invoice_pending';
   const projectId = (row) => text(row.project ?? row.projectId);
   const isPayrollPaid = (row) => /已付款|已付|paid/i.test(text(row.status)) || Boolean(row.payDate && row.paymentTransactionId);
+  const payrollPaidAmount = (data,row) => { const history=(data.salaryPayments||[]).filter((payment)=>text(payment.payrollId)===text(row.id)); return history.length?Math.min(number(row.total),sum(history,(payment)=>payment.amount)):isPayrollPaid(row)?number(row.total):0; };
   const collectionTx = (row) => /receipt|receivable/i.test(text(row.sourceType)) || /應收|收款/i.test(`${row.category || ''}${row.note || ''}`);
   const incomeTx = (row) => /收入|入帳|income/i.test(text(row.type));
   const expenseTx = (row) => /支出|付款|expense/i.test(text(row.type));
@@ -109,7 +110,7 @@
     });
     const payrollRows = data.payroll.filter((row) => text(row.month) === month);
     const payrollTotal = sum(payrollRows, (row) => row.total);
-    const payrollPaid = sum(payrollRows.filter(isPayrollPaid), (row) => row.total);
+    const payrollPaid = sum(payrollRows, (row) => payrollPaidAmount(data,row));
     const unbilledWork=unbilledWorkSummary(data);
     const retentionBillings=data.billings.filter((row)=>number(row.retention)>number(row.retentionReceived));
     const retentionOpen=sum(retentionBillings,(row)=>Math.max(0,number(row.retention)-number(row.retentionReceived)));
@@ -121,7 +122,7 @@
       { type: '待付款', count: openAP.length, amount: outstandingAP, module: 'payables', tone: 'orange', icon: 'arrow-up-from-line' },
       { type: '逾期應付', count: overduePayables.length, amount: sum(overduePayables, (row) => Math.max(0, apAmount(row) - paidAP(row))), module: 'payables', tone: 'red', icon: 'circle-alert' },
       { type: '待開發票', count: missingInvoices.length, amount: missingInvoiceAmount, module: 'invoices', tone: 'blue', icon: 'receipt' },
-      { type: '薪資待結算', count: payrollRows.filter((row) => !isPayrollPaid(row)).length, amount: Math.max(0, payrollTotal - payrollPaid), module: 'payroll', tone: 'violet', icon: 'wallet' }
+      { type: '薪資待結算', count: payrollRows.filter((row) => payrollPaidAmount(data,row)<number(row.total)).length, amount: Math.max(0, payrollTotal - payrollPaid), module: 'payroll', tone: 'violet', icon: 'wallet' }
     ].filter((row) => row.count || row.amount);
 
     return {
