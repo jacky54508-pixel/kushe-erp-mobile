@@ -50,6 +50,28 @@
     });
     return rows;
   }
+  function materialVendorOptions() {
+    const foreignLabels = new Set();
+    ['customers','projects','materials','employees','banks'].forEach((foreignKey) => {
+      (state?.[foreignKey] || []).forEach((row) => {
+        const label = normalizedMasterLabel(masterLabel(row, foreignKey));
+        if (label) foreignLabels.add(label);
+      });
+    });
+    const supplierIds = new Set(), supplierLabels = new Set();
+    (Array.isArray(state?.suppliers) ? state.suppliers : []).forEach((row) => {
+      const id = row?.id === undefined || row?.id === null ? '' : String(row.id).trim();
+      const label = normalizedMasterLabel(row?.name ?? row?.supplierName);
+      if (id) supplierIds.add(id);
+      if (label) supplierLabels.add(label);
+    });
+    return masterOptions('vendors').filter((row) => {
+      const id = String(row.id || '').trim(), label = normalizedMasterLabel(row.name);
+      const type = normalizedMasterLabel(row.entityType ?? row.masterType ?? row.kind ?? row.type ?? row.role);
+      const explicitlyVendor = row.isVendor === true || row.isSupplier === true || type === 'vendor' || type === 'supplier' || supplierIds.has(id) || supplierLabels.has(label);
+      return explicitlyVendor || !foreignLabels.has(label);
+    });
+  }
   function retentionState(amount, received, current) {
     const total=num(amount),paid=num(received);
     if(total<=0)return 'no_retention';
@@ -1038,5 +1060,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, salaryPaymentSummary, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, salaryPaymentSummary, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
