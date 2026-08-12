@@ -173,6 +173,14 @@
         state.payments.push({id:`legacy-${payable.id}`,idempotencyKey:`legacy-${payable.id}`,payableId:payable.id,date:payable.payDate||tx?.date||payable.date||'',amount:payable.paid,fee:num(payable.fee),actualDebit:num(tx?.amount)||payable.paid,bankId:payable.bankId||tx?.bankId||'',paymentMethod:payable.paymentMethod||'銀行轉帳',feePayer:payable.feeParty==='公司負擔'?'company':'recipient',note:payable.note||'',bankTransactionId:tx?.id||payable.paymentTransactionId||'',legacy:true,createdAt:payable.updatedAt||payable.createdAt||new Date().toISOString()});
       }
     });
+    state.payments.forEach((payment) => {
+      if (!payment.bankAccountId && payment.bankId) payment.bankAccountId=payment.bankId;
+      if (!payment.bankId && payment.bankAccountId) payment.bankId=payment.bankAccountId;
+      if (!payment.bankTransactionId) {
+        const transaction=state.bankTransactions.find((row)=>row.sourceId===payment.id&&['payable-payment','payable_payment'].includes(row.sourceType));
+        if(transaction)payment.bankTransactionId=transaction.id;
+      }
+    });
     state.payables.filter((payable) => Array.isArray(payable.usageIds)).forEach((payable) => {
       payable.usageIds.forEach((usageId) => {
         const usage = state.materialUsages.find((row) => String(row.id) === String(usageId));
@@ -675,12 +683,44 @@
     const feePayer=values.feePayer==='recipient'?'recipient':'company';
     if(feePayer==='recipient'&&fee>amount)throw new Error('收款人負擔的手續費不可高於本次付款');
     const actualDebit=feePayer==='company'?amount+fee:amount,now=new Date().toISOString(),paymentId=uid(),transactionId=uid();
-    const payment={id:paymentId,idempotencyKey:idempotencyKey||uid(),payableId:payable.id,date:values.date||now.slice(0,10),amount,fee,actualDebit,bankId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',feePayer,note:values.note||'',bankTransactionId:transactionId,createdAt:now};
+    const payment={id:paymentId,idempotencyKey:idempotencyKey||uid(),payableId:payable.id,date:values.date||now.slice(0,10),amount,fee,actualDebit,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',feePayer,note:values.note||'',bankTransactionId:transactionId,createdAt:now,updatedAt:now};
     state.payments.unshift(payment);
     payable.paid=num(payable.paid)+amount;payable.bankId=bank.id;payable.payDate=payment.date;payable.fee=num(payable.fee)+fee;payable.feeParty=feePayer==='company'?'公司負擔':'收款人負擔';payable.status=payable.paid>=num(payable.amount)?'已付清':'部分付款';payable.updatedAt=now;
     bank.expense=num(bank.expense)+actualDebit;bank.balance=num(bank.openingBalance)+num(bank.income)-num(bank.expense);bank.updatedAt=now;
-    state.bankTransactions.unshift({id:transactionId,date:payment.date,bankId:bank.id,type:'支出',category:'應付帳款付款',amount:actualDebit,payableAmount:amount,fee,actualDebit,feePayer,paymentMethod:payment.paymentMethod,sourceType:'payable-payment',sourceId:payment.id,payableId:payable.id,vendor:payable.vendor,vendorName:payable.vendorName||'',project:payable.project,projectName:payable.projectName||'',sourceNo:payable.payableNo||payable.sourceNo||'',note:payment.note||`${payable.payableNo||''} 付款`,createdAt:now,updatedAt:now});
+    state.bankTransactions.unshift({id:transactionId,date:payment.date,bankId:bank.id,bankAccountId:bank.id,type:'支出',direction:'out',category:'應付帳款付款',amount:actualDebit,payableAmount:amount,fee,actualDebit,feePayer,paymentMethod:payment.paymentMethod,sourceType:'payable_payment',sourceId:payment.id,payableId:payable.id,vendor:payable.vendor,vendorName:payable.vendorName||'',project:payable.project,projectName:payable.projectName||'',sourceNo:payable.payableNo||payable.sourceNo||'',description:`${payable.vendorName||payable.payableNo||'應付帳款'} 付款`,note:payment.note||`${payable.payableNo||''} 付款`,createdAt:now,updatedAt:now});
     await persist(`新增應付付款 ${payable.payableNo||payable.sourceNo||''}`); return payment;
+  }
+  function payablePaymentTransaction(payment) {
+    return state.bankTransactions.find((row)=>row.id===payment.bankTransactionId||(row.sourceId===payment.id&&['payable-payment','payable_payment'].includes(row.sourceType)));
+  }
+  function adjustBankExpense(bank, delta, now) {
+    if(!bank||!delta)return;
+    bank.expense=Math.max(0,num(bank.expense)+delta);bank.balance=num(bank.openingBalance)+num(bank.income)-num(bank.expense);bank.updatedAt=now;
+  }
+  function syncPayableSummary(payable, now) {
+    const history=state.payments.filter((row)=>row.payableId===payable.id),paid=history.reduce((sum,row)=>sum+num(row.amount),0),fee=history.reduce((sum,row)=>sum+num(row.fee),0),latest=[...history].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];
+    payable.paid=Math.min(num(payable.amount),paid);payable.fee=fee;payable.bankId=latest?.bankAccountId||latest?.bankId||'';payable.payDate=latest?.date||'';payable.feeParty=latest?(latest.feePayer==='company'?'公司負擔':'收款人負擔'):'';payable.status=payable.paid>=num(payable.amount)&&num(payable.amount)>0?'已付清':payable.paid>0?'部分付款':'未付款';payable.updatedAt=now;
+  }
+  function syncPayableBankTransaction(payment, payable, now) {
+    const bankId=String(payment.bankAccountId||payment.bankId||''),bank=state.banks.find((row)=>row.id===bankId);if(!bank)throw new Error('請選擇付款銀行帳戶');
+    const existing=payablePaymentTransaction(payment);if(existing){const previousBank=state.banks.find((row)=>row.id===(existing.bankAccountId||existing.bankId));adjustBankExpense(previousBank,-num(existing.amount),now)}
+    const transaction=existing||{id:uid(),createdAt:now};
+    Object.assign(transaction,{date:payment.date,bankId:bank.id,bankAccountId:bank.id,type:'支出',direction:'out',category:'應付帳款付款',amount:num(payment.actualDebit),payableAmount:num(payment.amount),fee:num(payment.fee),actualDebit:num(payment.actualDebit),feePayer:payment.feePayer,paymentMethod:payment.paymentMethod||'銀行轉帳',sourceType:'payable_payment',sourceId:payment.id,payableId:payable.id,vendor:payable.vendor,vendorName:payable.vendorName||'',project:payable.project,projectName:payable.projectName||'',sourceNo:payable.payableNo||payable.sourceNo||'',description:`${payable.vendorName||payable.payableNo||'應付帳款'} 付款`,note:payment.note||`${payable.payableNo||''} 付款`,updatedAt:now});
+    if(!existing)state.bankTransactions.unshift(transaction);payment.bankId=bank.id;payment.bankAccountId=bank.id;payment.bankTransactionId=transaction.id;adjustBankExpense(bank,num(payment.actualDebit),now);return transaction;
+  }
+  async function updatePayablePayment(id, values={}) {
+    await load();const payment=state.payments.find((row)=>row.id===id);if(!payment)throw new Error('找不到付款紀錄');if(payment.legacy)throw new Error('歷史付款紀錄不可直接修改');
+    const payable=state.payables.find((row)=>row.id===payment.payableId);if(!payable)throw new Error('找不到這筆應付帳款');
+    const otherPaid=state.payments.filter((row)=>row!==payment&&row.payableId===payable.id).reduce((sum,row)=>sum+num(row.amount),0),amount=Math.round(num(values.amount)),fee=values.fee===undefined?num(payment.fee):Math.max(0,Math.round(num(values.fee))),feePayer=values.feePayer==='recipient'?'recipient':'company',bankId=String(values.bankAccountId||values.bankId||'');
+    if(amount<=0||otherPaid+amount>num(payable.amount))throw new Error('本次付款不可超過未付金額');if(feePayer==='recipient'&&fee>amount)throw new Error('收款人負擔的手續費不可高於本次付款');if(!state.banks.some((row)=>row.id===bankId))throw new Error('請選擇付款銀行帳戶');
+    const now=new Date().toISOString(),actualDebit=feePayer==='company'?amount+fee:amount;Object.assign(payment,{date:values.date||payment.date||now.slice(0,10),amount,fee,actualDebit,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||payment.paymentMethod||'銀行轉帳',feePayer,note:values.note===undefined?payment.note:String(values.note||''),updatedAt:now});
+    syncPayableBankTransaction(payment,payable,now);syncPayableSummary(payable,now);await persist(`修改應付付款 ${payable.payableNo||''}`);return payment;
+  }
+  async function deletePayablePayment(id) {
+    await load();const payment=state.payments.find((row)=>row.id===id);if(!payment)throw new Error('找不到付款紀錄');if(payment.legacy)throw new Error('歷史付款紀錄不可直接刪除');
+    const payable=state.payables.find((row)=>row.id===payment.payableId);if(!payable)throw new Error('找不到這筆應付帳款');const now=new Date().toISOString(),transaction=payablePaymentTransaction(payment);
+    if(transaction){const bank=state.banks.find((row)=>row.id===(transaction.bankAccountId||transaction.bankId));adjustBankExpense(bank,-num(transaction.amount),now);state.bankTransactions=state.bankTransactions.filter((row)=>row.id!==transaction.id)}
+    state.payments=state.payments.filter((row)=>row!==payment);syncPayableSummary(payable,now);await persist(`刪除應付付款 ${payable.payableNo||''}`);return true;
   }
   async function updateBillingInvoice(id, values = {}) {
     await load(); const billing=state.billings.find((row)=>row.id===id);if(!billing)throw new Error('找不到請款單');
@@ -888,5 +928,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());

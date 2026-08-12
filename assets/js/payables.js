@@ -228,9 +228,9 @@
   }
   function paymentHistoryMarkup(payable, state) {
     const history = state.payments.filter((row) => row.payableId === payable.id).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
-    return `<section class="payable-payment-section"><header><div><h3>付款紀錄</h3><p>${history.length ? `${history.length} 次付款` : '尚未付款'}</p></div></header>${history.length ? `<div class="payable-history-scroll"><table class="payable-detail-table"><colgroup><col class="payable-col-date"><col class="payable-col-money"><col class="payable-col-bank"><col class="payable-col-method"><col class="payable-col-money"><col class="payable-col-money"><col class="payable-col-note"></colgroup><thead><tr><th>付款日期</th><th class="num">本次付款</th><th>銀行帳戶</th><th>付款方式</th><th class="num">手續費</th><th class="num">實際扣款</th><th>備註</th></tr></thead><tbody>${history.map((payment) => {
+    return `<section class="payable-payment-section"><header><div><h3>付款紀錄</h3><p>${history.length ? `${history.length} 次付款` : '尚未付款'}</p></div></header>${history.length ? `<div class="payable-history-scroll"><table class="payable-detail-table"><thead><tr><th>付款日期</th><th class="num">本次付款</th><th>銀行帳戶</th><th>付款方式</th><th class="num">手續費</th><th class="num">實際扣款</th><th>備註</th><th>操作</th></tr></thead><tbody>${history.map((payment) => {
       const bank = state.banks.find((item) => item.id === payment.bankId);
-      return `<tr><td>${esc(payment.date || '—')}</td><td class="num">${money(payment.amount)}</td><td>${esc(bank?.name || bank?.bank || bank?.account || '—')}</td><td>${esc(payment.paymentMethod || '銀行轉帳')}</td><td class="num">${money(payment.fee)}</td><td class="num">${money(payment.actualDebit ?? payment.amount)}</td><td>${esc(payment.note || '—')}</td></tr>`;
+      return `<tr><td>${esc(payment.date || '—')}</td><td class="num">${money(payment.amount)}</td><td>${esc(bank?.name || bank?.bank || bank?.account || '—')}</td><td>${esc(payment.paymentMethod || '銀行轉帳')}</td><td class="num">${money(payment.fee)}</td><td class="num">${money(payment.actualDebit ?? payment.amount)}</td><td>${esc(payment.note || '—')}</td><td>${payment.legacy?'—':`<button class="commission-link" type="button" data-edit-payment="${esc(payment.id)}">編輯</button><button class="commission-link" type="button" data-delete-payment="${esc(payment.id)}">刪除</button>`}</td></tr>`;
     }).join('')}</tbody></table></div>` : `<div class="payable-empty-state"><span>尚無付款紀錄</span><button class="commission-secondary compact" type="button" data-empty-pay="${esc(payable.id)}">＋ 新增付款</button></div>`}</section>`;
   }
   function detailMarkup(id, state) {
@@ -249,6 +249,8 @@
       main.insertAdjacentHTML('afterend', detailMarkup(id, store.getState()));
       detail = main.nextElementSibling;
       $('[data-empty-pay]', detail)?.addEventListener('click', (event) => { event.stopPropagation(); openPayment(id); });
+      $$('[data-edit-payment]',detail).forEach((button)=>button.addEventListener('click',(event)=>{event.stopPropagation();openEditPayment(button.dataset.editPayment)}));
+      $$('[data-delete-payment]',detail).forEach((button)=>button.addEventListener('click',async(event)=>{event.stopPropagation();if(!window.confirm('確定要刪除此付款紀錄嗎？銀行扣款將同步沖回。'))return;try{await store.deletePayablePayment(button.dataset.deletePayment);render();setTimeout(()=>toggleDetail(id),0);window.KushePhase1.toast('付款已刪除，銀行扣款已沖回')}catch(error){window.KushePhase1.toast(error.message||String(error))}}));
     }
     if (detail) detail.hidden = !expanded;
     main.classList.toggle('is-expanded', expanded);
@@ -378,6 +380,20 @@
         button.disabled = false;
       }
     };
+  }
+  function openEditPayment(id) {
+    const state=store.getState(),payment=state.payments.find((row)=>row.id===id);
+    if(!payment||payment.legacy)return;
+    const payable=state.payables.find((row)=>row.id===payment.payableId);
+    if(!payable)return;
+    const row=payableView(payable,state),otherPaid=state.payments.filter((item)=>item!==payment&&item.payableId===payable.id).reduce((sum,item)=>sum+store.num(item.amount),0),maximum=Math.max(0,row.amount-otherPaid),selectedBank=payment.bankAccountId||payment.bankId||'';
+    closeModal();
+    const overlay=document.createElement('div');overlay.className='erp-detail-overlay';
+    overlay.innerHTML=`<section class="erp-detail-card receipt-card" role="dialog" aria-modal="true"><header><div><span>應付帳款付款</span><h2>編輯付款</h2><p>${esc(row.vendorName)}｜${esc(projectLabel(row,state))}</p></div><button type="button" data-close-detail aria-label="關閉">×</button></header><form id="editPayablePaymentForm"><div class="erp-detail-body"><div class="billing-detail-summary payable-preview"><span>應付金額<b>${money(row.amount)}</b></span><span>其他付款<b>${money(otherPaid)}</b></span><span>本次付款<b id="editPaymentPreviewAmount">${money(payment.amount)}</b></span><span>實際扣款<b id="editPaymentPreviewDebit">${money(payment.actualDebit??payment.amount)}</b></span><span>修改後未付<b id="editPaymentPreviewOpen">${money(Math.max(0,row.amount-otherPaid-store.num(payment.amount)))}</b></span></div><div class="receipt-form-grid"><label><span>付款日期</span><input name="date" type="date" value="${esc(payment.date||today())}" required></label><label><span>本次付款金額</span><input name="amount" type="number" min="1" max="${maximum}" value="${store.num(payment.amount)}" required></label><label><span>付款銀行帳戶</span><select name="bankId" required><option value="">請選擇帳戶</option>${state.banks.map((bank)=>`<option value="${esc(bank.id)}" ${bank.id===selectedBank?'selected':''}>${esc(bank.name||bank.bank||bank.account||'銀行帳戶')}</option>`).join('')}</select></label><label><span>付款方式</span><select name="paymentMethod">${['銀行轉帳','現金','支票','其他'].map((value)=>`<option ${payment.paymentMethod===value?'selected':''}>${value}</option>`).join('')}</select></label><label><span>手續費</span><input name="fee" type="number" min="0" step="1" value="${store.num(payment.fee)}"></label><label><span>手續費負擔方式</span><select name="feePayer"><option value="company" ${payment.feePayer!=='recipient'?'selected':''}>公司／轉帳人負擔</option><option value="recipient" ${payment.feePayer==='recipient'?'selected':''}>收款人負擔</option></select></label><label class="payable-note-field"><span>備註</span><input name="note" value="${esc(payment.note||'')}"></label></div><p>修改金額或付款銀行時，原銀行交易會以相同付款 ID 更新，不會重複扣款。</p></div><footer><button type="button" class="commission-secondary" data-close-detail>取消</button><button type="submit" class="commission-primary">儲存修改</button></footer></form></section>`;
+    document.body.appendChild(overlay);$$('[data-close-detail]',overlay).forEach((button)=>{button.onclick=closeModal});
+    const form=$('#editPayablePaymentForm',overlay),refresh=()=>{const amount=Math.max(0,Number($('[name="amount"]',form).value)||0),fee=Math.max(0,Number($('[name="fee"]',form).value)||0),company=$('[name="feePayer"]',form).value==='company',debit=company?amount+fee:amount;$('#editPaymentPreviewAmount',overlay).textContent=money(amount);$('#editPaymentPreviewDebit',overlay).textContent=money(debit);$('#editPaymentPreviewOpen',overlay).textContent=money(Math.max(0,row.amount-otherPaid-amount))};
+    ['amount','fee','feePayer'].forEach((name)=>{$(`[name="${name}"]`,form).oninput=refresh});
+    form.onsubmit=async(event)=>{event.preventDefault();const button=$('button[type="submit"]',form);button.disabled=true;try{const fd=new FormData(form);await store.updatePayablePayment(id,{date:fd.get('date'),amount:fd.get('amount'),bankId:fd.get('bankId'),paymentMethod:fd.get('paymentMethod'),fee:fd.get('fee'),feePayer:fd.get('feePayer'),note:fd.get('note')});closeModal();render();setTimeout(()=>toggleDetail(payable.id),0);window.KushePhase1.toast('付款與銀行交易已同步更新')}catch(error){window.KushePhase1.toast(error.message||String(error));button.disabled=false}};
   }
   async function activate() {
     active = true;
