@@ -198,9 +198,9 @@ html,body{height:100%;overflow:hidden}
 .project-master-modal.large>form>footer{position:sticky;z-index:2;bottom:0;flex:0 0 auto;background:#fff;box-shadow:0 -5px 16px rgba(8,45,98,.08)}
 
 /* Keep payable payment actions visible while only the form body scrolls. */
-#payablePaymentForm{min-height:0;display:flex;flex:1 1 auto;flex-direction:column;overflow:hidden}
-#payablePaymentForm>.erp-detail-body{min-height:0;flex:1 1 auto;overflow-y:auto}
-#payablePaymentForm>footer{flex:0 0 auto;background:#fff}
+#payablePaymentForm,#editPayablePaymentForm{min-height:0;display:flex;flex:1 1 auto;flex-direction:column;overflow:hidden}
+#payablePaymentForm>.erp-detail-body,#editPayablePaymentForm>.erp-detail-body{min-height:0;flex:1 1 auto;overflow-y:auto}
+#payablePaymentForm>footer,#editPayablePaymentForm>footer{flex:0 0 auto;background:#fff}
 
 /* Fit the project overview by column density, while retaining the ERP's normal type scale. */
 @media(min-width:1280px){
