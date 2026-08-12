@@ -112,7 +112,9 @@
 
   function closeModal() { document.querySelector('.erp-detail-overlay')?.remove(); }
   function selectOptions(rows, value, empty) {
-    return `<option value="">${empty}</option>${rows.map((row) => `<option value="${esc(row.id)}" ${row.id === value ? 'selected' : ''}>${esc(row.name || '—')}</option>`).join('')}`;
+    const state = store.getState(), key = ['vendors','projects','banks'].find((name) => rows === state[name]);
+    const source = key ? store.masterOptions(key) : rows;
+    return `<option value="">${empty}</option>${source.map((row) => `<option value="${esc(row.id)}" ${row.id === value ? 'selected' : ''}>${esc(row.name || '—')}</option>`).join('')}`;
   }
   function materialSource(payable) {
     return /material|inventory/i.test(payable.sourceType || '') || payable.category === '材料採購';

@@ -10,6 +10,46 @@
   const num = (value) => Number(value) || 0;
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const monthOf = (value) => String(value || '').slice(0, 7);
+  const MASTER_COLLECTIONS = ['customers','projects','vendors','materials','employees','banks'];
+  const masterLabel = (row, key) => {
+    const value = key === 'banks' ? (row?.name ?? row?.bank ?? row?.account ?? row?.accountName) : row?.name;
+    return typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
+  };
+  const normalizedMasterLabel = (value) => String(value || '').trim().replace(/\s+/g,' ').toLocaleLowerCase('zh-Hant');
+  function masterOptions(key) {
+    if (!MASTER_COLLECTIONS.includes(key) || !Array.isArray(state?.[key])) return [];
+    const foreignLabels = new Set();
+    if (key === 'vendors') {
+      ['customers','projects','materials','employees','banks'].forEach((foreignKey) => {
+        (state[foreignKey] || []).forEach((row) => {
+          const label = normalizedMasterLabel(masterLabel(row, foreignKey));
+          if (label) foreignLabels.add(label);
+        });
+      });
+    }
+    const materialVendorIds = new Set();
+    if (key === 'vendors') {
+      [...(state.materials || []), ...(state.materialUsages || [])].forEach((row) => {
+        const value = row?.vendor ?? row?.vendorId;
+        if (typeof value === 'string' || typeof value === 'number') materialVendorIds.add(String(value));
+      });
+      (state.payables || []).filter((row) => /material/i.test(String(row?.sourceType || '')) || String(row?.category || '').includes('材料')).forEach((row) => {
+        const value = row?.vendor ?? row?.vendorId;
+        if (typeof value === 'string' || typeof value === 'number') materialVendorIds.add(String(value));
+      });
+    }
+    const seenIds = new Set(), rows = [];
+    state[key].forEach((row) => {
+      if (!row || typeof row !== 'object') return;
+      const rawId = row.id;
+      const id = typeof rawId === 'string' || typeof rawId === 'number' ? String(rawId).trim() : '';
+      const label = masterLabel(row, key), normalized = normalizedMasterLabel(label);
+      if (!id || !normalized || seenIds.has(id)) return;
+      if (key === 'vendors' && foreignLabels.has(normalized) && !materialVendorIds.has(id)) return;
+      seenIds.add(id); rows.push({...row,id,name:label});
+    });
+    return rows;
+  }
   function retentionState(amount, received, current) {
     const total=num(amount),paid=num(received);
     if(total<=0)return 'no_retention';
@@ -998,5 +1038,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, salaryPaymentSummary, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, salaryPaymentSummary, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());

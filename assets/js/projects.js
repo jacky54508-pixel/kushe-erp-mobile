@@ -28,7 +28,7 @@
   }
   function projectStatus(project){return ['進行中','已完工','暫停'].includes(project.status)?project.status:project.status==='未完工'?'進行中':'進行中'}
   function statusBadge(status){return `<span class="project-master-status ${status==='已完工'?'done':status==='暫停'?'paused':''}">${esc(status)}</span>`}
-  function optionRows(rows,value,placeholder){return `<option value="">${placeholder}</option>${rows.map((row)=>`<option value="${esc(row.id)}" ${String(row.id)===String(value)?'selected':''}>${esc(row.name||'—')}</option>`).join('')}`}
+  function optionRows(rows,value,placeholder){const data=state(),key=['customers','projects','vendors','materials','employees','banks'].find((name)=>rows===data[name]),source=key?store.masterOptions(key):rows;return `<option value="">${placeholder}</option>${source.map((row)=>`<option value="${esc(row.id)}" ${String(row.id)===String(value)?'selected':''}>${esc(row.name||'—')}</option>`).join('')}`}
   function projectNameOptions(){return [...new Set(state().projects.map((project)=>text(project.name)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'zh-Hant'))}
   function invoiceLabel(value){return value==='invoice_required'?'需要開發票':'不開發票'}
   function retentionRateValue(project){if(project.defaultRetentionMode==='custom')return store.num(project.defaultRetentionRate);if(['5','10'].includes(project.defaultRetentionMode))return Number(project.defaultRetentionMode);return 0}

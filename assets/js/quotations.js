@@ -8,7 +8,7 @@
   const pricingLabel={actual:'實做實算',lump_sum:'總價承攬',mixed:'混合計價'};
   const filters={month:'',customer:'',project:'',status:'',query:''};
   let active=false,ready=false,editingId='',importDraft=null,detailId='';
-  function state(){return store.getState()}
+  function state(){const data=store.getState();return {...data,customers:store.masterOptions('customers'),projects:store.masterOptions('projects')};}
   function scalarText(value){return typeof value==='string'||typeof value==='number'?String(value).trim():''}
   function displayLabel(value,fields=['name','item','number','unit','title','label','value']){if(value&&typeof value==='object'){for(const field of fields){const label=scalarText(value[field]);if(label)return label}return ''}return scalarText(value)}
   function option(rows,value,label){return `<option value="">${esc(label)}</option>${rows.map(r=>{const id=scalarText(r?.id),name=displayLabel(r,['name','number']);return id&&name?`<option value="${esc(id)}" ${id===String(value)?'selected':''}>${esc(name)}</option>`:''}).join('')}`}
