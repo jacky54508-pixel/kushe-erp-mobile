@@ -131,6 +131,9 @@
       if (!receipt.retentionReceiptId) receipt.retentionReceiptId = receipt.id || uid();
       if (!receipt.id) receipt.id = receipt.retentionReceiptId;
       receipt.amount = Math.max(0,Math.round(num(receipt.amount)));
+      if (!receipt.bankAccountId && receipt.bankId) receipt.bankAccountId = receipt.bankId;
+      if (!receipt.bankId && receipt.bankAccountId) receipt.bankId = receipt.bankAccountId;
+      if (receipt.fee === undefined) receipt.fee = 0;
       if (!receipt.paymentMethod) receipt.paymentMethod = '銀行轉帳';
     });
     state.receivables.forEach((receivable) => {
@@ -523,12 +526,30 @@
     const remaining=Math.max(0,retentionAmount-retentionReceived),amount=Math.round(num(values.amount));
     if(amount<=0)throw new Error('本次收回保留款必須大於 0');
     if(amount>remaining)throw new Error('本次收回金額不可超過剩餘保留款');
-    const now=new Date().toISOString(),id=uid(),receipt={id,retentionReceiptId:id,idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:billing?.id||ar.billingId||'',projectId:ar.project||billing?.project||'',customerId:ar.customer||billing?.customer||'',date:values.date||now.slice(0,10),amount,paymentMethod:values.paymentMethod||'銀行轉帳',bankId:values.bankId||'',fee:Math.max(0,Math.round(num(values.fee))),note:String(values.note||''),createdAt:now};
+    const now=new Date().toISOString(),id=uid(),bankAccountId=String(values.bankAccountId||values.bankId||''),receipt={id,retentionReceiptId:id,idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:billing?.id||ar.billingId||'',projectId:ar.project||billing?.project||'',customerId:ar.customer||billing?.customer||'',date:values.date||now.slice(0,10),amount,paymentMethod:values.paymentMethod||'銀行轉帳',bankAccountId,bankId:bankAccountId,fee:Math.max(0,Math.round(num(values.fee))),note:String(values.note||''),createdAt:now,updatedAt:now};
     state.retentionReceipts.unshift(receipt);
     const nextReceived=retentionReceived+amount,nextRemaining=Math.max(0,retentionAmount-nextReceived),nextState=retentionState(retentionAmount,nextReceived,ar.retentionStatus);
     Object.assign(ar,{retentionAmount,retention:retentionAmount,retentionReceived:nextReceived,remainingRetention:nextRemaining,retentionStatus:nextState,updatedAt:now});
     if(billing){Object.assign(billing,{retentionAmount,retention:retentionAmount,retentionReceived:nextReceived,remainingRetention:nextRemaining,retentionStatus:nextState,updatedAt:now});if(num(ar.received)>=num(ar.amount)&&nextRemaining===0)billing.status='全部收清'}
     await persist(`收回保留款 ${ar.sourceNo}`);return receipt;
+  }
+  async function updateRetentionReceipt(id, values = {}) {
+    await load();
+    const receipt=state.retentionReceipts.find((row)=>row.id===id||row.retentionReceiptId===id);if(!receipt)throw new Error('找不到保留款收回紀錄');
+    const ar=state.receivables.find((row)=>row.id===receipt.receivableId);if(!ar)throw new Error('找不到對應應收帳款');
+    const billing=state.billings.find((row)=>row.id===receipt.billingId||row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||''));
+    const retentionAmount=Math.max(0,num(ar.retentionAmount??ar.retention??billing?.retentionAmount??billing?.retention));
+    const amount=Math.round(num(values.amount)),hasBankTransaction=state.bankTransactions.some((row)=>row.sourceId===receipt.id||row.sourceId===receipt.retentionReceiptId||row.retentionReceiptId===receipt.retentionReceiptId);
+    if(amount<=0)throw new Error('本次收回保留款必須大於 0');
+    if(hasBankTransaction&&amount!==num(receipt.amount))throw new Error('此筆保留款已有銀行交易，不能修改收回金額');
+    const otherReceived=state.retentionReceipts.filter((row)=>row!==receipt&&(row.receivableId===ar.id||row.billingId&&row.billingId===ar.billingId)).reduce((sum,row)=>sum+num(row.amount),0);
+    if(otherReceived+amount>retentionAmount)throw new Error('本次收回金額不可超過剩餘保留款');
+    const now=new Date().toISOString(),bankAccountId=String(values.bankAccountId||values.bankId||'');
+    Object.assign(receipt,{date:values.date||receipt.date||now.slice(0,10),amount,bankAccountId,bankId:bankAccountId,paymentMethod:values.paymentMethod||'銀行轉帳',fee:Math.max(0,Math.round(num(values.fee))),note:String(values.note||''),updatedAt:now});
+    const received=otherReceived+amount,remaining=Math.max(0,retentionAmount-received),nextState=retentionState(retentionAmount,received,ar.retentionStatus);
+    Object.assign(ar,{retentionAmount,retention:retentionAmount,retentionReceived:received,remainingRetention:remaining,retentionStatus:nextState,updatedAt:now});
+    if(billing){Object.assign(billing,{retentionAmount,retention:retentionAmount,retentionReceived:received,remainingRetention:remaining,retentionStatus:nextState,updatedAt:now});billing.status=num(ar.received)>=num(ar.amount)&&remaining===0?'全部收清':num(ar.received)>=num(ar.amount)?'已收款':num(ar.received)>0?'部分收款':'未收款'}
+    await persist(`修改保留款收回紀錄 ${ar.sourceNo}`);return receipt;
   }
   function nextPayableNumber(date) {
     const compact = String(date || new Date().toISOString().slice(0,10)).replaceAll('-','');
@@ -779,5 +800,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, addRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, addRetentionReceipt, updateRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
