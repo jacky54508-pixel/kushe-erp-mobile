@@ -126,6 +126,12 @@
       if (receipt.fee === undefined) receipt.fee = 0;
       if (receipt.netAmount === undefined) receipt.netAmount = Math.max(0, num(receipt.amount) - num(receipt.fee));
       if (!receipt.paymentMethod) receipt.paymentMethod = '銀行轉帳';
+      if (!receipt.bankAccountId && receipt.bankId) receipt.bankAccountId = receipt.bankId;
+      if (!receipt.bankId && receipt.bankAccountId) receipt.bankId = receipt.bankAccountId;
+      if (!receipt.bankTransactionId) {
+        const transaction = state.bankTransactions.find((row) => row.sourceId === receipt.id && ['receipt','receivable_receipt'].includes(row.sourceType));
+        if (transaction) receipt.bankTransactionId = transaction.id;
+      }
     });
     state.retentionReceipts.forEach((receipt) => {
       if (!receipt.retentionReceiptId) receipt.retentionReceiptId = receipt.id || uid();
@@ -137,6 +143,10 @@
       if (!receipt.paymentMethod) receipt.paymentMethod = '銀行轉帳';
     });
     state.receivables.forEach((receivable) => {
+      if (receivable.legacyReceived === undefined) {
+        const recordedReceipts=state.receipts.filter((row)=>row.receivableId===receivable.id).reduce((sum,row)=>sum+num(row.amount),0);
+        receivable.legacyReceived=Math.max(0,num(receivable.received)-recordedReceipts);
+      }
       const billing=state.billings.find((row)=>row.id===receivable.billingId||String(row.number||'')===String(receivable.sourceNo||''));
       const retentionAmount=num(receivable.retentionAmount ?? receivable.retention ?? billing?.retentionAmount ?? billing?.retention);
       const recorded=state.retentionReceipts.filter((row)=>row.receivableId===receivable.id||row.billingId&&row.billingId===receivable.billingId).reduce((sum,row)=>sum+num(row.amount),0);
@@ -493,12 +503,43 @@
     const received = num(ar?.received), amount = num(ar?.amount ?? billing.total);
     return {receivable:ar,received,unreceived:Math.max(0,amount-received),status:amount>0&&received>=amount?'已收':received>0?'部分收款':'未收'};
   }
+  function receiptBankTransaction(receipt) {
+    return state.bankTransactions.find((row) => row.id === receipt.bankTransactionId || (row.sourceId === receipt.id && ['receipt','receivable_receipt'].includes(row.sourceType)));
+  }
+  function adjustBankIncome(bank, delta, now) {
+    if (!bank || !delta) return;
+    bank.income = Math.max(0,num(bank.income)+delta);
+    bank.balance = num(bank.openingBalance)+num(bank.income)-num(bank.expense);
+    bank.updatedAt = now;
+  }
+  function syncReceivableSummary(ar, now) {
+    const history=state.receipts.filter((row)=>row.receivableId===ar.id),received=num(ar.legacyReceived)+history.reduce((sum,row)=>sum+num(row.amount),0),latest=[...history].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];
+    ar.received=Math.min(num(ar.amount),received);ar.bankId=latest?.bankAccountId||latest?.bankId||'';ar.receiptDate=latest?.date||'';ar.status=ar.received>=num(ar.amount)&&num(ar.amount)>0?'已收':ar.received>0?'部分收款':'未收';ar.updatedAt=now;
+    const billing=state.billings.find((row)=>row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||''));
+    if(billing){billing.status=ar.status==='已收'?'已收款':ar.status==='部分收款'?'部分收款':'未收款';billing.updatedAt=now}
+  }
+  function syncReceiptBankTransaction(receipt, ar, now) {
+    const bankId=String(receipt.bankAccountId||receipt.bankId||''),bank=state.banks.find((row)=>row.id===bankId);
+    if(!bank)throw new Error('請選擇收款銀行帳戶');
+    const amount=Math.max(0,num(receipt.netAmount??num(receipt.amount)-num(receipt.fee))),existing=receiptBankTransaction(receipt);
+    if(existing){const previousBank=state.banks.find((row)=>row.id===(existing.bankAccountId||existing.bankId));adjustBankIncome(previousBank,-num(existing.amount),now)}
+    const transaction=existing||{id:uid(),createdAt:now};
+    Object.assign(transaction,{date:receipt.date,bankId:bank.id,bankAccountId:bank.id,type:'收入',direction:'in',category:'應收收款',amount,receiptAmount:num(receipt.amount),fee:num(receipt.fee),netAmount:amount,paymentMethod:receipt.paymentMethod||'銀行轉帳',sourceType:'receivable_receipt',sourceId:receipt.id,receivableId:ar.id,billingId:ar.billingId||'',customer:ar.customer,customerName:ar.customerName||'',project:ar.project,projectName:ar.projectName||'',sourceNo:ar.sourceNo||'',description:`${ar.projectName||ar.sourceNo||'應收帳款'} 收款`,note:receipt.note||`${ar.sourceNo||''} 收款`,updatedAt:now});
+    if(!existing)state.bankTransactions.unshift(transaction);
+    receipt.bankId=bank.id;receipt.bankAccountId=bank.id;receipt.bankTransactionId=transaction.id;
+    adjustBankIncome(bank,amount,now);
+    return transaction;
+  }
   async function addReceipt(values) {
     await load();
     const idempotencyKey = String(values.idempotencyKey || '').trim();
     if (idempotencyKey) {
       const existing = state.receipts.find((row) => row.idempotencyKey === idempotencyKey);
-      if (existing) return existing;
+      if (existing) {
+        const ar=state.receivables.find((row)=>row.id===existing.receivableId);
+        if(ar&&!receiptBankTransaction(existing)){const now=new Date().toISOString();syncReceiptBankTransaction(existing,ar,now);syncReceivableSummary(ar,now);await persist(`補齊一般收款銀行交易 ${ar.sourceNo||''}`)}
+        return existing;
+      }
     }
     const ar = state.receivables.find((row) => row.id === values.receivableId);
     if (!ar) throw new Error('找不到對應應收帳款');
@@ -507,13 +548,29 @@
     if (fee > amount) throw new Error('手續費不可超過本次收款金額');
     const bank = state.banks.find((row) => row.id === values.bankId);
     if (!bank) throw new Error('請選擇收款銀行帳戶');
-    const now = new Date().toISOString(), receipt = {id:uid(),idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:ar.billingId||'',date:values.date||now.slice(0,10),amount,fee,netAmount,bankId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:values.note||'',createdAt:now};
-    state.receipts.unshift(receipt); ar.received=num(ar.received)+amount; ar.bankId=bank.id; ar.receiptDate=receipt.date; ar.status=ar.received>=num(ar.amount)?'已收':'部分收款'; ar.updatedAt=now;
-    bank.income=num(bank.income)+netAmount; bank.balance=num(bank.openingBalance)+num(bank.income)-num(bank.expense); bank.updatedAt=now;
-    state.bankTransactions.unshift({id:uid(),date:receipt.date,bankId:bank.id,type:'收入',category:'應收帳款收款',amount:netAmount,receiptAmount:amount,fee,netAmount,paymentMethod:receipt.paymentMethod,sourceType:'receipt',sourceId:receipt.id,customer:ar.customer,customerName:ar.customerName||'',project:ar.project,projectName:ar.projectName||'',sourceNo:ar.sourceNo,note:receipt.note||`${ar.sourceNo} 收款`,createdAt:now,updatedAt:now});
-    const billing = state.billings.find((row) => row.id === ar.billingId || String(row.number||'') === String(ar.sourceNo||''));
-    if (billing) { billing.status=ar.status==='已收'?'已收款':'部分收款'; billing.updatedAt=now; }
+    const now = new Date().toISOString(), receipt = {id:uid(),idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:ar.billingId||'',date:values.date||now.slice(0,10),amount,fee,netAmount,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:values.note||'',createdAt:now,updatedAt:now};
+    state.receipts.unshift(receipt);syncReceiptBankTransaction(receipt,ar,now);syncReceivableSummary(ar,now);
     await persist(`新增分次收款 ${ar.sourceNo}`); return receipt;
+  }
+  async function updateReceipt(id, values = {}) {
+    await load();
+    const receipt=state.receipts.find((row)=>row.id===id);if(!receipt)throw new Error('找不到收款紀錄');
+    const ar=state.receivables.find((row)=>row.id===receipt.receivableId);if(!ar)throw new Error('找不到對應應收帳款');
+    const otherReceived=num(ar.legacyReceived)+state.receipts.filter((row)=>row!==receipt&&row.receivableId===ar.id).reduce((sum,row)=>sum+num(row.amount),0),amount=Math.round(num(values.amount)),fee=values.fee===undefined?num(receipt.fee):Math.max(0,Math.round(num(values.fee))),bankId=String(values.bankAccountId||values.bankId||'');
+    if(amount<=0||otherReceived+amount>num(ar.amount))throw new Error('本次收款金額不可超過本期剩餘應收');
+    if(fee>amount)throw new Error('手續費不可大於本次收款金額');
+    if(!state.banks.some((row)=>row.id===bankId))throw new Error('請選擇收款銀行帳戶');
+    const now=new Date().toISOString();
+    Object.assign(receipt,{date:values.date||receipt.date||now.slice(0,10),amount,fee,netAmount:amount-fee,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||receipt.paymentMethod||'銀行轉帳',note:values.note===undefined?receipt.note:String(values.note||''),updatedAt:now});
+    syncReceiptBankTransaction(receipt,ar,now);syncReceivableSummary(ar,now);await persist(`修改應收收款 ${ar.sourceNo||''}`);return receipt;
+  }
+  async function deleteReceipt(id) {
+    await load();
+    const receipt=state.receipts.find((row)=>row.id===id);if(!receipt)throw new Error('找不到收款紀錄');
+    const ar=state.receivables.find((row)=>row.id===receipt.receivableId);if(!ar)throw new Error('找不到對應應收帳款');
+    const now=new Date().toISOString(),transaction=receiptBankTransaction(receipt);
+    if(transaction){const bank=state.banks.find((row)=>row.id===(transaction.bankAccountId||transaction.bankId));adjustBankIncome(bank,-num(transaction.amount),now);state.bankTransactions=state.bankTransactions.filter((row)=>row.id!==transaction.id)}
+    state.receipts=state.receipts.filter((row)=>row.id!==receipt.id);syncReceivableSummary(ar,now);await persist(`刪除應收收款 ${ar.sourceNo||''}`);return true;
   }
   async function addRetentionReceipt(values) {
     await load();
@@ -800,5 +857,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, addRetentionReceipt, updateRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updateBillingInvoice, saveCustomer, saveProject, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());

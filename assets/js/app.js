@@ -38,6 +38,7 @@
     const isBillingDraft = route === 'billing-draft';
     const isReceivables = route === 'receivables';
     const isPayables = route === 'payables';
+    const isBanks = route === 'banks';
     const isProjects = route === 'projects' || route === 'customers';
     const isQuotations = route === 'quotations';
     $('#dashboard').hidden = !isDashboard;
@@ -47,9 +48,11 @@
     $('#billingDraftView').hidden = !isBillingDraft;
     $('#receivablesView').hidden = !isReceivables;
     $('#payablesView').hidden = !isPayables;
+    $('#banksView').hidden = !isBanks;
     $('#projectsView').hidden = !isProjects;
     $('#quotationsView').hidden = !isQuotations;
-    $('#moduleView').hidden = isDashboard || isCommissions || isUnbilledWork || isBillings || isBillingDraft || isReceivables || isPayables || isProjects || isQuotations;
+    $('#moduleView').hidden = isDashboard || isCommissions || isUnbilledWork || isBillings || isBillingDraft || isReceivables || isPayables || isBanks || isProjects || isQuotations;
+    if (!isBanks) window.KusheBanks?.deactivate();
     document.body.dataset.route = route;
     $$('.nav-item[data-module]').forEach((node) => {
       const navRoute = node.dataset.module;
@@ -60,10 +63,10 @@
     if (!isProjects) window.KusheProjects?.deactivate();
     if (!isQuotations) window.KusheQuotations?.deactivate();
     if (isProjects) {
-      window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();
+      window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();window.KusheBanks?.deactivate();
       window.KusheProjects?.activate({customer:route==='customers'});document.title = '酷舍 ERP｜客戶／案場';
     } else if (isQuotations) {
-      window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();
+      window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();window.KusheBanks?.deactivate();
       window.KusheQuotations?.activate();document.title = '酷舍 ERP－報價單管理';
     } else if (isCommissions) {
       window.KusheCommissions?.activate();
@@ -87,6 +90,9 @@
     } else if (isPayables) {
       window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();
       window.KushePayables?.activate();document.title = '酷舍 ERP｜應付帳款';
+    } else if (isBanks) {
+      window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();
+      window.KusheBanks?.activate();document.title = '酷舍 ERP｜銀行帳戶';
     } else if (!isDashboard) {
       window.KusheCommissions?.deactivate();
       window.KusheUnbilledWork?.deactivate();
