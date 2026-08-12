@@ -124,13 +124,15 @@
     });
     state.receipts.forEach((receipt) => {
       if (receipt.fee === undefined) receipt.fee = 0;
-      if (receipt.netAmount === undefined) receipt.netAmount = Math.max(0, num(receipt.amount) - num(receipt.fee));
+      const historicalTransaction = state.bankTransactions.find((row) => row.sourceId === receipt.id && ['receipt','receivable_receipt'].includes(row.sourceType));
+      const historicalNet = receipt.netAmount !== undefined ? num(receipt.netAmount) : historicalTransaction ? num(historicalTransaction.amount) : undefined;
+      if (!receipt.feePayer) receipt.feePayer = historicalNet !== undefined && historicalNet === num(receipt.amount) ? 'counterparty' : 'company';
+      if (receipt.netAmount === undefined) receipt.netAmount = historicalNet ?? Math.max(0, num(receipt.amount) - num(receipt.fee));
       if (!receipt.paymentMethod) receipt.paymentMethod = '銀行轉帳';
       if (!receipt.bankAccountId && receipt.bankId) receipt.bankAccountId = receipt.bankId;
       if (!receipt.bankId && receipt.bankAccountId) receipt.bankId = receipt.bankAccountId;
       if (!receipt.bankTransactionId) {
-        const transaction = state.bankTransactions.find((row) => row.sourceId === receipt.id && ['receipt','receivable_receipt'].includes(row.sourceType));
-        if (transaction) receipt.bankTransactionId = transaction.id;
+        if (historicalTransaction) receipt.bankTransactionId = historicalTransaction.id;
       }
     });
     state.retentionReceipts.forEach((receipt) => {
@@ -140,10 +142,13 @@
       if (!receipt.bankAccountId && receipt.bankId) receipt.bankAccountId = receipt.bankId;
       if (!receipt.bankId && receipt.bankAccountId) receipt.bankId = receipt.bankAccountId;
       if (receipt.fee === undefined) receipt.fee = 0;
+      const historicalTransaction = state.bankTransactions.find((row) => row.sourceId === receipt.id && row.sourceType === 'retention_receipt');
+      const historicalNet = receipt.netAmount !== undefined ? num(receipt.netAmount) : historicalTransaction ? num(historicalTransaction.amount) : undefined;
+      if (!receipt.feePayer) receipt.feePayer = historicalNet !== undefined && historicalNet === num(receipt.amount) ? 'counterparty' : 'company';
+      if (receipt.netAmount === undefined) receipt.netAmount = historicalNet ?? Math.max(0,num(receipt.amount)-num(receipt.fee));
       if (!receipt.paymentMethod) receipt.paymentMethod = '銀行轉帳';
       if (!receipt.bankTransactionId) {
-        const transaction = state.bankTransactions.find((row) => row.sourceId === receipt.id && row.sourceType === 'retention_receipt');
-        if (transaction) receipt.bankTransactionId = transaction.id;
+        if (historicalTransaction) receipt.bankTransactionId = historicalTransaction.id;
       }
     });
     state.receivables.forEach((receivable) => {
@@ -184,9 +189,13 @@
     state.salaryPayments.forEach((payment) => {
       if (!payment.bankAccountId && payment.bankId) payment.bankAccountId=payment.bankId;
       if (!payment.bankId && payment.bankAccountId) payment.bankId=payment.bankAccountId;
+      if (payment.fee === undefined) payment.fee=0;
+      const historicalTransaction=state.bankTransactions.find((row)=>row.sourceType==='salary_payment'&&row.sourceId===payment.id);
+      const historicalDebit=payment.actualDebit!==undefined?num(payment.actualDebit):historicalTransaction?num(historicalTransaction.amount):undefined;
+      if (!payment.feePayer) payment.feePayer=historicalDebit!==undefined&&historicalDebit===num(payment.amount)?'recipient':'company';
+      if (payment.actualDebit === undefined) payment.actualDebit=historicalDebit??num(payment.amount);
       if (!payment.bankTransactionId) {
-        const transaction=state.bankTransactions.find((row)=>row.sourceType==='salary_payment'&&row.sourceId===payment.id);
-        if(transaction)payment.bankTransactionId=transaction.id;
+        if(historicalTransaction)payment.bankTransactionId=historicalTransaction.id;
       }
     });
     state.payables.filter((payable) => Array.isArray(payable.usageIds)).forEach((payable) => {
@@ -533,6 +542,11 @@
     bank.balance = num(bank.openingBalance)+num(bank.income)-num(bank.expense);
     bank.updatedAt = now;
   }
+  function incomeSettlement(amountValue, feeValue, payerValue) {
+    const amount=Math.round(num(amountValue)),fee=Math.max(0,Math.round(num(feeValue))),feePayer=payerValue==='counterparty'?'counterparty':'company';
+    if(feePayer==='company'&&fee>amount)throw new Error('公司負擔的手續費不可高於本次收款');
+    return {amount,fee,feePayer,netAmount:feePayer==='company'?amount-fee:amount};
+  }
   function syncReceivableSummary(ar, now) {
     const history=state.receipts.filter((row)=>row.receivableId===ar.id),received=num(ar.legacyReceived)+history.reduce((sum,row)=>sum+num(row.amount),0),latest=[...history].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];
     ar.received=Math.min(num(ar.amount),received);ar.bankId=latest?.bankAccountId||latest?.bankId||'';ar.receiptDate=latest?.date||'';ar.status=ar.received>=num(ar.amount)&&num(ar.amount)>0?'已收':ar.received>0?'部分收款':'未收';ar.updatedAt=now;
@@ -542,10 +556,10 @@
   function syncReceiptBankTransaction(receipt, ar, now) {
     const bankId=String(receipt.bankAccountId||receipt.bankId||''),bank=state.banks.find((row)=>row.id===bankId);
     if(!bank)throw new Error('請選擇收款銀行帳戶');
-    const amount=Math.max(0,num(receipt.netAmount??num(receipt.amount)-num(receipt.fee))),existing=receiptBankTransaction(receipt);
+    const amount=Math.max(0,num(receipt.netAmount)),existing=receiptBankTransaction(receipt);
     if(existing){const previousBank=state.banks.find((row)=>row.id===(existing.bankAccountId||existing.bankId));adjustBankIncome(previousBank,-num(existing.amount),now)}
     const transaction=existing||{id:uid(),createdAt:now};
-    Object.assign(transaction,{date:receipt.date,bankId:bank.id,bankAccountId:bank.id,type:'收入',direction:'in',category:'應收收款',amount,receiptAmount:num(receipt.amount),fee:num(receipt.fee),netAmount:amount,paymentMethod:receipt.paymentMethod||'銀行轉帳',sourceType:'receivable_receipt',sourceId:receipt.id,receivableId:ar.id,billingId:ar.billingId||'',customer:ar.customer,customerName:ar.customerName||'',project:ar.project,projectName:ar.projectName||'',sourceNo:ar.sourceNo||'',description:`${ar.projectName||ar.sourceNo||'應收帳款'} 收款`,note:receipt.note||`${ar.sourceNo||''} 收款`,updatedAt:now});
+    Object.assign(transaction,{date:receipt.date,bankId:bank.id,bankAccountId:bank.id,type:'收入',direction:'in',category:'應收收款',amount,receiptAmount:num(receipt.amount),fee:num(receipt.fee),feePayer:receipt.feePayer,netAmount:amount,actualCredit:amount,paymentMethod:receipt.paymentMethod||'銀行轉帳',sourceType:'receivable_receipt',sourceId:receipt.id,receivableId:ar.id,billingId:ar.billingId||'',customer:ar.customer,customerName:ar.customerName||'',project:ar.project,projectName:ar.projectName||'',sourceNo:ar.sourceNo||'',description:`${ar.projectName||ar.sourceNo||'應收帳款'} 收款`,note:receipt.note||`${ar.sourceNo||''} 收款`,updatedAt:now});
     if(!existing)state.bankTransactions.unshift(transaction);
     receipt.bankId=bank.id;receipt.bankAccountId=bank.id;receipt.bankTransactionId=transaction.id;
     adjustBankIncome(bank,amount,now);
@@ -565,10 +579,10 @@
     const existing=retentionBankTransaction(receipt);
     if(existing){const previousBank=state.banks.find((row)=>row.id===(existing.bankAccountId||existing.bankId));adjustBankIncome(previousBank,-num(existing.amount),now)}
     const transaction=existing||{id:uid(),createdAt:now};
-    Object.assign(transaction,{date:receipt.date,bankId:bank.id,bankAccountId:bank.id,type:'收入',direction:'in',category:'保留款收回',amount:num(receipt.amount),sourceType:'retention_receipt',sourceId:receipt.id,retentionReceiptId:receipt.retentionReceiptId||receipt.id,receivableId:ar.id,billingId:billing?.id||ar.billingId||'',customer:ar.customer,customerName:ar.customerName||billing?.customerName||'',project:ar.project,projectName:ar.projectName||billing?.projectName||'',sourceNo:ar.sourceNo||billing?.number||'',description:`${ar.projectName||ar.sourceNo||'應收帳款'} 保留款收回`,note:receipt.note||`${ar.sourceNo||''} 保留款收回`,updatedAt:now});
+    Object.assign(transaction,{date:receipt.date,bankId:bank.id,bankAccountId:bank.id,type:'收入',direction:'in',category:'保留款收回',amount:num(receipt.netAmount),receiptAmount:num(receipt.amount),fee:num(receipt.fee),feePayer:receipt.feePayer,netAmount:num(receipt.netAmount),actualCredit:num(receipt.netAmount),sourceType:'retention_receipt',sourceId:receipt.id,retentionReceiptId:receipt.retentionReceiptId||receipt.id,receivableId:ar.id,billingId:billing?.id||ar.billingId||'',customer:ar.customer,customerName:ar.customerName||billing?.customerName||'',project:ar.project,projectName:ar.projectName||billing?.projectName||'',sourceNo:ar.sourceNo||billing?.number||'',description:`${ar.projectName||ar.sourceNo||'應收帳款'} 保留款收回`,note:receipt.note||`${ar.sourceNo||''} 保留款收回`,updatedAt:now});
     if(!existing)state.bankTransactions.unshift(transaction);
     receipt.bankId=bank.id;receipt.bankAccountId=bank.id;receipt.bankTransactionId=transaction.id;
-    adjustBankIncome(bank,num(receipt.amount),now);
+    adjustBankIncome(bank,num(receipt.netAmount),now);
     return transaction;
   }
   async function addReceipt(values) {
@@ -584,12 +598,11 @@
     }
     const ar = state.receivables.find((row) => row.id === values.receivableId);
     if (!ar) throw new Error('找不到對應應收帳款');
-    const amount = Math.round(num(values.amount)), fee = Math.max(0,Math.round(num(values.fee))), netAmount = amount - fee, outstanding = Math.max(0,num(ar.amount)-num(ar.received));
+    const settlement=incomeSettlement(values.amount,values.fee,values.feePayer),{amount,fee,feePayer,netAmount}=settlement,outstanding = Math.max(0,num(ar.amount)-num(ar.received));
     if (amount <= 0 || amount > outstanding) throw new Error('本次收款金額不可超過未收餘額');
-    if (fee > amount) throw new Error('手續費不可超過本次收款金額');
     const bank = state.banks.find((row) => row.id === values.bankId);
     if (!bank) throw new Error('請選擇收款銀行帳戶');
-    const now = new Date().toISOString(), receipt = {id:uid(),idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:ar.billingId||'',date:values.date||now.slice(0,10),amount,fee,netAmount,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:values.note||'',createdAt:now,updatedAt:now};
+    const now = new Date().toISOString(), receipt = {id:uid(),idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:ar.billingId||'',date:values.date||now.slice(0,10),amount,fee,feePayer,netAmount,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:values.note||'',createdAt:now,updatedAt:now};
     state.receipts.unshift(receipt);syncReceiptBankTransaction(receipt,ar,now);syncReceivableSummary(ar,now);
     await persist(`新增分次收款 ${ar.sourceNo}`); return receipt;
   }
@@ -597,12 +610,11 @@
     await load();
     const receipt=state.receipts.find((row)=>row.id===id);if(!receipt)throw new Error('找不到收款紀錄');
     const ar=state.receivables.find((row)=>row.id===receipt.receivableId);if(!ar)throw new Error('找不到對應應收帳款');
-    const otherReceived=num(ar.legacyReceived)+state.receipts.filter((row)=>row!==receipt&&row.receivableId===ar.id).reduce((sum,row)=>sum+num(row.amount),0),amount=Math.round(num(values.amount)),fee=values.fee===undefined?num(receipt.fee):Math.max(0,Math.round(num(values.fee))),bankId=String(values.bankAccountId||values.bankId||'');
+    const otherReceived=num(ar.legacyReceived)+state.receipts.filter((row)=>row!==receipt&&row.receivableId===ar.id).reduce((sum,row)=>sum+num(row.amount),0),settlement=incomeSettlement(values.amount,values.fee===undefined?receipt.fee:values.fee,values.feePayer===undefined?receipt.feePayer:values.feePayer),{amount,fee,feePayer,netAmount}=settlement,bankId=String(values.bankAccountId||values.bankId||'');
     if(amount<=0||otherReceived+amount>num(ar.amount))throw new Error('本次收款金額不可超過本期剩餘應收');
-    if(fee>amount)throw new Error('手續費不可大於本次收款金額');
     if(!state.banks.some((row)=>row.id===bankId))throw new Error('請選擇收款銀行帳戶');
     const now=new Date().toISOString();
-    Object.assign(receipt,{date:values.date||receipt.date||now.slice(0,10),amount,fee,netAmount:amount-fee,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||receipt.paymentMethod||'銀行轉帳',note:values.note===undefined?receipt.note:String(values.note||''),updatedAt:now});
+    Object.assign(receipt,{date:values.date||receipt.date||now.slice(0,10),amount,fee,feePayer,netAmount,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||receipt.paymentMethod||'銀行轉帳',note:values.note===undefined?receipt.note:String(values.note||''),updatedAt:now});
     syncReceiptBankTransaction(receipt,ar,now);syncReceivableSummary(ar,now);await persist(`修改應收收款 ${ar.sourceNo||''}`);return receipt;
   }
   async function deleteReceipt(id) {
@@ -621,12 +633,12 @@
     const billing=state.billings.find((row)=>row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||''));
     const retentionAmount=Math.max(0,num(ar.retentionAmount ?? ar.retention ?? billing?.retentionAmount ?? billing?.retention));
     const retentionReceived=Math.max(0,num(ar.retentionReceived ?? billing?.retentionReceived));
-    const remaining=Math.max(0,retentionAmount-retentionReceived),amount=Math.round(num(values.amount));
+    const remaining=Math.max(0,retentionAmount-retentionReceived),settlement=incomeSettlement(values.amount,values.fee,values.feePayer),{amount,fee,feePayer,netAmount}=settlement;
     if(amount<=0)throw new Error('本次收回保留款必須大於 0');
     if(amount>remaining)throw new Error('本次收回金額不可超過剩餘保留款');
     const now=new Date().toISOString(),id=uid(),bankAccountId=String(values.bankAccountId||values.bankId||'');
     if(!state.banks.some((row)=>row.id===bankAccountId))throw new Error('請選擇入帳銀行帳戶');
-    const receipt={id,retentionReceiptId:id,idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:billing?.id||ar.billingId||'',projectId:ar.project||billing?.project||'',customerId:ar.customer||billing?.customer||'',date:values.date||now.slice(0,10),amount,paymentMethod:values.paymentMethod||'銀行轉帳',bankAccountId,bankId:bankAccountId,fee:Math.max(0,Math.round(num(values.fee))),note:String(values.note||''),createdAt:now,updatedAt:now};
+    const receipt={id,retentionReceiptId:id,idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:billing?.id||ar.billingId||'',projectId:ar.project||billing?.project||'',customerId:ar.customer||billing?.customer||'',date:values.date||now.slice(0,10),amount,paymentMethod:values.paymentMethod||'銀行轉帳',bankAccountId,bankId:bankAccountId,fee,feePayer,netAmount,note:String(values.note||''),createdAt:now,updatedAt:now};
     state.retentionReceipts.unshift(receipt);
     syncRetentionBankTransaction(receipt,ar,billing,now);syncRetentionSummary(ar,billing,now);
     await persist(`收回保留款 ${ar.sourceNo}`);return receipt;
@@ -637,13 +649,13 @@
     const ar=state.receivables.find((row)=>row.id===receipt.receivableId);if(!ar)throw new Error('找不到對應應收帳款');
     const billing=state.billings.find((row)=>row.id===receipt.billingId||row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||''));
     const retentionAmount=Math.max(0,num(ar.retentionAmount??ar.retention??billing?.retentionAmount??billing?.retention));
-    const amount=Math.round(num(values.amount));
+    const settlement=incomeSettlement(values.amount,values.fee===undefined?receipt.fee:values.fee,values.feePayer===undefined?receipt.feePayer:values.feePayer),{amount,fee,feePayer,netAmount}=settlement;
     if(amount<=0)throw new Error('本次收回保留款必須大於 0');
     const otherReceived=num(ar.legacyRetentionReceived)+state.retentionReceipts.filter((row)=>row!==receipt&&(row.receivableId===ar.id||row.billingId&&row.billingId===ar.billingId)).reduce((sum,row)=>sum+num(row.amount),0);
     if(otherReceived+amount>retentionAmount)throw new Error('本次收回金額不可超過剩餘保留款');
     const now=new Date().toISOString(),bankAccountId=String(values.bankAccountId||values.bankId||'');
     if(!state.banks.some((row)=>row.id===bankAccountId))throw new Error('請選擇入帳銀行帳戶');
-    Object.assign(receipt,{date:values.date||receipt.date||now.slice(0,10),amount,bankAccountId,bankId:bankAccountId,paymentMethod:values.paymentMethod||'銀行轉帳',fee:Math.max(0,Math.round(num(values.fee))),note:String(values.note||''),updatedAt:now});
+    Object.assign(receipt,{date:values.date||receipt.date||now.slice(0,10),amount,bankAccountId,bankId:bankAccountId,paymentMethod:values.paymentMethod||'銀行轉帳',fee,feePayer,netAmount,note:String(values.note||''),updatedAt:now});
     syncRetentionBankTransaction(receipt,ar,billing,now);syncRetentionSummary(ar,billing,now);
     await persist(`修改保留款收回紀錄 ${ar.sourceNo}`);return receipt;
   }
@@ -746,18 +758,18 @@
     const bankId=String(payment.bankAccountId||payment.bankId||''),bank=state.banks.find((row)=>row.id===bankId);if(!bank)throw new Error('請選擇薪資付款銀行帳戶');
     const existing=salaryPaymentTransaction(payment);if(existing){const previousBank=state.banks.find((row)=>row.id===(existing.bankAccountId||existing.bankId));adjustBankExpense(previousBank,-num(existing.amount),now)}
     const employee=state.employees.find((row)=>row.id===payroll.employee),employeeName=employee?.name||payroll.employeeName||'員工',transaction=existing||{id:uid(),createdAt:now};
-    Object.assign(transaction,{date:payment.date,bankId:bank.id,bankAccountId:bank.id,type:'支出',direction:'out',category:'員工薪資',amount:num(payment.amount),sourceType:'salary_payment',sourceId:payment.id,salaryPaymentId:payment.id,payrollId:payroll.id,employee:payroll.employee,employeeName,month:payroll.month,sourceNo:payroll.month||'',description:`${employeeName} ${payroll.month||''} 薪資付款`,note:payment.note||`${employeeName} ${payroll.month||''} 薪資付款`,updatedAt:now});
-    if(!existing)state.bankTransactions.unshift(transaction);payment.bankId=bank.id;payment.bankAccountId=bank.id;payment.bankTransactionId=transaction.id;adjustBankExpense(bank,num(payment.amount),now);return transaction;
+    Object.assign(transaction,{date:payment.date,bankId:bank.id,bankAccountId:bank.id,type:'支出',direction:'out',category:'員工薪資',amount:num(payment.actualDebit),salaryAmount:num(payment.amount),fee:num(payment.fee),feePayer:payment.feePayer,actualDebit:num(payment.actualDebit),employeeNetAmount:Math.max(0,num(payment.amount)-num(payment.fee)*(payment.feePayer==='recipient'?1:0)),sourceType:'salary_payment',sourceId:payment.id,salaryPaymentId:payment.id,payrollId:payroll.id,employee:payroll.employee,employeeName,month:payroll.month,sourceNo:payroll.month||'',description:`${employeeName} ${payroll.month||''} 薪資付款`,note:payment.note||`${employeeName} ${payroll.month||''} 薪資付款`,updatedAt:now});
+    if(!existing)state.bankTransactions.unshift(transaction);payment.bankId=bank.id;payment.bankAccountId=bank.id;payment.bankTransactionId=transaction.id;adjustBankExpense(bank,num(payment.actualDebit),now);return transaction;
   }
   async function addSalaryPayment(values) {
     await load();const idempotencyKey=String(values.idempotencyKey||'').trim();if(idempotencyKey){const existing=state.salaryPayments.find((row)=>row.idempotencyKey===idempotencyKey);if(existing)return existing}
-    const payroll=state.payroll.find((row)=>row.id===values.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const summary=salaryPaymentSummary(payroll),amount=Math.round(num(values.amount));if(amount<=0||amount>summary.outstanding)throw new Error('本次付款不可超過未付薪資');
-    const bank=state.banks.find((row)=>row.id===String(values.bankAccountId||values.bankId||''));if(!bank)throw new Error('請選擇薪資付款銀行帳戶');const now=new Date().toISOString(),payment={id:uid(),idempotencyKey:idempotencyKey||uid(),payrollId:payroll.id,date:values.date||now.slice(0,10),amount,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:String(values.note||''),createdAt:now,updatedAt:now};
+    const payroll=state.payroll.find((row)=>row.id===values.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const summary=salaryPaymentSummary(payroll),amount=Math.round(num(values.amount)),fee=Math.max(0,Math.round(num(values.fee))),feePayer=values.feePayer==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount;if(amount<=0||amount>summary.outstanding)throw new Error('本次付款不可超過未付薪資');if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次付款');
+    const bank=state.banks.find((row)=>row.id===String(values.bankAccountId||values.bankId||''));if(!bank)throw new Error('請選擇薪資付款銀行帳戶');const now=new Date().toISOString(),payment={id:uid(),idempotencyKey:idempotencyKey||uid(),payrollId:payroll.id,date:values.date||now.slice(0,10),amount,fee,feePayer,actualDebit,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:String(values.note||''),createdAt:now,updatedAt:now};
     state.salaryPayments.unshift(payment);syncSalaryBankTransaction(payment,payroll,now);syncSalarySummary(payroll,now);await persist(`新增薪資付款 ${payroll.month||''}`);return payment;
   }
   async function updateSalaryPayment(id, values={}) {
-    await load();const payment=state.salaryPayments.find((row)=>row.id===id);if(!payment)throw new Error('找不到薪資付款紀錄');const payroll=state.payroll.find((row)=>row.id===payment.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const otherPaid=state.salaryPayments.filter((row)=>row!==payment&&row.payrollId===payroll.id).reduce((sum,row)=>sum+num(row.amount),0),amount=Math.round(num(values.amount)),bankId=String(values.bankAccountId||values.bankId||'');if(amount<=0||otherPaid+amount>num(payroll.total))throw new Error('本次付款不可超過未付薪資');if(!state.banks.some((row)=>row.id===bankId))throw new Error('請選擇薪資付款銀行帳戶');
-    const now=new Date().toISOString();Object.assign(payment,{date:values.date||payment.date||now.slice(0,10),amount,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||payment.paymentMethod||'銀行轉帳',note:values.note===undefined?payment.note:String(values.note||''),updatedAt:now});syncSalaryBankTransaction(payment,payroll,now);syncSalarySummary(payroll,now);await persist(`修改薪資付款 ${payroll.month||''}`);return payment;
+    await load();const payment=state.salaryPayments.find((row)=>row.id===id);if(!payment)throw new Error('找不到薪資付款紀錄');const payroll=state.payroll.find((row)=>row.id===payment.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const otherPaid=state.salaryPayments.filter((row)=>row!==payment&&row.payrollId===payroll.id).reduce((sum,row)=>sum+num(row.amount),0),amount=Math.round(num(values.amount)),fee=values.fee===undefined?num(payment.fee):Math.max(0,Math.round(num(values.fee))),feePayer=(values.feePayer===undefined?payment.feePayer:values.feePayer)==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount,bankId=String(values.bankAccountId||values.bankId||'');if(amount<=0||otherPaid+amount>num(payroll.total))throw new Error('本次付款不可超過未付薪資');if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次付款');if(!state.banks.some((row)=>row.id===bankId))throw new Error('請選擇薪資付款銀行帳戶');
+    const now=new Date().toISOString();Object.assign(payment,{date:values.date||payment.date||now.slice(0,10),amount,fee,feePayer,actualDebit,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||payment.paymentMethod||'銀行轉帳',note:values.note===undefined?payment.note:String(values.note||''),updatedAt:now});syncSalaryBankTransaction(payment,payroll,now);syncSalarySummary(payroll,now);await persist(`修改薪資付款 ${payroll.month||''}`);return payment;
   }
   async function deleteSalaryPayment(id) {
     await load();const payment=state.salaryPayments.find((row)=>row.id===id);if(!payment)throw new Error('找不到薪資付款紀錄');const payroll=state.payroll.find((row)=>row.id===payment.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const now=new Date().toISOString(),transaction=salaryPaymentTransaction(payment);if(transaction){const bank=state.banks.find((row)=>row.id===(transaction.bankAccountId||transaction.bankId));adjustBankExpense(bank,-num(transaction.amount),now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==transaction)}
