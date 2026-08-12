@@ -1,0 +1,26 @@
+(function () {
+  'use strict';
+  const $=(selector,root=document)=>root.querySelector(selector),$$=(selector,root=document)=>Array.from(root.querySelectorAll(selector));
+  const store=window.KuSheERPStore,esc=(value)=>String(value??'').replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const money=(value)=>`$${Math.round(store.num(value)).toLocaleString('en-US')}`;
+  let active=false,query='';
+  function state(){return store.getState()}
+  function vendorName(material,data){return data.vendors.find((row)=>row.id===material.vendor)?.name||material.vendorName||'—'}
+  function optionRows(rows,selected,placeholder){return `<option value="">${esc(placeholder)}</option>${rows.map((row)=>`<option value="${esc(row.id)}" ${String(row.id)===String(selected||'')?'selected':''}>${esc(row.name||'—')}</option>`).join('')}`}
+  function overlay(markup){const node=document.createElement('div');node.className='detail-overlay is-open';node.innerHTML=markup;document.body.appendChild(node);const close=()=>node.remove();$$('[data-close-detail]',node).forEach((button)=>button.onclick=close);node.onclick=(event)=>{if(event.target===node)close()};return {node,close}}
+  async function render(){
+    if(!active)return; await store.load(); const data=state(),host=$('#materialsApp');if(!host)return;
+    const normalized=query.trim().toLocaleLowerCase('zh-Hant'),rows=data.materials.filter((row)=>!normalized||`${row.name||''} ${row.code||''} ${row.unit||''} ${vendorName(row,data)} ${row.note||''}`.toLocaleLowerCase('zh-Hant').includes(normalized));
+    host.innerHTML=`<section class="commissions-heading"><div><h1>材料管理</h1><p>管理材料主檔；案場用量、成本與廠商應付沿用同一份材料資料。</p></div><button class="commission-primary" id="newMaterial" type="button">＋ 新增材料</button></section><section class="commission-panel commission-filters"><label class="payable-search"><span>關鍵字</span><input id="materialQuery" type="search" value="${esc(query)}" placeholder="材料名稱、代碼、廠商或單位"></label></section><section class="commission-panel billing-list-panel"><div class="commission-table-wrap"><table class="commission-table"><thead><tr><th>材料名稱</th><th>材料代碼</th><th>廠商</th><th>規格／型號</th><th>單位</th><th class="num">單價</th><th>備註</th><th>操作</th></tr></thead><tbody>${rows.map((row)=>`<tr><td><b>${esc(row.name||'—')}</b></td><td>${esc(row.code||'—')}</td><td>${esc(vendorName(row,data))}</td><td>${esc(row.model||'—')}</td><td>${esc(row.unit||'—')}</td><td class="num">${money(row.unitPrice)}</td><td>${esc(row.note||'—')}</td><td><div class="project-row-actions"><button type="button" data-edit-material-master="${esc(row.id)}">編輯</button><button type="button" data-delete-material-master="${esc(row.id)}">刪除</button></div></td></tr>`).join('')||'<tr><td colspan="8" class="billing-empty">尚無材料主檔。</td></tr>'}</tbody></table></div></section>`;
+    $('#newMaterial').onclick=()=>openForm();$('#materialQuery').oninput=(event)=>{query=event.target.value;render()};
+    $$('[data-edit-material-master]',host).forEach((button)=>button.onclick=()=>openForm(button.dataset.editMaterialMaster));
+    $$('[data-delete-material-master]',host).forEach((button)=>button.onclick=async()=>{if(!confirm('確定刪除此材料主檔？'))return;try{await store.deleteMaterial(button.dataset.deleteMaterialMaster);render();window.KushePhase1.toast('材料已刪除')}catch(error){window.KushePhase1.toast(error.message)}});
+    window.KusheTableScroll?.refresh?.();
+  }
+  function openForm(id=''){
+    const data=state(),row=data.materials.find((item)=>item.id===id)||{};
+    const modal=overlay(`<section class="erp-detail-card project-master-modal" role="dialog" aria-modal="true"><header><div><span>材料主檔</span><h2>${id?'編輯材料':'新增材料'}</h2><p>材料價格供案場材料使用自動帶入；單次使用改價不回寫主檔。</p></div><button type="button" data-close-detail aria-label="關閉">×</button></header><form id="materialMasterForm"><div class="erp-detail-body"><div class="project-form-grid"><label><span>材料名稱</span><input name="name" value="${esc(row.name||'')}" required></label><label><span>材料代碼</span><input name="code" value="${esc(row.code||'')}"></label><label><span>廠商</span><select name="vendor" required>${optionRows(data.vendors,row.vendor,'請選擇既有廠商')}</select></label><label><span>單位</span><input name="unit" value="${esc(row.unit||'')}" required></label><label><span>單價</span><input name="unitPrice" type="number" min="0" step="0.01" value="${store.num(row.unitPrice)}" required></label><label><span>規格／型號</span><input name="model" value="${esc(row.model||'')}"></label><label class="wide"><span>備註</span><textarea name="note" rows="3">${esc(row.note||'')}</textarea></label></div></div><footer><button type="button" class="commission-secondary" data-close-detail>取消</button><button type="submit" class="commission-primary">儲存材料</button></footer></form></section>`);
+    $('#materialMasterForm',modal.node).onsubmit=async(event)=>{event.preventDefault();const button=event.submitter;button.disabled=true;try{await store.saveMaterial(Object.fromEntries(new FormData(event.target)),id);modal.close();render();window.KushePhase1.toast('材料主檔已儲存')}catch(error){button.disabled=false;window.KushePhase1.toast(error.message)}};
+  }
+  window.KusheMaterials={activate(){active=true;render()},deactivate(){active=false},render};
+})();
