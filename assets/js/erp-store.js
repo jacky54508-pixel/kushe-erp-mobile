@@ -584,7 +584,15 @@
   }
   function legacyInvoicePayable(row) {
     const directId=String(row.sourceId||row.payableId||'').trim();
-    if(directId)return state.payables.find((item)=>String(item.id)===directId)||null;
+    if(directId){
+      const direct=state.payables.find((item)=>String(item.id)===directId)||null;
+      if(direct){
+        const invoiceVendor=normalizedMasterLabel(row.party||row.vendorName||state.vendors.find((vendor)=>String(vendor.id)===String(row.vendorId||row.vendor))?.name),payableVendor=normalizedMasterLabel(direct.vendorName||state.vendors.find((vendor)=>vendor.id===direct.vendor)?.name);
+        const invoiceAmount=num(row.netAmount??row.amount),payableAmount=num(direct.amount),invoiceSourceNo=String(row.sourceNo||'').trim(),payableSourceNos=[direct.payableNo,direct.sourceNo].map((value)=>String(value||'').trim()).filter(Boolean);
+        const vendorConflict=Boolean(invoiceVendor&&payableVendor&&invoiceVendor!==payableVendor),amountConflict=Boolean(invoiceAmount>0&&payableAmount>0&&invoiceAmount!==payableAmount),sourceConflict=Boolean(/^AP-/i.test(invoiceSourceNo)&&payableSourceNos.some((value)=>/^AP-/i.test(value))&&!payableSourceNos.includes(invoiceSourceNo));
+        if(!vendorConflict&&!amountConflict&&!sourceConflict)return direct;
+      }
+    }
     if(!/進項/.test(String(row.type||''))&&row.invoiceType!=='input')return null;
     const party=normalizedMasterLabel(row.party||row.vendorName),sourceNo=String(row.sourceNo||'').trim(),amount=num(row.netAmount??row.amount);
     if(!party||!sourceNo||amount<=0)return null;
@@ -594,7 +602,7 @@
   function normalizedInvoice(row) {
     const type=row.invoiceType||(/進項/.test(String(row.type||''))?'input':'output'),billing=type==='output'?state.billings.find((item)=>String(item.id)===String(row.sourceId||row.billingId||'')):null,payable=type==='input'?legacyInvoicePayable(row):null;
     const number=String(row.invoiceNumber??row.number??'').trim(),date=row.invoiceDate||row.date||billing?.date||payable?.date||'',net=num(row.netAmount??row.amount),tax=num(row.taxAmount??row.tax),gross=num(row.grossAmount??row.total)||(net+tax);
-    return {...row,id:row.id||row.invoiceId,invoiceId:row.invoiceId||row.id,invoiceType:type,invoiceNumber:number,invoiceDate:date,customerId:row.customerId||row.customer||billing?.customer||'',vendorId:row.vendorId||row.vendor||payable?.vendor||'',projectId:row.projectId||row.project||billing?.project||payable?.project||'',sourceType:row.sourceType||(row.billingId?'billing':payable?'payable':'legacy_invoice'),sourceId:row.sourceId||row.billingId||row.payableId||payable?.id||'',taxMode:row.taxMode||billing?.taxMode||'未稅',netAmount:net,taxAmount:tax,grossAmount:gross,status:invoiceStatus(row.status,number),party:row.party||billing?.customerName||payable?.vendorName||'',projectName:row.projectName||billing?.projectName||payable?.projectName||'',sourceNo:row.sourceNo||billing?.number||payable?.payableNo||''};
+    return {...row,id:row.id||row.invoiceId,invoiceId:row.invoiceId||row.id,invoiceType:type,invoiceNumber:number,invoiceDate:date,customerId:row.customerId||row.customer||billing?.customer||'',vendorId:row.vendorId||row.vendor||payable?.vendor||'',projectId:row.projectId||row.project||billing?.project||payable?.project||'',sourceType:type==='input'?(payable?'payable':'legacy_invoice'):(row.sourceType||(row.billingId?'billing':'legacy_invoice')),sourceId:type==='input'?(payable?.id||''):(row.sourceId||row.billingId||row.payableId||''),taxMode:row.taxMode||billing?.taxMode||'未稅',netAmount:net,taxAmount:tax,grossAmount:gross,status:invoiceStatus(row.status,number),party:row.party||billing?.customerName||payable?.vendorName||'',projectName:row.projectName||billing?.projectName||payable?.projectName||'',sourceNo:row.sourceNo||billing?.number||payable?.payableNo||''};
   }
   function invoiceRows() {
     const rows=state.invoices.map(normalizedInvoice),keys=new Set(rows.filter((row)=>row.sourceId).map((row)=>`${row.sourceType}:${row.sourceId}`));
