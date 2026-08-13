@@ -3,7 +3,7 @@
   const num=value=>Number(value)||0;
   const text=value=>String(value??'').trim();
   const safeFile=value=>text(value).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/[. ]+$/g,'');
-  function companyView(){return {name:'酷舍企業有限公司',englishName:'Cool Sir Limited Company',taxId:'82980636',address:'台中市豐原區瑞興路62號',line:'eing0519'}}
+  function companyView(){return {name:'酷舍企業有限公司',englishName:'Cool Sir Limited Company',taxId:'82980636',address:'台中市豐原區瑞興路 62 號',line:'eing0519'}}
   function publicLines(record,type){const mode=type==='quotation'?text(record.pricingMode):'',lines=(Array.isArray(record.lines)?record.lines:[]).map(line=>{const pricingType=mode==='mixed'?(line.pricingType==='lump_sum'?'lump_sum':'actual'):mode,rawQty=line.qty??line.quantity,hasQty=rawQty!==null&&rawQty!==undefined&&String(rawQty).trim()!==''&&num(rawQty)>0,amount=pricingType==='lump_sum'?num(line.lumpSumAmount??line.amount):hasQty?num(line.amount??num(rawQty)*num(line.price??line.unitPrice)):0;return {house:text(line.house||line.unitName||line.building),item:text(line.item||line.name||line.description),unit:text(line.unit),qty:hasQty?num(rawQty):null,price:pricingType==='lump_sum'?null:num(line.price??line.unitPrice),amount,pricingType}}).filter(line=>line.item||line.amount||line.qty);if(type==='quotation'&&mode==='lump_sum')lines.push({house:'',item:'合約／報價總價',unit:'式',qty:null,price:null,amount:num(record.lumpSumTotal??record.amount),pricingType:'lump_sum'});return lines}
   function externalView(record,settings,type){
     const lines=publicLines(record,type),sales=num(record.amount)||lines.reduce((sum,line)=>sum+line.amount,0),tax=num(record.tax),total=num(record.grossTotal)||num(record.total)||sales+tax;
