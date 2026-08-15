@@ -102,6 +102,18 @@
       request.onerror = () => reject(request.error);
     });
   }
+  function mergeQuotationUnitPresets(...sources) {
+    if (!state.settings || typeof state.settings !== 'object' || Array.isArray(state.settings)) state.settings = {};
+    const existing = Array.isArray(state.settings.quotationUnitPresets) ? state.settings.quotationUnitPresets : [];
+    const seen = new Set(), merged = [];
+    [...existing, ...sources.flat(Infinity)].forEach((value) => {
+      const label = typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '', key = label.toLocaleLowerCase('zh-Hant');
+      if (!label || seen.has(key)) return;
+      seen.add(key); merged.push(label);
+    });
+    state.settings.quotationUnitPresets = merged;
+    return merged;
+  }
   async function load() {
     if (state) return state;
     try {
@@ -137,6 +149,7 @@
       });
       state.meta.quotationPriceMigrated = true;
     }
+    mergeQuotationUnitPresets('式', state.quotationPrices.map((row) => row.unit), state.quotations.flatMap((quote) => (quote.lines || []).map((line) => line.unit)));
     state.dailyLogs.forEach((log) => {
       const billable = log.billable !== false && !log.noInvoice && (num(log.groupTotal) > 0 || num(log.performance) > 0 || (log.items || []).some((item) => num(item.qty) * num(item.price) > 0));
       if (log.billable === undefined) log.billable = billable;
@@ -1132,7 +1145,7 @@
     const lumpSumTotal=mode==='lump_sum'?Math.max(0,num(values.lumpSumTotal)):0;if(mode==='lump_sum'&&lumpSumTotal<=0)throw new Error('請輸入合約／報價總價');
     const totals=quotationTotals(lines,values.taxMode,mode,lumpSumTotal),row=existing||{id:uid(),number:nextQuotationNumber(values.date),createdAt:now};
     Object.assign(row,{customer:customer.id,customerName:customer.name,project:project.id,projectName:project.name,date:values.date||now.slice(0,10),dueDate:values.dueDate||'',pricingMode:mode,lumpSumTotal,billingPlan:values.billingPlan||row.billingPlan||'one_time',billingMilestones:Array.isArray(row.billingMilestones)?row.billingMilestones:[],taxMode:values.taxMode==='含稅'?'含稅':'未稅',lines,amount:totals.amount,tax:totals.tax,total:totals.total,status:['草稿','已送出','已確認','作廢'].includes(values.status)?values.status:(row.status||'草稿'),internalNote:clean(values.internalNote),publicNote:clean(values.publicNote),note:clean(values.publicNote),sourceType:values.sourceType||row.sourceType||'manual',importTemplateId:values.importTemplateId||row.importTemplateId||'',updatedAt:now});
-    if(!existing)state.quotations.unshift(row); await persist(`${id?'修改':'新增'}報價單 ${row.number}`); return row;
+    if(!existing)state.quotations.unshift(row); mergeQuotationUnitPresets(lines.map((line)=>line.unit)); await persist(`${id?'修改':'新增'}報價單 ${row.number}`); return row;
   }
   async function setQuotationStatus(id,status) {
     await load(); const row=state.quotations.find((item)=>item.id===id); if(!row)throw new Error('找不到報價單');
