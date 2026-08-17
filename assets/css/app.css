@@ -243,3 +243,54 @@ html,body{height:100%;overflow:hidden}
 .receipt-card>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm)>.erp-detail-body{flex:1 1 auto;min-width:0;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding-bottom:24px}
 .receipt-card>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm)>.erp-detail-body>*{min-width:0;max-width:100%}
 .receipt-card>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm)>footer{position:sticky;bottom:0;z-index:2;flex:0 0 auto;background:#fff}
+
+/* Global ERP shell polish: shared layout and components only. */
+html,body,.app-shell{max-width:100%;overflow-x:hidden}
+.page-frame,.dashboard,.module-view,.commissions-view,.app-view{min-width:0;max-width:100%}
+.dashboard,.module-view,.commissions-view{width:100%}
+:is(.dashboard,.module-view,.commissions-view) > *{min-width:0;max-width:100%}
+
+.commissions-heading{align-items:flex-start;flex-wrap:wrap;column-gap:20px;row-gap:12px}
+.commissions-heading>div{min-width:0}
+.commissions-heading h1{font-weight:800;line-height:1.25}
+:is(.billing-heading-actions,.unbilled-card-actions,.quotation-actions,.quotation-row-actions,.quotation-status-actions,.commission-row-actions,.receivable-actions){flex-wrap:wrap}
+
+:is(.panel,.kpi-card,.commission-panel,.commission-kpis article){border-color:#dfe7f0;border-radius:14px;box-shadow:0 6px 22px rgba(23,50,83,.075)}
+:is(.commission-primary,.commission-secondary,.commission-clear){display:inline-flex;align-items:center;justify-content:center;gap:7px;height:auto;min-height:40px;padding:9px 16px;line-height:1.15}
+.commission-primary.compact{min-height:30px;padding:6px 12px}
+.commission-row-actions button,.quotation-row-actions button,.commission-link{display:inline-flex;align-items:center;justify-content:center;line-height:1.2}
+
+:is(.commission-filter-grid,.billing-filter-grid,.receivable-filter-grid,.quotation-filter-grid,.billing-field-grid,.quotation-form-grid,.receipt-form-grid)>label{min-width:0}
+:is(.commission-filter-grid,.billing-filter-grid,.receivable-filter-grid,.quotation-filter-grid,.billing-field-grid,.quotation-form-grid,.receipt-form-grid) :is(input:not([type="checkbox"]):not([type="radio"]),select,textarea){min-width:0;max-width:100%}
+:where(.module-view,.commissions-view,.erp-detail-card,.commission-drawer) :is(input,select,textarea):focus-visible{outline:0;border-color:#73a5eb;box-shadow:0 0 0 3px rgba(7,91,216,.1)}
+
+:is(.commission-table-wrap,.table-wrap,.daily-lines-wrap,.receipt-history-scroll){min-width:0;max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain}
+.commission-table th,.commission-table td{vertical-align:middle;line-height:1.45}
+.commission-table .num,.commission-table td.num{font-variant-numeric:tabular-nums}
+
+.erp-detail-overlay{overflow:hidden;overscroll-behavior:contain}
+.erp-detail-card{max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px)}
+.erp-detail-card>header{flex:0 0 auto}
+.erp-detail-body{min-width:0;overscroll-behavior:contain}
+.erp-detail-card>footer,.erp-detail-card form>footer{flex:0 0 auto;flex-wrap:wrap;background:#fff}
+.erp-detail-card :is(input,select,textarea){max-width:100%}
+
+.nav-icon{flex:0 0 22px}
+.nav-item b{min-width:0;overflow:hidden;text-overflow:ellipsis}
+
+@media(max-width:1500px){
+  .receivable-filter-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .receivable-search{grid-column:span 2}
+}
+@media(max-width:820px){
+  .commissions-heading{column-gap:12px;margin-bottom:16px}
+  :is(.billing-heading-actions,.unbilled-card-actions,.quotation-actions){width:100%}
+  .receivable-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .erp-detail-card{max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);max-height:calc(100dvh - 16px)}
+}
+@media(max-width:620px){
+  .receivable-filter-grid{grid-template-columns:1fr}
+  .receivable-search{grid-column:auto}
+  .erp-detail-card>footer,.erp-detail-card form>footer{padding:12px}
+  .erp-detail-card>footer>:is(button,.commission-primary,.commission-secondary),.erp-detail-card form>footer>:is(button,.commission-primary,.commission-secondary){flex:1 1 120px}
+}
