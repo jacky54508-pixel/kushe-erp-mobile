@@ -368,3 +368,28 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
   .kpi-value{font-size:24px}
   :is(.commission-status,.quote-status,.invoice-status-badge,.status-pill,.receipt-count-badge){font-size:10.5px}
 }
+
+/* Final pre-release UI fixes: KPI fit and materials search consistency. */
+.kpi-card,.kpi-top,.kpi-top>div{min-width:0}
+.kpi-top>div{max-width:100%}
+.kpi-value{max-width:100%;font-size:clamp(23px,2.2vw,26px);letter-spacing:-.035em}
+
+#materialsApp .commission-filters{display:flex;align-items:flex-end}
+#materialsApp .commission-filters .payable-search{display:grid;gap:7px;width:min(100%,560px);min-width:min(360px,100%)}
+#materialsApp #materialQuery{width:100%;min-height:42px;border:1px solid #d7e1ec;border-radius:9px;background:#fff;padding:9px 12px;font-size:12.5px;line-height:1.35;outline:0;transition:border-color .15s ease,box-shadow .15s ease}
+#materialsApp #materialQuery::placeholder{color:#7a899d;opacity:1}
+#materialsApp #materialQuery:focus{border-color:#73a5eb;box-shadow:0 0 0 3px rgba(7,91,216,.1)}
+
+@media(max-width:1800px) and (min-width:621px){
+  .kpi-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:740px){
+  .kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:620px){
+  #materialsApp .commission-filters .payable-search{width:100%;min-width:0}
+}
+@media(max-width:520px){
+  .kpi-grid{grid-template-columns:1fr}
+  .kpi-value{font-size:24px}
+}
