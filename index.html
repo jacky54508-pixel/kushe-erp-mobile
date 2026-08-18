@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#061d3b">
   <title>酷舍 ERP｜首頁總覽</title>
-  <link rel="stylesheet" href="assets/css/app.css?v=20260817-final-ui1">
+  <link rel="stylesheet" href="assets/css/app.css?v=20260818-employee-v1">
   <link rel="stylesheet" href="assets/css/projects-scoped.css?v=20260811-billing-settings1">
 </head>
 <body>
@@ -190,6 +190,11 @@
         <div id="materialsApp" aria-live="polite"></div>
       </main>
 
+      <main class="commissions-view app-view" id="employeesView" data-view="employees" hidden>
+        <nav class="view-breadcrumb" aria-label="麵包屑"><button type="button" data-route="dashboard">管理總覽</button><span>/</span><b>員工管理</b></nav>
+        <div id="employeesApp" aria-live="polite"></div>
+      </main>
+
       <main class="commissions-view app-view" id="payrollView" data-view="payroll" hidden>
         <nav class="view-breadcrumb" aria-label="麵包屑"><button type="button" data-route="dashboard">首頁總覽</button><span>/</span><b>薪資管理</b></nav>
         <div id="payrollApp" aria-live="polite"></div>
@@ -202,13 +207,14 @@
   <script src="assets/js/backup-snapshot.js?v=20260805"></script>
   <script src="assets/js/config.js?v=20260809-billing1"></script>
   <script src="assets/js/legacy-adapter.js?v=20260809-nav4"></script>
-  <script src="assets/js/erp-store.js?v=20260816-billing-edit1"></script>
+  <script src="assets/js/erp-store.js?v=20260818-employee-v1"></script>
   <script src="assets/js/dashboard.js?v=20260809-projects1"></script>
   <script src="assets/js/commissions.js?v=20260811-quote-corrections1"></script>
   <script src="assets/js/unbilled-work.js?v=20260810-pricing1"></script>
   <script src="assets/js/billing.js?v=20260817-retention-base1"></script>
   <script src="assets/js/payables.js?v=20260809-payable-scroll4"></script>
   <script src="assets/js/materials.js?v=20260812-material-actions2"></script>
+  <script src="assets/js/employees.js?v=20260818-employee-v1"></script>
   <script src="assets/js/banks.js?v=20260812-receivable-bank1"></script>
   <script src="assets/js/payroll.js?v=20260813-payroll-monthly1"></script>
   <script src="assets/js/invoices.js?v=20260813-input-pending1"></script>
@@ -216,6 +222,6 @@
   <script src="assets/js/table-scroll.js?v=20260809-global1"></script>
   <script src="assets/js/billing-print.js?v=20260815-lumpsum-price1"></script>
   <script src="assets/js/quotations.js?v=20260815-detail-price1"></script>
-  <script src="assets/js/app.js?v=20260809-quotations2"></script>
+  <script src="assets/js/app.js?v=20260818-employee-v1"></script>
 </body>
 </html>
