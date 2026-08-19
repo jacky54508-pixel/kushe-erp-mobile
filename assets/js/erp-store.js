@@ -748,6 +748,47 @@
   function billingSourceRefs(billing) { return billing?[...(billing.sourceItemRefs||[]),...(billing.lines||[]).flatMap((line)=>line.sourceRefs||[])]:[]; }
   function billingSourcesResolvable(billing) { return billingSourceRefs(billing).every((ref)=>availableSourceCopies(ref).length>0); }
   function billingDeletable(id) { const safety=billingSafety(id);return safety.deletable&&billingSourcesResolvable(safety.billing); }
+  const accountingDeleteToken=Symbol('accounting-delete');
+  function receivableBillingCandidates(receivable) {
+    if(!receivable)return [];
+    const direct=state.billings.filter((row)=>String(row.id)===String(receivable.billingId||'')||String(row.receivableId||'')===String(receivable.id));
+    if(direct.length)return direct;
+    return state.billings.filter((row)=>String(row.number||'')===String(receivable.sourceNo||''));
+  }
+  function receiptBankTransactions(receipt) {
+    const id=String(receipt?.id||''),transactionId=String(receipt?.bankTransactionId||'');
+    return state.bankTransactions.filter((row)=>(transactionId&&String(row.id)===transactionId)||(id&&String(row.sourceId||'')===id&&['receipt','receivable_receipt'].includes(row.sourceType)));
+  }
+  function retentionBankTransactions(receipt) {
+    const id=String(receipt?.id||''),transactionId=String(receipt?.bankTransactionId||'');
+    return state.bankTransactions.filter((row)=>(transactionId&&String(row.id)===transactionId)||(id&&String(row.sourceId||'')===id&&row.sourceType==='retention_receipt'));
+  }
+  function accountingDeletionPreflight(receivableId) {
+    const receivable=state.receivables.find((row)=>String(row.id)===String(receivableId));
+    if(!receivable)throw new Error('找不到應收帳款');
+    const billings=receivableBillingCandidates(receivable);
+    if(billings.length!==1)throw new Error('找不到唯一 Billing／Receivable 關係，為避免誤刪已停止');
+    const billing=billings[0];
+    if(billingReceivable(billing)!==receivable)throw new Error('找不到唯一 Billing／Receivable 關係，為避免誤刪已停止');
+    const invoiceRecords=[...new Set([...billingInvoiceRecords(billing),...state.invoices.filter((row)=>String(row.receivableId||'')===String(receivable.id))])],issuedInvoice=billingInvoiceStatus(billing)==='invoiced'||Boolean(String(billing.invoiceNo||'').trim())||invoiceRecords.some((row)=>invoiceStatus(row.status,row.invoiceNumber||row.invoiceNo||row.number)==='issued'||Boolean(String(row.invoiceNumber||row.invoiceNo||row.number||'').trim()));
+    if(issuedInvoice)throw new Error('此筆已正式開立發票，為保留正式帳務不可直接刪除。');
+    const receipts=state.receipts.filter((row)=>String(row.receivableId||'')===String(receivable.id)||String(row.billingId||'')===String(billing.id)),retentionReceipts=state.retentionReceipts.filter((row)=>String(row.receivableId||'')===String(receivable.id)||String(row.billingId||'')===String(billing.id));
+    if(receipts.some((row)=>row.receivableId&&String(row.receivableId)!==String(receivable.id)||row.billingId&&String(row.billingId)!==String(billing.id))||retentionReceipts.some((row)=>row.receivableId&&String(row.receivableId)!==String(receivable.id)||row.billingId&&String(row.billingId)!==String(billing.id)))throw new Error('收款與請款關聯不一致，為避免帳務斷鏈已停止刪除。');
+    if(num(receivable.legacyReceived)>0||num(receivable.legacyRetentionReceived)>0)throw new Error('存在無法逐筆解析的歷史收款，為避免帳務斷鏈已停止刪除。');
+    const dailyRefs=billingSourceRefs(billing),contractRefs=[...(billing.sourceContractRefs||[]),...(billing.lines||[]).flatMap((line)=>line.sourceContractRefs||[])],requiresDailySource=['daily-work','mixed-pricing'].includes(String(billing.sourceType||''));
+    if((requiresDailySource&&!dailyRefs.length)||dailyRefs.some((ref)=>!availableSourceCopies(ref).length)||contractRefs.some((ref)=>!ref?.contractKey||!contractSourceByKey(ref.contractKey))||!dailyRefs.length&&!contractRefs.length)throw new Error('找不到完整施工來源，為避免帳務斷鏈已停止刪除。');
+    const receiptTransactions=receipts.map((receipt)=>{const matches=receiptBankTransactions(receipt);if(matches.length!==1)throw new Error('一般收款的銀行交易關係不完整，為避免帳務斷鏈已停止刪除。');return matches[0]}),retentionTransactions=retentionReceipts.map((receipt)=>{const matches=retentionBankTransactions(receipt);if(matches.length!==1)throw new Error('保留款收回的銀行交易關係不完整，為避免帳務斷鏈已停止刪除。');return matches[0]}),transactions=[...receiptTransactions,...retentionTransactions],transactionIds=new Set(transactions.map((row)=>String(row.id)));
+    if(transactionIds.size!==transactions.length)throw new Error('銀行交易重複關聯多筆收款，為避免帳務斷鏈已停止刪除。');
+    if(transactions.some((row)=>!state.banks.some((bank)=>String(bank.id)===String(row.bankAccountId||row.bankId||''))))throw new Error('找不到收款對應銀行帳戶，為避免帳務斷鏈已停止刪除。');
+    const receiptIds=new Set([...receipts,...retentionReceipts].flatMap((row)=>[row.id,row.retentionReceiptId]).filter(Boolean).map(String)),linkedTransactions=state.bankTransactions.filter((row)=>String(row.billingId||'')===String(billing.id)||String(row.receivableId||'')===String(receivable.id)||[String(billing.id),String(receivable.id)].includes(String(row.sourceId||''))||receiptIds.has(String(row.sourceId||''))||receiptIds.has(String(row.receiptId||''))||receiptIds.has(String(row.retentionReceiptId||''))||(String(row.sourceNo||'')===String(billing.number||'')&&/receipt|receivable|retention|收款|應收|保留/i.test(`${row.sourceType||''} ${row.category||''}`)));
+    if(linkedTransactions.some((row)=>!transactionIds.has(String(row.id))))throw new Error('存在無法對應收款紀錄的銀行交易，為避免帳務斷鏈已停止刪除。');
+    return {receivable,billing,receipts,retentionReceipts,transactions,invoiceRecords,dailyRefs,contractRefs};
+  }
+  function accountingDeletionSummary(plan) {
+    const {receivable,billing,receipts,retentionReceipts,transactions}=plan;
+    return {receivableId:receivable.id,billingId:billing.id,billingNo:billing.number||receivable.sourceNo||'',customerName:billing.customerName||receivable.customerName||'',projectName:billing.projectName||receivable.projectName||'',billingDate:billing.date||receivable.date||'',grossTotal:num(billing.grossTotal??receivable.grossTotal??billing.total??receivable.amount),receiptCount:receipts.length,retentionReceiptCount:retentionReceipts.length,bankTransactionCount:transactions.length};
+  }
+  async function receivableAccountingDeletePreview(receivableId) { await load();return accountingDeletionSummary(accountingDeletionPreflight(receivableId)); }
   function normalizedBillingLineInput(value, label) {
     const raw=String(value??'').trim(),number=Number(raw);
     if(raw===''||!Number.isFinite(number)||number<0)throw new Error(`${label}必須是 0 以上的數字`);
@@ -790,7 +831,7 @@
     billingSourceRefs(billing).forEach((ref)=>availableSourceCopies(ref).forEach(({log,item})=>{if(item.billingId===billing.id){item.billingNo=number;syncLogBillingState(log)}}));
     await persist(`修改請款單 ${number}`);return billing;
   }
-  async function deleteBilling(id) {
+  async function deleteBilling(id, token) {
     await load();
     const safety=billingSafety(id);if(!safety.billing)throw new Error('找不到請款單');if(!safety.deletable)throw new Error(`此請款已鎖定：${safety.reason}`);if(!billingSourcesResolvable(safety.billing))throw new Error('找不到完整施工來源，為避免誤刪已停止刪除');
     const billing=safety.billing,receivable=safety.receivable,refs=billingSourceRefs(billing),seen=new Set(),affected=[];
@@ -800,7 +841,7 @@
     state.receivables=state.receivables.filter((row)=>row!==receivable);
     if(linkedInvoices.length){const linked=new Set(linkedInvoices);state.invoices=state.invoices.filter((row)=>!linked.has(row));}
     affected.forEach(({log,item,index})=>{const replacement=otherFor({log,item,index});if(replacement){item.billingStatus='已請款';item.billingId=replacement.id;item.billingNo=replacement.number||''}else if(String(item.billingId||'')===String(billing.id)){item.billingStatus='未請款';item.billingId='';item.billingNo=''}syncLogBillingState(log)});
-    await persist(`刪除請款單 ${billing.number}`);return true;
+    if(token!==accountingDeleteToken)await persist(`刪除請款單 ${billing.number}`);return true;
   }
   function billingReceiptState(billing) {
     const ar = state.receivables.find((row) => row.id === billing.receivableId || row.billingId === billing.id || String(row.sourceNo||'') === String(billing.number||''));
@@ -891,13 +932,13 @@
     Object.assign(receipt,{date:values.date||receipt.date||now.slice(0,10),amount,fee,feePayer,netAmount,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||receipt.paymentMethod||'銀行轉帳',note:values.note===undefined?receipt.note:String(values.note||''),updatedAt:now});
     syncReceiptBankTransaction(receipt,ar,now);syncReceivableSummary(ar,now);await persist(`修改應收收款 ${ar.sourceNo||''}`);return receipt;
   }
-  async function deleteReceipt(id) {
+  async function deleteReceipt(id, token) {
     await load();
     const receipt=state.receipts.find((row)=>row.id===id);if(!receipt)throw new Error('找不到收款紀錄');
     const ar=state.receivables.find((row)=>row.id===receipt.receivableId);if(!ar)throw new Error('找不到對應應收帳款');
     const now=new Date().toISOString(),transaction=receiptBankTransaction(receipt);
     if(transaction){const bank=state.banks.find((row)=>row.id===(transaction.bankAccountId||transaction.bankId));adjustBankIncome(bank,-num(transaction.amount),now);state.bankTransactions=state.bankTransactions.filter((row)=>row.id!==transaction.id)}
-    state.receipts=state.receipts.filter((row)=>row.id!==receipt.id);syncReceivableSummary(ar,now);await persist(`刪除應收收款 ${ar.sourceNo||''}`);return true;
+    state.receipts=state.receipts.filter((row)=>row.id!==receipt.id);syncReceivableSummary(ar,now);if(token!==accountingDeleteToken)await persist(`刪除應收收款 ${ar.sourceNo||''}`);return true;
   }
   async function addRetentionReceipt(values) {
     await load();
@@ -933,13 +974,29 @@
     syncRetentionBankTransaction(receipt,ar,billing,now);syncRetentionSummary(ar,billing,now);
     await persist(`修改保留款收回紀錄 ${ar.sourceNo}`);return receipt;
   }
-  async function deleteRetentionReceipt(id) {
+  async function deleteRetentionReceipt(id, token) {
     await load();
     const receipt=state.retentionReceipts.find((row)=>row.id===id||row.retentionReceiptId===id);if(!receipt)throw new Error('找不到保留款收回紀錄');
     const ar=state.receivables.find((row)=>row.id===receipt.receivableId);if(!ar)throw new Error('找不到對應應收帳款');
     const billing=state.billings.find((row)=>row.id===receipt.billingId||row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||'')),now=new Date().toISOString(),transaction=retentionBankTransaction(receipt);
     if(transaction){const bank=state.banks.find((row)=>row.id===(transaction.bankAccountId||transaction.bankId));adjustBankIncome(bank,-num(transaction.amount),now);state.bankTransactions=state.bankTransactions.filter((row)=>row.id!==transaction.id)}
-    state.retentionReceipts=state.retentionReceipts.filter((row)=>row!==receipt);syncRetentionSummary(ar,billing,now);await persist(`刪除保留款收回紀錄 ${ar.sourceNo||''}`);return true;
+    state.retentionReceipts=state.retentionReceipts.filter((row)=>row!==receipt);syncRetentionSummary(ar,billing,now);if(token!==accountingDeleteToken)await persist(`刪除保留款收回紀錄 ${ar.sourceNo||''}`);return true;
+  }
+  async function deleteReceivableAccounting(receivableId) {
+    await load();
+    const plan=accountingDeletionPreflight(receivableId),summary=accountingDeletionSummary(plan),snapshot=JSON.parse(JSON.stringify(state));
+    try {
+      for(const receipt of plan.receipts)await deleteReceipt(receipt.id,accountingDeleteToken);
+      for(const receipt of plan.retentionReceipts)await deleteRetentionReceipt(receipt.retentionReceiptId||receipt.id,accountingDeleteToken);
+      await deleteBilling(plan.billing.id,accountingDeleteToken);
+      if(plan.invoiceRecords.length){const linked=new Set(plan.invoiceRecords);state.invoices=state.invoices.filter((row)=>!linked.has(row))}
+      await persist(`安全刪除整筆測試帳務 ${summary.billingNo}`);
+      return summary;
+    } catch(error) {
+      state=snapshot;
+      try{await persist()}catch(_){/* 保留原始錯誤；記憶體已還原，持久層回復採最大努力 */}
+      throw error;
+    }
   }
   function nextPayableNumber(date) {
     const compact = String(date || new Date().toISOString().slice(0,10)).replaceAll('-','');
@@ -1343,5 +1400,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, saveProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, saveProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
