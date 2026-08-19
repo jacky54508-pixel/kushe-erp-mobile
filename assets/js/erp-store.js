@@ -299,6 +299,23 @@
   function payrollNet(p) {
     return num(p.baseSalary)+num(p.commission)+num(p.fuel)+num(p.meal)+num(p.other)+num(p.overtime)+num(p.bonus)+num(p.allowance)-num(p.advance)-num(p.laborInsurance)-num(p.incomeTax)-num(p.deduction);
   }
+  const PAID_PAYROLL_SOURCE_ERROR = '此施工紀錄已納入已付款薪資，為保留歷史帳務不可修改或刪除。';
+  const PAID_COMMISSION_SOURCE_ERROR = '此抽成紀錄已納入已付款薪資，為保留歷史帳務不可修改或刪除。';
+  const DAILY_LOG_COMMISSION_ERROR = '每日施工衍生抽成必須由每日施工來源調整，不可直接修改或刪除。';
+  function payrollHistoryLock(employeeId, dateOrMonth) {
+    const employee=String(employeeId||''),month=monthOf(dateOrMonth);
+    if(!employee||!month)return {locked:false,reason:'',payrollIds:[],salaryPaymentIds:[],bankTransactionIds:[]};
+    const payrollRows=(state?.payroll||[]).filter((row)=>String(row.employee||row.employeeId||'')===employee&&monthOf(row.month)===month),payrollIds=new Set(payrollRows.map((row)=>String(row.id)));
+    const salaryPayments=(state?.salaryPayments||[]).filter((row)=>payrollIds.has(String(row.payrollId||''))||(String(row.employee||row.employeeId||'')===employee&&monthOf(row.month)===month)),salaryPaymentIds=new Set(salaryPayments.map((row)=>String(row.id)));
+    const bankTransactions=(state?.bankTransactions||[]).filter((row)=>{
+      const sourceType=String(row.sourceType||''),sourceId=String(row.sourceId||'');
+      if(sourceType==='salary_payment'&&(salaryPaymentIds.has(sourceId)||salaryPaymentIds.has(String(row.salaryPaymentId||''))||payrollIds.has(String(row.payrollId||''))))return true;
+      if(sourceType==='payroll'&&payrollIds.has(sourceId))return true;
+      return payrollIds.has(String(row.payrollId||''))&&/salary|payroll|薪資/i.test(`${sourceType} ${row.category||''}`);
+    });
+    const paidPayroll=payrollRows.some((row)=>row.status==='已付款'),locked=paidPayroll||salaryPayments.length>0||bankTransactions.length>0;
+    return {locked,reason:paidPayroll?'paid-payroll':salaryPayments.length?'salary-payment':bankTransactions.length?'salary-bank-transaction':'',payrollIds:[...payrollIds],salaryPaymentIds:[...salaryPaymentIds],bankTransactionIds:bankTransactions.map((row)=>String(row.id))};
+  }
   function rebuildPayrollFor(month, employee) {
     if (!month || !employee) return;
     const atts = state.attendance.filter((x) => monthOf(x.date) === month && x.employee === employee);
@@ -437,10 +454,11 @@
     await load();
     const previous = editingBatchId ? batchRows(editingBatchId) : [];
     if (previous.some((log) => log.billingId || (log.billingStatus && log.billingStatus !== '未請款'))) throw new Error('已進入請款流程的施工紀錄不可直接修改');
-    previous.forEach((log) => syncDailyLogLinks({...log,performance:0,workMode:'none'}, log));
-    if (previous.length) state.dailyLogs = state.dailyLogs.filter((log) => (log.batchId || log.id) !== editingBatchId);
     const date = values.date;
     const employeeIds = values.employeeIds || [];
+    if ([...previous.map((log)=>[log.employee,log.date]),...employeeIds.map((employeeId)=>[employeeId,date])].some(([employeeId,workDate])=>payrollHistoryLock(employeeId,workDate).locked)) throw new Error(PAID_PAYROLL_SOURCE_ERROR);
+    previous.forEach((log) => syncDailyLogLinks({...log,performance:0,workMode:'none'}, log));
+    if (previous.length) state.dailyLogs = state.dailyLogs.filter((log) => (log.batchId || log.id) !== editingBatchId);
     const lines = (values.lines || []).filter((line) => line.project && line.item && num(line.qty) > 0);
     if (!employeeIds.length || !lines.length) throw new Error('請至少選擇一位員工並填寫一筆施工項目');
     const prepared = lines.map((line) => {
@@ -484,6 +502,7 @@
   async function deleteDailyBatch(batchId) {
     await load(); const rows = batchRows(batchId); if (!rows.length) return false;
     if (rows.some((log) => log.billingId || (log.billingStatus && log.billingStatus !== '未請款'))) throw new Error('已進入請款流程的施工紀錄不可刪除');
+    if (rows.some((log)=>payrollHistoryLock(log.employee,log.date).locked)) throw new Error(PAID_PAYROLL_SOURCE_ERROR);
     rows.forEach((log) => syncDailyLogLinks({...log,performance:0,workMode:'none'}, log));
     state.dailyLogs = state.dailyLogs.filter((log) => (log.batchId || log.id) !== batchId);
     await persist('刪除多案場每日施工紀錄'); return true;
@@ -498,6 +517,11 @@
   async function saveCommission(values, id) {
     await load();
     const existing = id ? state.commissions.find((x) => x.id === id) : null;
+    if (existing?.sourceType === 'daily-log') {
+      if (payrollHistoryLock(existing.employee,existing.date).locked) throw new Error(PAID_COMMISSION_SOURCE_ERROR);
+      throw new Error(DAILY_LOG_COMMISSION_ERROR);
+    }
+    if ([[existing?.employee,existing?.date],[values.employee,values.date]].some(([employeeId,date])=>employeeId&&payrollHistoryLock(employeeId,date).locked)) throw new Error(PAID_COMMISSION_SOURCE_ERROR);
     const before = existing ? { date: existing.date, employee: existing.employee } : null;
     const row = existing || { id: uid(), createdAt: new Date().toISOString() };
     Object.assign(row, {
@@ -522,6 +546,8 @@
     await load();
     const row = state.commissions.find((x) => x.id === id);
     if (!row) return false;
+    if (payrollHistoryLock(row.employee,row.date).locked) throw new Error(PAID_COMMISSION_SOURCE_ERROR);
+    if (row.sourceType === 'daily-log') throw new Error(DAILY_LOG_COMMISSION_ERROR);
     state.commissions = state.commissions.filter((x) => x.id !== id);
     rebuildPayrollFor(monthOf(row.date), row.employee);
     await persist('刪除員工業績抽成');
@@ -1317,5 +1343,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, saveProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, saveProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
