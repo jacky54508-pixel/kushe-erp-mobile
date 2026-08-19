@@ -114,9 +114,10 @@
   }
   function payrollState(state, employeeId, month) {
     const rows=(state.payroll||[]).filter((row)=>employeeIdOf(row)===employeeId&&String(row.month||'').slice(0,7)===month);
-    if(store.payrollHistoryLock(employeeId,month).locked||rows.some((row)=>row.status==='已付款'))return {label:'已付款',className:'is-settled'};
-    if(rows.length)return {label:rows[0].status||'未付款',className:'is-unsettled'};
-    return {label:'尚未建立',className:'is-neutral'};
+    if(!rows.length)return {label:'尚未建立',className:'is-neutral'};
+    const hasPaid=rows.some((row)=>row.status==='已付款'),hasUnpaid=rows.some((row)=>row.status!=='已付款');
+    if(hasPaid&&hasUnpaid)return {label:'部分已付款',className:'is-unsettled'};
+    return hasPaid?{label:'已付款',className:'is-settled'}:{label:'未付款',className:'is-unsettled'};
   }
   function summarySection(state, attendanceRows, commissionRows) {
     const grouped=new Map(),ensure=(employeeId,fallback='—')=>{if(!employeeId)return null;if(!grouped.has(employeeId))grouped.set(employeeId,{employeeId,name:label(state,'employees',employeeId,fallback),days:0,hours:0,work:0,untaxed:0,commission:0});return grouped.get(employeeId)};
@@ -139,9 +140,9 @@
     const attendanceRows = attendanceRowsFor(state);
     const totalWork = attendanceRows.reduce((sum,row)=>sum+number(row.amount),0);
     const totalCommission = rows.reduce((sum,row)=>sum+number(row.commission),0);
-    const unpaidAttendance = attendanceRows.filter((row)=>!store.payrollHistoryLock(employeeIdOf(row),row.date).locked);
-    const unpaidCommissions = rows.filter((row)=>!store.payrollHistoryLock(employeeIdOf(row),row.date).locked);
-    const unpaidEmployeeMonths = new Set([...unpaidAttendance,...unpaidCommissions].map((row)=>`${employeeIdOf(row)}:${String(row.date||'').slice(0,7)}`).filter((value)=>!value.startsWith(':')));
+    const payrollRows=(state.payroll||[]).filter((row)=>String(row.month||'').slice(0,7)===filters.month&&(!filters.employee||employeeIdOf(row)===filters.employee));
+    const unpaidPayrollRows=payrollRows.filter((row)=>row.status!=='已付款');
+    const unpaidPayrollEmployees=new Set(unpaidPayrollRows.map(employeeIdOf).filter(Boolean));
     const todayEmployees = new Set([...(state.dailyLogs||[]),...(state.attendance||[])].filter((row)=>String(row.date||'')===today()&&(!filters.employee||employeeIdOf(row)===filters.employee)&&(!filters.project||projectIdOf(row)===filters.project)).map(employeeIdOf).filter(Boolean));
     const monthProjects = new Set([...batches.flatMap((batch)=>batch.logs),...attendanceRows].map(projectIdOf).filter(Boolean));
     $('#commissionsApp').innerHTML = `
@@ -153,7 +154,7 @@
         <article><span>今日作業人數</span><strong>${todayEmployees.size} 人</strong><small>依實際作業與出勤員工去重</small></article>
         <article><span>本月點工薪資</span><strong>${money(totalWork)}</strong><small>依正式點工薪資來源</small></article>
         <article><span>本月抽成</span><strong>${money(totalCommission)}</strong><small>依正式抽成來源</small></article>
-        <article class="is-warning"><span>未付款來源</span><strong>${unpaidEmployeeMonths.size} 組</strong><small>點工 ${unpaidAttendance.length} 筆／抽成 ${unpaidCommissions.length} 筆</small></article>
+        <article class="is-warning"><span>未付款薪資</span><strong>${unpaidPayrollEmployees.size} 人</strong><small>尚有 ${unpaidPayrollRows.length} 筆薪資待付款</small></article>
         <article class="is-success"><span>本月作業案場</span><strong>${monthProjects.size} 處</strong><small>依實際作業來源去重</small></article>
       </section>
       <section class="commission-panel commission-filters workforce-filters" aria-label="共用搜尋與篩選">
