@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#061d3b">
   <title>酷舍 ERP｜首頁總覽</title>
-  <link rel="stylesheet" href="assets/css/app.css?v=20260819-employee-status-ux1">
+  <link rel="stylesheet" href="assets/css/app.css?v=20260819-workforce-ui1">
   <link rel="stylesheet" href="assets/css/projects-scoped.css?v=20260811-billing-settings1">
 </head>
 <body>
@@ -22,6 +22,7 @@
         <a class="nav-item" href="#projects" data-module="projects" data-tooltip="客戶／案場" aria-label="客戶／案場"><i class="nav-icon" data-icon="map-pin"></i><b>客戶／案場</b></a>
         <a class="nav-item" href="#quotations" data-module="quotations" data-tooltip="報價單管理" aria-label="報價單管理"><i class="nav-icon" data-icon="file-text"></i><b>報價單管理</b></a>
         <a class="nav-item" href="#billings" data-module="billings" data-tooltip="請款單管理" aria-label="請款單管理"><i class="nav-icon" data-icon="clipboard-list"></i><b>請款單管理</b></a>
+        <a class="nav-item" href="#unbilled-work" data-module="unbilled-work" data-tooltip="待請款施工" aria-label="待請款施工"><i class="nav-icon" data-icon="clipboard-list"></i><b>待請款施工</b></a>
         <a class="nav-item" href="#receivables" data-module="receivables" data-tooltip="應收帳款" aria-label="應收帳款"><i class="nav-icon" data-icon="arrow-down-to-line"></i><b>應收帳款</b></a>
         <a class="nav-item" href="#payables" data-module="payables" data-tooltip="應付帳款" aria-label="應付帳款"><i class="nav-icon" data-icon="arrow-up-from-line"></i><b>應付帳款</b></a>
         <a class="nav-item" href="#banks" data-module="banks" data-tooltip="銀行帳戶" aria-label="銀行帳戶"><i class="nav-icon" data-icon="landmark"></i><b>銀行帳戶</b></a>
@@ -29,9 +30,7 @@
         <a class="nav-item" href="#materials" data-module="materials" data-tooltip="材料管理" aria-label="材料管理"><i class="nav-icon" data-icon="boxes"></i><b>材料管理</b></a>
         <p class="nav-section">人員與成本</p>
         <a class="nav-item" href="#employees" data-module="employees" data-tooltip="員工管理" aria-label="員工管理"><i class="nav-icon" data-icon="user-round"></i><b>員工管理</b></a>
-        <a class="nav-item" href="#attendance" data-module="attendance" data-tooltip="出勤點工" aria-label="出勤點工"><i class="nav-icon" data-icon="calendar-check"></i><b>出勤點工</b></a>
-        <a class="nav-item" href="#commissions" data-module="commissions" data-tooltip="員工業績／抽成" aria-label="員工業績／抽成"><i class="nav-icon" data-icon="chart-no-axes-combined"></i><b>員工業績／抽成</b></a>
-        <a class="nav-item" href="#unbilled-work" data-module="unbilled-work" data-tooltip="待請款施工" aria-label="待請款施工"><i class="nav-icon" data-icon="clipboard-list"></i><b>待請款施工</b></a>
+        <a class="nav-item" href="#commissions" data-module="commissions" data-tooltip="出勤／業績" aria-label="出勤／業績"><i class="nav-icon" data-icon="chart-no-axes-combined"></i><b>出勤／業績</b></a>
         <a class="nav-item" href="#payroll" data-module="payroll" data-tooltip="薪資管理" aria-label="薪資管理"><i class="nav-icon" data-icon="wallet"></i><b>薪資管理</b></a>
         <p class="nav-section">分析報表</p>
         <a class="nav-item" href="#reports" data-module="reports" data-tooltip="統計報表" aria-label="統計報表"><i class="nav-icon" data-icon="bar-chart-3"></i><b>統計報表</b></a>
@@ -136,7 +135,7 @@
       </main>
 
       <main class="commissions-view app-view" id="commissionsView" data-view="commissions" hidden>
-        <nav class="view-breadcrumb" aria-label="麵包屑"><button type="button" data-route="dashboard">首頁總覽</button><span>/</span><b>員工業績／抽成</b></nav>
+        <nav class="view-breadcrumb" aria-label="麵包屑"><button type="button" data-route="dashboard">首頁總覽</button><span>/</span><b>出勤／業績管理</b></nav>
         <div id="commissionsApp" aria-live="polite"></div>
       </main>
 
@@ -209,7 +208,7 @@
   <script src="assets/js/legacy-adapter.js?v=20260809-nav4"></script>
   <script src="assets/js/erp-store.js?v=20260819-payroll-history-lock1"></script>
   <script src="assets/js/dashboard.js?v=20260809-projects1"></script>
-  <script src="assets/js/commissions.js?v=20260819-payroll-history-lock1"></script>
+  <script src="assets/js/commissions.js?v=20260819-workforce-ui1"></script>
   <script src="assets/js/unbilled-work.js?v=20260810-pricing1"></script>
   <script src="assets/js/billing.js?v=20260817-retention-base1"></script>
   <script src="assets/js/payables.js?v=20260809-payable-scroll4"></script>
@@ -222,6 +221,6 @@
   <script src="assets/js/table-scroll.js?v=20260809-global1"></script>
   <script src="assets/js/billing-print.js?v=20260815-lumpsum-price1"></script>
   <script src="assets/js/quotations.js?v=20260815-detail-price1"></script>
-  <script src="assets/js/app.js?v=20260818-employee-v1"></script>
+  <script src="assets/js/app.js?v=20260819-workforce-ui1"></script>
 </body>
 </html>

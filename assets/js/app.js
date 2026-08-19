@@ -32,7 +32,7 @@
     const route = validRoute(module);
     ui.route = route;
     const isDashboard = route === 'dashboard';
-    const isCommissions = route === 'commissions';
+    const isCommissions = route === 'commissions' || route === 'attendance';
     const isUnbilledWork = route === 'unbilled-work';
     const isBillings = route === 'billings';
     const isBillingDraft = route === 'billing-draft';
@@ -68,7 +68,7 @@
     document.body.dataset.route = route;
     $$('.nav-item[data-module]').forEach((node) => {
       const navRoute = node.dataset.module;
-      const active = navRoute === route || (route === 'customers' && navRoute === 'projects') || (route === 'billing-draft' && navRoute === 'billings');
+      const active = navRoute === route || (route === 'attendance' && navRoute === 'commissions') || (route === 'customers' && navRoute === 'projects') || (route === 'billing-draft' && navRoute === 'billings');
       node.classList.toggle('active', active);
       node.setAttribute('aria-current', active ? 'page' : 'false');
     });
@@ -81,10 +81,10 @@
       window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();window.KusheBanks?.deactivate();
       window.KusheQuotations?.activate();document.title = '酷舍 ERP－報價單管理';
     } else if (isCommissions) {
-      window.KusheCommissions?.activate();
+      window.KusheCommissions?.activate({ route });
       window.KusheUnbilledWork?.deactivate();
       window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();
-      document.title = '酷舍 ERP｜員工業績／抽成';
+      document.title = '酷舍 ERP｜出勤／業績管理';
     } else if (isUnbilledWork) {
       window.KusheCommissions?.deactivate();
       window.KusheUnbilledWork?.activate();

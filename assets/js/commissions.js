@@ -3,9 +3,10 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
   const store = window.KuSheERPStore;
-  const filters = { month: '', employee: '', project: '', status: '', billingStatus: '', query: '', sort: 'date', direction: 'desc' };
+  const filters = { month: '', employee: '', project: '', query: '', sort: 'date', direction: 'desc' };
   let ready = false;
   let active = false;
+  let activeTab = 'daily';
   let editingId = null;
   let editingDailyBatch = '';
   let dailyLineSequence = 0;
@@ -24,17 +25,14 @@
     if (billing && number(billing.amount) === number(row.untaxedAmount) && number(billing.total)) return number(billing.total);
     return store.grossFromUntaxed(row.untaxedAmount);
   }
-  function latestMonth(state) {
-    const months = (state.commissions || []).map((row) => String(row.date || '').slice(0, 7)).filter((value) => /^\d{4}-\d{2}$/.test(value));
-    return months.includes(monthNow()) ? monthNow() : (months.sort().at(-1) || monthNow());
-  }
+  const employeeIdOf = (row) => String(row?.employee || row?.employeeId || '');
+  const projectIdOf = (row) => String(row?.project || row?.projectId || '');
   function rowsFor(state) {
     const query = filters.query.trim().toLocaleLowerCase('zh-Hant');
     const rows = (state.commissions || []).filter((row) => {
       if (filters.month && !String(row.date || '').startsWith(filters.month)) return false;
       if (filters.employee && row.employee !== filters.employee) return false;
       if (filters.project && row.project !== filters.project) return false;
-      if (filters.status && row.status !== filters.status) return false;
       const employee = label(state, 'employees', row.employee, row.employeeName || '');
       const project = label(state, 'projects', row.project, row.projectName || '');
       return !query || `${employee} ${project} ${row.sourceNo || ''} ${row.note || ''}`.toLocaleLowerCase('zh-Hant').includes(query);
@@ -56,6 +54,18 @@
     const arrow = filters.sort === key ? (filters.direction === 'asc' ? '↑' : '↓') : '';
     return `<button type="button" class="commission-sort" data-sort="${key}">${text}<span>${arrow}</span></button>`;
   }
+  function attendanceRowsFor(state) {
+    const query = filters.query.trim().toLocaleLowerCase('zh-Hant');
+    return (state.attendance || []).filter((row) => {
+      const employeeId = employeeIdOf(row), projectId = projectIdOf(row);
+      if (filters.month && !String(row.date || '').startsWith(filters.month)) return false;
+      if (filters.employee && employeeId !== filters.employee) return false;
+      if (filters.project && projectId !== filters.project) return false;
+      const employee = label(state, 'employees', employeeId, row.employeeName || '');
+      const project = label(state, 'projects', projectId, row.projectName || '');
+      return !query || `${employee} ${project} ${row.sourceNo || ''} ${row.note || ''} ${row.workMode || ''}`.toLocaleLowerCase('zh-Hant').includes(query);
+    }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  }
   function dailyBatches(state) {
     const groups = new Map();
     (state.dailyLogs || []).forEach((log) => { const key=log.batchId||log.id; if(!groups.has(key))groups.set(key,[]); groups.get(key).push(log); });
@@ -72,73 +82,117 @@
       if(filters.month&&!batch.date.startsWith(filters.month))return false;
       if(filters.employee&&!batch.logs.some((log)=>log.employee===filters.employee))return false;
       if(filters.project&&!batch.logs.some((log)=>log.project===filters.project))return false;
-      if(filters.billingStatus&&batch.billingStatus!==filters.billingStatus)return false;
       return !query||`${batch.employees.join(' ')} ${batch.projects.join(' ')} ${batch.items.join(' ')} ${batch.note}`.toLocaleLowerCase('zh-Hant').includes(query);
     }).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
   }
   function dailySection(state,batches) {
-    return `<section class="commission-panel daily-work-panel"><header><div><h2>每日施工紀錄</h2><p>同一天可記錄多個案場與多筆施工項目；抽成、點工與待請款共用同一筆資料。</p></div><button class="commission-secondary" id="manualCommission" type="button">新增手動抽成</button></header><div class="commission-table-wrap"><table class="commission-table daily-work-table"><thead><tr><th>日期</th><th>員工</th><th>客戶／案場</th><th>施工項目</th><th class="num">未稅施工額</th><th class="num">抽成</th><th class="num">點工薪資</th><th>請款狀態</th><th>操作</th></tr></thead><tbody>${batches.map((batch)=>{const locked=batch.logs.some((log)=>store.payrollHistoryLock(log.employee,log.date).locked),actions=locked?'<span class="commission-status is-settled" title="此紀錄已納入已付款薪資，為保留歷史帳務不可修改。">已付款鎖定</span>':`<div class="commission-row-actions"><button type="button" data-daily-edit="${esc(batch.batchId)}">編輯</button><button type="button" data-daily-delete="${esc(batch.batchId)}">刪除</button></div>`;return `<tr data-daily-batch="${esc(batch.batchId)}"><td>${esc(batch.date)}</td><td><b>${esc(batch.employees.join('、'))}</b></td><td><span class="daily-project-list">${batch.projects.map(esc).join('<br>')}</span></td><td><span class="commission-source">${esc(batch.items.filter(Boolean).slice(0,3).join('、')||'純點工')}${batch.itemCount>3?` 等 ${batch.itemCount} 項`:''}</span></td><td class="num"><b>${money(batch.untaxed)}</b><small>${batch.itemCount} 筆</small></td><td class="num">${money(batch.commission)}</td><td class="num">${money(batch.work)}</td><td><span class="commission-status billing-${batch.billingStatus==='未請款'?'open':batch.billingStatus==='草稿中'?'draft':batch.billingStatus==='已請款'?'done':'none'}">${esc(batch.billingStatus)}</span>${batch.billingAmount>0?`<small>${money(batch.billingAmount)}</small>`:''}</td><td>${actions}</td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="9">此篩選條件下沒有每日施工紀錄。</td></tr>'}</tbody></table></div></section>`;
+    return `<section class="commission-panel daily-work-panel"><header><div><h2>每日作業</h2><p>沿用既有每日施工流程；抽成、點工與待請款仍由同一筆來源串聯。</p></div></header><div class="commission-table-wrap"><table class="commission-table daily-work-table"><thead><tr><th>日期</th><th>員工</th><th>客戶／案場</th><th>施工項目</th><th class="num">未稅施工額</th><th class="num">抽成</th><th class="num">點工薪資</th><th>請款狀態</th><th>操作</th></tr></thead><tbody>${batches.map((batch)=>{const paidLocked=batch.logs.some((log)=>store.payrollHistoryLock(log.employee,log.date).locked),billingLocked=batch.logs.some((log)=>log.billingId||(log.billingStatus&&log.billingStatus!=='未請款')),actions=paidLocked?'<span class="commission-status is-settled" title="此紀錄已納入已付款薪資，為保留歷史帳務不可修改。">已付款鎖定</span>':billingLocked?'<span class="commission-status billing-done" title="此紀錄已進入請款流程，不可修改或刪除。">已請款鎖定</span>':`<div class="commission-row-actions"><button type="button" data-daily-edit="${esc(batch.batchId)}">編輯</button><button type="button" data-daily-delete="${esc(batch.batchId)}">刪除</button></div>`;return `<tr data-daily-batch="${esc(batch.batchId)}"><td>${esc(batch.date)}</td><td><b>${esc(batch.employees.join('、'))}</b></td><td><span class="daily-project-list">${batch.projects.map(esc).join('<br>')}</span></td><td><span class="commission-source">${esc(batch.items.filter(Boolean).slice(0,3).join('、')||'純點工')}${batch.itemCount>3?` 等 ${batch.itemCount} 項`:''}</span></td><td class="num"><b>${money(batch.untaxed)}</b><small>${batch.itemCount} 筆</small></td><td class="num">${money(batch.commission)}</td><td class="num">${money(batch.work)}</td><td><span class="commission-status billing-${batch.billingStatus==='未請款'?'open':batch.billingStatus==='草稿中'?'draft':batch.billingStatus==='已請款'?'done':'none'}">${esc(batch.billingStatus)}</span>${batch.billingAmount>0?`<small>${money(batch.billingAmount)}</small>`:''}</td><td>${actions}</td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="9">此篩選條件下沒有每日作業紀錄。</td></tr>'}</tbody></table></div></section>`;
+  }
+  function todayProjectsSection(state) {
+    const query = filters.query.trim().toLocaleLowerCase('zh-Hant'), groups = new Map();
+    (state.dailyLogs || []).filter((log) => {
+      if (String(log.date || '') !== today()) return false;
+      if (filters.employee && employeeIdOf(log) !== filters.employee) return false;
+      if (filters.project && projectIdOf(log) !== filters.project) return false;
+      const employee = label(state, 'employees', employeeIdOf(log), log.employeeName || '');
+      const project = label(state, 'projects', projectIdOf(log), log.projectName || '');
+      const items = (log.items || []).map((item) => item.item || '').join(' ');
+      return !query || `${employee} ${project} ${items} ${log.note || ''}`.toLocaleLowerCase('zh-Hant').includes(query);
+    }).forEach((log) => {
+      const projectId = projectIdOf(log) || log.projectName || 'unknown';
+      if (!groups.has(projectId)) groups.set(projectId, { name: label(state, 'projects', projectIdOf(log), log.projectName || '未指定案場'), employees: new Set() });
+      groups.get(projectId).employees.add(label(state, 'employees', employeeIdOf(log), log.employeeName || '—'));
+    });
+    const cards = [...groups.values()].map((row) => `<article><b>${esc(row.name)}</b><span>${esc([...row.employees].join('、'))}</span></article>`).join('');
+    return `<section class="commission-panel workforce-today"><header><div><h2>今日案場</h2><p>${esc(today())} 實際作業摘要</p></div></header><div class="workforce-today-grid">${cards || '<p class="workforce-empty-note">今日尚無作業紀錄</p>'}</div></section>`;
+  }
+  function attendanceSection(state, rows) {
+    return `<section class="commission-panel commission-table-panel workforce-attendance-panel"><header><div><h2>出勤／點工</h2><p>直接呈現正式薪資來源；歷史獨立出勤維持唯讀，不進行轉換。</p></div><span class="workforce-readonly">唯讀</span></header><div class="commission-table-wrap"><table class="commission-table workforce-attendance-table"><thead><tr><th>日期</th><th>員工</th><th>案場</th><th>點工類型</th><th class="num">天數</th><th class="num">時數</th><th class="num">單價</th><th class="num">點工金額</th><th class="num">油費</th><th>來源</th><th>狀態</th><th>操作</th></tr></thead><tbody>${rows.map((row)=>{const employeeId=employeeIdOf(row),projectId=projectIdOf(row),isDaily=row.sourceType==='daily-log',isHourly=row.workMode==='hourly'||number(row.hours)>0,rate=isHourly?row.hourlyRate??row.rate:row.dailyRate??row.rate;return `<tr data-attendance-id="${esc(row.id)}"><td>${esc(row.date||'—')}</td><td><b>${esc(label(state,'employees',employeeId,row.employeeName||'—'))}</b></td><td>${esc(label(state,'projects',projectId,row.projectName||'—'))}</td><td>${esc(isHourly?'時薪':'日薪')}</td><td class="num">${number(row.days)?number(row.days):'—'}</td><td class="num">${number(row.hours)?number(row.hours):'—'}</td><td class="num">${rate===null||rate===undefined?'—':money(rate)}</td><td class="num"><b>${money(row.amount)}</b></td><td class="num">${number(row.fuel)?money(row.fuel):'—'}</td><td><span class="workforce-source-badge ${isDaily?'is-synced':'is-legacy'}">${isDaily?'每日施工同步':'歷史出勤'}</span>${row.sourceNo?`<small class="workforce-source-no">${esc(row.sourceNo)}</small>`:''}</td><td><span class="commission-status ${row.status==='已列入薪資'?'is-settled':'is-unsettled'}">${esc(row.status||'—')}</span></td><td>${isDaily&&row.sourceId?`<button class="commission-link" type="button" data-view-daily-source="${esc(row.sourceId)}">查看來源</button>`:'<span class="workforce-readonly-row">唯讀</span>'}</td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="12">此篩選條件下沒有出勤／點工紀錄。</td></tr>'}</tbody></table></div></section>`;
+  }
+  function commissionSection(state, rows) {
+    return `<section class="commission-panel commission-table-panel"><header><div><h2>業績／抽成</h2><p>每日施工同步與手動登錄分流呈現，既有抽成公式與薪資狀態保持不變。</p></div></header><div class="commission-table-wrap"><table class="commission-table workforce-commission-table"><thead><tr><th>${sortButton('date','日期')}</th><th>${sortButton('employee','員工')}</th><th>${sortButton('project','案場')}</th><th>業績來源</th><th class="num">含稅金額</th><th class="num">${sortButton('untaxedAmount','未稅金額')}</th><th class="num">${sortButton('rate','抽成 %')}</th><th class="num">${sortButton('commission','抽成金額')}</th><th>${sortButton('status','結算狀態')}</th><th>操作</th></tr></thead><tbody>${rows.map((row)=>{const linkedPayroll=state.payroll.filter((item)=>item.month===String(row.date||'').slice(0,7)&&item.employee===row.employee),locked=store.payrollHistoryLock(row.employee,row.date).locked,isDaily=row.sourceType==='daily-log',actions=locked?'<span class="commission-status is-settled" title="此紀錄已納入已付款薪資，為保留歷史帳務不可修改。">已付款鎖定</span>':isDaily?'<span class="commission-status" title="請由每日施工來源調整">來源同步</span>':`<div class="commission-row-actions"><button type="button" data-edit="${esc(row.id)}">編輯</button><button type="button" data-delete="${esc(row.id)}">刪除</button></div>`;return `<tr data-row-id="${esc(row.id)}" data-payroll-records="${linkedPayroll.length}" data-payroll-commission="${linkedPayroll.filter((item)=>item.status!=='已付款').reduce((sum,item)=>sum+number(item.commission),0)}"><td>${esc(row.date||'—')}</td><td><b>${esc(label(state,'employees',row.employee,row.employeeName||'—'))}</b></td><td>${esc(label(state,'projects',row.project,row.projectName||'—'))}</td><td><span class="workforce-source-badge ${isDaily?'is-synced':'is-manual'}">${isDaily?'每日施工同步':'手動登錄'}</span>${row.sourceNo?`<small class="workforce-source-no">${esc(row.sourceNo)}</small>`:''}</td><td class="num">${money(grossOf(state,row))}</td><td class="num">${money(row.untaxedAmount)}</td><td class="num">${number(row.rate)}%</td><td class="num"><b>${money(row.commission)}</b></td><td><span class="commission-status ${row.status==='已列入薪資'?'is-settled':'is-unsettled'}">${row.status==='已列入薪資'?'已結算':'未結算'}</span></td><td>${actions}</td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="10">此篩選條件下沒有業績／抽成紀錄。</td></tr>'}</tbody></table></div></section>`;
+  }
+  function payrollState(state, employeeId, month) {
+    const rows=(state.payroll||[]).filter((row)=>employeeIdOf(row)===employeeId&&String(row.month||'').slice(0,7)===month);
+    if(store.payrollHistoryLock(employeeId,month).locked||rows.some((row)=>row.status==='已付款'))return {label:'已付款',className:'is-settled'};
+    if(rows.length)return {label:rows[0].status||'未付款',className:'is-unsettled'};
+    return {label:'尚未建立',className:'is-neutral'};
+  }
+  function summarySection(state, attendanceRows, commissionRows) {
+    const grouped=new Map(),ensure=(employeeId,fallback='—')=>{if(!employeeId)return null;if(!grouped.has(employeeId))grouped.set(employeeId,{employeeId,name:label(state,'employees',employeeId,fallback),days:0,hours:0,work:0,untaxed:0,commission:0});return grouped.get(employeeId)};
+    attendanceRows.forEach((row)=>{const target=ensure(employeeIdOf(row),row.employeeName||'—');if(!target)return;target.days+=number(row.days);target.hours+=number(row.hours);target.work+=number(row.amount)});
+    commissionRows.forEach((row)=>{const target=ensure(employeeIdOf(row),row.employeeName||'—');if(!target)return;target.untaxed+=number(row.untaxedAmount);target.commission+=number(row.commission)});
+    const rows=[...grouped.values()].sort((a,b)=>a.name.localeCompare(b.name,'zh-Hant'));
+    return `<section class="commission-panel commission-table-panel workforce-summary-panel"><header><div><h2>月度彙總</h2><p>點工與業績各取唯一正式來源，避免每日作業衍生資料重複加總。</p></div></header><div class="commission-table-wrap"><table class="commission-table workforce-summary-table"><thead><tr><th>員工</th><th class="num">出勤天數</th><th class="num">工時</th><th class="num">點工薪資</th><th class="num">未稅業績</th><th class="num">抽成</th><th>薪資狀態</th><th>操作</th></tr></thead><tbody>${rows.map((row)=>{const status=payrollState(state,row.employeeId,filters.month);return `<tr><td><b>${esc(row.name)}</b></td><td class="num">${row.days||'—'}</td><td class="num">${row.hours||'—'}</td><td class="num"><b>${money(row.work)}</b></td><td class="num">${row.untaxed?money(row.untaxed):'—'}</td><td class="num">${row.commission?money(row.commission):'—'}</td><td><span class="commission-status ${status.className}">${esc(status.label)}</span></td><td><button class="commission-link" type="button" data-view-payroll="${esc(row.employeeId)}">查看薪資</button></td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="8">此月份沒有可彙總的出勤或抽成來源。</td></tr>'}</tbody></table></div></section>`;
+  }
+  function tabContent(state, batches, attendanceRows, commissionRows) {
+    if(activeTab==='attendance')return attendanceSection(state,attendanceRows);
+    if(activeTab==='commissions')return commissionSection(state,commissionRows);
+    if(activeTab==='summary')return summarySection(state,attendanceRows,commissionRows);
+    return `${todayProjectsSection(state)}${dailySection(state,batches)}`;
   }
   function render() {
     if (!active) return;
     const state = store.getState();
     const rows = rowsFor(state);
     const batches = dailyBatches(state);
-    const totalGross = rows.reduce((sum, row) => sum + grossOf(state, row), 0);
-    const totalUntaxed = rows.reduce((sum, row) => sum + number(row.untaxedAmount), 0);
-    const totalCommission = rows.reduce((sum, row) => sum + number(row.commission), 0);
-    const unsettled = rows.filter((row) => row.status !== '已列入薪資').reduce((sum, row) => sum + number(row.commission), 0);
-    const settled = rows.filter((row) => row.status === '已列入薪資').reduce((sum, row) => sum + number(row.commission), 0);
+    const attendanceRows = attendanceRowsFor(state);
+    const totalWork = attendanceRows.reduce((sum,row)=>sum+number(row.amount),0);
+    const totalCommission = rows.reduce((sum,row)=>sum+number(row.commission),0);
+    const unpaidAttendance = attendanceRows.filter((row)=>!store.payrollHistoryLock(employeeIdOf(row),row.date).locked);
+    const unpaidCommissions = rows.filter((row)=>!store.payrollHistoryLock(employeeIdOf(row),row.date).locked);
+    const unpaidEmployeeMonths = new Set([...unpaidAttendance,...unpaidCommissions].map((row)=>`${employeeIdOf(row)}:${String(row.date||'').slice(0,7)}`).filter((value)=>!value.startsWith(':')));
+    const todayEmployees = new Set([...(state.dailyLogs||[]),...(state.attendance||[])].filter((row)=>String(row.date||'')===today()&&(!filters.employee||employeeIdOf(row)===filters.employee)&&(!filters.project||projectIdOf(row)===filters.project)).map(employeeIdOf).filter(Boolean));
+    const monthProjects = new Set([...batches.flatMap((batch)=>batch.logs),...attendanceRows].map(projectIdOf).filter(Boolean));
     $('#commissionsApp').innerHTML = `
-      <section class="commissions-heading">
-        <div><h1>員工業績／抽成</h1><p>管理員工業績、抽成與薪資結算</p></div>
-        <button class="commission-primary" id="addCommission" type="button">＋ 新增業績／施工</button>
+      <section class="commissions-heading workforce-heading">
+        <div><h1>出勤／業績管理</h1><p>整合每日作業、點工薪資、員工業績與抽成結算</p></div>
+        <div class="workforce-heading-actions"><button class="commission-secondary" id="manualCommission" type="button">新增手動抽成</button><button class="commission-primary" id="addCommission" type="button">＋ 新增每日作業</button></div>
       </section>
-      <section class="commission-kpis" aria-label="抽成統計摘要">
-        <article><span>本月總業績</span><strong>${money(totalGross)}</strong><small>${rows.length} 筆業績（含稅）</small></article>
-        <article><span>本月未稅業績</span><strong>${money(totalUntaxed)}</strong><small>抽成計算基礎</small></article>
-        <article><span>本月抽成總額</span><strong>${money(totalCommission)}</strong><small>依正式版公式</small></article>
-        <article class="is-warning"><span>未結算抽成</span><strong>${money(unsettled)}</strong><small>尚未列入薪資</small></article>
-        <article class="is-success"><span>已結算抽成</span><strong>${money(settled)}</strong><small>已列入薪資</small></article>
+      <section class="commission-kpis workforce-kpis" aria-label="出勤與業績統計摘要">
+        <article><span>今日作業人數</span><strong>${todayEmployees.size} 人</strong><small>依實際作業與出勤員工去重</small></article>
+        <article><span>本月點工薪資</span><strong>${money(totalWork)}</strong><small>依正式點工薪資來源</small></article>
+        <article><span>本月抽成</span><strong>${money(totalCommission)}</strong><small>依正式抽成來源</small></article>
+        <article class="is-warning"><span>未付款來源</span><strong>${unpaidEmployeeMonths.size} 組</strong><small>點工 ${unpaidAttendance.length} 筆／抽成 ${unpaidCommissions.length} 筆</small></article>
+        <article class="is-success"><span>本月作業案場</span><strong>${monthProjects.size} 處</strong><small>依實際作業來源去重</small></article>
       </section>
-      <section class="commission-panel commission-filters" aria-label="搜尋與篩選">
-        <div class="commission-filter-grid">
+      <section class="commission-panel commission-filters workforce-filters" aria-label="共用搜尋與篩選">
+        <div class="commission-filter-grid workforce-filter-grid">
           <label><span>月份</span><input id="commissionMonthFilter" type="month" value="${esc(filters.month)}"></label>
           <label><span>員工</span><select id="commissionEmployeeFilter">${options(state.employees, filters.employee, '全部員工')}</select></label>
           <label><span>案場</span><select id="commissionProjectFilter">${options(state.projects, filters.project, '全部案場')}</select></label>
-          <label><span>結算狀態</span><select id="commissionStatusFilter"><option value="">全部狀態</option><option value="未列入薪資" ${filters.status === '未列入薪資' ? 'selected' : ''}>未結算</option><option value="已列入薪資" ${filters.status === '已列入薪資' ? 'selected' : ''}>已結算</option></select></label>
-          <label><span>請款狀態</span><select id="commissionBillingFilter"><option value="">全部請款狀態</option><option value="未請款" ${filters.billingStatus==='未請款'?'selected':''}>未請款</option><option value="草稿中" ${filters.billingStatus==='草稿中'?'selected':''}>草稿中</option><option value="已請款" ${filters.billingStatus==='已請款'?'selected':''}>已請款</option><option value="不需請款" ${filters.billingStatus==='不需請款'?'selected':''}>不需請款</option></select></label>
-          <label class="commission-search"><span>關鍵字搜尋</span><input id="commissionQueryFilter" type="search" value="${esc(filters.query)}" placeholder="員工、案場、來源單號、備註"></label>
+          <label class="commission-search workforce-search"><span>關鍵字搜尋</span><input id="commissionQueryFilter" type="search" value="${esc(filters.query)}" placeholder="員工、案場、施工項目、備註、來源單號"></label>
           <button class="commission-clear" id="commissionClearFilters" type="button">清除篩選</button>
         </div>
       </section>
-      ${dailySection(state,batches)}
-      <section class="commission-panel commission-table-panel">
-        <header><div><h2>抽成明細</h2><p>由每日施工紀錄自動同步，並保留既有手動抽成資料。</p></div></header>
-        <div class="commission-table-wrap"><table class="commission-table">
-          <thead><tr><th>${sortButton('date','日期')}</th><th>${sortButton('employee','員工')}</th><th>${sortButton('project','案場')}</th><th>業績來源</th><th class="num">含稅金額</th><th class="num">${sortButton('untaxedAmount','未稅金額')}</th><th class="num">${sortButton('rate','抽成 %')}</th><th class="num">${sortButton('commission','抽成金額')}</th><th>${sortButton('status','結算狀態')}</th><th>操作</th></tr></thead>
-          <tbody>${rows.map((row) => { const linkedPayroll = state.payroll.filter((item) => item.month === String(row.date || '').slice(0,7) && item.employee === row.employee),locked=store.payrollHistoryLock(row.employee,row.date).locked,actions=locked?'<span class="commission-status is-settled" title="此紀錄已納入已付款薪資，為保留歷史帳務不可修改。">已付款鎖定</span>':row.sourceType==='daily-log'?'<span class="commission-status" title="請由每日施工來源調整">來源同步</span>':`<div class="commission-row-actions"><button type="button" data-edit="${esc(row.id)}">編輯</button><button type="button" data-delete="${esc(row.id)}">刪除</button></div>`; return `<tr data-row-id="${esc(row.id)}" data-payroll-records="${linkedPayroll.length}" data-payroll-commission="${linkedPayroll.filter((item) => item.status !== '已付款').reduce((sum,item) => sum + number(item.commission),0)}"><td>${esc(row.date || '—')}</td><td><b>${esc(label(state, 'employees', row.employee, row.employeeName || '—'))}</b></td><td>${esc(label(state, 'projects', row.project, row.projectName || '—'))}</td><td><span class="commission-source">${esc(row.sourceNo || (row.sourceType === 'daily-log' ? '每日業績' : '手動登錄'))}</span></td><td class="num">${money(grossOf(state, row))}</td><td class="num">${money(row.untaxedAmount)}</td><td class="num">${number(row.rate)}%</td><td class="num"><b>${money(row.commission)}</b></td><td><span class="commission-status ${row.status === '已列入薪資' ? 'is-settled' : 'is-unsettled'}">${row.status === '已列入薪資' ? '已結算' : '未結算'}</span></td><td>${actions}</td></tr>`; }).join('') || '<tr><td class="commission-empty" colspan="10">此篩選條件下沒有業績紀錄。</td></tr>'}</tbody>
-        </table></div>
-      </section>
+      <nav class="workforce-tabs" role="tablist" aria-label="出勤與業績資料分頁">${[['daily','每日作業'],['attendance','出勤／點工'],['commissions','業績／抽成'],['summary','月度彙總']].map(([key,text])=>`<button type="button" role="tab" data-workforce-tab="${key}" aria-selected="${activeTab===key}" class="workforce-tab ${activeTab===key?'is-active':''}">${text}</button>`).join('')}</nav>
+      <div class="workforce-tab-panel" role="tabpanel">${tabContent(state,batches,attendanceRows,rows)}</div>
       <div class="commission-drawer-layer" id="commissionDrawerLayer" hidden></div>`;
     bind();
     window.KusheIcons?.render($('#commissionsView'));
   }
   function bind() {
-    $('#addCommission').addEventListener('click', () => openDailyDrawer());
-    $('#manualCommission').addEventListener('click', () => openDrawer());
+    $('#addCommission')?.addEventListener('click', () => openDailyDrawer());
+    $('#manualCommission')?.addEventListener('click', () => openDrawer());
     $('#commissionMonthFilter').addEventListener('change', (event) => { filters.month = event.target.value; render(); });
     $('#commissionEmployeeFilter').addEventListener('change', (event) => { filters.employee = event.target.value; render(); });
     $('#commissionProjectFilter').addEventListener('change', (event) => { filters.project = event.target.value; render(); });
-    $('#commissionStatusFilter').addEventListener('change', (event) => { filters.status = event.target.value; render(); });
-    $('#commissionBillingFilter').addEventListener('change', (event) => { filters.billingStatus = event.target.value; render(); });
     $('#commissionQueryFilter').addEventListener('input', (event) => { filters.query = event.target.value; window.clearTimeout(bind.searchTimer); bind.searchTimer = window.setTimeout(render, 180); });
-    $('#commissionClearFilters').addEventListener('click', () => { Object.assign(filters, {month:latestMonth(store.getState()),employee:'',project:'',status:'',billingStatus:'',query:''}); render(); });
+    $('#commissionClearFilters').addEventListener('click', () => { Object.assign(filters, {month:monthNow(),employee:'',project:'',query:''}); render(); });
+    $$('[data-workforce-tab]').forEach((button)=>button.addEventListener('click',()=>{activeTab=button.dataset.workforceTab;render()}));
     $$('[data-sort]').forEach((button) => button.addEventListener('click', () => { const key = button.dataset.sort; filters.direction = filters.sort === key && filters.direction === 'desc' ? 'asc' : 'desc'; filters.sort = key; render(); }));
     $$('[data-edit]').forEach((button) => button.addEventListener('click', () => openDrawer(button.dataset.edit)));
     $$('[data-delete]').forEach((button) => button.addEventListener('click', () => remove(button.dataset.delete)));
     $$('[data-daily-edit]').forEach((button) => button.addEventListener('click', () => openDailyDrawer(button.dataset.dailyEdit)));
     $$('[data-daily-delete]').forEach((button) => button.addEventListener('click', () => removeDaily(button.dataset.dailyDelete)));
+    $$('[data-view-daily-source]').forEach((button)=>button.addEventListener('click',()=>showDailySource(button.dataset.viewDailySource)));
+    $$('[data-view-payroll]').forEach((button)=>button.addEventListener('click',()=>{window.location.hash='#payroll'}));
+  }
+  function showDailySource(sourceId) {
+    const log=(store.getState().dailyLogs||[]).find((row)=>row.id===sourceId);
+    if(!log)return window.KushePhase1?.toast('找不到對應的每日作業來源');
+    activeTab='daily';filters.month=String(log.date||'').slice(0,7);filters.employee='';filters.project='';filters.query='';render();
+    requestAnimationFrame(()=>{const target=$$('[data-daily-batch]').find((row)=>row.dataset.dailyBatch===(log.batchId||log.id));target?.scrollIntoView({block:'center'});target?.classList.add('is-highlighted');window.setTimeout(()=>target?.classList.remove('is-highlighted'),1800)});
   }
   function openDailyDrawerLegacy(batchId='') {
     const state=store.getState(),logs=batchId?(state.dailyLogs||[]).filter((log)=>(log.batchId||log.id)===batchId):[];
@@ -257,9 +311,10 @@
     if (!row || !window.confirm(`確定刪除 ${label(state,'employees',row.employee,'此員工')} 的這筆業績？`)) return;
     try{await store.deleteCommission(id);render();window.KushePhase1?.toast('業績已刪除，薪資連動已重算')}catch(error){window.KushePhase1?.toast(error.message)}
   }
-  async function activate() {
+  async function activate(options = {}) {
     active = true;
-    if (!ready) { await store.load(); filters.month = latestMonth(store.getState()); ready = true; }
+    if (!ready) { await store.load(); filters.month = monthNow(); ready = true; }
+    if (options.route === 'attendance') activeTab = 'attendance';
     render();
   }
   function deactivate() { active = false; }
