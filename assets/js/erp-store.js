@@ -833,7 +833,7 @@
   }
   async function deleteBilling(id, token) {
     await load();
-    const safety=billingSafety(id);if(!safety.billing)throw new Error('找不到請款單');if(!safety.deletable)throw new Error(`此請款已鎖定：${safety.reason}`);if(!billingSourcesResolvable(safety.billing))throw new Error('找不到完整施工來源，為避免誤刪已停止刪除');
+    const safety=billingSafety(id);if(!safety.billing)throw new Error('找不到請款單');if(!safety.receivable)throw new Error(`此請款已鎖定：${safety.reason}`);if(token!==accountingDeleteToken&&!safety.deletable)throw new Error(`此請款已鎖定：${safety.reason}`);if(!billingSourcesResolvable(safety.billing))throw new Error('找不到完整施工來源，為避免誤刪已停止刪除');
     const billing=safety.billing,receivable=safety.receivable,refs=billingSourceRefs(billing),seen=new Set(),affected=[];
     refs.forEach((ref)=>{const copies=availableSourceCopies(ref);if(!copies.length)throw new Error('找不到原施工來源，為避免帳務斷鏈已停止刪除');copies.forEach((copy)=>{const key=`${copy.log.id}:${copy.index}`;if(!seen.has(key)){seen.add(key);affected.push(copy)}})});
     const linkedInvoices=billingInvoiceRecords(billing),otherBillings=state.billings.filter((row)=>row!==billing),otherFor=(copy)=>otherBillings.find((row)=>[...(row.sourceItemRefs||[]),...(row.lines||[]).flatMap((line)=>line.sourceRefs||[])].some((ref)=>sourceMatches(ref,copy.log,copy.item,copy.index)));
