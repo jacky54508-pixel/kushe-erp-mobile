@@ -305,16 +305,10 @@
   function payrollHistoryLock(employeeId, dateOrMonth) {
     const employee=String(employeeId||''),month=monthOf(dateOrMonth);
     if(!employee||!month)return {locked:false,reason:'',payrollIds:[],salaryPaymentIds:[],bankTransactionIds:[]};
-    const payrollRows=(state?.payroll||[]).filter((row)=>String(row.employee||row.employeeId||'')===employee&&monthOf(row.month)===month),payrollIds=new Set(payrollRows.map((row)=>String(row.id)));
-    const salaryPayments=(state?.salaryPayments||[]).filter((row)=>payrollIds.has(String(row.payrollId||''))||(String(row.employee||row.employeeId||'')===employee&&monthOf(row.month)===month)),salaryPaymentIds=new Set(salaryPayments.map((row)=>String(row.id)));
-    const bankTransactions=(state?.bankTransactions||[]).filter((row)=>{
-      const sourceType=String(row.sourceType||''),sourceId=String(row.sourceId||'');
-      if(sourceType==='salary_payment'&&(salaryPaymentIds.has(sourceId)||salaryPaymentIds.has(String(row.salaryPaymentId||''))||payrollIds.has(String(row.payrollId||''))))return true;
-      if(sourceType==='payroll'&&payrollIds.has(sourceId))return true;
-      return payrollIds.has(String(row.payrollId||''))&&/salary|payroll|薪資/i.test(`${sourceType} ${row.category||''}`);
-    });
-    const paidPayroll=payrollRows.some((row)=>row.status==='已付款'),locked=paidPayroll||salaryPayments.length>0||bankTransactions.length>0;
-    return {locked,reason:paidPayroll?'paid-payroll':salaryPayments.length?'salary-payment':bankTransactions.length?'salary-bank-transaction':'',payrollIds:[...payrollIds],salaryPaymentIds:[...salaryPaymentIds],bankTransactionIds:bankTransactions.map((row)=>String(row.id))};
+    const payrollRows=(state?.payroll||[]).filter((row)=>String(row.employee||row.employeeId||'')===employee&&monthOf(row.month)===month);
+    if(!payrollRows.length)return {locked:false,reason:'',payrollIds:[],salaryPaymentIds:[],bankTransactionIds:[]};
+    const truth=payrollPaymentTruth({employee,month,recordIds:payrollRows.map((row)=>row.id),total:Math.max(0,...payrollRows.map((row)=>num(row.total)))});
+    return {locked:truth.hasVerifiedPayment,reason:truth.explicitPayments.length?'salary-payment':truth.verifiedLegacyTransactions.length?'salary-bank-transaction':'',payrollIds:truth.recordIds,salaryPaymentIds:truth.explicitPayments.map((row)=>String(row.id)),bankTransactionIds:truth.bankTransactionIds};
   }
   function rebuildPayrollFor(month, employee) {
     if (!month || !employee) return;
@@ -1102,6 +1096,27 @@
     const employeeId=payrollEmployeeId(payroll),month=String(payroll?.month||'');
     return state.payroll.filter((row)=>payrollEmployeeId(row)===employeeId&&String(row.month||'')===month);
   }
+  function payrollPaymentTruth(payroll) {
+    const records=payrollGroupRows(payroll),recordIds=new Set(records.map((row)=>String(row.id))),employeeId=payrollEmployeeId(payroll),month=String(payroll?.month||records[0]?.month||''),total=payroll?.total!==undefined&&Array.isArray(payroll?.recordIds)?Math.max(0,num(payroll.total)):Math.max(0,...records.map((row)=>num(row.total)));
+    const explicitPayments=state.salaryPayments.filter((row)=>recordIds.has(String(row.payrollId||''))||(!String(row.payrollId||'').trim()&&String(row.employee||row.employeeId||'')===employeeId&&monthOf(row.month||row.date)===month));
+    const paymentIds=new Set(explicitPayments.map((row)=>String(row.id))),explicitTransactionIds=new Set(explicitPayments.map((row)=>String(row.bankTransactionId||'')).filter(Boolean)),explicitBankTransactions=[];
+    state.bankTransactions.forEach((row)=>{const transactionId=String(row.id||''),sourceType=String(row.sourceType||''),sourceId=String(row.sourceId||''),salaryPaymentId=String(row.salaryPaymentId||'');if(explicitTransactionIds.has(transactionId)||(sourceType==='salary_payment'&&(paymentIds.has(sourceId)||paymentIds.has(salaryPaymentId))))explicitBankTransactions.push(row)});
+    const explicitBankIds=new Set(explicitBankTransactions.map((row)=>String(row.id||''))),verifiedLegacyTransactions=[],legacyHistory=[],seenLegacy=new Set();
+    state.bankTransactions.forEach((row)=>{
+      const transactionId=String(row.id||'').trim(),sourceType=String(row.sourceType||'').trim(),sourceId=String(row.sourceId||'').trim(),payrollId=String(row.payrollId||'').trim();
+      if(!transactionId||explicitBankIds.has(transactionId)||seenLegacy.has(transactionId))return;
+      const referencedRecord=records.find((record)=>String(record.paymentTransactionId||'')===transactionId),directPayrollLink=recordIds.has(payrollId)||(sourceType==='payroll'&&recordIds.has(sourceId))||(sourceType==='salary_payment'&&(recordIds.has(payrollId)||recordIds.has(sourceId)));
+      if(!referencedRecord&&!directPayrollLink)return;
+      const amount=Math.max(0,num(row.salaryAmount??row.payrollAmount??row.paymentAmount??row.amount));if(amount<=0)return;
+      seenLegacy.add(transactionId);verifiedLegacyTransactions.push(row);
+      const record=referencedRecord||records.find((item)=>String(item.id)===payrollId||String(item.id)===sourceId);
+      legacyHistory.push({id:`legacy-bank-${transactionId}`,payrollId:record?.id||payrollId||sourceId,date:row.date||record?.payDate||'',amount,fee:Math.max(0,num(row.fee)),actualDebit:Math.max(0,num(row.actualDebit??row.amount)),bankId:row.bankId||row.bankAccountId||record?.bankId||'',bankAccountId:row.bankAccountId||row.bankId||record?.bankId||'',paymentMethod:row.paymentMethod||'歷史銀行交易',note:row.note||row.description||'可驗證的歷史薪資付款',bankTransactionId:transactionId,legacy:true,readOnly:true});
+    });
+    const history=[...explicitPayments,...legacyHistory].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))),paid=Math.min(total,history.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0)),outstanding=Math.max(0,total-paid),status=paid>0&&outstanding<=0&&total>0?'已付清':paid>0?'部分付款':'未付款',hasVerifiedPayment=explicitPayments.length>0||verifiedLegacyTransactions.length>0;
+    const stalePayrollStatus=!hasVerifiedPayment&&records.some((row)=>row.status==='已付款'||num(row.paidAmount)>0||row.payDate||row.paidAt||row.paymentTransactionId),missingBankPaymentIds=explicitPayments.filter((payment)=>!explicitBankTransactions.some((row)=>String(row.id||'')===String(payment.bankTransactionId||'')||(row.sourceType==='salary_payment'&&(String(row.sourceId||'')===String(payment.id)||String(row.salaryPaymentId||'')===String(payment.id))))).map((row)=>String(row.id));
+    const integrity=missingBankPaymentIds.length?'explicit-missing-bank-transaction':explicitPayments.length&&verifiedLegacyTransactions.length?'explicit-and-legacy':explicitPayments.length?'explicit':verifiedLegacyTransactions.length?'verified-legacy':stalePayrollStatus?'stale-payroll-status':'none';
+    return {explicitPayments,verifiedLegacyTransactions,history,paid,outstanding,status,hasVerifiedPayment,integrity,missingBankPaymentIds,total,recordIds:[...recordIds],bankTransactionIds:[...new Set([...explicitBankTransactions,...verifiedLegacyTransactions].map((row)=>String(row.id||'')).filter(Boolean))],legacyPaid:verifiedLegacyTransactions.length>0};
+  }
   function salarySourceIdentity(row,type) {
     const sourceId=String(row?.sourceId||row?.attendanceId||row?.commissionId||'').trim();
     if(sourceId)return `${type}:${row?.sourceType||'source'}:${sourceId}`;
@@ -1133,20 +1148,18 @@
       const sources=monthlySalarySources(group.employeeId,group.month,records),sourceTotal=sources.reduce((sum,row)=>sum+num(row.amount),0),sourceBase=sources.filter((row)=>['點工','出勤'].includes(row.type)).reduce((sum,row)=>sum+num(row.amount),0),sourceCommission=sources.filter((row)=>row.type==='抽成').reduce((sum,row)=>sum+num(row.amount),0);
       const total=sources.length?Math.max(0,sourceTotal):Math.max(0,...records.map((row)=>num(row.total))),baseSalary=sourceBase||Math.max(0,...records.map((row)=>num(row.baseSalary))),commission=sourceCommission||Math.max(0,...records.map((row)=>num(row.commission)));
       const view={...group,recordIds:records.map((row)=>row.id),primaryPayrollId:primary.id,employee:group.employeeId,employeeName:employee?.name||primary.employeeName||'—',total,baseSalary,commission,sources};
-      const summary=salaryPaymentSummary(view);return {...view,...summary,status:summary.outstanding<=0&&total>0?'已付清':summary.paid>0?'部分付款':'未付款'};
+      const summary=salaryPaymentSummary(view);return {...view,...summary,status:summary.status};
     }).sort((a,b)=>String(b.month).localeCompare(String(a.month))||String(a.employeeName).localeCompare(String(b.employeeName),'zh-Hant'));
   }
   function salaryPaymentSummary(payroll) {
-    const records=payrollGroupRows(payroll),recordIds=new Set(records.map((row)=>String(row.id))),total=payroll?.total!==undefined&&Array.isArray(payroll?.recordIds)?num(payroll.total):Math.max(0,...records.map((row)=>num(row.total)));
-    const history=state.salaryPayments.filter((row)=>recordIds.has(String(row.payrollId))),legacyPaid=!history.length&&records.some((row)=>row.status==='已付款')?total:0,paid=Math.min(total,history.reduce((sum,row)=>sum+num(row.amount),legacyPaid));
-    return {history,paid,outstanding:Math.max(0,total-paid),legacyPaid:Boolean(legacyPaid),total,recordIds:[...recordIds]};
+    return payrollPaymentTruth(payroll);
   }
   function salaryPaymentTransaction(payment) {
     return state.bankTransactions.find((row)=>row.id===payment.bankTransactionId||(row.sourceType==='salary_payment'&&row.sourceId===payment.id));
   }
   function syncSalarySummary(payroll, now) {
     const summary=salaryPaymentSummary(payroll),latest=[...summary.history].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];
-    payroll.paidAmount=summary.paid;payroll.status=summary.outstanding<=0&&num(payroll.total)>0?'已付款':summary.paid>0?'部分付款':'未付款';payroll.bankId=latest?.bankAccountId||latest?.bankId||'';payroll.payDate=latest?.date||'';payroll.paymentTransactionId=summary.history.length===1?summary.history[0].bankTransactionId||'':'';payroll.paidAt=summary.outstanding<=0&&summary.paid>0?(payroll.paidAt||now):'';payroll.updatedAt=now;
+    payroll.paidAmount=summary.paid;payroll.status=summary.status==='已付清'?'已付款':summary.status;payroll.bankId=latest?.bankAccountId||latest?.bankId||'';payroll.payDate=latest?.date||'';payroll.paymentTransactionId=summary.history.length===1?summary.history[0].bankTransactionId||'':'';payroll.paidAt=summary.outstanding<=0&&summary.paid>0?(payroll.paidAt||now):'';payroll.updatedAt=now;
     return summary;
   }
   function syncSalaryBankTransaction(payment, payroll, now) {
@@ -1414,5 +1427,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, dailyLogPayrollDeleteLock, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, saveProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, dailyLogPayrollDeleteLock, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, saveProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
