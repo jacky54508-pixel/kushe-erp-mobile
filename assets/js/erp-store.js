@@ -301,6 +301,7 @@
   }
   const PAID_PAYROLL_SOURCE_ERROR = '此施工紀錄已納入已付款薪資，為保留歷史帳務不可修改或刪除。';
   const PAID_COMMISSION_SOURCE_ERROR = '此抽成紀錄已納入已付款薪資，為保留歷史帳務不可修改或刪除。';
+  const PAID_ORPHAN_COMMISSION_ERROR = '此抽成已納入真正已付款薪資，不能直接清除來源。';
   const DAILY_LOG_COMMISSION_ERROR = '每日施工衍生抽成必須由每日施工來源調整，不可直接修改或刪除。';
   function payrollHistoryLock(employeeId, dateOrMonth) {
     const employee=String(employeeId||''),month=monthOf(dateOrMonth);
@@ -522,6 +523,29 @@
     state.dailyItemPresets.filter((row)=>String(row.projectId||'')===String(projectId)).forEach((row)=>remember(row,row.updatedAt));
     return [...items.values()].sort((a,b)=>a.item.localeCompare(b.item,'zh-Hant'));
   }
+  function commissionBillingLink(row) {
+    if(!row||typeof row!=='object')return {kind:'ambiguous',billing:null,evidence:'invalid-row'};
+    const sourceType=String(row.sourceType||'').trim().toLocaleLowerCase('en-US');
+    if(sourceType==='daily-log')return {kind:'daily-log',billing:null,evidence:'source-type'};
+    const billingSourceTypes=new Set(['billing','billing-commission','billing_commission','legacy-billing','legacy_billing','billing-inline']),isBillingSource=billingSourceTypes.has(sourceType),billingId=String(row.billingId||'').trim(),sourceId=isBillingSource?String(row.sourceId||'').trim():'',directIds=[...new Set([billingId,sourceId].filter(Boolean))];
+    if(directIds.length){
+      const matches=state.billings.filter((billing)=>directIds.includes(String(billing.id)));
+      if(directIds.length===1&&matches.length===1)return {kind:'linked',billing:matches[0],evidence:billingId?'billing-id':'source-id'};
+      if(!matches.length)return {kind:'orphan-billing',billing:null,evidence:billingId?'missing-billing-id':'missing-source-id'};
+      return {kind:'ambiguous',billing:null,evidence:'conflicting-billing-ids'};
+    }
+    const sourceNo=String(row.sourceNo||'').trim(),note=String(row.note||'').trim(),legacySignature=/^由請款單自動建立(?:$|｜(?:固定金額|比例分配)(?:$|｜))/u.test(note),hasBillingEvidence=isBillingSource||legacySignature;
+    if(hasBillingEvidence&&sourceNo){
+      const matches=state.billings.filter((billing)=>String(billing.number||'').trim()===sourceNo);
+      if(matches.length===1)return {kind:'linked',billing:matches[0],evidence:isBillingSource?'billing-source-number':'legacy-note-number'};
+      if(!matches.length)return {kind:'orphan-billing',billing:null,evidence:isBillingSource?'missing-billing-source-number':'missing-legacy-note-number'};
+      return {kind:'ambiguous',billing:null,evidence:'duplicate-billing-number'};
+    }
+    if(hasBillingEvidence)return {kind:'ambiguous',billing:null,evidence:'billing-evidence-without-identity'};
+    if(sourceType&&sourceType!=='manual')return {kind:'ambiguous',billing:null,evidence:'unknown-source-type'};
+    if(sourceNo)return {kind:'ambiguous',billing:null,evidence:'unverified-source-number'};
+    return {kind:'manual',billing:null,evidence:sourceType==='manual'?'source-type':'no-billing-evidence'};
+  }
   async function saveCommission(values, id) {
     await load();
     const existing = id ? state.commissions.find((x) => x.id === id) : null;
@@ -530,6 +554,8 @@
       throw new Error(DAILY_LOG_COMMISSION_ERROR);
     }
     if ([[existing?.employee,existing?.date],[values.employee,values.date]].some(([employeeId,date])=>employeeId&&payrollHistoryLock(employeeId,date).locked)) throw new Error(PAID_COMMISSION_SOURCE_ERROR);
+    const selectedBilling=values.billing?state.billings.find((billing)=>String(billing.id)===String(values.billing)):null;
+    if(values.billing&&!selectedBilling)throw new Error('找不到選擇的請款來源');
     const before = existing ? { date: existing.date, employee: existing.employee } : null;
     const row = existing || { id: uid(), createdAt: new Date().toISOString() };
     Object.assign(row, {
@@ -544,21 +570,23 @@
       note: values.note || '',
       updatedAt: new Date().toISOString()
     });
+    if(selectedBilling)Object.assign(row,{sourceType:'billing',sourceId:selectedBilling.id,billingId:selectedBilling.id,sourceNo:selectedBilling.number||row.sourceNo||''});
     if (!existing) state.commissions.unshift(row);
     if (before?.employee) rebuildPayrollFor(monthOf(before.date), before.employee);
     rebuildPayrollFor(monthOf(row.date), row.employee);
     await persist(`${existing ? '修改' : '新增'}員工業績抽成`);
     return row;
   }
-  async function deleteCommission(id) {
+  async function deleteCommission(id, token) {
     await load();
     const row = state.commissions.find((x) => x.id === id);
     if (!row) return false;
-    if (payrollHistoryLock(row.employee,row.date).locked) throw new Error(PAID_COMMISSION_SOURCE_ERROR);
+    const source=commissionBillingLink(row);
+    if (payrollHistoryLock(row.employee,row.date).locked) throw new Error(source.kind==='orphan-billing'?PAID_ORPHAN_COMMISSION_ERROR:PAID_COMMISSION_SOURCE_ERROR);
     if (row.sourceType === 'daily-log') throw new Error(DAILY_LOG_COMMISSION_ERROR);
     state.commissions = state.commissions.filter((x) => x.id !== id);
     rebuildPayrollFor(monthOf(row.date), row.employee);
-    await persist('刪除員工業績抽成');
+    if(token!==accountingDeleteToken)await persist('刪除員工業績抽成');
     return true;
   }
   function nextBillingNumber(date) {
@@ -780,6 +808,8 @@
     if(billingReceivable(billing)!==receivable)throw new Error('找不到唯一 Billing／Receivable 關係，為避免誤刪已停止');
     const invoiceRecords=[...new Set([...billingInvoiceRecords(billing),...state.invoices.filter((row)=>String(row.receivableId||'')===String(receivable.id))])],billingStatus=billingInvoiceStatus(billing),billingInvoiceNumber=String(billing.invoiceNo||'').trim(),issuedInvoice=billingStatus==='invoiced'||billingStatus!=='no_invoice'&&Boolean(billingInvoiceNumber)||invoiceRecords.some((row)=>invoiceStatus(row.status,row.invoiceNumber||row.invoiceNo||row.number)==='issued');
     if(issuedInvoice)throw new Error('此筆已正式開立發票，為保留正式帳務不可直接刪除。');
+    const linkedCommissions=state.commissions.filter((row)=>{const link=commissionBillingLink(row);return link.kind==='linked'&&link.billing===billing});
+    if(linkedCommissions.some((row)=>payrollHistoryLock(row.employee,row.date).locked))throw new Error(PAID_ORPHAN_COMMISSION_ERROR);
     const receipts=state.receipts.filter((row)=>String(row.receivableId||'')===String(receivable.id)||String(row.billingId||'')===String(billing.id)),retentionReceipts=state.retentionReceipts.filter((row)=>String(row.receivableId||'')===String(receivable.id)||String(row.billingId||'')===String(billing.id));
     if(receipts.some((row)=>row.receivableId&&String(row.receivableId)!==String(receivable.id)||row.billingId&&String(row.billingId)!==String(billing.id))||retentionReceipts.some((row)=>row.receivableId&&String(row.receivableId)!==String(receivable.id)||row.billingId&&String(row.billingId)!==String(billing.id)))throw new Error('收款與請款關聯不一致，為避免帳務斷鏈已停止刪除。');
     if(num(receivable.legacyReceived)>0||num(receivable.legacyRetentionReceived)>0)throw new Error('存在無法逐筆解析的歷史收款，為避免帳務斷鏈已停止刪除。');
@@ -790,11 +820,11 @@
     if(transactions.some((row)=>!state.banks.some((bank)=>String(bank.id)===String(row.bankAccountId||row.bankId||''))))throw new Error('找不到收款對應銀行帳戶，為避免帳務斷鏈已停止刪除。');
     const receiptIds=new Set([...receipts,...retentionReceipts].flatMap((row)=>[row.id,row.retentionReceiptId]).filter(Boolean).map(String)),linkedTransactions=state.bankTransactions.filter((row)=>String(row.billingId||'')===String(billing.id)||String(row.receivableId||'')===String(receivable.id)||[String(billing.id),String(receivable.id)].includes(String(row.sourceId||''))||receiptIds.has(String(row.sourceId||''))||receiptIds.has(String(row.receiptId||''))||receiptIds.has(String(row.retentionReceiptId||''))||(String(row.sourceNo||'')===String(billing.number||'')&&/receipt|receivable|retention|收款|應收|保留/i.test(`${row.sourceType||''} ${row.category||''}`)));
     if(linkedTransactions.some((row)=>!transactionIds.has(String(row.id))))throw new Error('存在無法對應收款紀錄的銀行交易，為避免帳務斷鏈已停止刪除。');
-    return {receivable,billing,receipts,retentionReceipts,transactions,invoiceRecords,dailyRefs,contractRefs};
+    return {receivable,billing,receipts,retentionReceipts,transactions,invoiceRecords,dailyRefs,contractRefs,linkedCommissions};
   }
   function accountingDeletionSummary(plan) {
     const {receivable,billing,receipts,retentionReceipts,transactions}=plan;
-    return {receivableId:receivable.id,billingId:billing.id,billingNo:billing.number||receivable.sourceNo||'',customerName:billing.customerName||receivable.customerName||'',projectName:billing.projectName||receivable.projectName||'',billingDate:billing.date||receivable.date||'',grossTotal:num(billing.grossTotal??receivable.grossTotal??billing.total??receivable.amount),receiptCount:receipts.length,retentionReceiptCount:retentionReceipts.length,bankTransactionCount:transactions.length};
+    return {receivableId:receivable.id,billingId:billing.id,billingNo:billing.number||receivable.sourceNo||'',customerName:billing.customerName||receivable.customerName||'',projectName:billing.projectName||receivable.projectName||'',billingDate:billing.date||receivable.date||'',grossTotal:num(billing.grossTotal??receivable.grossTotal??billing.total??receivable.amount),receiptCount:receipts.length,retentionReceiptCount:retentionReceipts.length,bankTransactionCount:transactions.length,commissionCount:plan.linkedCommissions.length};
   }
   async function receivableAccountingDeletePreview(receivableId) { await load();return accountingDeletionSummary(accountingDeletionPreflight(receivableId)); }
   function normalizedBillingLineInput(value, label) {
@@ -996,6 +1026,7 @@
     try {
       for(const receipt of plan.receipts)await deleteReceipt(receipt.id,accountingDeleteToken);
       for(const receipt of plan.retentionReceipts)await deleteRetentionReceipt(receipt.retentionReceiptId||receipt.id,accountingDeleteToken);
+      for(const commission of plan.linkedCommissions)await deleteCommission(commission.id,accountingDeleteToken);
       await deleteBilling(plan.billing.id,accountingDeleteToken);
       if(plan.invoiceRecords.length){const linked=new Set(plan.invoiceRecords);state.invoices=state.invoices.filter((row)=>!linked.has(row))}
       await persist(`安全刪除整筆測試帳務 ${summary.billingNo}`);
@@ -1427,5 +1458,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, dailyLogPayrollDeleteLock, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, saveProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, saveProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
