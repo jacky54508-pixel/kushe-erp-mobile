@@ -399,6 +399,21 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 @media(max-width:900px){.employee-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.employee-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.employee-search{grid-column:1/-1}.employee-filter-grid .commission-clear{width:100%}.employee-detail-body dl{grid-template-columns:1fr}}
 @media(max-width:620px){.employee-heading{align-items:stretch}.employee-kpis,.employee-filter-grid,.employee-form-grid{grid-template-columns:1fr}.employee-search,.employee-form-grid .wide{grid-column:auto}.employee-detail-body{padding:14px}.employee-editor-modal{width:100%}.employee-editor-modal .erp-detail-body{padding:17px 15px}.employee-compensation-preview{grid-column:auto}}
 
+/* Payroll adjustments: scoped editor layout only. */
+.payroll-adjustment-card{width:min(860px,calc(100vw - 16px));max-height:calc(100vh - 16px);max-height:calc(100dvh - 16px)}
+#payrollAdjustmentForm{display:flex;flex:1 1 auto;min-width:0;min-height:0;flex-direction:column;overflow:hidden}
+#payrollAdjustmentForm>.erp-detail-body{flex:1 1 auto;min-width:0;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding-bottom:24px}
+#payrollAdjustmentForm>footer{position:sticky;bottom:0;z-index:2;flex:0 0 auto;background:#fff}
+.payroll-adjustment-source,.payroll-adjustment-preview{grid-template-columns:repeat(4,minmax(0,1fr));margin:0}
+.payroll-adjustment-section{margin-top:18px;padding-top:17px;border-top:1px solid #e4ebf3}
+.payroll-adjustment-section h3{margin:0 0 13px;color:#0a386f;font-size:15px}
+.payroll-adjustment-section .payable-note-field{display:grid;gap:7px}
+.payroll-adjustment-preview{margin-top:18px}
+.payroll-adjustment-preview span:last-child{border-color:#b9dfd1;background:#eaf8f3}
+.payroll-adjustment-preview span:last-child b{color:#087856;font-size:18px}
+@media(max-width:700px){.payroll-adjustment-source,.payroll-adjustment-preview{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:440px){.payroll-adjustment-source,.payroll-adjustment-preview{grid-template-columns:1fr}}
+
 /* Workforce workspace V1: UI-only composition of existing dailyLogs, attendance and commissions. */
 .workforce-heading{align-items:flex-end}.workforce-heading-actions{display:flex;align-items:center;justify-content:flex-end;gap:9px;flex-wrap:wrap}.workforce-kpis article{min-width:0}.workforce-kpis strong{overflow-wrap:anywhere}.workforce-filter-grid{grid-template-columns:150px minmax(170px,.8fr) minmax(190px,1fr) minmax(280px,1.45fr) auto}.workforce-search{min-width:0}
 .workforce-tabs{display:flex;max-width:100%;margin:0 0 14px;padding:5px;border:1px solid #d9e3ee;border-radius:12px;background:#eef3f8;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:thin}.workforce-tab{flex:1 0 150px;min-height:42px;border:0;border-radius:9px;background:transparent;color:#52657c;font-size:12.5px;font-weight:850;white-space:nowrap}.workforce-tab:hover{background:rgba(255,255,255,.72);color:#0b4f9c}.workforce-tab.is-active{background:#fff;color:#075bd8;box-shadow:0 3px 12px rgba(26,55,90,.12)}.workforce-tab-panel{min-width:0}.workforce-tab-panel>.commission-panel:last-child{margin-bottom:0}

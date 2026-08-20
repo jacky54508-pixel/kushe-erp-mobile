@@ -317,17 +317,18 @@
     const comms = state.commissions.filter((x) => monthOf(x.date) === month && x.employee === employee && x.status === '已列入薪資');
     let payroll = state.payroll.find((x) => x.month === month && x.employee === employee && x.status !== '已付款');
     if (!payroll) {
-      payroll = {id:uid(),month,employee,days:0,baseSalary:0,commission:0,fuel:0,meal:0,other:0,overtime:0,bonus:0,allowance:0,advance:0,laborInsurance:0,incomeTax:0,deduction:0,total:0,payDate:'',bankId:'',paymentTransactionId:'',paidAt:'',status:'未付款',note:'由請款單、抽成與點工自動彙整',createdAt:new Date().toISOString()};
+      payroll = {id:uid(),month,employee,days:0,baseSalary:0,commission:0,fuel:0,manualFuel:0,meal:0,other:0,overtime:0,bonus:0,allowance:0,advance:0,laborInsurance:0,incomeTax:0,deduction:0,total:0,payDate:'',bankId:'',paymentTransactionId:'',paidAt:'',status:'未付款',note:'由請款單、抽成與點工自動彙整',payrollAdjustmentNote:'',createdAt:new Date().toISOString()};
       state.payroll.unshift(payroll);
     }
     payroll.days = atts.reduce((sum, x) => sum + num(x.days), 0);
     payroll.hours = atts.reduce((sum, x) => sum + num(x.hours), 0);
     payroll.baseSalary = atts.reduce((sum, x) => sum + num(x.amount), 0);
-    payroll.fuel = atts.reduce((sum, x) => sum + num(x.fuel), 0);
+    payroll.manualFuel = Math.max(0, num(payroll.manualFuel));
+    payroll.fuel = atts.reduce((sum, x) => sum + num(x.fuel), 0) + payroll.manualFuel;
     payroll.commission = comms.reduce((sum, x) => sum + num(x.commission), 0);
     payroll.total = payrollNet(payroll);
     payroll.updatedAt = new Date().toISOString();
-    const otherValues = ['fuel','meal','other','overtime','bonus','allowance','advance','laborInsurance','incomeTax','deduction'].some((key) => num(payroll[key]));
+    const otherValues = ['fuel','manualFuel','meal','other','overtime','bonus','allowance','advance','laborInsurance','incomeTax','deduction'].some((key) => num(payroll[key]));
     if (!atts.length && !comms.length && !otherValues && payroll.status !== '已付款') state.payroll = state.payroll.filter((x) => x.id !== payroll.id);
   }
   async function persist(action) {
@@ -1113,7 +1114,7 @@
     state.payments=state.payments.filter((row)=>row!==payment);syncPayableSummary(payable,now);await persist(`刪除應付付款 ${payable.payableNo||''}`);return true;
   }
   const salaryAdjustmentFields = [
-    ['fuel','油費','加項'],['meal','伙食','加項'],['other','其他加項','加項'],['overtime','加班','加項'],['bonus','獎金','加項'],['allowance','其他津貼','加項'],
+    ['manualFuel','額外油資','加項'],['meal','餐費','加項'],['other','其他加項','加項'],['overtime','加班','加項'],['bonus','獎金','加項'],['allowance','其他津貼','加項'],
     ['advance','預支','扣項'],['laborInsurance','勞健保','扣項'],['incomeTax','所得稅','扣項'],['deduction','其他扣項','扣項']
   ];
   function payrollEmployeeId(payroll) {
@@ -1168,7 +1169,7 @@
       push(salarySourceIdentity(row,'commission'),{id:row.id,date:row.date||'',type:'抽成',projectId:row.project||'',projectName:project?.name||row.projectName||'—',content:row.note||row.sourceNo||'業績抽成',quantity:base,quantityLabel:base?`$${Math.round(base).toLocaleString('zh-TW')}`:'',rate,rateLabel:rate?`${rate}%`:'',amount:num(row.commission),sourceType:row.sourceType||'commission',sourceId:row.sourceId||row.id});
     });
     const sorted=[...records].sort((a,b)=>String(b.updatedAt||b.createdAt||'').localeCompare(String(a.updatedAt||a.createdAt||'')));
-    salaryAdjustmentFields.forEach(([field,label,direction])=>{if(field==='fuel'&&rows.some((row)=>row.type==='油費'))return;const record=sorted.find((row)=>num(row[field])!==0),value=num(record?.[field]);if(!value)return;push(`adjustment:${field}`,{id:`${record.id}-${field}`,date:record.updatedAt?.slice(0,10)||'',type:label,projectId:'',projectName:'—',content:record.note||label,quantity:0,quantityLabel:'',rate:0,rateLabel:'',amount:direction==='扣項'?-Math.abs(value):Math.abs(value),sourceType:'payroll-adjustment',sourceId:record.id})});
+    salaryAdjustmentFields.forEach(([field,label,direction])=>{const record=sorted.find((row)=>num(row[field])!==0),value=num(record?.[field]);if(!value)return;push(`adjustment:${field}`,{id:`${record.id}-${field}`,date:record.updatedAt?.slice(0,10)||'',type:label,projectId:'',projectName:'—',content:record.payrollAdjustmentNote||label,quantity:0,quantityLabel:'',rate:0,rateLabel:'',amount:direction==='扣項'?-Math.abs(value):Math.abs(value),sourceType:'payroll-adjustment',sourceId:record.id})});
     return rows.sort((a,b)=>String(a.date||'').localeCompare(String(b.date||''))||String(a.type).localeCompare(String(b.type),'zh-Hant'));
   }
   function monthlyPayrollGroups() {
@@ -1176,14 +1177,39 @@
     state.payroll.forEach((row)=>{const employeeId=payrollEmployeeId(row),month=String(row.month||''),key=`${employeeId}__${month}`;if(!groups.has(key))groups.set(key,{key,id:key,employeeId,month,records:[]});groups.get(key).records.push(row)});
     return [...groups.values()].map((group)=>{
       const records=[...group.records].sort((a,b)=>String(b.updatedAt||b.createdAt||'').localeCompare(String(a.updatedAt||a.createdAt||''))),primary=records[0],employee=state.employees.find((row)=>String(row.id)===group.employeeId);
-      const sources=monthlySalarySources(group.employeeId,group.month,records),sourceTotal=sources.reduce((sum,row)=>sum+num(row.amount),0),sourceBase=sources.filter((row)=>['點工','出勤'].includes(row.type)).reduce((sum,row)=>sum+num(row.amount),0),sourceCommission=sources.filter((row)=>row.type==='抽成').reduce((sum,row)=>sum+num(row.amount),0);
+      const sources=monthlySalarySources(group.employeeId,group.month,records),sourceTotal=sources.reduce((sum,row)=>sum+num(row.amount),0),sourceBase=sources.filter((row)=>['點工','出勤'].includes(row.type)).reduce((sum,row)=>sum+num(row.amount),0),sourceCommission=sources.filter((row)=>row.type==='抽成').reduce((sum,row)=>sum+num(row.amount),0),sourceFuel=sources.filter((row)=>row.type==='油費').reduce((sum,row)=>sum+num(row.amount),0);
       const total=sources.length?Math.max(0,sourceTotal):Math.max(0,...records.map((row)=>num(row.total))),baseSalary=sourceBase||Math.max(0,...records.map((row)=>num(row.baseSalary))),commission=sourceCommission||Math.max(0,...records.map((row)=>num(row.commission)));
-      const view={...group,recordIds:records.map((row)=>row.id),primaryPayrollId:primary.id,employee:group.employeeId,employeeName:employee?.name||primary.employeeName||'—',total,baseSalary,commission,sources};
+      const adjustments=Object.fromEntries(salaryAdjustmentFields.map(([field])=>[field,num(records.find((row)=>num(row[field])!==0)?.[field])])),payrollAdjustmentNote=String(records.find((row)=>String(row.payrollAdjustmentNote||'').trim())?.payrollAdjustmentNote||'');
+      const view={...group,recordIds:records.map((row)=>row.id),primaryPayrollId:primary.id,employee:group.employeeId,employeeName:employee?.name||primary.employeeName||'—',total,baseSalary,commission,sourceFuel,fuel:sourceFuel+adjustments.manualFuel,...adjustments,payrollAdjustmentNote,sources};
       const summary=salaryPaymentSummary(view);return {...view,...summary,status:summary.status};
     }).sort((a,b)=>String(b.month).localeCompare(String(a.month))||String(a.employeeName).localeCompare(String(b.employeeName),'zh-Hant'));
   }
   function salaryPaymentSummary(payroll) {
     return payrollPaymentTruth(payroll);
+  }
+  function payrollAdjustmentAmount(value, label) {
+    const text=String(value??'').trim();if(!text)return 0;const amount=Number(text);
+    if(!Number.isFinite(amount)||amount<0)throw new Error(`${label}必須是 0 以上的有限數字`);
+    return Math.round(amount);
+  }
+  async function updatePayrollAdjustments(groupKey, values={}) {
+    await load();
+    const reference=String(groupKey||''),group=monthlyPayrollGroups().find((row)=>row.key===reference||row.recordIds.some((id)=>String(id)===reference));
+    let employeeId=group?.employeeId||'',month=group?.month||'';
+    if(!group){const divider=reference.lastIndexOf('__');if(divider>0){employeeId=reference.slice(0,divider);month=reference.slice(divider+2)}}
+    if(!employeeId||!/^\d{4}-\d{2}$/.test(month))throw new Error('找不到薪資月份或員工');
+    const records=state.payroll.filter((row)=>payrollEmployeeId(row)===employeeId&&String(row.month||'')===month),truth=payrollPaymentTruth({employee:employeeId,month,recordIds:records.map((row)=>row.id),total:Math.max(0,...records.map((row)=>num(row.total)))});
+    if(truth.paid>0||truth.hasVerifiedPayment)throw new Error('此月份已有薪資付款，請先刪除／沖回薪資付款後再調整薪資。');
+    const normalized=Object.fromEntries(salaryAdjustmentFields.map(([field,label])=>[field,payrollAdjustmentAmount(values[field],label)])),payrollAdjustmentNote=String(values.adjustmentNote??values.payrollAdjustmentNote??'').trim();
+    const employeeRecord=state.employees.find((row)=>String(row.id)===employeeId),employeeValue=records[0]?.employee??records[0]?.employeeId??employeeRecord?.id;
+    if(employeeValue===undefined||employeeValue===null||employeeValue==='')throw new Error('找不到員工資料');
+    let payroll=state.payroll.find((row)=>payrollEmployeeId(row)===employeeId&&String(row.month||'')===month&&row.status!=='已付款')||records[0];
+    if(!payroll){payroll={id:uid(),month,employee:employeeValue,days:0,hours:0,baseSalary:0,commission:0,fuel:0,manualFuel:0,meal:0,other:0,overtime:0,bonus:0,allowance:0,advance:0,laborInsurance:0,incomeTax:0,deduction:0,total:0,payDate:'',bankId:'',paymentTransactionId:'',paidAt:'',status:'未付款',note:'由請款單、抽成與點工自動彙整',payrollAdjustmentNote:'',createdAt:new Date().toISOString()};state.payroll.unshift(payroll)}
+    if(payroll.status==='已付款'){Object.assign(payroll,{status:'未付款',paidAmount:0,payDate:'',paidAt:'',paymentTransactionId:'',bankId:''})}
+    records.filter((row)=>row!==payroll).forEach((row)=>{salaryAdjustmentFields.forEach(([field])=>{row[field]=0});row.payrollAdjustmentNote=''});
+    Object.assign(payroll,normalized,{payrollAdjustmentNote});rebuildPayrollFor(month,employeeValue);
+    await persist(`更新薪資調整 ${month}`);
+    return monthlyPayrollGroups().find((row)=>row.employeeId===employeeId&&row.month===month)||null;
   }
   function salaryPaymentTransaction(payment) {
     return state.bankTransactions.find((row)=>row.id===payment.bankTransactionId||(row.sourceType==='salary_payment'&&row.sourceId===payment.id));
@@ -1458,5 +1484,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, saveProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, saveProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
