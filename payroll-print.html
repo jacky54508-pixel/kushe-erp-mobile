@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>酷舍薪資單</title>
+  <style>
+    @page{size:A4 portrait;margin:0}
+    *{box-sizing:border-box}
+    html,body{margin:0;background:#edf1f4;color:#17243b;font-family:"Microsoft JhengHei","Noto Sans TC",Arial,sans-serif}
+    .toolbar{position:sticky;top:0;z-index:5;display:flex;justify-content:center;gap:10px;padding:10px;background:#172033}
+    .toolbar button{border:0;border-radius:6px;padding:9px 20px;background:#0b887e;color:#fff;font-weight:800;cursor:pointer}.toolbar .secondary{background:#31536f}.toolbar .close{background:#596677}
+    .paper{display:flex;flex-direction:column;width:210mm;min-height:297mm;margin:16px auto;padding:9mm 13mm 8mm;background:#fff;box-shadow:0 10px 32px rgba(20,39,65,.15)}
+    .head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:9mm;align-items:start;padding-bottom:4mm;border-bottom:1mm solid #078d82}
+    .company h1{margin:0;color:#078d82;font-size:21pt;font-weight:900;letter-spacing:1.5pt;line-height:1.05}.company .en{margin-top:1.5mm;color:#52647c;font-size:8.5pt}.document-title{margin-top:4mm;color:#101b48;font-size:22pt;font-weight:900;letter-spacing:4pt}
+    .company-logo-frame{display:flex;width:29mm;height:24mm;align-items:center;justify-content:flex-end;overflow:hidden}.company-logo{display:none;max-width:28mm;max-height:23mm;object-fit:contain}
+    .info{display:grid;grid-template-columns:1fr 1fr;gap:2.5mm 4mm;margin:5mm 0 4mm;padding:3mm;background:#f1f8f8;border:.25mm solid #b8d5df;border-radius:2.5mm}
+    .info div{display:flex;align-items:center;min-height:10mm;padding:2mm 3mm;background:#fff;border:.25mm solid #cad9e6;border-radius:1.8mm;font-size:9.5pt;font-weight:700}.label{display:inline-block;min-width:21mm;margin-right:2.5mm;color:#52647c;font-size:8pt;font-weight:800}.status{display:inline-flex;padding:1mm 2.5mm;border-radius:99px;background:#e7f7f4;color:#087e75;font-weight:900}.status.partial{background:#fff3d8;color:#9a6700}.status.unpaid{background:#eef2f6;color:#52647c}
+    .section{margin-top:3mm;border:.25mm solid #b8ccdf;border-radius:2.2mm;overflow:hidden;break-inside:avoid}.section-title{padding:2mm 3mm;background:#0b4264;color:#fff;font-size:9.5pt;font-weight:900;letter-spacing:.4pt}
+    table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}th,td{border:.2mm solid #c5d4e2;padding:1.8mm 1.5mm;font-size:8.2pt;line-height:1.2;vertical-align:middle}th{background:#eef6f7;color:#123b5a;text-align:center;font-weight:900}td{overflow-wrap:anywhere}.num{text-align:right;white-space:nowrap}.center{text-align:center}.source-type{font-weight:800;color:#0b7069}.deduction{color:#b24040;font-weight:800}.empty{padding:5mm;text-align:center;color:#738094}
+    .summary{display:grid;grid-template-columns:repeat(4,1fr);margin-top:3mm;border:.25mm solid #b8ccdf;border-radius:2.2mm;overflow:hidden;break-inside:avoid}.summary div{padding:2.5mm 3mm;border-right:.2mm solid #d5e0e9;background:#f8fafb}.summary div:last-child{border-right:0}.summary span{display:block;color:#627188;font-size:7.7pt;font-weight:700}.summary strong{display:block;margin-top:1mm;color:#102c4c;font-size:11pt;white-space:nowrap}.summary .total{background:#e9f8f5}.summary .total strong{color:#087d74}
+    .history-note{padding:3mm;color:#6d7888;text-align:center;font-size:8.5pt}.legacy{display:inline-block;margin-left:1mm;padding:.5mm 1.5mm;border-radius:99px;background:#eef2f6;color:#59697d;font-size:7pt;font-weight:800}
+    .signature{margin-top:auto;padding-top:9mm;text-align:left;color:#34445b;font-size:10pt;font-weight:700;break-inside:avoid}.signature-line{display:inline-block;width:52mm;margin-left:3mm;border-bottom:.25mm solid #34445b;transform:translateY(-1mm)}
+    .paper.is-dense{padding-top:7mm;padding-bottom:6mm}.paper.is-dense .info{margin-top:3.5mm;margin-bottom:2.5mm}.paper.is-dense .section{margin-top:2.2mm}.paper.is-dense th,.paper.is-dense td{padding:1.3mm 1.2mm;font-size:7.7pt}.paper.is-dense .summary{margin-top:2.2mm}.paper.is-dense .signature{padding-top:5mm}
+    @media print{html,body{background:#fff}.toolbar{display:none!important}.paper{width:210mm;min-height:297mm;margin:0;padding:9mm 13mm 8mm;box-shadow:none}.paper.is-dense{padding-top:7mm;padding-bottom:6mm}}
+    @media screen and (max-width:850px){.paper{margin:0;transform-origin:top left;transform:scale(calc(100vw / 794));}.toolbar{width:100vw}}
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button type="button" id="exportPayrollPdf">匯出 PDF</button>
+    <button type="button" class="secondary" id="printPayroll">列印</button>
+    <button type="button" class="close" id="closePayrollPrint">關閉</button>
+  </div>
+  <main class="paper" id="paper"></main>
+  <script>
+    const escapeHtml=(value)=>String(value??'').replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const number=(value)=>{const parsed=Number(value);return Number.isFinite(parsed)?parsed:0};
+    const money=(value)=>new Intl.NumberFormat('zh-TW',{style:'currency',currency:'TWD',maximumFractionDigits:0}).format(number(value));
+    const display=(value)=>String(value??'').trim()||'—';
+    const closePrintView=()=>{try{window.close()}catch(error){}setTimeout(()=>{if(!window.closed)location.replace(new URL('index.html#payroll',location.href).href)},100)};
+    let data={};
+    try{data=JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(location.hash.slice(1))))))}catch(error){document.getElementById('paper').innerHTML='<p class="empty">薪資單資料無法讀取</p>'}
+    const sources=Array.isArray(data.sources)?data.sources.filter((row)=>number(row.amount)!==0):[];
+    const history=Array.isArray(data.history)?data.history.filter((row)=>number(row.amount)>0):[];
+    const statusClass=data.status==='已付清'?'':data.status==='部分付款'?'partial':'unpaid';
+    const sourceRows=sources.map((row)=>`<tr><td class="center">${escapeHtml(display(row.date))}</td><td class="source-type">${escapeHtml(display(row.type))}</td><td>${escapeHtml(display(row.projectName))}</td><td>${escapeHtml(display(row.content))}</td><td class="center">${escapeHtml(display(row.quantityLabel))}</td><td class="num">${escapeHtml(display(row.rateLabel))}</td><td class="num ${number(row.amount)<0?'deduction':''}">${money(row.amount)}</td></tr>`).join('');
+    const historyRows=history.map((row)=>`<tr><td class="center">${escapeHtml(display(row.date))}</td><td class="num">${money(row.amount)}</td><td>${escapeHtml(display(row.paymentMethod))}${row.legacy?'<span class="legacy">唯讀</span>':''}</td><td class="num">${money(row.fee)}</td><td class="num">${money(row.actualDebit)}</td></tr>`).join('');
+    document.title=data.fileName||'酷舍_薪資單.pdf';
+    const paper=document.getElementById('paper');
+    paper.classList.toggle('is-dense',sources.length>10||history.length>2);
+    paper.innerHTML=`<header class="head"><div><div class="company"><h1>${escapeHtml(data.companyName||'酷舍企業有限公司')}</h1><div class="en">Cool Sir Limited Company</div></div><div class="document-title">${escapeHtml(data.title||'員工薪資單')}</div></div><span class="company-logo-frame"><img class="company-logo" id="formalCompanyLogo" alt="酷舍企業 LOGO" onerror="this.hidden=true"></span></header><section class="info"><div><span class="label">員工姓名</span>${escapeHtml(display(data.employeeName))}</div><div><span class="label">薪資月份</span>${escapeHtml(display(data.month))}</div><div><span class="label">產生日期</span>${escapeHtml(display(data.generatedDate))}</div><div><span class="label">付款狀態</span><b class="status ${statusClass}">${escapeHtml(display(data.status))}</b></div></section><section class="section"><div class="section-title">薪資來源明細</div><table class="source-table"><colgroup><col style="width:12%"><col style="width:11%"><col style="width:15%"><col style="width:25%"><col style="width:12%"><col style="width:12%"><col style="width:13%"></colgroup><thead><tr><th>日期</th><th>類型</th><th>案場</th><th>內容</th><th>數量／比例</th><th>單價／基準</th><th>金額</th></tr></thead><tbody>${sourceRows||'<tr><td class="empty" colspan="7">本月無非零薪資來源</td></tr>'}</tbody></table></section><section class="summary"><div class="total"><span>本月應領薪資</span><strong>${money(data.total)}</strong></div><div><span>已付款</span><strong>${money(data.paid)}</strong></div><div><span>尚未付款</span><strong>${money(data.outstanding)}</strong></div><div><span>付款狀態</span><strong>${escapeHtml(display(data.status))}</strong></div></section><section class="section payment-section"><div class="section-title">付款紀錄</div>${historyRows?`<table><colgroup><col style="width:20%"><col style="width:21%"><col style="width:25%"><col style="width:16%"><col style="width:18%"></colgroup><thead><tr><th>付款日期</th><th>付款金額</th><th>付款方式</th><th>手續費</th><th>實際扣款</th></tr></thead><tbody>${historyRows}</tbody></table>`:'<p class="history-note">尚無付款紀錄</p>'}</section><section class="signature">員工簽名：<span class="signature-line"></span></section>`;
+    async function loadLogo(){try{const source=await fetch('../enterprise/index.html').then((response)=>response.text()),start=source.indexOf('const companyLogoAsset=');if(start<0)return;let end=source.indexOf(';\n',start);if(end<0)end=source.indexOf(';\r',start);const parts=[...source.slice(start,end).matchAll(/'([^']*)'/g)].map((match)=>match[1]);if(parts.length){const image=document.getElementById('formalCompanyLogo');image.src=parts.join('');image.style.display='block'}}catch(error){}}
+    function printPayroll(){window.print()}
+    document.getElementById('exportPayrollPdf').onclick=printPayroll;
+    document.getElementById('printPayroll').onclick=printPayroll;
+    document.getElementById('closePayrollPrint').onclick=closePrintView;
+    window.__payrollPrintData=data;
+    loadLogo().finally(()=>{window.__payrollPrintReady=true;if(new URLSearchParams(location.search).get('print')==='1')setTimeout(printPayroll,250)});
+  </script>
+</body>
+</html>
