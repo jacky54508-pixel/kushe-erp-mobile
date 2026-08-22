@@ -30,8 +30,8 @@
       state = normalize(local.value);
       sourceInfo = { type: 'localStorage', label: '現有正式版 ERP 即時資料（唯讀）', key: local.key, updatedAt: state.meta?.updatedAt || '' };
     } else {
-      state = normalize(window.KUSHE_PHASE1_BACKUP || {});
-      sourceInfo = { type: 'backup-snapshot', label: '現有 ERP 最新備份快照（唯讀）', updatedAt: state.meta?.updatedAt || '' };
+      state = normalize({});
+      sourceInfo = { type: 'empty', label: '尚無本機 ERP 資料', updatedAt: '' };
     }
     return state;
   }

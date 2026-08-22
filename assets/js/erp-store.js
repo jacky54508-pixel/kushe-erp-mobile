@@ -163,7 +163,7 @@
     if (!score(state)) {
       try { const emergency = JSON.parse(localStorage.getItem(EMERGENCY_KEY) || 'null'); if (score(emergency)) state = emergency; } catch (_) {}
     }
-    if (!score(state)) state = window.KuSheLegacyData?.getState() || window.KUSHE_PHASE1_BACKUP || {};
+    if (!score(state)) state = window.KuSheLegacyData?.getState() || {};
     ['commissions','employees','customers','projects','vendors','materials','materialUsages','projectCosts','billings','receivables','payables','invoices','receipts','retentionReceipts','payments','salaryPayments','banks','bankTransactions','payroll','attendance','dailyLogs','dailyItemPresets','quotations','quotationPrices','quotationTemplates','audit'].forEach((key) => { if (!Array.isArray(state[key])) state[key] = []; });
     if (!state.settings) state.settings = {};
     if (!state.meta) state.meta = {};
