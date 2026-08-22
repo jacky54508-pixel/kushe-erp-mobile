@@ -126,6 +126,34 @@
     catch (error) { state.settings.quotationUnitPresets = previous; throw error; }
     return true;
   }
+  function quotationPublicNotePresets(customerId = '') {
+    const target = clean(customerId), presets = Array.isArray(state?.settings?.quotationPublicNotePresets) ? state.settings.quotationPublicNotePresets : [];
+    if (!target) return [];
+    return presets.filter((row) => row && clean(row.id) && String(row.customerId) === target && clean(row.text)).map((row) => ({...row,text:clean(row.text)})).sort((a,b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
+  }
+  async function saveQuotationPublicNotePreset(customerId, value) {
+    await load();
+    const target = clean(customerId), text = clean(value), customer = state.customers.find((row) => String(row.id) === target);
+    if (!customer || !text) throw new Error('請先選擇客戶並輸入對外備註');
+    const previous = Array.isArray(state.settings.quotationPublicNotePresets) ? state.settings.quotationPublicNotePresets : undefined;
+    const presets = (previous || []).map((row) => ({...row})), index = presets.findIndex((row) => String(row.customerId) === target && clean(row.text) === text), now = new Date().toISOString();
+    const row = index >= 0 ? {...presets[index],text,updatedAt:now} : {id:uid(),customerId:target,text,createdAt:now,updatedAt:now};
+    if (index >= 0) presets.splice(index,1);
+    presets.unshift(row); state.settings.quotationPublicNotePresets = presets;
+    try { await persist(`儲存 ${customer.name} 常用對外備註`); }
+    catch (error) { if (previous === undefined) delete state.settings.quotationPublicNotePresets; else state.settings.quotationPublicNotePresets = previous; throw error; }
+    return row;
+  }
+  async function deleteQuotationPublicNotePreset(customerId, presetId) {
+    await load();
+    const target = clean(customerId), id = clean(presetId), previous = Array.isArray(state.settings.quotationPublicNotePresets) ? state.settings.quotationPublicNotePresets : undefined;
+    const presets = previous || [], row = presets.find((item) => clean(item?.id) === id && String(item?.customerId) === target);
+    if (!row) throw new Error('找不到此客戶的常用備註範本');
+    state.settings.quotationPublicNotePresets = presets.filter((item) => item !== row);
+    try { await persist('刪除客戶常用對外備註'); }
+    catch (error) { state.settings.quotationPublicNotePresets = previous; throw error; }
+    return true;
+  }
   async function load() {
     if (state) return state;
     try {
@@ -1484,5 +1512,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, saveProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, saveProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
