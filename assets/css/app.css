@@ -237,14 +237,14 @@ html,body{height:100%;overflow:hidden}
 #billingEditForm .commission-table-wrap{max-width:100%;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain}
 #billingEditForm>footer{position:sticky;bottom:0;z-index:2;flex:0 0 auto;background:#fff}
 
-/* Receipt dialogs: keep actions visible while only the form body scrolls. */
-.erp-detail-overlay:has(.receipt-card>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm)){overflow:hidden;padding:8px;overscroll-behavior:contain}
-.erp-detail-card.receipt-card:has(>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm)){width:min(760px,calc(100vw - 16px));max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);max-height:calc(100dvh - 16px);display:flex;flex-direction:column;overflow:hidden}
-.receipt-card:has(>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm))>header{flex:0 0 auto}
-.receipt-card>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm){flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
-.receipt-card>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm)>.erp-detail-body{flex:1 1 auto;min-width:0;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding-bottom:24px}
-.receipt-card>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm)>.erp-detail-body>*{min-width:0;max-width:100%}
-.receipt-card>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm)>footer{position:sticky;bottom:0;z-index:2;flex:0 0 auto;background:#fff}
+/* Scoped long-form dialogs: keep actions visible while only the form body scrolls. */
+.erp-detail-overlay:has(.erp-detail-card>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm,#newPayableForm,#payablePaymentForm,#editPayablePaymentForm,#inputInvoiceForm,#salaryPaymentForm,#editSalaryPaymentForm)){overflow:hidden;padding:8px;overscroll-behavior:contain}
+.erp-detail-card:has(>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm,#newPayableForm,#payablePaymentForm,#editPayablePaymentForm,#inputInvoiceForm,#salaryPaymentForm,#editSalaryPaymentForm)){width:min(760px,calc(100vw - 16px));max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);max-height:calc(100dvh - 16px);display:flex;flex-direction:column;overflow:hidden}
+.erp-detail-card:has(>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm,#newPayableForm,#payablePaymentForm,#editPayablePaymentForm,#inputInvoiceForm,#salaryPaymentForm,#editSalaryPaymentForm))>header{flex:0 0 auto}
+.erp-detail-card>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm,#newPayableForm,#payablePaymentForm,#editPayablePaymentForm,#inputInvoiceForm,#salaryPaymentForm,#editSalaryPaymentForm){flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.erp-detail-card>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm,#newPayableForm,#payablePaymentForm,#editPayablePaymentForm,#inputInvoiceForm,#salaryPaymentForm,#editSalaryPaymentForm)>.erp-detail-body{flex:1 1 auto;min-width:0;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding-bottom:24px}
+.erp-detail-card>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm,#newPayableForm,#payablePaymentForm,#editPayablePaymentForm,#inputInvoiceForm,#salaryPaymentForm,#editSalaryPaymentForm)>.erp-detail-body>*{min-width:0;max-width:100%}
+.erp-detail-card>:is(#newReceiptForm,#retentionReceiptForm,#editReceiptForm,#editRetentionReceiptForm,#newPayableForm,#payablePaymentForm,#editPayablePaymentForm,#inputInvoiceForm,#salaryPaymentForm,#editSalaryPaymentForm)>footer{position:sticky;bottom:0;z-index:2;flex:0 0 auto;background:#fff}
 
 /* Global ERP shell polish: shared layout and components only. */
 html,body,.app-shell{max-width:100%;overflow-x:hidden}
