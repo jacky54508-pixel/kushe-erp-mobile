@@ -2,7 +2,9 @@
   'use strict';
   window.KUSHE_PHASE1_CONFIG = {
     version: 'Dashboard 1.0',
-    legacyUrl: '../enterprise/index.html',
+    legacyUrl: /\/beta(?:\/|$)/.test(window.location.pathname)
+      ? '../enterprise/index.html'
+      : './enterprise/index.html',
     legacyStorageKey: 'KuSheERP25_EMERGENCY',
     uiStorageKey: 'kushe_erp_dashboard_ui_v2',
     moduleLabels: {
