@@ -5,10 +5,11 @@
   const SESSION_KEY = config.authSessionStorageKey || 'kushe_erp_supabase_auth_v1';
 
   class AuthRequestError extends Error {
-    constructor(status = 0) {
+    constructor(status = 0, code = '') {
       super('Authentication request failed');
       this.name = 'AuthRequestError';
       this.status = Number(status) || 0;
+      this.code = String(code || '');
     }
   }
 
@@ -129,6 +130,49 @@
     return next.user;
   }
 
+  async function changePassword(currentPassword, newPassword) {
+    const currentSecret = String(currentPassword || '');
+    const nextSecret = String(newPassword || '');
+    if (!currentSecret || nextSecret.length < 12 || currentSecret === nextSecret) throw new AuthRequestError(400, 'invalid_password_input');
+    if (!await requireAuth()) throw new AuthRequestError(401, 'invalid_session');
+
+    const current = readSession();
+    if (!current?.access_token) throw new AuthRequestError(401, 'invalid_session');
+    const verified = await verifiedUser(current.access_token);
+    if (!verified.email) throw new AuthRequestError(401, 'invalid_session');
+
+    let reauthPayload;
+    try {
+      reauthPayload = await requestJson('/auth/v1/token?grant_type=password', {
+        method: 'POST',
+        body: { email: verified.email, password: currentSecret }
+      });
+    } catch (error) {
+      if ([400, 401, 422].includes(Number(error?.status))) throw new AuthRequestError(401, 'invalid_current_password');
+      throw error;
+    }
+
+    const responseUser = storedUser(reauthPayload?.user);
+    if (!responseUser?.id || responseUser.id !== verified.id) throw new AuthRequestError(403, 'identity_mismatch');
+    const fresh = normalizeSession(reauthPayload);
+    const reauthUser = await verifiedUser(fresh.access_token);
+    if (!reauthUser.id || reauthUser.id !== verified.id) throw new AuthRequestError(403, 'identity_mismatch');
+
+    await requestJson('/auth/v1/user', {
+      method: 'PUT',
+      token: fresh.access_token,
+      body: { password: nextSecret }
+    });
+
+    try {
+      await requestJson('/auth/v1/logout', { method: 'POST', token: fresh.access_token });
+    } catch (_) {
+      // A successful password update must still end the local session.
+    }
+    clearSession();
+    return true;
+  }
+
   async function logout() {
     const current = readSession();
     if (current?.access_token) {
@@ -155,5 +199,5 @@
     return session()?.user || null;
   }
 
-  window.KusheAuthGate = Object.freeze({ requireAuth, login, logout, session, user });
+  window.KusheAuthGate = Object.freeze({ requireAuth, login, changePassword, logout, session, user });
 }());

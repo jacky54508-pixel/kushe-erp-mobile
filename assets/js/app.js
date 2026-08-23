@@ -49,12 +49,72 @@
   }
   async function handleLogout() {
     closePopovers();
+    closeChangePasswordModal(true);
     try { await window.KusheAuthGate?.logout(); } catch (_) {}
     setAuthView(false);
     $('#loginForm')?.reset();
     setLoginBusy(false);
     setLoginMessage('已安全登出。');
     $('#loginEmail')?.focus();
+  }
+  function setChangePasswordError(message = '') {
+    const node = $('#changePasswordError');
+    if (!node) return;
+    node.textContent = message;
+    node.hidden = !message;
+  }
+  function setChangePasswordBusy(busy) {
+    const form = $('#changePasswordForm'), submit = $('#changePasswordSubmit');
+    $$('input,button', form || document.createElement('div')).forEach((node) => { node.disabled = Boolean(busy); });
+    if ($('#changePasswordClose')) $('#changePasswordClose').disabled = Boolean(busy);
+    if ($('#changePasswordBackdrop')) $('#changePasswordBackdrop').disabled = Boolean(busy);
+    if (submit) submit.textContent = busy ? '變更中…' : '確認變更';
+    if (form) form.setAttribute('aria-busy', String(Boolean(busy)));
+  }
+  function closeChangePasswordModal(force = false) {
+    const modal = $('#changePasswordModal'), form = $('#changePasswordForm');
+    if (!modal || (!force && form?.getAttribute('aria-busy') === 'true')) return;
+    modal.hidden = true;
+    form?.reset();
+    setChangePasswordBusy(false);
+    setChangePasswordError();
+  }
+  function openChangePasswordModal() {
+    closePopovers();
+    const modal = $('#changePasswordModal');
+    if (!modal) return;
+    $('#changePasswordForm')?.reset();
+    setChangePasswordBusy(false);
+    setChangePasswordError();
+    modal.hidden = false;
+    $('#currentPassword')?.focus();
+  }
+  async function handleChangePassword(event) {
+    event.preventDefault();
+    const form = $('#changePasswordForm');
+    const currentPassword = String($('#currentPassword')?.value || '');
+    const newPassword = String($('#newPassword')?.value || '');
+    const confirmation = String($('#confirmNewPassword')?.value || '');
+    form?.reset();
+    setChangePasswordError();
+    if (newPassword !== confirmation) return setChangePasswordError('兩次輸入的新密碼不一致。');
+    if (newPassword.length < 12) return setChangePasswordError('新密碼至少需要 12 個字元。');
+    if (newPassword === currentPassword) return setChangePasswordError('新密碼不可與目前密碼相同。');
+    setChangePasswordBusy(true);
+    try {
+      if (!window.KusheAuthGate?.changePassword) throw new Error('Password change unavailable');
+      await window.KusheAuthGate.changePassword(currentPassword, newPassword);
+      closeChangePasswordModal(true);
+      closePopovers();
+      setAuthView(false);
+      $('#loginForm')?.reset();
+      setLoginBusy(false);
+      setLoginMessage('密碼已更新，請使用新密碼重新登入。');
+      $('#loginEmail')?.focus();
+    } catch (error) {
+      setChangePasswordBusy(false);
+      setChangePasswordError(error?.code === 'invalid_current_password' ? '目前密碼不正確。' : '密碼變更失敗，請稍後再試。');
+    }
   }
   function bindAuthUi() {
     if (authUiBound) return;
@@ -76,6 +136,11 @@
         setLoginBusy(false);
       }
     });
+    $('#changePasswordForm')?.addEventListener('submit', handleChangePassword);
+    $('#changePasswordCancel')?.addEventListener('click', () => closeChangePasswordModal());
+    $('#changePasswordClose')?.addEventListener('click', () => closeChangePasswordModal());
+    $('#changePasswordBackdrop')?.addEventListener('click', () => closeChangePasswordModal());
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !$('#changePasswordModal')?.hidden) closeChangePasswordModal(); });
   }
   async function boot() {
     bindAuthUi();
@@ -277,6 +342,7 @@
     $('#mobileNavBackdrop').addEventListener('click',()=>{ui.mobileOpen=false;setShell()});
     $('#notificationButton').addEventListener('click',(event)=>{event.stopPropagation();togglePopover('notificationPopover')});
     $('#userMenuButton').addEventListener('click',(event)=>{event.stopPropagation();togglePopover('userPopover')});
+    const changePasswordButton = document.createElement('button');changePasswordButton.id='changePasswordButton';changePasswordButton.type='button';changePasswordButton.textContent='變更密碼';changePasswordButton.addEventListener('click',openChangePasswordModal);$('#userPopover')?.appendChild(changePasswordButton);
     const logoutButton = document.createElement('button');logoutButton.id='logoutButton';logoutButton.type='button';logoutButton.textContent='登出';logoutButton.addEventListener('click',handleLogout);$('#userPopover')?.appendChild(logoutButton);
     $('#messageButton').addEventListener('click',()=>toast('目前沒有新訊息'));
     $('#viewAllAttention').addEventListener('click',(event)=>{event.stopPropagation();togglePopover('notificationPopover')});

@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#061d3b">
   <title>酷舍 ERP｜首頁總覽</title>
-  <link rel="stylesheet" href="assets/css/app.css?v=20260823-auth-p0-1">
+  <link rel="stylesheet" href="assets/css/app.css?v=20260823-auth-p01-1">
   <link rel="stylesheet" href="assets/css/projects-scoped.css?v=20260811-billing-settings1">
 </head>
 <body>
@@ -224,10 +224,28 @@
     </div>
     <button class="mobile-backdrop" id="mobileNavBackdrop" type="button" aria-label="關閉選單"></button>
   </div>
+  <div class="auth-modal-layer" id="changePasswordModal" hidden>
+    <button class="auth-modal-backdrop" id="changePasswordBackdrop" type="button" aria-label="取消變更密碼"></button>
+    <section class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="changePasswordTitle">
+      <header>
+        <div><small>帳戶安全</small><h2 id="changePasswordTitle">變更密碼</h2></div>
+        <button class="auth-modal-close" id="changePasswordClose" type="button" aria-label="取消變更密碼">×</button>
+      </header>
+      <form id="changePasswordForm">
+        <div class="auth-modal-body">
+          <label><span>目前密碼</span><input id="currentPassword" name="currentPassword" type="password" autocomplete="current-password" required></label>
+          <label><span>新密碼</span><input id="newPassword" name="newPassword" type="password" autocomplete="new-password" minlength="12" required><small>至少 12 個字元</small></label>
+          <label><span>再次輸入新密碼</span><input id="confirmNewPassword" name="confirmNewPassword" type="password" autocomplete="new-password" minlength="12" required></label>
+          <p class="auth-modal-error" id="changePasswordError" role="alert" aria-live="polite" hidden></p>
+        </div>
+        <footer><button class="auth-modal-cancel" id="changePasswordCancel" type="button">取消</button><button class="auth-modal-submit" id="changePasswordSubmit" type="submit">確認變更</button></footer>
+      </form>
+    </section>
+  </div>
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
   <script src="assets/js/lucide.min.js?v=20260809-commissions1"></script>
   <script src="assets/js/config.js?v=20260823-auth-p0-1"></script>
-  <script src="assets/js/auth-gate.js?v=20260823-auth-p0-1"></script>
+  <script src="assets/js/auth-gate.js?v=20260823-auth-p01-1"></script>
   <script src="assets/js/legacy-adapter.js?v=20260809-nav4"></script>
   <script src="assets/js/erp-store.js?v=20260822-quotation-note-presets1"></script>
   <script src="assets/js/dashboard.js?v=20260809-projects1"></script>
@@ -245,6 +263,6 @@
   <script src="assets/js/table-scroll.js?v=20260809-global1"></script>
   <script src="assets/js/billing-print.js?v=20260822-quotation-a4fit1"></script>
   <script src="assets/js/quotations.js?v=20260822-quotation-note-presets1"></script>
-  <script src="assets/js/app.js?v=20260823-auth-p0-1"></script>
+  <script src="assets/js/app.js?v=20260823-auth-p01-1"></script>
 </body>
 </html>
