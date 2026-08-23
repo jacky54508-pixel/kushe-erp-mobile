@@ -4,6 +4,8 @@
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
   const config = window.KUSHE_PHASE1_CONFIG || {};
   const ui = { collapsed: false, mobileOpen: false, route: 'dashboard' };
+  let initialized = false;
+  let authUiBound = false;
   const moduleIcons = {
     customers: 'contact', projects: 'map-pin', quotations: 'file-text', billings: 'clipboard-list',
     receivables: 'arrow-down-to-line', payables: 'arrow-up-from-line', banks: 'landmark', invoices: 'receipt',
@@ -20,6 +22,81 @@
   function toast(message) {
     const node = document.createElement('div'); node.className='toast'; node.textContent=message; $('#toastHost').appendChild(node);
     requestAnimationFrame(()=>node.classList.add('is-visible')); setTimeout(()=>{node.classList.remove('is-visible');setTimeout(()=>node.remove(),220)},2400);
+  }
+  function setAuthView(authenticated) {
+    const loginView = $('#loginView'), appShell = $('#appShell');
+    if (loginView) loginView.hidden = Boolean(authenticated);
+    if (appShell) appShell.hidden = !authenticated;
+  }
+  function setLoginMessage(message = '', error = false) {
+    const status = $('#loginStatus'), alert = $('#loginError');
+    if (status) { status.textContent = error ? '' : message; status.hidden = error || !message; }
+    if (alert) { alert.textContent = error ? message : ''; alert.hidden = !error || !message; }
+  }
+  function setLoginBusy(busy, message = '') {
+    const form = $('#loginForm'), submit = $('#loginSubmit');
+    $$('input,button', form || document.createElement('div')).forEach((node) => { node.disabled = Boolean(busy); });
+    if (submit) submit.textContent = busy ? '登入中…' : '登入';
+    if (form) form.setAttribute('aria-busy', String(Boolean(busy)));
+    if (message) setLoginMessage(message);
+  }
+  function startAuthenticatedApp() {
+    setAuthView(true);
+    setLoginMessage();
+    if (initialized) return;
+    init();
+    initialized = true;
+  }
+  async function handleLogout() {
+    closePopovers();
+    try { await window.KusheAuthGate?.logout(); } catch (_) {}
+    setAuthView(false);
+    $('#loginForm')?.reset();
+    setLoginBusy(false);
+    setLoginMessage('已安全登出。');
+    $('#loginEmail')?.focus();
+  }
+  function bindAuthUi() {
+    if (authUiBound) return;
+    authUiBound = true;
+    $('#loginForm')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const email = $('#loginEmail'), password = $('#loginPassword');
+      setLoginMessage();
+      setLoginBusy(true, '正在驗證登入資訊…');
+      try {
+        if (!window.KusheAuthGate) throw new Error('Auth gate unavailable');
+        await window.KusheAuthGate.login(email?.value, password?.value);
+        if (password) password.value = '';
+        startAuthenticatedApp();
+      } catch (_) {
+        if (password) password.value = '';
+        setLoginMessage('登入失敗，請確認 Email 與密碼後再試一次。', true);
+      } finally {
+        setLoginBusy(false);
+      }
+    });
+  }
+  async function boot() {
+    bindAuthUi();
+    setAuthView(false);
+    setLoginBusy(true, '正在確認登入狀態…');
+    if (!window.KusheAuthGate) {
+      setLoginBusy(false);
+      setLoginMessage('登入服務目前無法使用。', true);
+      return false;
+    }
+    let authenticated = false;
+    try { authenticated = await window.KusheAuthGate.requireAuth(); } catch (_) {}
+    setLoginBusy(false);
+    if (!authenticated) {
+      setAuthView(false);
+      setLoginMessage();
+      $('#loginEmail')?.focus();
+      return false;
+    }
+    startAuthenticatedApp();
+    return true;
   }
   function closePopovers(except) { $$('.topbar-popover.is-open').forEach((node)=>{if(node!==except)node.classList.remove('is-open')}); }
   function togglePopover(id) { const node=$(`#${id}`); if(!node)return; const open=!node.classList.contains('is-open'); closePopovers(node); node.classList.toggle('is-open',open); }
@@ -200,6 +277,7 @@
     $('#mobileNavBackdrop').addEventListener('click',()=>{ui.mobileOpen=false;setShell()});
     $('#notificationButton').addEventListener('click',(event)=>{event.stopPropagation();togglePopover('notificationPopover')});
     $('#userMenuButton').addEventListener('click',(event)=>{event.stopPropagation();togglePopover('userPopover')});
+    const logoutButton = document.createElement('button');logoutButton.id='logoutButton';logoutButton.type='button';logoutButton.textContent='登出';logoutButton.addEventListener('click',handleLogout);$('#userPopover')?.appendChild(logoutButton);
     $('#messageButton').addEventListener('click',()=>toast('目前沒有新訊息'));
     $('#viewAllAttention').addEventListener('click',(event)=>{event.stopPropagation();togglePopover('notificationPopover')});
     $$('[data-backup]').forEach((node)=>node.addEventListener('click',()=>navigate('settings')));
@@ -226,6 +304,6 @@
     setupHeader();setupNavigation();setupNavTooltips();setupPeriod();setupSearch();window.KusheDashboard.init();
     navigate(currentHashRoute(), { replace: true, instant: true });
   }
-  window.KushePhase1={navigate,toast};
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+  window.KushePhase1={navigate,toast,boot};
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{void boot()},{once:true});else void boot();
 }());

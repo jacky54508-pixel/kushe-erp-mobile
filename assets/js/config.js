@@ -5,6 +5,9 @@
     legacyUrl: /\/beta(?:\/|$)/.test(window.location.pathname)
       ? '../enterprise/index.html'
       : './enterprise/index.html',
+    supabaseUrl: "https://jimcybsztnwfzrnvexsp.supabase.co",
+    supabasePublishableKey: "sb_publishable_EfbasynbQP45E4XTnBNX6A_tzE5zn_m",
+    authSessionStorageKey: 'kushe_erp_supabase_auth_v1',
     legacyStorageKey: 'KuSheERP25_EMERGENCY',
     uiStorageKey: 'kushe_erp_dashboard_ui_v2',
     moduleLabels: {

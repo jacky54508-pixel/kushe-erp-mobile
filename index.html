@@ -6,11 +6,34 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#061d3b">
   <title>酷舍 ERP｜首頁總覽</title>
-  <link rel="stylesheet" href="assets/css/app.css?v=20260822-final-p0-footer1">
+  <link rel="stylesheet" href="assets/css/app.css?v=20260823-auth-p0-1">
   <link rel="stylesheet" href="assets/css/projects-scoped.css?v=20260811-billing-settings1">
 </head>
 <body>
-  <div class="app-shell" id="appShell">
+  <main class="auth-view" id="loginView" aria-labelledby="loginTitle">
+    <section class="auth-card">
+      <div class="auth-brand" aria-hidden="true"><span>酷</span></div>
+      <header>
+        <p>酷舍企業有限公司</p>
+        <h1 id="loginTitle">酷舍 ERP</h1>
+        <span>企業管理系統</span>
+      </header>
+      <form id="loginForm">
+        <label>
+          <span>Email</span>
+          <input id="loginEmail" name="email" type="email" autocomplete="username" inputmode="email" required>
+        </label>
+        <label>
+          <span>Password</span>
+          <input id="loginPassword" name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <button id="loginSubmit" type="submit">登入</button>
+        <p class="auth-status" id="loginStatus" aria-live="polite" hidden></p>
+        <p class="auth-error" id="loginError" role="alert" hidden></p>
+      </form>
+    </section>
+  </main>
+  <div class="app-shell" id="appShell" hidden>
     <aside class="sidebar" id="sidebar" aria-label="主選單">
       <div class="brand sidebar-header">
         <div class="brand-mark" aria-hidden="true"><span></span></div>
@@ -203,7 +226,8 @@
   </div>
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
   <script src="assets/js/lucide.min.js?v=20260809-commissions1"></script>
-  <script src="assets/js/config.js?v=20260822-production-path1"></script>
+  <script src="assets/js/config.js?v=20260823-auth-p0-1"></script>
+  <script src="assets/js/auth-gate.js?v=20260823-auth-p0-1"></script>
   <script src="assets/js/legacy-adapter.js?v=20260809-nav4"></script>
   <script src="assets/js/erp-store.js?v=20260822-quotation-note-presets1"></script>
   <script src="assets/js/dashboard.js?v=20260809-projects1"></script>
@@ -221,6 +245,6 @@
   <script src="assets/js/table-scroll.js?v=20260809-global1"></script>
   <script src="assets/js/billing-print.js?v=20260822-quotation-a4fit1"></script>
   <script src="assets/js/quotations.js?v=20260822-quotation-note-presets1"></script>
-  <script src="assets/js/app.js?v=20260819-workforce-ui1"></script>
+  <script src="assets/js/app.js?v=20260823-auth-p0-1"></script>
 </body>
 </html>
