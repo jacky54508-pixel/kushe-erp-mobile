@@ -4,6 +4,9 @@
   const config = window.KUSHE_PHASE1_CONFIG || {};
   const SESSION_KEY = config.authSessionStorageKey || 'kushe_erp_supabase_auth_v1';
 
+  // Persistent Auth sessions from earlier releases are intentionally discarded.
+  try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
+
   class AuthRequestError extends Error {
     constructor(status = 0, code = '') {
       super('Authentication request failed');
@@ -40,7 +43,7 @@
 
   function readSession() {
     try {
-      const value = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+      const value = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
       return value && typeof value === 'object' && String(value.access_token || '').trim() ? value : null;
     } catch (_) {
       return null;
@@ -48,10 +51,11 @@
   }
 
   function saveSession(value) {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(value));
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(value));
   }
 
   function clearSession() {
+    try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
     try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
   }
 
