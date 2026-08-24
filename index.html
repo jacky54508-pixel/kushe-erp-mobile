@@ -246,14 +246,15 @@
     <button class="auth-modal-backdrop" id="cloudSyncBackdrop" type="button" aria-label="關閉雲端同步"></button>
     <section class="auth-modal cloud-sync-modal" role="dialog" aria-modal="true" aria-labelledby="cloudSyncTitle">
       <header>
-        <div><small>手動安全備份</small><h2 id="cloudSyncTitle">雲端同步</h2></div>
+        <div><small>安全雲端備份</small><h2 id="cloudSyncTitle">雲端同步</h2></div>
         <button class="auth-modal-close" id="cloudSyncHeaderClose" type="button" aria-label="關閉雲端同步">×</button>
       </header>
       <div class="cloud-sync-body">
-        <p class="cloud-sync-intro">本階段只檢查版本並在安全條件成立時手動上傳；不會下載、套用或合併雲端資料。</p>
+        <p class="cloud-sync-intro">本機資料正常儲存後，系統會在確認雲端版本未被其他裝置變更時自動備份；如偵測到衝突會停止自動覆蓋。</p>
         <div class="cloud-sync-grid">
           <div class="cloud-sync-item"><span>登入帳號</span><b id="cloudSyncEmail">—</b></div>
           <div class="cloud-sync-item"><span>狀態</span><b id="cloudSyncState">—</b></div>
+          <div class="cloud-sync-item"><span>自動備份</span><b id="cloudSyncAutoState">未啟用</b></div>
           <div class="cloud-sync-item"><span>本機更新</span><b id="cloudSyncLocalTime">未知</b></div>
           <div class="cloud-sync-item"><span>雲端更新</span><b id="cloudSyncRemoteTime">尚無資料</b></div>
           <div class="cloud-sync-item"><span>本機資料筆數</span><b id="cloudSyncLocalScore">0</b></div>
@@ -271,7 +272,7 @@
   <script src="assets/js/auth-gate.js?v=20260823-auth-p02-1"></script>
   <script src="assets/js/legacy-adapter.js?v=20260809-nav4"></script>
   <script src="assets/js/erp-store.js?v=20260822-quotation-note-presets1"></script>
-  <script src="assets/js/cloud-sync.js?v=20260824-cloud-p21-1"></script>
+  <script src="assets/js/cloud-sync.js?v=20260824-cloud-p3-1"></script>
   <script src="assets/js/dashboard.js?v=20260809-projects1"></script>
   <script src="assets/js/commissions.js?v=20260821-orphan-billing-commission1"></script>
   <script src="assets/js/unbilled-work.js?v=20260810-pricing1"></script>
@@ -287,6 +288,6 @@
   <script src="assets/js/table-scroll.js?v=20260809-global1"></script>
   <script src="assets/js/billing-print.js?v=20260824-billing-tax-total1"></script>
   <script src="assets/js/quotations.js?v=20260822-quotation-note-presets1"></script>
-  <script src="assets/js/app.js?v=20260824-cloud-p1-1"></script>
+  <script src="assets/js/app.js?v=20260824-cloud-p3-1"></script>
 </body>
 </html>

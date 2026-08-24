@@ -43,12 +43,15 @@
   function startAuthenticatedApp() {
     setAuthView(true);
     setLoginMessage();
-    if (initialized) return;
-    init();
-    initialized = true;
+    if (!initialized) {
+      init();
+      initialized = true;
+    }
+    try { void Promise.resolve(window.KusheCloudSync?.startAutoBackup?.()).catch(() => {}); } catch (_) {}
   }
   async function handleLogout() {
     closePopovers();
+    window.KusheCloudSync?.stopAutoBackup?.();
     window.KusheCloudSync?.close();
     closeChangePasswordModal(true);
     try { await window.KusheAuthGate?.logout(); } catch (_) {}
@@ -102,6 +105,7 @@
     if (newPassword.length < 12) return setChangePasswordError('新密碼至少需要 12 個字元。');
     if (newPassword === currentPassword) return setChangePasswordError('新密碼不可與目前密碼相同。');
     setChangePasswordBusy(true);
+    window.KusheCloudSync?.stopAutoBackup?.();
     try {
       if (!window.KusheAuthGate?.changePassword) throw new Error('Password change unavailable');
       await window.KusheAuthGate.changePassword(currentPassword, newPassword);
@@ -113,6 +117,7 @@
       setLoginMessage('密碼已更新，請使用新密碼重新登入。');
       $('#loginEmail')?.focus();
     } catch (error) {
+      try { void Promise.resolve(window.KusheCloudSync?.startAutoBackup?.()).catch(() => {}); } catch (_) {}
       setChangePasswordBusy(false);
       setChangePasswordError(error?.code === 'invalid_current_password' ? '目前密碼不正確。' : '密碼變更失敗，請稍後再試。');
     }

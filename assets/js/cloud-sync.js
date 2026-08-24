@@ -12,6 +12,9 @@
   const RESTORE_STATE_KEY = 'main';
   const RESTORE_EMERGENCY_KEY = 'KuSheERP25_EMERGENCY';
   const RESTORE_MAX_BYTES = 20 * 1024 * 1024;
+  const AUTO_BASELINE_KEY = 'kushe_erp_cloud_auto_v1';
+  const AUTO_DEBOUNCE_MS = 8000;
+  const AUTO_ONLINE_RETRY_MS = 3000;
   const SETTINGS_CREDENTIAL_KEYS = new Set([
     'username', 'password', 'loginusername', 'loginpassword', 'cloudurl',
     'cloudpublishablekey', 'supabaseurl', 'supabasepublishablekey',
@@ -40,10 +43,34 @@
     RESTORE_COMPLETE: '雲端資料已安全還原，即將重新載入 ERP。',
     ERROR: '雲端檢查失敗，請稍後再試。'
   };
+  const AUTO_STATUS_TEXT = {
+    STOPPED: '未啟用',
+    CHECKING: '正在確認安全同步基準',
+    ARMED: '已啟用',
+    WAITING: '等待同步',
+    SYNCING: '同步中',
+    AUTO_SYNCED: '已同步',
+    WAITING_NETWORK: '等待網路',
+    MANUAL_REQUIRED: '需要手動同步',
+    CONFLICT: '偵測到衝突，已停止',
+    RACE_BLOCKED: '雲端版本已變更，已停止',
+    SECRET_BLOCKED: '安全檢查未通過，已停止',
+    AUTH_REQUIRED: '未登入'
+  };
 
   let currentStatus = null;
   let busy = false;
   let uiBound = false;
+  let autoState = { code: 'STOPPED', message: AUTO_STATUS_TEXT.STOPPED, pending: false, armed: false };
+  let autoStarted = false;
+  let autoArmed = false;
+  let autoRunning = false;
+  let autoGeneration = 0;
+  let autoTimer = null;
+  let autoOnlineTimer = null;
+  let autoController = null;
+  let autoRetryMode = '';
+  let autoPendingVerification = null;
 
   class CloudSyncError extends Error {
     constructor(code = 'ERROR') {
@@ -187,7 +214,8 @@
     const response = await fetch(`${url}${path}`, {
       method: options.method || 'GET',
       headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body)
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      signal: options.signal
     });
     if (!response.ok) throw new CloudSyncError('ERROR');
     if (response.status === 204) return null;
@@ -198,9 +226,61 @@
     return `/rest/v1/erp_states?select=data%2Cupdated_at&user_id=eq.${encodeURIComponent(userId)}&limit=1`;
   }
 
-  async function readRemote(auth) {
-    const rows = await request(remotePath(auth.user.id), auth);
+  async function readRemote(auth, options = {}) {
+    const rows = await request(remotePath(auth.user.id), auth, options);
     return Array.isArray(rows) && rows.length ? rows[0] : null;
+  }
+
+  function removeBaseline() {
+    try { window.localStorage.removeItem(AUTO_BASELINE_KEY); } catch (_) {}
+  }
+
+  function readBaseline(userId) {
+    try {
+      const raw = window.localStorage.getItem(AUTO_BASELINE_KEY);
+      if (!raw) return null;
+      const value = JSON.parse(raw);
+      const baseline = {
+        version: Number(value?.version),
+        userId: String(value?.userId || ''),
+        remoteUpdatedAt: String(value?.remoteUpdatedAt || ''),
+        remoteFingerprint: String(value?.remoteFingerprint || ''),
+        localFingerprint: String(value?.localFingerprint || '')
+      };
+      const valid = baseline.version === 1
+        && baseline.userId === String(userId || '')
+        && Boolean(baseline.remoteUpdatedAt)
+        && /^[a-f0-9]{64}$/i.test(baseline.remoteFingerprint)
+        && /^[a-f0-9]{64}$/i.test(baseline.localFingerprint);
+      if (!valid) {
+        removeBaseline();
+        return null;
+      }
+      return baseline;
+    } catch (_) {
+      removeBaseline();
+      return null;
+    }
+  }
+
+  async function writeBaseline(auth, row, localFingerprint) {
+    const remote = await remoteInfo(row);
+    const baseline = {
+      version: 1,
+      userId: String(auth?.user?.id || ''),
+      remoteUpdatedAt: String(row?.updated_at || ''),
+      remoteFingerprint: String(remote?.fingerprint || ''),
+      localFingerprint: String(localFingerprint || '')
+    };
+    if (!baseline.userId || !baseline.remoteUpdatedAt
+      || !/^[a-f0-9]{64}$/i.test(baseline.remoteFingerprint)
+      || !/^[a-f0-9]{64}$/i.test(baseline.localFingerprint)) return false;
+    try {
+      window.localStorage.setItem(AUTO_BASELINE_KEY, JSON.stringify(baseline));
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   async function readPersistedLocalRaw() {
@@ -291,6 +371,7 @@
     if (upload) upload.disabled = busy || !view.canUpload;
     const restore = document.getElementById('cloudSyncRestore');
     if (restore) restore.disabled = busy || !view.canRestore;
+    renderAutoState();
   }
 
   function setBusy(value) {
@@ -573,6 +654,7 @@
         return publicStatus();
       }
       currentStatus = classified('UPLOAD_COMPLETE', preflight.auth, preflight.local, verified, verifiedRow, false);
+      await armAutoBackup(preflight.auth, verifiedRow, preflight.local.fingerprint, 'ARMED');
       return publicStatus();
     } catch (error) {
       currentStatus = failure(error?.code || 'ERROR');
@@ -580,6 +662,279 @@
     } finally {
       setBusy(false);
     }
+  }
+
+  function autoStatus() {
+    return deepClone(autoState);
+  }
+
+  function renderAutoState() {
+    setText('cloudSyncAutoState', autoState.message || AUTO_STATUS_TEXT[autoState.code] || '—');
+  }
+
+  function setAutoState(code, options = {}) {
+    autoState = {
+      code,
+      message: options.message || AUTO_STATUS_TEXT[code] || AUTO_STATUS_TEXT.STOPPED,
+      pending: Boolean(options.pending),
+      armed: Boolean(options.armed ?? autoArmed)
+    };
+    renderAutoState();
+    return autoStatus();
+  }
+
+  function isNetworkFailure(error) {
+    return error?.name === 'TypeError' || error?.name === 'NetworkError';
+  }
+
+  function clearAutoTimer() {
+    if (autoTimer !== null) window.clearTimeout(autoTimer);
+    autoTimer = null;
+  }
+
+  function clearOnlineTimer() {
+    if (autoOnlineTimer !== null) window.clearTimeout(autoOnlineTimer);
+    autoOnlineTimer = null;
+  }
+
+  function ensureAutoListeners() {
+    window.removeEventListener('kushe:data-updated', handleDataUpdated);
+    window.removeEventListener('online', handleOnline);
+    window.addEventListener('kushe:data-updated', handleDataUpdated);
+    window.addEventListener('online', handleOnline);
+  }
+
+  function activeAutoRun(generation) {
+    return autoStarted && generation === autoGeneration;
+  }
+
+  function scheduleAutoBackup(delay = AUTO_DEBOUNCE_MS) {
+    if (!autoStarted || !autoArmed) return false;
+    clearAutoTimer();
+    setAutoState('WAITING', { pending: true, armed: true });
+    const generation = autoGeneration;
+    autoTimer = window.setTimeout(() => {
+      autoTimer = null;
+      if (activeAutoRun(generation)) void autoBackupNow();
+    }, delay);
+    return true;
+  }
+
+  function handleDataUpdated() {
+    if (autoStarted && autoArmed) scheduleAutoBackup();
+  }
+
+  function handleOnline() {
+    if (!autoStarted || autoState.code !== 'WAITING_NETWORK' || !autoState.pending) return;
+    clearOnlineTimer();
+    const generation = autoGeneration;
+    const retryMode = autoRetryMode;
+    autoOnlineTimer = window.setTimeout(() => {
+      autoOnlineTimer = null;
+      if (!activeAutoRun(generation)) return;
+      if (retryMode === 'verify') void verifyPendingAutoUpload(generation);
+      else if (retryMode === 'upload') void autoBackupNow();
+      else void evaluateAutoStart(generation);
+    }, AUTO_ONLINE_RETRY_MS);
+  }
+
+  function baselineMatchesRemote(baseline, row, remote) {
+    return Boolean(baseline && row && remote)
+      && baseline.remoteUpdatedAt === String(row.updated_at || '')
+      && baseline.remoteFingerprint === remote.fingerprint;
+  }
+
+  async function armAutoBackup(auth, row, localFingerprint, code = 'ARMED') {
+    const saved = await writeBaseline(auth, row, localFingerprint);
+    if (!saved) {
+      autoArmed = false;
+      return setAutoState('MANUAL_REQUIRED', { pending: false, armed: false });
+    }
+    if (!autoStarted) {
+      autoStarted = true;
+      autoGeneration += 1;
+      ensureAutoListeners();
+    }
+    autoArmed = true;
+    autoRetryMode = '';
+    autoPendingVerification = null;
+    return setAutoState(code, { pending: Boolean(autoTimer), armed: true });
+  }
+
+  async function evaluateAutoStart(generation) {
+    try {
+      const checked = await inspectCore();
+      if (!activeAutoRun(generation)) return autoStatus();
+      if (checked.code === 'SYNCED') {
+        await armAutoBackup(checked.auth, { data: checked.remote.data, updated_at: checked.remoteUpdatedAt }, checked.local.fingerprint, 'ARMED');
+        return autoStatus();
+      }
+      if (checked.code === 'LOCAL_NEWER') {
+        const baseline = readBaseline(checked.auth.user.id);
+        const row = { data: checked.remote.data, updated_at: checked.remoteUpdatedAt };
+        if (baselineMatchesRemote(baseline, row, checked.remote)
+          && checked.local.fingerprint !== baseline.localFingerprint) {
+          autoArmed = true;
+          scheduleAutoBackup();
+          return autoStatus();
+        }
+        autoArmed = false;
+        return setAutoState('MANUAL_REQUIRED', { pending: false, armed: false });
+      }
+      autoArmed = false;
+      if (checked.code === 'REMOTE_EMPTY') return setAutoState('MANUAL_REQUIRED', { pending: false, armed: false });
+      return setAutoState('CONFLICT', { pending: false, armed: false });
+    } catch (error) {
+      if (!activeAutoRun(generation) || error?.name === 'AbortError') return autoStatus();
+      autoArmed = false;
+      if (error?.code === 'AUTH_REQUIRED') return setAutoState('AUTH_REQUIRED', { pending: false, armed: false });
+      if (error?.code === 'SECRET_BLOCKED') return setAutoState('SECRET_BLOCKED', { pending: false, armed: false });
+      if (isNetworkFailure(error)) {
+        autoRetryMode = 'start';
+        return setAutoState('WAITING_NETWORK', { pending: true, armed: false });
+      }
+      return setAutoState('CONFLICT', { pending: false, armed: false });
+    }
+  }
+
+  async function verifyPendingAutoUpload(generation) {
+    const pending = autoPendingVerification;
+    if (!pending || !activeAutoRun(generation)) return autoStatus();
+    try {
+      const auth = await authContext();
+      if (!activeAutoRun(generation) || auth.user.id !== pending.userId) throw new CloudSyncError('AUTH_REQUIRED');
+      const row = await readRemote(auth);
+      const remote = await remoteInfo(row);
+      if (!remote || remote.fingerprint !== pending.localFingerprint) {
+        autoArmed = false;
+        autoPendingVerification = null;
+        return setAutoState('CONFLICT', { pending: false, armed: false });
+      }
+      await armAutoBackup(auth, row, pending.localFingerprint, 'AUTO_SYNCED');
+      return autoStatus();
+    } catch (error) {
+      if (!activeAutoRun(generation)) return autoStatus();
+      if (isNetworkFailure(error)) {
+        autoRetryMode = 'verify';
+        return setAutoState('WAITING_NETWORK', { pending: true, armed: true });
+      }
+      autoArmed = false;
+      return setAutoState(error?.code === 'AUTH_REQUIRED' ? 'AUTH_REQUIRED' : 'CONFLICT', { pending: false, armed: false });
+    }
+  }
+
+  async function autoBackupNow() {
+    if (!autoStarted || !autoArmed) return autoStatus();
+    if (autoRunning || busy) {
+      scheduleAutoBackup();
+      return autoStatus();
+    }
+    clearAutoTimer();
+    autoRunning = true;
+    const generation = autoGeneration;
+    autoController = new AbortController();
+    setAutoState('SYNCING', { pending: true, armed: true });
+    try {
+      const auth = await authContext();
+      if (!activeAutoRun(generation)) return autoStatus();
+      const local = await readLocal();
+      if (!activeAutoRun(generation)) return autoStatus();
+      if (local.score <= 0) {
+        autoArmed = false;
+        return setAutoState('MANUAL_REQUIRED', { pending: false, armed: false });
+      }
+      const baseline = readBaseline(auth.user.id);
+      if (!baseline) {
+        autoArmed = false;
+        return setAutoState('MANUAL_REQUIRED', { pending: false, armed: false });
+      }
+
+      const firstRow = await readRemote(auth, { signal: autoController.signal });
+      const firstRemote = await remoteInfo(firstRow);
+      if (!activeAutoRun(generation)) return autoStatus();
+      if (!baselineMatchesRemote(baseline, firstRow, firstRemote)) {
+        autoArmed = false;
+        return setAutoState('CONFLICT', { pending: false, armed: false });
+      }
+      if (local.fingerprint === baseline.localFingerprint) {
+        return setAutoState('ARMED', { pending: false, armed: true });
+      }
+
+      const firstObservation = { updatedAt: String(firstRow.updated_at || ''), fingerprint: firstRemote.fingerprint };
+      const raceRow = await readRemote(auth, { signal: autoController.signal });
+      const raceRemote = await remoteInfo(raceRow);
+      const raceObservation = { updatedAt: String(raceRow?.updated_at || ''), fingerprint: String(raceRemote?.fingerprint || '') };
+      if (!activeAutoRun(generation)) return autoStatus();
+      if (!sameObservation(firstObservation, raceObservation) || !baselineMatchesRemote(baseline, raceRow, raceRemote)) {
+        autoArmed = false;
+        return setAutoState('RACE_BLOCKED', { pending: false, armed: false });
+      }
+
+      const uploadedAt = new Date().toISOString();
+      await request('/rest/v1/erp_states?on_conflict=user_id', auth, {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: { user_id: auth.user.id, data: local.data, updated_at: uploadedAt },
+        signal: autoController.signal
+      });
+      autoPendingVerification = { userId: auth.user.id, localFingerprint: local.fingerprint };
+      if (!activeAutoRun(generation)) return autoStatus();
+
+      const verifiedRow = await readRemote(auth, { signal: autoController.signal });
+      const verified = await remoteInfo(verifiedRow);
+      if (!verified || verified.fingerprint !== local.fingerprint) {
+        autoArmed = false;
+        autoPendingVerification = null;
+        return setAutoState('CONFLICT', { pending: false, armed: false });
+      }
+      const queued = autoTimer !== null;
+      await armAutoBackup(auth, verifiedRow, local.fingerprint, queued ? 'WAITING' : 'AUTO_SYNCED');
+      if (queued) setAutoState('WAITING', { pending: true, armed: true });
+      return autoStatus();
+    } catch (error) {
+      if (!activeAutoRun(generation) || error?.name === 'AbortError') return autoStatus();
+      if (error?.code === 'AUTH_REQUIRED') {
+        autoArmed = false;
+        return setAutoState('AUTH_REQUIRED', { pending: false, armed: false });
+      }
+      if (error?.code === 'SECRET_BLOCKED') {
+        autoArmed = false;
+        return setAutoState('SECRET_BLOCKED', { pending: false, armed: false });
+      }
+      if (isNetworkFailure(error)) {
+        autoRetryMode = autoPendingVerification ? 'verify' : 'upload';
+        return setAutoState('WAITING_NETWORK', { pending: true, armed: true });
+      }
+      autoArmed = false;
+      return setAutoState('CONFLICT', { pending: false, armed: false });
+    } finally {
+      autoRunning = false;
+      autoController = null;
+    }
+  }
+
+  async function startAutoBackup() {
+    stopAutoBackup();
+    autoStarted = true;
+    autoGeneration += 1;
+    ensureAutoListeners();
+    setAutoState('CHECKING', { pending: false, armed: false });
+    return evaluateAutoStart(autoGeneration);
+  }
+
+  function stopAutoBackup() {
+    autoStarted = false;
+    autoArmed = false;
+    autoGeneration += 1;
+    clearAutoTimer();
+    clearOnlineTimer();
+    autoController?.abort();
+    autoController = null;
+    autoRetryMode = '';
+    autoPendingVerification = null;
+    window.removeEventListener('kushe:data-updated', handleDataUpdated);
+    window.removeEventListener('online', handleOnline);
+    return setAutoState('STOPPED', { pending: false, armed: false });
   }
 
   function ensureUi() {
@@ -614,5 +969,8 @@
     return true;
   }
 
-  window.KusheCloudSync = Object.freeze({ inspect, uploadLocal, restoreRemote, status: publicStatus, open, close });
+  window.KusheCloudSync = Object.freeze({
+    inspect, uploadLocal, restoreRemote, status: publicStatus, open, close,
+    startAutoBackup, stopAutoBackup, autoStatus
+  });
 }());
