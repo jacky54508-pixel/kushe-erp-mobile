@@ -203,11 +203,21 @@
     return Array.isArray(rows) && rows.length ? rows[0] : null;
   }
 
+  async function readPersistedLocalRaw() {
+    try {
+      const indexed = await readIndexedDbSnapshot();
+      if (businessScore(indexed) > 0) return indexed;
+    } catch (_) {}
+    try {
+      const emergency = readEmergencySnapshot();
+      if (businessScore(emergency) > 0) return emergency;
+    } catch (_) {}
+    return {};
+  }
+
   async function readLocal() {
-    const store = window.KuSheERPStore;
-    if (!store?.load || !store?.getState) throw new CloudSyncError('ERROR');
-    await store.load();
-    return snapshotInfo(deepClone(store.getState()));
+    const raw = await readPersistedLocalRaw();
+    return snapshotInfo(deepClone(raw));
   }
 
   async function remoteInfo(row) {
