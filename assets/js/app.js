@@ -49,6 +49,7 @@
   }
   async function handleLogout() {
     closePopovers();
+    window.KusheCloudSync?.close();
     closeChangePasswordModal(true);
     try { await window.KusheAuthGate?.logout(); } catch (_) {}
     setAuthView(false);
@@ -342,6 +343,7 @@
     $('#mobileNavBackdrop').addEventListener('click',()=>{ui.mobileOpen=false;setShell()});
     $('#notificationButton').addEventListener('click',(event)=>{event.stopPropagation();togglePopover('notificationPopover')});
     $('#userMenuButton').addEventListener('click',(event)=>{event.stopPropagation();togglePopover('userPopover')});
+    const cloudSyncButton = document.createElement('button');cloudSyncButton.id='cloudSyncButton';cloudSyncButton.type='button';cloudSyncButton.textContent='雲端同步';cloudSyncButton.addEventListener('click',()=>{closePopovers();window.KusheCloudSync?.open()});$('#userPopover')?.appendChild(cloudSyncButton);
     const changePasswordButton = document.createElement('button');changePasswordButton.id='changePasswordButton';changePasswordButton.type='button';changePasswordButton.textContent='變更密碼';changePasswordButton.addEventListener('click',openChangePasswordModal);$('#userPopover')?.appendChild(changePasswordButton);
     const logoutButton = document.createElement('button');logoutButton.id='logoutButton';logoutButton.type='button';logoutButton.textContent='登出';logoutButton.addEventListener('click',handleLogout);$('#userPopover')?.appendChild(logoutButton);
     $('#messageButton').addEventListener('click',()=>toast('目前沒有新訊息'));

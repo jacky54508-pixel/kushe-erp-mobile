@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#061d3b">
   <title>酷舍 ERP｜首頁總覽</title>
-  <link rel="stylesheet" href="assets/css/app.css?v=20260823-auth-p01-1">
+  <link rel="stylesheet" href="assets/css/app.css?v=20260824-cloud-p1-1">
   <link rel="stylesheet" href="assets/css/projects-scoped.css?v=20260811-billing-settings1">
 </head>
 <body>
@@ -242,12 +242,36 @@
       </form>
     </section>
   </div>
+  <div class="auth-modal-layer" id="cloudSyncModal" hidden>
+    <button class="auth-modal-backdrop" id="cloudSyncBackdrop" type="button" aria-label="關閉雲端同步"></button>
+    <section class="auth-modal cloud-sync-modal" role="dialog" aria-modal="true" aria-labelledby="cloudSyncTitle">
+      <header>
+        <div><small>手動安全備份</small><h2 id="cloudSyncTitle">雲端同步</h2></div>
+        <button class="auth-modal-close" id="cloudSyncHeaderClose" type="button" aria-label="關閉雲端同步">×</button>
+      </header>
+      <div class="cloud-sync-body">
+        <p class="cloud-sync-intro">本階段只檢查版本並在安全條件成立時手動上傳；不會下載、套用或合併雲端資料。</p>
+        <div class="cloud-sync-grid">
+          <div class="cloud-sync-item"><span>登入帳號</span><b id="cloudSyncEmail">—</b></div>
+          <div class="cloud-sync-item"><span>狀態</span><b id="cloudSyncState">—</b></div>
+          <div class="cloud-sync-item"><span>本機更新</span><b id="cloudSyncLocalTime">未知</b></div>
+          <div class="cloud-sync-item"><span>雲端更新</span><b id="cloudSyncRemoteTime">尚無資料</b></div>
+          <div class="cloud-sync-item"><span>本機資料筆數</span><b id="cloudSyncLocalScore">0</b></div>
+          <div class="cloud-sync-item"><span>雲端資料筆數</span><b id="cloudSyncRemoteScore">0</b></div>
+        </div>
+        <div class="cloud-sync-status"><strong>安全檢查結果</strong><p id="cloudSyncMessage">尚未檢查。</p></div>
+        <p class="cloud-sync-fingerprint" id="cloudSyncFingerprint">本機 —／雲端 —</p>
+      </div>
+      <footer><button class="auth-modal-cancel" id="cloudSyncClose" type="button">關閉</button><button class="auth-modal-cancel" id="cloudSyncRefresh" type="button">重新檢查</button><button class="auth-modal-submit cloud-sync-upload" id="cloudSyncUpload" type="button" disabled>上傳本機至雲端</button></footer>
+    </section>
+  </div>
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
   <script src="assets/js/lucide.min.js?v=20260809-commissions1"></script>
   <script src="assets/js/config.js?v=20260823-auth-p0-1"></script>
   <script src="assets/js/auth-gate.js?v=20260823-auth-p02-1"></script>
   <script src="assets/js/legacy-adapter.js?v=20260809-nav4"></script>
   <script src="assets/js/erp-store.js?v=20260822-quotation-note-presets1"></script>
+  <script src="assets/js/cloud-sync.js?v=20260824-cloud-p1-1"></script>
   <script src="assets/js/dashboard.js?v=20260809-projects1"></script>
   <script src="assets/js/commissions.js?v=20260821-orphan-billing-commission1"></script>
   <script src="assets/js/unbilled-work.js?v=20260810-pricing1"></script>
@@ -263,6 +287,6 @@
   <script src="assets/js/table-scroll.js?v=20260809-global1"></script>
   <script src="assets/js/billing-print.js?v=20260822-quotation-a4fit1"></script>
   <script src="assets/js/quotations.js?v=20260822-quotation-note-presets1"></script>
-  <script src="assets/js/app.js?v=20260823-auth-p01-1"></script>
+  <script src="assets/js/app.js?v=20260824-cloud-p1-1"></script>
 </body>
 </html>
