@@ -1450,7 +1450,8 @@
     await load(); const item=clean(values.item),price=Math.max(0,num(values.price)),scope=['company','customer','project'].includes(values.scope)?values.scope:'company';
     if(!item)throw new Error('請輸入施工項目'); if(!clean(values.unit))throw new Error('請輸入單位');
     if(scope==='customer'&&!values.customerId)throw new Error('請選擇客戶'); if(scope==='project'&&!values.projectId)throw new Error('請選擇案場');
-    const row={id:uid(),scope,customerId:scope==='company'?'':values.customerId||'',projectId:scope==='project'?values.projectId||'':'',item,unit:clean(values.unit),price,effectiveDate:values.effectiveDate||new Date().toISOString().slice(0,10),createdSource:clean(values.createdSource)||'manual',createdAt:new Date().toISOString()};
+    const backupValue=values.isBackupPrice,isBackupPrice=backupValue===true||['true','1','on'].includes(String(backupValue??'').toLowerCase());
+    const row={id:uid(),scope,customerId:scope==='company'?'':values.customerId||'',projectId:scope==='project'?values.projectId||'':'',item,unit:clean(values.unit),price,isBackupPrice,effectiveDate:values.effectiveDate||new Date().toISOString().slice(0,10),createdSource:clean(values.createdSource)||'manual',createdAt:new Date().toISOString()};
     state.quotationPrices.unshift(row); await persist(`新增報價價格歷史 ${item}`); return row;
   }
   async function saveQuotation(values, id = '') {
