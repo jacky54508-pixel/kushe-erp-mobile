@@ -76,7 +76,7 @@
     const id=button.dataset.deleteCustomer;
     try{
       const preview=store.customerDeletePreview(id);
-      if(preview.deletable!==true){window.KushePhase1.toast(`此客戶仍有關聯資料，不能刪除：${preview.blockers.map((row)=>`${row.label} ${row.count} 筆`).join('、')}`);return}
+      if(preview.deletable!==true){const blockers=preview.blockers.filter((row)=>row.count>0).map((row)=>`• ${row.label} ${row.count} 筆`).join('\n');window.alert(`無法刪除客戶「${preview.customerName}」\n\n此客戶仍有以下關聯資料：\n\n${blockers}\n\n請先處理相關資料後，再重新刪除。`);return}
       if(!confirm(`確定刪除客戶「${preview.customerName}」？\n\n此客戶目前沒有任何案場、報價、請款或其他關聯資料。\n刪除後無法復原。`))return;
       button.disabled=true;
       await store.deleteCustomer(id);
