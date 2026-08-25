@@ -1336,6 +1336,54 @@
     state.projects.filter((project) => project.customer === row.id).forEach((project) => { project.customerName=row.name; });
     await persist(`${id?'修改':'新增'}客戶 ${row.name}`); return row;
   }
+  const CUSTOMER_DELETE_BLOCKERS = [
+    ['projects','案場'],
+    ['quotations','報價單'],
+    ['quotationPrices','價格歷史'],
+    ['quotationTemplates','報價模板'],
+    ['billings','請款單'],
+    ['receivables','應收'],
+    ['invoices','發票'],
+    ['dailyLogs','每日施工'],
+    ['attendance','出勤'],
+    ['commissions','抽成'],
+    ['materialUsages','材料使用'],
+    ['projectCosts','案場成本'],
+    ['payables','應付']
+  ];
+  function customerReferenceMatches(row, customer) {
+    if (!row || typeof row !== 'object') return false;
+    const referenceIds = [row.customerId,row.customer]
+      .filter((value) => (typeof value === 'string' || typeof value === 'number') && clean(value));
+    if (referenceIds.length) return referenceIds.some((value) => clean(value) === String(customer.id));
+    return [row.customerName,row.customerLabel].some((value) => clean(value) && sameName(value,customer.name));
+  }
+  function customerDeletePreview(customerId) {
+    const id=clean(customerId),customer=state?.customers?.find((row)=>String(row.id)===id);
+    const counts=Object.fromEntries(CUSTOMER_DELETE_BLOCKERS.map(([key])=>[key,0]));
+    counts.quotationPublicNotePresets=0;
+    if(customer){
+      CUSTOMER_DELETE_BLOCKERS.forEach(([key])=>{counts[key]=(state[key]||[]).filter((row)=>customerReferenceMatches(row,customer)).length});
+      const presets=Array.isArray(state.settings?.quotationPublicNotePresets)?state.settings.quotationPublicNotePresets:[];
+      counts.quotationPublicNotePresets=presets.filter((row)=>customerReferenceMatches(row,customer)).length;
+    }
+    const labels=new Map([...CUSTOMER_DELETE_BLOCKERS,['quotationPublicNotePresets','常用對外備註']]);
+    const blockers=Object.entries(counts).filter(([,count])=>count>0).map(([key,count])=>({key,label:labels.get(key),count}));
+    return {customerId:id,customerName:customer?.name||'',deletable:Boolean(customer)&&blockers.length===0,blockers,counts};
+  }
+  const customerDeleteBlockedMessage = (preview) => `此客戶仍有關聯資料，不能刪除：${preview.blockers.map((row)=>`${row.label} ${row.count} 筆`).join('、')}`;
+  async function deleteCustomer(customerId) {
+    await load();
+    const id=clean(customerId),customer=state.customers.find((row)=>String(row.id)===id);
+    if(!customer)throw new Error('找不到客戶資料');
+    const preview=customerDeletePreview(id);
+    if(preview.deletable!==true)throw new Error(customerDeleteBlockedMessage(preview));
+    const previousCustomers=state.customers,previousMeta={...state.meta},previousAudit=[...state.audit];
+    state.customers=state.customers.filter((row)=>row!==customer);
+    try{await persist(`刪除客戶 ${customer.name}`)}
+    catch(error){state.customers=previousCustomers;state.meta=previousMeta;state.audit=previousAudit;throw error}
+    return true;
+  }
   async function saveProject(values, id = '') {
     await load();
     const name=clean(values.name),customer=state.customers.find((row)=>row.id===values.customer);
@@ -1515,5 +1563,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, saveProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
