@@ -1384,6 +1384,65 @@
     catch(error){state.customers=previousCustomers;state.meta=previousMeta;state.audit=previousAudit;throw error}
     return true;
   }
+  const PROJECT_DELETE_BLOCKERS = [
+    ['quotations','報價單'],
+    ['quotationPrices','價格歷史'],
+    ['quotationTemplates','報價模板'],
+    ['dailyLogs','每日施工'],
+    ['dailyItemPresets','施工項目預設'],
+    ['attendance','出勤／點工'],
+    ['commissions','業績／抽成'],
+    ['billings','請款單'],
+    ['receivables','應收'],
+    ['invoices','發票'],
+    ['materialUsages','材料使用'],
+    ['projectCosts','案場成本'],
+    ['payables','應付'],
+    ['retentionReceipts','保留款收回'],
+    ['bankTransactions','銀行交易'],
+    ['calendar','行事曆／排程']
+  ];
+  function projectReferenceMatches(row, project) {
+    if (!row || typeof row !== 'object') return false;
+    const referenceIds = [row.projectId,row.project]
+      .filter((value) => (typeof value === 'string' || typeof value === 'number') && clean(value));
+    if (referenceIds.length) return referenceIds.some((value) => clean(value) === String(project.id));
+    return [row.projectName,row.projectLabel].some((value) => clean(value) && sameName(value,project.name));
+  }
+  function legacyProjectItemPriceCount(project) {
+    const prices=state.projectItemPrices;
+    if (!prices || typeof prices !== 'object' || Array.isArray(prices)) return 0;
+    return Object.keys(prices).filter((key) => {
+      const projectKey=clean(String(key).split('::')[0]);
+      return projectKey && (projectKey===String(project.id)||sameName(projectKey,project.name));
+    }).length;
+  }
+  function projectDeletePreview(projectId) {
+    const id=clean(projectId),project=state?.projects?.find((row)=>String(row.id)===id);
+    const counts=Object.fromEntries(PROJECT_DELETE_BLOCKERS.map(([key])=>[key,0]));
+    counts.legacyProjectItemPrices=0;
+    if(project){
+      PROJECT_DELETE_BLOCKERS.forEach(([key])=>{counts[key]=(Array.isArray(state[key])?state[key]:[]).filter((row)=>projectReferenceMatches(row,project)).length});
+      counts.legacyProjectItemPrices=legacyProjectItemPriceCount(project);
+    }
+    const labels=new Map([...PROJECT_DELETE_BLOCKERS,['legacyProjectItemPrices','舊版案場價格']]);
+    const blockers=Object.entries(counts).filter(([,count])=>count>0).map(([key,count])=>({key,label:labels.get(key),count}));
+    const customerId=project?clean(project.customerId||project.customer):'',customer=state?.customers?.find((row)=>String(row.id)===customerId);
+    return {projectId:id,projectName:project?.name||'',customerId,customerName:customer?.name||project?.customerName||'',deletable:Boolean(project)&&blockers.length===0,blockers,counts};
+  }
+  const projectDeleteBlockedMessage = (preview) => `此案場仍有關聯資料，不能刪除：${preview.blockers.map((row)=>`${row.label} ${row.count} 筆`).join('、')}`;
+  async function deleteProject(projectId) {
+    await load();
+    const id=clean(projectId),project=state.projects.find((row)=>String(row.id)===id);
+    if(!project)throw new Error('找不到案場資料');
+    const preview=projectDeletePreview(id);
+    if(preview.deletable!==true)throw new Error(projectDeleteBlockedMessage(preview));
+    const previousProjects=state.projects,previousMeta={...state.meta},previousAudit=[...state.audit];
+    state.projects=state.projects.filter((row)=>row!==project);
+    try{await persist(`刪除案場 ${project.name}`)}
+    catch(error){state.projects=previousProjects;state.meta=previousMeta;state.audit=previousAudit;throw error}
+    return true;
+  }
   async function saveProject(values, id = '') {
     await load();
     const name=clean(values.name),customer=state.customers.find((row)=>row.id===values.customer);
@@ -1563,5 +1622,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
