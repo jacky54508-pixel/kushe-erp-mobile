@@ -20,9 +20,19 @@
     '每日點工：', '每日點工:'
   ];
   const internalIdentifier = /^(?:sourceId|sourceNo|attendanceId|billingId)\s*[:：=].*$/i;
+  const sameDayProjectSegment = /^(?:同日施工案場|同日案場施工)\s*[:：]?\s*(.*)$/;
+
+  function sameDayProjectNames(value) {
+    const match = text(value).match(sameDayProjectSegment);
+    if (!match) return null;
+    return text(match[1]).replace(/^[：:\s\-–—]+/, '').split(/[、，,／/]/).map(text).filter(Boolean);
+  }
 
   function stripInternalWorkText(value) {
-    return text(value).replace(/\r?\n/g, '｜').split(/[｜|]/).map((part) => {
+    const parts = text(value).replace(/\r?\n/g, '｜').split(/[｜|]/).map(text);
+    const internalProjectNames = new Set(parts.flatMap((part) => sameDayProjectNames(part) || []));
+    return parts.map((part) => {
+      if (sameDayProjectNames(part) !== null) return '';
       let visible = text(part);
       let changed = true;
       while (visible && changed) {
@@ -34,7 +44,7 @@
           break;
         }
       }
-      if (!visible || internalOnlyWorkText.has(visible) || internalIdentifier.test(visible)) return '';
+      if (!visible || internalOnlyWorkText.has(visible) || internalProjectNames.has(visible) || internalIdentifier.test(visible)) return '';
       return visible;
     }).filter(Boolean).join('｜');
   }
@@ -116,7 +126,7 @@
     const view = buildView(group);
     if (!view) return;
     const payload = encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(view)))));
-    const url = new URL(`payroll-print.html?v=20260826-payroll-employee1&print=${autoPrint ? '1' : '0'}`, location.href);
+    const url = new URL(`payroll-print.html?v=20260827-payroll-employee2&print=${autoPrint ? '1' : '0'}`, location.href);
     url.hash = payload;
     location.assign(url.href);
   }
