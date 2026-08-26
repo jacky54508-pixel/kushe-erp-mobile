@@ -180,6 +180,11 @@ html,body{height:100%;overflow:hidden}
  .receivable-table th:nth-child(2),.receivable-table td:nth-child(2),.payable-table th:nth-child(2),.payable-table td:nth-child(2),.billing-list-table th:nth-child(3),.billing-list-table td:nth-child(3){position:sticky;left:0;z-index:2;background:#fff;box-shadow:5px 0 7px -7px #536b80}
  .receivable-table thead th:nth-child(2),.payable-table thead th:nth-child(2),.billing-list-table thead th:nth-child(3){z-index:4;background:#f5f8fb}
 }
+@media (min-width:1200px){
+ .billing-list-table>thead>tr>th:last-child,.billing-list-table>tbody>tr>td:not([colspan]):last-child,.receivable-table>thead>tr>th:last-child,.receivable-table>tbody>.receivable-main-row>td:last-child,.payable-table>thead>tr>th:last-child,.payable-table>tbody>.payable-main-row>td:last-child{position:sticky;right:0;z-index:3;background:#fff;box-shadow:-5px 0 7px -7px #536b80}
+ .billing-list-table>thead>tr>th:last-child,.receivable-table>thead>tr>th:last-child,.payable-table>thead>tr>th:last-child{z-index:5;background:#f5f8fb}
+ .receivable-table>tbody>.receivable-main-row:hover>td:last-child,.receivable-table>tbody>.receivable-main-row.is-expanded>td:last-child,.payable-table>tbody>.payable-main-row:hover>td:last-child,.payable-table>tbody>.payable-main-row.is-expanded>td:last-child{background:#f4f8fd}
+}
 @media (max-width:700px){.erp-global-hscroll{display:none!important}.billing-print-actions{gap:4px}.billing-print-actions button{padding:7px 9px;font-size:12px}}
 
 /* Quotation management */
