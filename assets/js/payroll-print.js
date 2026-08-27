@@ -95,13 +95,20 @@
       quantityLabel: text(row.quantityLabel),
       amount: number(row.amount)
     }));
-    const otherSources = nonZeroSources.filter((row) => !isWorkSalarySource(row)).map((row) => ({
+    const commissionSources = nonZeroSources.filter((row) => text(row.type) === '抽成').map((row) => ({
+      item: otherItemLabel(row),
+      description: otherDescription(row),
+      direction: number(row.amount) < 0 ? '扣項' : '加項',
+      amount: number(row.amount)
+    }));
+    const otherSources = nonZeroSources.filter((row) => !isWorkSalarySource(row) && text(row.type) !== '抽成').map((row) => ({
       item: otherItemLabel(row),
       description: otherDescription(row),
       direction: number(row.amount) < 0 ? '扣項' : '加項',
       amount: number(row.amount)
     }));
     const workSalary = workSources.reduce((sum, row) => sum + number(row.amount), 0);
+    const commissionTotal = commissionSources.reduce((sum, row) => sum + number(row.amount), 0);
     const otherAddition = otherSources.filter((row) => row.amount > 0).reduce((sum, row) => sum + row.amount, 0);
     const otherDeduction = Math.abs(otherSources.filter((row) => row.amount < 0).reduce((sum, row) => sum + row.amount, 0));
     const total = Math.max(0, number(group.total));
@@ -112,11 +119,13 @@
       month,
       generatedDate: taipeiDate(),
       workSources,
+      commissionSources,
       otherSources,
       workSalary,
+      commissionTotal,
       otherAddition,
       otherDeduction,
-      totalDiff: workSalary + otherAddition - otherDeduction - total,
+      totalDiff: workSalary + commissionTotal + otherAddition - otherDeduction - total,
       total,
       fileName: `${safeFile(`酷舍_薪資單_${employeeName}_${month}`)}.pdf`
     };
@@ -126,7 +135,7 @@
     const view = buildView(group);
     if (!view) return;
     const payload = encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(view)))));
-    const url = new URL(`payroll-print.html?v=20260827-payroll-employee2&print=${autoPrint ? '1' : '0'}`, location.href);
+    const url = new URL(`payroll-print.html?v=20260827-payroll-dynamic-sections1&print=${autoPrint ? '1' : '0'}`, location.href);
     url.hash = payload;
     location.assign(url.href);
   }
