@@ -106,7 +106,7 @@
     const otherDeduction = Math.abs(otherSources.filter((row) => row.amount < 0).reduce((sum, row) => sum + row.amount, 0));
     const total = Math.max(0, number(group.total));
     return {
-      title: '員工薪資單',
+      title: '薪資單',
       companyName: '酷舍企業有限公司',
       employeeName,
       month,
