@@ -345,7 +345,7 @@
     const comms = state.commissions.filter((x) => monthOf(x.date) === month && x.employee === employee && x.status === '已列入薪資');
     let payroll = state.payroll.find((x) => x.month === month && x.employee === employee && x.status !== '已付款');
     if (!payroll) {
-      payroll = {id:uid(),month,employee,days:0,baseSalary:0,commission:0,fuel:0,manualFuel:0,meal:0,other:0,overtime:0,bonus:0,allowance:0,advance:0,laborInsurance:0,incomeTax:0,deduction:0,total:0,payDate:'',bankId:'',paymentTransactionId:'',paidAt:'',status:'未付款',note:'由請款單、抽成與點工自動彙整',payrollAdjustmentNote:'',createdAt:new Date().toISOString()};
+      payroll = {id:uid(),month,employee,days:0,baseSalary:0,commission:0,fuel:0,manualFuel:0,meal:0,other:0,overtime:0,bonus:0,allowance:0,advance:0,laborInsurance:0,incomeTax:0,deduction:0,total:0,payDate:'',bankId:'',paymentTransactionId:'',paidAt:'',status:'未付款',note:'由請款單、抽成與點工自動彙整',payrollAdjustmentNote:'',otherNote:'',deductionNote:'',createdAt:new Date().toISOString()};
       state.payroll.unshift(payroll);
     }
     payroll.days = atts.reduce((sum, x) => sum + num(x.days), 0);
@@ -1197,7 +1197,7 @@
       push(salarySourceIdentity(row,'commission'),{id:row.id,date:row.date||'',type:'抽成',projectId:row.project||'',projectName:project?.name||row.projectName||'—',content:row.note||row.sourceNo||'業績抽成',quantity:base,quantityLabel:base?`$${Math.round(base).toLocaleString('zh-TW')}`:'',rate,rateLabel:rate?`${rate}%`:'',amount:num(row.commission),sourceType:row.sourceType||'commission',sourceId:row.sourceId||row.id});
     });
     const sorted=[...records].sort((a,b)=>String(b.updatedAt||b.createdAt||'').localeCompare(String(a.updatedAt||a.createdAt||'')));
-    salaryAdjustmentFields.forEach(([field,label,direction])=>{const record=sorted.find((row)=>num(row[field])!==0),value=num(record?.[field]);if(!value)return;push(`adjustment:${field}`,{id:`${record.id}-${field}`,date:record.updatedAt?.slice(0,10)||'',type:label,projectId:'',projectName:'—',content:record.payrollAdjustmentNote||label,quantity:0,quantityLabel:'',rate:0,rateLabel:'',amount:direction==='扣項'?-Math.abs(value):Math.abs(value),sourceType:'payroll-adjustment',sourceId:record.id})});
+    salaryAdjustmentFields.forEach(([field,label,direction])=>{const record=sorted.find((row)=>num(row[field])!==0),value=num(record?.[field]);if(!value)return;const fieldNote=field==='other'?record.otherNote:field==='deduction'?record.deductionNote:'',content=['other','deduction'].includes(field)?String(fieldNote||'').trim()||String(record.payrollAdjustmentNote||'').trim()||label:record.payrollAdjustmentNote||label;push(`adjustment:${field}`,{id:`${record.id}-${field}`,date:record.updatedAt?.slice(0,10)||'',type:label,projectId:'',projectName:'—',content,quantity:0,quantityLabel:'',rate:0,rateLabel:'',amount:direction==='扣項'?-Math.abs(value):Math.abs(value),sourceType:'payroll-adjustment',sourceId:record.id})});
     return rows.sort((a,b)=>String(a.date||'').localeCompare(String(b.date||''))||String(a.type).localeCompare(String(b.type),'zh-Hant'));
   }
   function monthlyPayrollGroups() {
@@ -1207,8 +1207,8 @@
       const records=[...group.records].sort((a,b)=>String(b.updatedAt||b.createdAt||'').localeCompare(String(a.updatedAt||a.createdAt||''))),primary=records[0],employee=state.employees.find((row)=>String(row.id)===group.employeeId);
       const sources=monthlySalarySources(group.employeeId,group.month,records),sourceTotal=sources.reduce((sum,row)=>sum+num(row.amount),0),sourceBase=sources.filter((row)=>['點工','出勤'].includes(row.type)).reduce((sum,row)=>sum+num(row.amount),0),sourceCommission=sources.filter((row)=>row.type==='抽成').reduce((sum,row)=>sum+num(row.amount),0),sourceFuel=sources.filter((row)=>row.type==='油費').reduce((sum,row)=>sum+num(row.amount),0);
       const total=sources.length?Math.max(0,sourceTotal):Math.max(0,...records.map((row)=>num(row.total))),baseSalary=sourceBase||Math.max(0,...records.map((row)=>num(row.baseSalary))),commission=sourceCommission||Math.max(0,...records.map((row)=>num(row.commission)));
-      const adjustments=Object.fromEntries(salaryAdjustmentFields.map(([field])=>[field,num(records.find((row)=>num(row[field])!==0)?.[field])])),payrollAdjustmentNote=String(records.find((row)=>String(row.payrollAdjustmentNote||'').trim())?.payrollAdjustmentNote||'');
-      const view={...group,recordIds:records.map((row)=>row.id),primaryPayrollId:primary.id,employee:group.employeeId,employeeName:employee?.name||primary.employeeName||'—',total,baseSalary,commission,sourceFuel,fuel:sourceFuel+adjustments.manualFuel,...adjustments,payrollAdjustmentNote,sources};
+      const adjustments=Object.fromEntries(salaryAdjustmentFields.map(([field])=>[field,num(records.find((row)=>num(row[field])!==0)?.[field])])),payrollAdjustmentNote=String(records.find((row)=>String(row.payrollAdjustmentNote||'').trim())?.payrollAdjustmentNote||''),otherNote=String(records.find((row)=>String(row.otherNote||'').trim())?.otherNote||''),deductionNote=String(records.find((row)=>String(row.deductionNote||'').trim())?.deductionNote||'');
+      const view={...group,recordIds:records.map((row)=>row.id),primaryPayrollId:primary.id,employee:group.employeeId,employeeName:employee?.name||primary.employeeName||'—',total,baseSalary,commission,sourceFuel,fuel:sourceFuel+adjustments.manualFuel,...adjustments,payrollAdjustmentNote,otherNote,deductionNote,sources};
       const summary=salaryPaymentSummary(view);return {...view,...summary,status:summary.status};
     }).sort((a,b)=>String(b.month).localeCompare(String(a.month))||String(a.employeeName).localeCompare(String(b.employeeName),'zh-Hant'));
   }
@@ -1228,14 +1228,14 @@
     if(!employeeId||!/^\d{4}-\d{2}$/.test(month))throw new Error('找不到薪資月份或員工');
     const records=state.payroll.filter((row)=>payrollEmployeeId(row)===employeeId&&String(row.month||'')===month),truth=payrollPaymentTruth({employee:employeeId,month,recordIds:records.map((row)=>row.id),total:Math.max(0,...records.map((row)=>num(row.total)))});
     if(truth.paid>0||truth.hasVerifiedPayment)throw new Error('此月份已有薪資付款，請先刪除／沖回薪資付款後再調整薪資。');
-    const normalized=Object.fromEntries(salaryAdjustmentFields.map(([field,label])=>[field,payrollAdjustmentAmount(values[field],label)])),payrollAdjustmentNote=String(values.adjustmentNote??values.payrollAdjustmentNote??'').trim();
+    const normalized=Object.fromEntries(salaryAdjustmentFields.map(([field,label])=>[field,payrollAdjustmentAmount(values[field],label)])),payrollAdjustmentNote=String(values.adjustmentNote??values.payrollAdjustmentNote??'').trim(),otherNote=String(values.otherNote??records.find((row)=>String(row.otherNote||'').trim())?.otherNote??'').trim(),deductionNote=String(values.deductionNote??records.find((row)=>String(row.deductionNote||'').trim())?.deductionNote??'').trim();
     const employeeRecord=state.employees.find((row)=>String(row.id)===employeeId),employeeValue=records[0]?.employee??records[0]?.employeeId??employeeRecord?.id;
     if(employeeValue===undefined||employeeValue===null||employeeValue==='')throw new Error('找不到員工資料');
     let payroll=state.payroll.find((row)=>payrollEmployeeId(row)===employeeId&&String(row.month||'')===month&&row.status!=='已付款')||records[0];
-    if(!payroll){payroll={id:uid(),month,employee:employeeValue,days:0,hours:0,baseSalary:0,commission:0,fuel:0,manualFuel:0,meal:0,other:0,overtime:0,bonus:0,allowance:0,advance:0,laborInsurance:0,incomeTax:0,deduction:0,total:0,payDate:'',bankId:'',paymentTransactionId:'',paidAt:'',status:'未付款',note:'由請款單、抽成與點工自動彙整',payrollAdjustmentNote:'',createdAt:new Date().toISOString()};state.payroll.unshift(payroll)}
+    if(!payroll){payroll={id:uid(),month,employee:employeeValue,days:0,hours:0,baseSalary:0,commission:0,fuel:0,manualFuel:0,meal:0,other:0,overtime:0,bonus:0,allowance:0,advance:0,laborInsurance:0,incomeTax:0,deduction:0,total:0,payDate:'',bankId:'',paymentTransactionId:'',paidAt:'',status:'未付款',note:'由請款單、抽成與點工自動彙整',payrollAdjustmentNote:'',otherNote:'',deductionNote:'',createdAt:new Date().toISOString()};state.payroll.unshift(payroll)}
     if(payroll.status==='已付款'){Object.assign(payroll,{status:'未付款',paidAmount:0,payDate:'',paidAt:'',paymentTransactionId:'',bankId:''})}
-    records.filter((row)=>row!==payroll).forEach((row)=>{salaryAdjustmentFields.forEach(([field])=>{row[field]=0});row.payrollAdjustmentNote=''});
-    Object.assign(payroll,normalized,{payrollAdjustmentNote});rebuildPayrollFor(month,employeeValue);
+    records.filter((row)=>row!==payroll).forEach((row)=>{salaryAdjustmentFields.forEach(([field])=>{row[field]=0});row.payrollAdjustmentNote='';row.otherNote='';row.deductionNote=''});
+    Object.assign(payroll,normalized,{payrollAdjustmentNote,otherNote,deductionNote});rebuildPayrollFor(month,employeeValue);
     await persist(`更新薪資調整 ${month}`);
     return monthlyPayrollGroups().find((row)=>row.employeeId===employeeId&&row.month===month)||null;
   }
