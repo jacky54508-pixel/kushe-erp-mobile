@@ -135,7 +135,7 @@
     const view = buildView(group);
     if (!view) return;
     const payload = encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(view)))));
-    const url = new URL(`payroll-print.html?v=20260827-payroll-dynamic-sections1&print=${autoPrint ? '1' : '0'}`, location.href);
+    const url = new URL(`payroll-print.html?v=20260828-payroll-vertical-center1&print=${autoPrint ? '1' : '0'}`, location.href);
     url.hash = payload;
     location.assign(url.href);
   }
