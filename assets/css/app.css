@@ -508,13 +508,14 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 #receivablesApp .receivable-table .retention-amount+.retention-status-badge{max-width:100%;margin-top:4px;white-space:normal;text-align:center;line-height:1.25}
 #receivablesApp .receivable-status-stack{display:flex;flex-direction:column;align-items:center;gap:4px}
 #receivablesApp .receivable-status-stack>span{max-width:100%;white-space:nowrap}
-#receivablesApp .receivable-actions-cell{padding-left:8px!important;padding-right:8px!important}
+#receivablesApp .receivable-table>tbody>.receivable-main-row{height:74px}
+#receivablesApp .receivable-actions-cell{padding-left:6px!important;padding-right:6px!important}
 #receivablesApp .receivable-actions-cell:has(.receivable-more-menu:not([hidden])){z-index:20!important}
-#receivablesApp .receivable-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;white-space:nowrap}
-#receivablesApp .receivable-actions>button{box-sizing:border-box;width:auto;min-width:0;min-height:32px;height:32px;margin:0;padding:0 10px;white-space:nowrap}
-#receivablesApp .receivable-actions>[data-retention-receive]{padding-inline:8px}
-#receivablesApp .receivable-actions .receivable-expand,#receivablesApp .receivable-more-toggle{display:grid;place-items:center;flex:0 0 32px;width:32px;height:32px;padding:0}
-#receivablesApp .receivable-more{position:relative;flex:0 0 32px}
+#receivablesApp .receivable-actions{display:grid;grid-template-columns:54px 68px 32px 32px;align-items:center;justify-content:end;gap:6px;white-space:nowrap}
+#receivablesApp .receivable-actions>button{box-sizing:border-box;width:100%;min-width:0;min-height:32px;height:32px;margin:0;padding:0 6px;white-space:nowrap}
+#receivablesApp .receivable-action-placeholder{visibility:hidden;pointer-events:none}
+#receivablesApp .receivable-actions .receivable-expand,#receivablesApp .receivable-more-toggle{display:grid;place-items:center;width:32px;height:32px;padding:0}
+#receivablesApp .receivable-more{position:relative;width:32px}
 #receivablesApp .receivable-more-toggle{border:1px solid #d7e1ec;border-radius:8px;background:#fff;color:#51677e;font-size:19px;font-weight:900;line-height:1}
 #receivablesApp .receivable-more-toggle:hover,#receivablesApp .receivable-more-toggle[aria-expanded=true]{border-color:#8db3e7;background:#edf5ff;color:#075bd8}
 #receivablesApp .receivable-more-menu{position:fixed;z-index:195;width:164px;padding:6px;border:1px solid #dbe4ee;border-radius:9px;background:#fff;box-shadow:0 12px 28px rgba(14,39,70,.18)}
