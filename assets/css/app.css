@@ -531,3 +531,24 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 #receivablesApp .receivable-detail-panel .receipt-detail-table{box-sizing:border-box;width:100%;max-width:100%;min-width:0;table-layout:fixed}
 #receivablesApp .receivable-detail-panel .receipt-detail-table th,#receivablesApp .receivable-detail-panel .receipt-detail-table td{white-space:normal;overflow-wrap:anywhere}
 @media(max-width:620px){#receivablesApp .receivable-view-switch{align-items:stretch}#receivablesApp .receivable-view-switch button{flex:1;min-width:0}}
+
+/* Payables-only safe-delete menu and preflight dialog. */
+#payablesApp .payable-row-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;white-space:nowrap}
+#payablesApp .payable-row-actions>button{min-height:32px;height:32px;margin:0}
+#payablesApp .payable-more{position:relative;width:32px}
+#payablesApp .payable-more-toggle{display:grid;place-items:center;width:32px;height:32px;padding:0;border:1px solid #d7e1ec;border-radius:8px;background:#fff;color:#51677e;font-size:19px;font-weight:900;line-height:1}
+#payablesApp .payable-more-toggle:hover,#payablesApp .payable-more-toggle[aria-expanded=true]{border-color:#8db3e7;background:#edf5ff;color:#075bd8}
+.payable-more-menu{position:fixed;z-index:195;width:176px;padding:6px;border:1px solid #dbe4ee;border-radius:9px;background:#fff;box-shadow:0 12px 28px rgba(14,39,70,.18)}
+.payable-more-delete{width:100%;height:34px;padding:0 9px;border:0;border-radius:7px;background:#fff;color:#b42318;font-size:10px;font-weight:850;text-align:left;white-space:nowrap}
+.payable-more-delete:hover{background:#fff1f0;color:#991b12}
+.payable-delete-modal{width:min(760px,96vw)}
+.payable-delete-summary{grid-template-columns:repeat(3,minmax(0,1fr))}
+.payable-delete-result{margin-top:15px;padding:14px 15px;border:1px solid;border-radius:10px}
+.payable-delete-result h3{margin:0 0 7px;font-size:12px}
+.payable-delete-result p{margin:0;font-size:11px;line-height:1.65}
+.payable-delete-result.is-allowed{border-color:#b9e4cf;background:#edf9f3;color:#08764a}
+.payable-delete-result.is-blocked{border-color:#efcbc6;background:#fff5f3;color:#9f2f27}
+.payable-delete-result ul{display:grid;gap:8px;margin:0;padding:0;list-style:none}
+.payable-delete-result li{display:grid;gap:2px;font-size:10px;line-height:1.5}
+.payable-delete-result li strong{font-size:11px}
+@media(max-width:620px){.payable-delete-summary{grid-template-columns:1fr}.payable-delete-result{padding:12px}}

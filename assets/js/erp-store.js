@@ -1090,6 +1090,58 @@
     const row = {id,payableNo:nextPayableNumber(date),date,vendor:vendor?.id||'',vendorName:vendor?.name||payeeName,project:project?.id||'',projectName:project?.name||'',category:values.category||'其他',item:String(values.item||'').trim(),amount,paid:0,dueDate:values.dueDate||'',status:'未付款',note:values.note||'',sourceType:'manual-payable',sourceId:values.sourceId||id,createdAt:now,updatedAt:now};
     state.payables.unshift(row); await persist(`新增應付 ${row.payableNo}`); return row;
   }
+  function payableDeletePreview(payableId) {
+    const id=clean(payableId),payable=state?.payables?.find((row)=>String(row.id)===id),empty={payableId:id,allowed:false,blockers:[],sourceType:'',amount:0,paid:0,paymentCount:0,bankTransactionCount:0,invoiceNo:'',invoiceRecordCount:0,materialUsageCount:0,inventoryReceiptCount:0,projectCostCount:0,unknownRelationCount:0,payableNo:'',vendorName:'',projectName:'',invoiceStatus:'無正式發票'};
+    if(!payable)return {...empty,blockers:[{key:'notFound',label:'應付帳款',count:1,message:'找不到應付帳款資料。'}]};
+    const payments=(state.payments||[]).filter((row)=>String(row.payableId||'')===id),paymentIds=new Set(payments.map((row)=>String(row.id||'')).filter(Boolean)),paymentTransactionIds=new Set(payments.map((row)=>String(row.bankTransactionId||'')).filter(Boolean));
+    const bankTransactions=(state.bankTransactions||[]).filter((row)=>String(row.payableId||'')===id||paymentTransactionIds.has(String(row.id||''))||paymentIds.has(String(row.sourceId||''))||(String(row.sourceId||'')===id&&/payable|應付/i.test(`${row.sourceType||''} ${row.type||''} ${row.category||''}`))||(String(payable.paymentTransactionId||'')&&String(row.id||'')===String(payable.paymentTransactionId)));
+    const invoiceRecords=(state.invoices||[]).filter((row)=>String(row.payableId||'')===id||String(row.sourceId||'')===id);
+    const materialUsageIds=new Set();
+    (state.materialUsages||[]).forEach((row,index)=>{if(String(row.payableId||'')===id)materialUsageIds.add(String(row.id||`direct-${index}`))});
+    (Array.isArray(payable.usageIds)?payable.usageIds:[]).forEach((usageId,index)=>materialUsageIds.add(String(usageId||`source-${index}`)));
+    const inventoryReceipts=(Array.isArray(state.inventoryReceipts)?state.inventoryReceipts:[]).filter((row)=>String(row.payableId||'')===id);
+    const projectCosts=(state.projectCosts||[]).filter((row)=>String(row.payableId||'')===id||(clean(payable.sourceId)&&String(row.id||'')===String(payable.sourceId||'')));
+    const knownCollections=new Set(['payables','payments','bankTransactions','invoices','materialUsages','inventoryReceipts','projectCosts','audit']);
+    let unknownRelationCount=String(payable.sourceType||'')==='manual-payable'&&clean(payable.sourceId)&&String(payable.sourceId)!==id?1:0;
+    Object.entries(state||{}).forEach(([key,rows])=>{
+      if(knownCollections.has(key)||!Array.isArray(rows))return;
+      rows.forEach((row)=>{
+        if(!row||typeof row!=='object')return;
+        const direct=[row.payableId,row.payable].some((value)=>clean(value)===id),listed=Array.isArray(row.payableIds)&&row.payableIds.some((value)=>clean(value)===id),typedSource=clean(row.sourceId)===id&&/payable|應付/i.test(`${row.sourceType||''} ${row.type||''} ${row.category||''}`);
+        if(direct||listed||typedSource)unknownRelationCount+=1;
+      });
+    });
+    const sourceType=String(payable.sourceType||''),paid=num(payable.paid),invoiceNo=String(payable.invoiceNo||'').trim(),issuedInvoice=invoiceRecords.some((row)=>invoiceStatus(row.status,row.invoiceNumber||row.invoiceNo||row.number)==='issued'||String(row.invoiceNumber||row.invoiceNo||row.number||'').trim()),issuedPayableStatus=['issued','invoiced','已開票','已開發票'].includes(String(payable.invoiceStatus||'').trim());
+    const blockers=[],add=(key,label,count,message)=>{if(count>0)blockers.push({key,label,count,message})};
+    if(sourceType!=='manual-payable')add('sourceType','來源類型',1,sourceType==='material-project'?'此筆由材料使用自動建立，請從材料來源處理。':sourceType==='project-cost'?'此筆由案場成本建立，請從案場成本來源處理。':'此筆不是可安全刪除的手動應付，未知或歷史來源一律禁止直接刪除。');
+    add('paid','已付金額',paid!==0?1:0,'此筆已有付款金額，銀行對帳完成前禁止整筆刪除。');
+    add('payments','付款紀錄',payments.length,'此筆已有付款紀錄，銀行對帳完成前禁止整筆刪除。');
+    add('bankTransactions','銀行流水',bankTransactions.length,'此筆已有關聯銀行流水，銀行對帳完成前禁止整筆刪除。');
+    add('invoiceNo','發票號碼',invoiceNo?1:0,'此筆已有正式進項發票號碼，不可直接刪除。');
+    add('invoiceStatus','發票狀態',issuedPayableStatus?1:0,'此筆已標記正式進項發票，不可直接刪除。');
+    add('invoices','進項發票',invoiceRecords.length,'此筆已有持久化進項發票紀錄，不可直接刪除。');
+    add('materialUsages','材料來源',materialUsageIds.size,'此筆由材料使用關聯，請從材料來源處理。');
+    add('inventoryReceipts','入庫來源',inventoryReceipts.length,'此筆已有材料入庫來源，請從材料來源處理。');
+    add('projectCosts','案場成本來源',projectCosts.length,'此筆由案場成本建立，請從案場成本來源處理。');
+    add('unknownRelations','未知關聯',unknownRelationCount,'此筆存在未識別的來源關聯，為避免帳務斷鏈已停止刪除。');
+    return {payableId:id,allowed:blockers.length===0,blockers,sourceType,amount:num(payable.amount),paid,paymentCount:payments.length,bankTransactionCount:bankTransactions.length,invoiceNo,invoiceRecordCount:invoiceRecords.length,materialUsageCount:materialUsageIds.size,inventoryReceiptCount:inventoryReceipts.length,projectCostCount:projectCosts.length,unknownRelationCount,payableNo:payable.payableNo||payable.number||payable.sourceNo||'',vendorName:payable.vendorName||state.vendors?.find((row)=>String(row.id)===String(payable.vendor||''))?.name||'',projectName:payable.projectName||state.projects?.find((row)=>String(row.id)===String(payable.project||''))?.name||'',invoiceStatus:invoiceRecords.length?(issuedInvoice?'已有正式進項發票':'已有進項發票紀錄'):invoiceNo?'已填發票號碼':'無正式發票'};
+  }
+  async function deletePayable(payableId) {
+    await load();
+    const id=clean(payableId),payable=state.payables.find((row)=>String(row.id)===id);
+    if(!payable)throw new Error('找不到應付帳款資料');
+    const preview=payableDeletePreview(id);
+    if(preview.allowed!==true)throw new Error(`此筆應付帳款不能刪除：${preview.blockers.map((row)=>row.message).join(' ')}`);
+    const previousPayables=state.payables,previousMeta={...state.meta},previousAudit=[...state.audit];
+    state.payables=state.payables.filter((row)=>row!==payable);
+    try{await persist(`刪除未付款手動應付帳款｜${payable.payableNo||payable.sourceNo||payable.id}｜${payable.vendorName||''}｜${num(payable.amount)}`)}
+    catch(error){
+      state.payables=previousPayables;state.meta=previousMeta;state.audit=previousAudit;
+      try{if(!db)db=await openDB();if(db)await dbSet(STATE_KEY,state);localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state))}catch(_){/* 原始錯誤優先；記憶體狀態已完整還原 */}
+      throw error;
+    }
+    return preview;
+  }
   async function addPayablePayment(values) {
     await load();
     const idempotencyKey = String(values.idempotencyKey || '').trim();
@@ -1622,5 +1674,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());

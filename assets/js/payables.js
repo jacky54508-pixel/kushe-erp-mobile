@@ -111,6 +111,32 @@
   window.addEventListener('load', () => setTimeout(scheduleStickyScrollbar, 120));
 
   function closeModal() { document.querySelector('.erp-detail-overlay')?.remove(); }
+  function closePayableMenus() {
+    $$('.payable-more-menu').forEach((menu) => menu.remove());
+    $$('[data-payable-more]').forEach((button) => button.setAttribute('aria-expanded', 'false'));
+  }
+  document.addEventListener('click', (event) => { if (!event.target.closest('.payable-more')) closePayableMenus(); });
+  function openPayableMenu(button, payableId) {
+    const opening = button.getAttribute('aria-expanded') !== 'true';
+    closePayableMenus();
+    if (!opening) return;
+    const menu = document.createElement('div');
+    menu.className = 'payable-more-menu';
+    menu.innerHTML = `<button class="payable-more-delete" type="button">刪除整筆帳務</button>`;
+    document.body.appendChild(menu);
+    button.setAttribute('aria-expanded', 'true');
+    const rect = button.getBoundingClientRect(), width = 176;
+    menu.style.left = `${Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width))}px`;
+    menu.style.top = `${rect.bottom + 5}px`;
+    const menuRect = menu.getBoundingClientRect();
+    if (menuRect.bottom > window.innerHeight - 8) menu.style.top = `${Math.max(8, rect.top - menuRect.height - 5)}px`;
+    menu.onclick = (event) => event.stopPropagation();
+    $('.payable-more-delete', menu).onclick = (event) => {
+      event.stopPropagation();
+      closePayableMenus();
+      openPayableDelete(payableId);
+    };
+  }
   function selectOptions(rows, value, empty) {
     const state = store.getState(), key = ['vendors','projects','banks'].find((name) => rows === state[name]);
     const source = key ? store.masterOptions(key) : rows;
@@ -265,6 +291,34 @@
     }
     requestAnimationFrame(scheduleStickyScrollbar);
   }
+  function openPayableDelete(id) {
+    let preview;
+    try { preview = store.payableDeletePreview(id); }
+    catch (error) { window.KushePhase1.toast(error.message || String(error)); return; }
+    closeModal();
+    const overlay = document.createElement('div');
+    const sourceLabel = preview.sourceType === 'manual-payable' ? '手動建立' : preview.sourceType || '未知／歷史來源';
+    const blockers = preview.blockers.map((row) => `<li><strong>${esc(row.label)}</strong><span>${esc(row.message)}</span></li>`).join('');
+    overlay.className = 'erp-detail-overlay';
+    overlay.innerHTML = `<section class="erp-detail-card receipt-card payable-delete-modal" role="dialog" aria-modal="true" aria-labelledby="payableDeleteTitle"><header><div><span>應付帳款安全刪除</span><h2 id="payableDeleteTitle">刪除整筆帳務</h2><p>${esc(preview.payableNo || '—')}</p></div><button type="button" data-close-detail aria-label="關閉">×</button></header><div class="erp-detail-body"><div class="billing-detail-summary payable-delete-summary"><span>應付編號<b>${esc(preview.payableNo || '—')}</b></span><span>廠商／收款人<b>${esc(preview.vendorName || '—')}</b></span><span>案場<b>${esc(preview.projectName || '—')}</b></span><span>來源類型<b>${esc(sourceLabel)}</b></span><span>應付金額<b>${money(preview.amount)}</b></span><span>已付金額<b>${money(preview.paid)}</b></span><span>付款紀錄數<b>${preview.paymentCount}</b></span><span>銀行流水數<b>${preview.bankTransactionCount}</b></span><span>發票狀態<b>${esc(preview.invoiceStatus)}</b></span><span>材料來源數<b>${preview.materialUsageCount + preview.inventoryReceiptCount}</b></span><span>案場成本來源數<b>${preview.projectCostCount}</b></span><span>未知關聯數<b>${preview.unknownRelationCount}</b></span></div><section class="payable-delete-result ${preview.allowed ? 'is-allowed' : 'is-blocked'}" aria-live="polite"><h3>安全檢查結果</h3>${preview.allowed ? '<p>此筆為未付款手動應付，沒有付款、銀行、發票或來源關聯，可安全刪除。</p>' : `<ul>${blockers}</ul>`}</section></div><footer><button type="button" class="commission-secondary" data-close-detail>取消</button>${preview.allowed ? '<button type="button" class="commission-secondary danger" data-confirm-payable-delete>確認刪除此筆應付</button>' : ''}</footer></section>`;
+    document.body.appendChild(overlay);
+    $$('[data-close-detail]', overlay).forEach((button) => { button.onclick = closeModal; });
+    overlay.onclick = (event) => { if (event.target === overlay) closeModal(); };
+    const confirmButton = $('[data-confirm-payable-delete]', overlay);
+    if (confirmButton) confirmButton.onclick = async () => {
+      if (!window.confirm(`最後確認刪除未付款手動應付「${preview.payableNo || preview.vendorName || '此筆應付'}」？此操作無法復原。`)) return;
+      confirmButton.disabled = true;
+      try {
+        await store.deletePayable(id);
+        closeModal();
+        render();
+        window.KushePhase1.toast('已安全刪除未付款手動應付帳款');
+      } catch (error) {
+        window.KushePhase1.toast(error.message || String(error));
+        confirmButton.disabled = false;
+      }
+    };
+  }
   function bindListEvents() {
     [['payableMonth','month'],['payableVendor','vendor'],['payableProject','project'],['payableCategory','category'],['payableStatus','status']].forEach(([id,key]) => {
       $(`#${id}`).onchange = (event) => { filters[key] = event.target.value; render(); };
@@ -282,6 +336,10 @@
     $('#newPayable').onclick = openNewPayable;
     $$('[data-pay]').forEach((button) => { button.onclick = (event) => { event.stopPropagation(); openPayment(button.dataset.pay); }; });
     $$('[data-expand-button]').forEach((button) => { button.onclick = (event) => { event.stopPropagation(); toggleDetail(button.dataset.expandButton); }; });
+    $$('[data-payable-more]').forEach((button) => { button.onclick = (event) => {
+      event.stopPropagation();
+      openPayableMenu(button, button.dataset.payableMore);
+    }; });
     $$('[data-expand-payable]').forEach((row) => {
       row.onclick = (event) => { if (!event.target.closest('button,a,input,select')) toggleDetail(row.dataset.expandPayable); };
       row.onkeydown = (event) => {
@@ -312,7 +370,7 @@
         const history = state.payments.filter((payment) => payment.payableId === row.id);
         const project = projectLabel(row, state);
         const source = row.sourceNo || row.item || row.category;
-        return `<tr class="payable-main-row" data-expand-payable="${esc(row.id)}" tabindex="0" aria-expanded="false"><td>${esc(row.date || '—')}</td><td><b>${esc(row.vendorName)}</b>${history.length ? `<span class="receipt-count-badge">${history.length} 次付款</span>` : ''}</td><td><b>${esc(project)}</b></td><td><span class="payable-category">${esc(row.category)}</span><small class="payable-source-label">${esc(source)}</small></td><td class="num">${money(row.amount)}</td><td class="num">${money(row.paid)}</td><td class="num"><b>${money(row.outstanding)}</b></td><td><span class="commission-status ${row.baseStatus === '已付清' ? 'settled' : row.baseStatus === '部分付款' ? 'partial' : row.overdue ? 'overdue' : ''}">${esc(row.status)}</span></td><td><div class="receivable-actions">${row.outstanding > 0 ? `<button class="commission-primary compact" type="button" data-pay="${esc(row.id)}">付款</button>` : ''}<button class="receivable-expand" type="button" data-expand-button="${esc(row.id)}" aria-label="展開應付明細" aria-expanded="false"><span aria-hidden="true">⌄</span></button></div></td></tr>`;
+        return `<tr class="payable-main-row" data-expand-payable="${esc(row.id)}" tabindex="0" aria-expanded="false"><td>${esc(row.date || '—')}</td><td><b>${esc(row.vendorName)}</b>${history.length ? `<span class="receipt-count-badge">${history.length} 次付款</span>` : ''}</td><td><b>${esc(project)}</b></td><td><span class="payable-category">${esc(row.category)}</span><small class="payable-source-label">${esc(source)}</small></td><td class="num">${money(row.amount)}</td><td class="num">${money(row.paid)}</td><td class="num"><b>${money(row.outstanding)}</b></td><td><span class="commission-status ${row.baseStatus === '已付清' ? 'settled' : row.baseStatus === '部分付款' ? 'partial' : row.overdue ? 'overdue' : ''}">${esc(row.status)}</span></td><td><div class="receivable-actions payable-row-actions">${row.outstanding > 0 ? `<button class="commission-primary compact" type="button" data-pay="${esc(row.id)}">付款</button>` : ''}<button class="receivable-expand" type="button" data-expand-button="${esc(row.id)}" aria-label="展開應付明細" aria-expanded="false"><span aria-hidden="true">⌄</span></button><div class="payable-more"><button class="payable-more-toggle" type="button" data-payable-more="${esc(row.id)}" aria-label="更多操作" aria-expanded="false">⋯</button></div></div></td></tr>`;
       }).join('') || '<tr><td colspan="9" class="billing-empty">此篩選條件下沒有應付帳款。</td></tr>'}</tbody></table></div></section>`;
     bindListEvents();
     requestAnimationFrame(scheduleStickyScrollbar);
