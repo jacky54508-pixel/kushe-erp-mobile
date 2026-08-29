@@ -1143,7 +1143,7 @@
     return preview;
   }
   function materialPayableTestCleanupPreview(payableId) {
-    const id=clean(payableId),payable=state?.payables?.find((row)=>String(row.id)===id),empty={payableId:id,allowed:false,blockers:[],sourceType:'',payableNo:'',vendorName:'',projectName:'',amount:0,paid:0,paymentCount:0,bankTransactionCount:0,invoiceRecordCount:0,materialUsageCount:0,inventoryReceiptCount:0,projectCostCount:0,sharedMaterialUsageCount:0,unknownRelationCount:0,invoices:[],materialUsages:[]};
+    const id=clean(payableId),payable=state?.payables?.find((row)=>String(row.id)===id),empty={payableId:id,allowed:false,blockers:[],sourceType:'',payableNo:'',vendorName:'',projectName:'',amount:0,paid:0,paymentCount:0,bankTransactionCount:0,invoiceRecordCount:0,materialUsageCount:0,inventoryReceiptCount:0,projectCostCount:0,sharedMaterialUsageCount:0,sharedMaterialUsageDetails:[],unknownRelationCount:0,invoices:[],materialUsages:[]};
     if(!payable)return {...empty,blockers:[{key:'notFound',label:'應付帳款',count:1,message:'找不到應付帳款資料。'}]};
     const payments=(state.payments||[]).filter((row)=>String(row.payableId||'')===id),paymentIds=new Set(payments.map((row)=>clean(row.id)).filter(Boolean)),paymentTransactionIds=new Set(payments.map((row)=>clean(row.bankTransactionId)).filter(Boolean));
     const bankTransactions=(state.bankTransactions||[]).filter((row)=>String(row.payableId||'')===id||paymentTransactionIds.has(clean(row.id))||paymentIds.has(clean(row.sourceId))||(clean(row.sourceId)===id&&/payable|應付/i.test(`${row.sourceType||''} ${row.type||''} ${row.category||''}`))||(clean(payable.paymentTransactionId)&&clean(row.id)===clean(payable.paymentTransactionId)));
@@ -1154,6 +1154,21 @@
     const sharedMaterialUsages=materialUsages.filter((usage)=>{
       const usageId=clean(usage.id),directOwner=clean(usage.payableId);
       return Boolean(directOwner&&directOwner!==id)||state.payables.some((row)=>row!==payable&&(Array.isArray(row.usageIds)&&row.usageIds.some((value)=>clean(value)===usageId)||String(row.sourceType||'')==='material-project'&&clean(row.sourceId)===usageId));
+    });
+    const sharedMaterialUsageDetails=sharedMaterialUsages.map((usage)=>{
+      const usageId=clean(usage.id),relations=new Map(),addRelation=(otherPayable,referenceType,relatedId='')=>{
+        const payableId=clean(otherPayable?.id||relatedId),key=payableId||`${referenceType}:${relations.size}`;
+        if(!relations.has(key))relations.set(key,{payable:otherPayable||null,payableId,referenceTypes:new Set()});
+        relations.get(key).referenceTypes.add(referenceType);
+      };
+      const directOwner=clean(usage.payableId);
+      if(directOwner&&directOwner!==id)addRelation(state.payables.find((row)=>clean(row.id)===directOwner),'materialUsage.payableId',directOwner);
+      state.payables.forEach((row)=>{
+        if(row===payable)return;
+        if(Array.isArray(row.usageIds)&&row.usageIds.some((value)=>clean(value)===usageId))addRelation(row,'payable.usageIds[]');
+        if(String(row.sourceType||'')==='material-project'&&clean(row.sourceId)===usageId)addRelation(row,'payable.sourceId');
+      });
+      return {usageId,materialName:usage.materialName||state.materials?.find((row)=>clean(row.id)===clean(usage.material||usage.materialId))?.name||'',projectName:usage.projectName||state.projects?.find((row)=>clean(row.id)===clean(usage.project||usage.projectId))?.name||'',amount:num(usage.amount??num(usage.quantity)*num(usage.unitPrice)),currentPayableId:id,currentPayableNo:payable.payableNo||payable.number||payable.sourceNo||'',otherPayables:[...relations.values()].map(({payable:other,payableId,referenceTypes})=>({payableId,payableNo:other?.payableNo||other?.number||other?.sourceNo||'',vendorName:other?.vendorName||state.vendors?.find((row)=>clean(row.id)===clean(other?.vendor))?.name||'',amount:num(other?.amount),paid:num(other?.paid),sourceType:String(other?.sourceType||''),referenceType:[...referenceTypes].join('、')}))};
     });
     const inventoryReceipts=(Array.isArray(state.inventoryReceipts)?state.inventoryReceipts:[]).filter((row)=>clean(row.payableId)===id),projectCosts=(state.projectCosts||[]).filter((row)=>clean(row.payableId)===id||(clean(payable.sourceId)&&clean(row.id)===clean(payable.sourceId)));
     const knownCollections=new Set(['payables','payments','bankTransactions','invoices','materialUsages','inventoryReceipts','projectCosts','audit']);
@@ -1181,7 +1196,7 @@
     add('invoiceRecordCount','進項發票',inputInvoices.length===1?0:Math.abs(inputInvoices.length-1)||1,inputInvoices.length?'關聯進項發票不唯一，禁止清理。':'找不到唯一的持久化進項發票紀錄。');
     add('invoiceIdentity','發票識別',invalidInvoiceIdentity?1:0,'進項發票缺少唯一識別，禁止清理。');
     add('unknownRelations','未知關聯',unknownRelationCount,'此筆存在未識別、缺失或衝突關聯，禁止清理。');
-    return {payableId:id,allowed:blockers.length===0,blockers,sourceType,payableNo:payable.payableNo||payable.number||payable.sourceNo||'',vendorName:payable.vendorName||state.vendors?.find((row)=>clean(row.id)===clean(payable.vendor))?.name||'',projectName:payable.projectName||state.projects?.find((row)=>clean(row.id)===clean(payable.project))?.name||'',amount:num(payable.amount),paid,paymentCount:payments.length,bankTransactionCount:bankTransactions.length,invoiceRecordCount:inputInvoices.length,materialUsageCount:materialUsages.length,inventoryReceiptCount:inventoryReceipts.length,projectCostCount:projectCosts.length,sharedMaterialUsageCount:sharedMaterialUsages.length,unknownRelationCount,invoices:inputInvoices.map((row)=>({id:clean(row.id),invoiceNo:String(row.invoiceNumber||row.invoiceNo||row.number||''),date:row.invoiceDate||row.date||'',status:invoiceStatus(row.status,row.invoiceNumber||row.invoiceNo||row.number),amount:num(row.grossAmount??row.total??row.netAmount??row.amount),sourceNo:row.sourceNo||''})),materialUsages:materialUsages.map((row)=>({id:clean(row.id),date:row.date||'',projectId:row.project||row.projectId||'',projectName:row.projectName||state.projects?.find((project)=>clean(project.id)===clean(row.project||row.projectId))?.name||'',materialId:row.material||row.materialId||'',materialName:row.materialName||state.materials?.find((material)=>clean(material.id)===clean(row.material||row.materialId))?.name||'',amount:num(row.amount??num(row.quantity)*num(row.unitPrice))}))};
+    return {payableId:id,allowed:blockers.length===0,blockers,sourceType,payableNo:payable.payableNo||payable.number||payable.sourceNo||'',vendorName:payable.vendorName||state.vendors?.find((row)=>clean(row.id)===clean(payable.vendor))?.name||'',projectName:payable.projectName||state.projects?.find((row)=>clean(row.id)===clean(payable.project))?.name||'',amount:num(payable.amount),paid,paymentCount:payments.length,bankTransactionCount:bankTransactions.length,invoiceRecordCount:inputInvoices.length,materialUsageCount:materialUsages.length,inventoryReceiptCount:inventoryReceipts.length,projectCostCount:projectCosts.length,sharedMaterialUsageCount:sharedMaterialUsages.length,sharedMaterialUsageDetails,unknownRelationCount,invoices:inputInvoices.map((row)=>({id:clean(row.id),invoiceNo:String(row.invoiceNumber||row.invoiceNo||row.number||''),date:row.invoiceDate||row.date||'',status:invoiceStatus(row.status,row.invoiceNumber||row.invoiceNo||row.number),amount:num(row.grossAmount??row.total??row.netAmount??row.amount),sourceNo:row.sourceNo||''})),materialUsages:materialUsages.map((row)=>({id:clean(row.id),date:row.date||'',projectId:row.project||row.projectId||'',projectName:row.projectName||state.projects?.find((project)=>clean(project.id)===clean(row.project||row.projectId))?.name||'',materialId:row.material||row.materialId||'',materialName:row.materialName||state.materials?.find((material)=>clean(material.id)===clean(row.material||row.materialId))?.name||'',amount:num(row.amount??num(row.quantity)*num(row.unitPrice))}))};
   }
   async function cleanupMaterialPayableTestData(payableId, confirmation={}) {
     await load();
