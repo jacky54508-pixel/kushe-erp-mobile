@@ -145,6 +145,73 @@
   function materialSource(payable) {
     return /material|inventory/i.test(payable.sourceType || '') || payable.category === '材料採購';
   }
+  const payableSourceLabels = {
+    'material-project':'單筆材料應付',
+    'material-merged':'合併材料應付',
+    'manual-payable':'手動新增應付',
+    'project-cost':'案場成本應付'
+  };
+  function payableSourceLabel(value) {
+    return payableSourceLabels[String(value || '').trim()] || '其他未確認帳務來源';
+  }
+  function payableReferenceLabel(value) {
+    const labels = {
+      'payable.usageIds[]':'此材料已包含在這筆合併應付中',
+      'payable.sourceId':'此材料是這筆應付帳款的來源',
+      'materialUsage.payableId':'此材料紀錄目前連結到這筆應付帳款'
+    };
+    const values = String(value || '').split('、').map((item) => item.trim()).filter(Boolean);
+    return values.length ? values.map((item) => labels[item] || '其他實際帳務關聯').join('；') : '其他實際帳務關聯';
+  }
+  function payableBlockerLabel(row) {
+    return ({
+      notFound:'應付帳款',
+      sourceType:'帳務來源',
+      paid:'已付款金額',
+      payments:'付款紀錄',
+      bankTransactions:'銀行交易紀錄',
+      invoiceNo:'進項發票號碼',
+      invoiceStatus:'進項發票狀態',
+      invoices:'進項發票紀錄',
+      invoiceRecordCount:'進項發票紀錄',
+      invoiceIdentity:'進項發票資料',
+      materialUsages:'材料使用紀錄',
+      sharedMaterialUsages:'此材料同時被其他應付帳款使用',
+      inventoryReceipts:'材料入庫紀錄',
+      projectCosts:'案場成本紀錄',
+      unknownRelations:'其他未確認關聯'
+    })[row?.key] || '安全檢查項目';
+  }
+  function payableBlockerMessage(row, context = {}) {
+    const messages = {
+      notFound:'找不到這筆應付帳款。',
+      paid:'此筆已有付款金額，銀行對帳完成前不能刪除整筆帳務。',
+      payments:'此筆已有付款紀錄，銀行對帳完成前不能刪除整筆帳務。',
+      bankTransactions:'此筆已有關聯的銀行交易紀錄，銀行對帳完成前不能刪除整筆帳務。',
+      invoiceNo:'此筆已有正式進項發票號碼，不能直接刪除。',
+      invoiceStatus:'此筆已標記為正式進項發票，不能直接刪除。',
+      invoices:'此筆已有進項發票紀錄，不能直接刪除。',
+      invoiceIdentity:'進項發票資料缺少唯一識別，為避免誤刪已停止清理。',
+      inventoryReceipts:'此筆已有材料入庫紀錄，不能直接清理。',
+      projectCosts:'此筆已有案場成本紀錄，不能直接清理。',
+      unknownRelations:'此筆存在其他未確認、缺失或衝突的關聯，為避免帳務斷鏈已停止清理。'
+    };
+    if (row?.key === 'sourceType') return context.sourceType === 'material-project'
+      ? '此筆由材料使用紀錄建立，請先確認原始材料資料。'
+      : context.sourceType === 'project-cost'
+        ? '此筆由案場成本紀錄建立，請先從案場成本來源確認。'
+        : '此筆不是可直接刪除的手動新增應付，未確認或歷史帳務來源一律停止刪除。';
+    if (row?.key === 'sharedMaterialUsages') return context.hasPaidShared
+      ? '另一筆應付帳款已有付款紀錄，目前不能刪除此材料或解除關聯，以免影響已付款金額與銀行帳務。'
+      : '此筆材料已包含在另一筆應付帳款中，因此目前不能直接刪除，以免影響其他帳務。';
+    if (row?.key === 'materialUsages') return context.cleanup
+      ? '找不到可唯一對應的材料使用紀錄。'
+      : '此筆已有材料使用紀錄，請先從原始材料資料確認。';
+    if (row?.key === 'invoiceRecordCount') return Number(context.invoiceRecordCount) > 1
+      ? '找到多筆關聯的進項發票紀錄，無法唯一確認要處理的資料。'
+      : '找不到唯一對應的進項發票紀錄。';
+    return messages[row?.key] || '此筆資料未通過安全檢查，目前不開放刪除或清理。';
+  }
   function payableView(row, state) {
     const amount = store.num(row.amount);
     const paid = Math.min(amount, Math.max(0, store.num(row.paid)));
@@ -305,7 +372,7 @@
     const invoiceRows = preview.invoices.map((row) => `<tr><td>${esc(row.invoiceNo || row.id || '—')}</td><td>${esc(row.date || '—')}</td><td>${esc(row.status === 'issued' ? '已開發票' : row.status === 'void' ? '已作廢' : '待開發票')}</td><td class="num">${money(row.amount)}</td></tr>`).join('');
     const usageRows = preview.materialUsages.map((row) => `<tr><td>${esc(row.date || '—')}</td><td>${esc(row.projectName || preview.projectName || '—')}</td><td>${esc(row.materialName || '—')}</td><td class="num">${money(row.amount)}</td></tr>`).join('');
     overlay.className = 'erp-detail-overlay';
-    overlay.innerHTML = `<section class="erp-detail-card payable-test-cleanup-modal" role="dialog" aria-modal="true" aria-labelledby="payableTestCleanupTitle"><header><div><span>受控測試資料清理</span><h2 id="payableTestCleanupTitle">材料 → 應付 → 進項發票</h2><p>${esc(preview.payableNo || '—')}</p></div><button type="button" data-close-detail aria-label="關閉">×</button></header><form id="payableTestCleanupForm" class="payable-test-cleanup-form"><div class="erp-detail-body"><div class="billing-detail-summary payable-test-cleanup-summary"><span>應付編號<b>${esc(preview.payableNo || '—')}</b></span><span>廠商／收款人<b>${esc(preview.vendorName || '—')}</b></span><span>案場<b>${esc(preview.projectName || '—')}</b></span><span>來源類型<b>${esc(preview.sourceType)}</b></span><span>應付金額<b>${money(preview.amount)}</b></span><span>已付金額<b>${money(preview.paid)}</b></span><span>付款紀錄數<b>${preview.paymentCount}</b></span><span>銀行流水數<b>${preview.bankTransactionCount}</b></span></div><section class="payable-test-cleanup-warning"><strong>此功能只適用於人工確認的測試資料。</strong><span>正式帳務與正式發票不得使用。系統只確認資料鏈在技術上可原子清理，不會自行判定資料是否為測試資料。</span></section><section class="payable-test-chain"><h3>進項發票 <small>${preview.invoiceRecordCount} 筆</small></h3><div class="payable-test-chain-scroll"><table><thead><tr><th>發票號碼</th><th>日期</th><th>狀態</th><th class="num">金額</th></tr></thead><tbody>${invoiceRows}</tbody></table></div><h3>應付帳款 <small>1 筆</small></h3><div class="payable-test-chain-single"><span>${esc(preview.payableNo || '—')}</span><b>${esc(preview.vendorName || '—')}</b><em>${money(preview.amount)}</em></div><h3>材料使用 <small>${preview.materialUsageCount} 筆</small></h3><div class="payable-test-chain-scroll"><table><thead><tr><th>日期</th><th>案場</th><th>材料</th><th class="num">金額</th></tr></thead><tbody>${usageRows}</tbody></table></div></section><div class="payable-test-cleanup-confirm"><label><input type="checkbox" name="confirmed" required><span>我確認此整組資料為測試資料</span></label><label><span>清理原因（必填）</span><textarea name="reason" rows="3" maxlength="300" required placeholder="請輸入人工判定為測試資料的原因"></textarea></label></div></div><footer><button type="button" class="commission-secondary" data-close-detail>取消</button><button type="submit" class="commission-secondary danger">確認清理整組測試資料</button></footer></form></section>`;
+    overlay.innerHTML = `<section class="erp-detail-card payable-test-cleanup-modal" role="dialog" aria-modal="true" aria-labelledby="payableTestCleanupTitle"><header><div><span>受控測試資料清理</span><h2 id="payableTestCleanupTitle">材料 → 應付 → 進項發票</h2><p>${esc(preview.payableNo || '—')}</p></div><button type="button" data-close-detail aria-label="關閉">×</button></header><form id="payableTestCleanupForm" class="payable-test-cleanup-form"><div class="erp-detail-body"><div class="billing-detail-summary payable-test-cleanup-summary"><span>應付編號<b>${esc(preview.payableNo || '—')}</b></span><span>廠商／收款人<b>${esc(preview.vendorName || '—')}</b></span><span>案場<b>${esc(preview.projectName || '—')}</b></span><span>帳務來源<b>${esc(payableSourceLabel(preview.sourceType))}</b></span><span>應付金額<b>${money(preview.amount)}</b></span><span>已付金額<b>${money(preview.paid)}</b></span><span>付款紀錄數<b>${preview.paymentCount}</b></span><span>銀行交易紀錄數<b>${preview.bankTransactionCount}</b></span></div><section class="payable-test-cleanup-warning"><strong>此功能只適用於人工確認的測試資料。</strong><span>正式帳務與正式發票不得使用。系統只確認資料鏈符合安全清理條件，不會自行判定資料是否為測試資料。</span></section><section class="payable-test-chain"><h3>進項發票 <small>${preview.invoiceRecordCount} 筆</small></h3><div class="payable-test-chain-scroll"><table><thead><tr><th>發票號碼</th><th>日期</th><th>狀態</th><th class="num">金額</th></tr></thead><tbody>${invoiceRows}</tbody></table></div><h3>應付帳款 <small>1 筆</small></h3><div class="payable-test-chain-single"><span>${esc(preview.payableNo || '—')}</span><b>${esc(preview.vendorName || '—')}</b><em>${money(preview.amount)}</em></div><h3>材料使用紀錄 <small>${preview.materialUsageCount} 筆</small></h3><div class="payable-test-chain-scroll"><table><thead><tr><th>日期</th><th>案場</th><th>材料</th><th class="num">金額</th></tr></thead><tbody>${usageRows}</tbody></table></div></section><div class="payable-test-cleanup-confirm"><label><input type="checkbox" name="confirmed" required><span>我確認此整組資料為測試資料</span></label><label><span>清理原因（必填）</span><textarea name="reason" rows="3" maxlength="300" required placeholder="請輸入人工判定為測試資料的原因"></textarea></label></div></div><footer><button type="button" class="commission-secondary" data-close-detail>取消</button><button type="submit" class="commission-secondary danger">確認清理整組測試資料</button></footer></form></section>`;
     document.body.appendChild(overlay);
     $$('[data-close-detail]', overlay).forEach((button) => { button.onclick = closeModal; });
     overlay.onclick = (event) => { if (event.target === overlay) closeModal(); };
@@ -339,14 +406,19 @@
     const testCleanupAllowed = testCleanupPreview?.allowed === true;
     closeModal();
     const overlay = document.createElement('div');
-    const sourceLabel = preview.sourceType === 'manual-payable' ? '手動建立' : preview.sourceType || '未知／歷史來源';
-    const blockers = preview.blockers.map((row) => `<li><strong>${esc(row.label)}</strong><span>${esc(row.message)}</span></li>`).join('');
+    const sourceLabel = payableSourceLabel(preview.sourceType);
+    const blockers = preview.blockers.map((row) => `<li><strong>${esc(payableBlockerLabel(row))}</strong><span>${esc(payableBlockerMessage(row, {sourceType:preview.sourceType,cleanup:false}))}</span></li>`).join('');
     const testCleanupBlocked = preview.allowed !== true && testCleanupPreview && testCleanupPreview.allowed !== true;
-    const sharedUsageDetails = testCleanupBlocked ? (testCleanupPreview.sharedMaterialUsageDetails || []).map((usage) => `<article class="payable-shared-usage-detail"><h4>材料來源</h4><dl><div><dt>usage ID</dt><dd>${esc(usage.usageId || '—')}</dd></div><div><dt>材料名稱</dt><dd>${esc(usage.materialName || '—')}</dd></div><div><dt>案場</dt><dd>${esc(usage.projectName || '—')}</dd></div><div><dt>金額</dt><dd>${money(usage.amount)}</dd></div></dl><h4>目前應付</h4><dl><div><dt>應付編號</dt><dd>${esc(usage.currentPayableNo || '—')}</dd></div><div><dt>payable ID</dt><dd>${esc(usage.currentPayableId || '—')}</dd></div></dl><h4>另外共用此材料來源的應付</h4><div class="payable-shared-usage-scroll"><table><thead><tr><th>應付編號</th><th>廠商</th><th>金額</th><th>已付</th><th>sourceType</th><th>關聯方式</th></tr></thead><tbody>${(usage.otherPayables || []).map((other) => `<tr><td><strong>${esc(other.payableNo || '—')}</strong><small>${esc(other.payableId || '—')}</small></td><td>${esc(other.vendorName || '—')}</td><td>${money(other.amount)}</td><td>${money(other.paid)}</td><td>${esc(other.sourceType || '—')}</td><td>${esc(other.referenceType || '—')}</td></tr>`).join('')}</tbody></table></div></article>`).join('') : '';
-    const testCleanupBlockers = testCleanupBlocked ? testCleanupPreview.blockers.map((row) => `<li><strong>${esc(row.label)}</strong><span>${esc(row.message)}</span>${row.count !== undefined ? `<small>數量：${esc(row.count)}</small>` : ''}${row.key === 'sharedMaterialUsages' ? `${sharedUsageDetails}<p class="payable-shared-usage-warning">請先確認另一筆應付是否也是測試資料。<br>目前不會自動解除或刪除任何關聯。</p>` : ''}</li>`).join('') : '';
-    const testCleanupDiagnostic = testCleanupBlocked ? `<section class="payable-test-cleanup-diagnostic" aria-live="polite"><h3>測試資料清理技術檢查</h3><ul>${testCleanupBlockers}</ul><div class="payable-test-cleanup-diagnostic-summary"><span>持久化進項發票<b>${testCleanupPreview.invoiceRecordCount}</b></span><span>材料使用<b>${testCleanupPreview.materialUsageCount}</b></span><span>共用材料來源<b>${testCleanupPreview.sharedMaterialUsageCount}</b></span><span>材料入庫<b>${testCleanupPreview.inventoryReceiptCount}</b></span><span>案場成本<b>${testCleanupPreview.projectCostCount}</b></span><span>未知關聯<b>${testCleanupPreview.unknownRelationCount}</b></span><span>付款紀錄<b>${testCleanupPreview.paymentCount}</b></span><span>銀行流水<b>${testCleanupPreview.bankTransactionCount}</b></span></div><p>目前尚未通過測試資料安全清理條件，因此清理按鈕不開放。</p></section>` : '';
+    const sharedHasPaid = testCleanupBlocked && (testCleanupPreview.sharedMaterialUsageDetails || []).some((usage) => (usage.otherPayables || []).some((other) => store.num(other.paid) > 0));
+    const sharedUsageDetails = testCleanupBlocked ? (testCleanupPreview.sharedMaterialUsageDetails || []).map((usage) => {
+      const relatedRows = (usage.otherPayables || []).map((other) => `<tr><td><strong>${esc(other.payableNo || '—')}</strong></td><td>${esc(other.vendorName || '—')}</td><td>${money(other.amount)}</td><td>${money(other.paid)}</td><td>${esc(payableSourceLabel(other.sourceType))}</td><td>${esc(payableReferenceLabel(other.referenceType))}</td></tr>`).join('');
+      const technicalRows = (usage.otherPayables || []).map((other) => `<tr><td>${esc(other.payableNo || '—')}</td><td>${esc(other.payableId || '—')}</td><td>${esc(other.sourceType || '—')}</td><td>${esc(other.referenceType || '—')}</td></tr>`).join('');
+      return `<article class="payable-shared-usage-detail"><h4>此材料同時出現在其他應付帳款</h4><dl><div><dt>材料名稱</dt><dd>${esc(usage.materialName || '—')}</dd></div><div><dt>案場</dt><dd>${esc(usage.projectName || '—')}</dd></div><div><dt>材料金額</dt><dd>${money(usage.amount)}</dd></div></dl><h4>目前帳款</h4><dl><div><dt>應付編號</dt><dd>${esc(usage.currentPayableNo || '—')}</dd></div></dl><h4>相關的另一筆帳款</h4><div class="payable-shared-usage-scroll"><table><thead><tr><th>應付編號</th><th>廠商</th><th>應付金額</th><th>已付款</th><th>帳務來源</th><th>關聯原因</th></tr></thead><tbody>${relatedRows}</tbody></table></div><details class="payable-diagnostic-technical"><summary>技術資訊</summary><dl><div><dt>材料紀錄 ID</dt><dd>${esc(usage.usageId || '—')}</dd></div><div><dt>應付資料 ID</dt><dd>${esc(usage.currentPayableId || '—')}</dd></div></dl><div class="payable-shared-usage-scroll"><table><thead><tr><th>應付編號</th><th>應付資料 ID</th><th>原始 sourceType</th><th>referenceType</th></tr></thead><tbody>${technicalRows}</tbody></table></div></details></article>`;
+    }).join('') : '';
+    const testCleanupBlockers = testCleanupBlocked ? testCleanupPreview.blockers.map((row) => `<li><strong>${esc(payableBlockerLabel(row))}</strong><span>${esc(payableBlockerMessage(row, {sourceType:testCleanupPreview.sourceType,cleanup:true,hasPaidShared:sharedHasPaid,invoiceRecordCount:testCleanupPreview.invoiceRecordCount}))}</span>${row.count !== undefined ? `<small>數量：${esc(row.count)}</small>` : ''}${row.key === 'sharedMaterialUsages' ? `${sharedUsageDetails}<p class="payable-shared-usage-warning">請先確認另一筆應付帳款是否也是測試資料。<br>目前不會自動解除或刪除任何關聯。</p>` : ''}</li>`).join('') : '';
+    const testCleanupDiagnostic = testCleanupBlocked ? `<section class="payable-test-cleanup-diagnostic" aria-live="polite"><h3>測試資料清理安全檢查</h3><ul>${testCleanupBlockers}</ul><div class="payable-test-cleanup-diagnostic-summary"><span>進項發票紀錄<b>${testCleanupPreview.invoiceRecordCount}</b></span><span>材料使用紀錄<b>${testCleanupPreview.materialUsageCount}</b></span><span>其他應付共用材料<b>${testCleanupPreview.sharedMaterialUsageCount}</b></span><span>材料入庫紀錄<b>${testCleanupPreview.inventoryReceiptCount}</b></span><span>案場成本紀錄<b>${testCleanupPreview.projectCostCount}</b></span><span>其他未確認關聯<b>${testCleanupPreview.unknownRelationCount}</b></span><span>付款紀錄<b>${testCleanupPreview.paymentCount}</b></span><span>銀行交易紀錄<b>${testCleanupPreview.bankTransactionCount}</b></span></div><p>目前尚未通過測試資料安全清理條件，因此清理按鈕不開放。</p></section>` : '';
     overlay.className = 'erp-detail-overlay';
-    overlay.innerHTML = `<section class="erp-detail-card receipt-card payable-delete-modal" role="dialog" aria-modal="true" aria-labelledby="payableDeleteTitle"><header><div><span>應付帳款安全刪除</span><h2 id="payableDeleteTitle">刪除整筆帳務</h2><p>${esc(preview.payableNo || '—')}</p></div><button type="button" data-close-detail aria-label="關閉">×</button></header><div class="erp-detail-body"><div class="billing-detail-summary payable-delete-summary"><span>應付編號<b>${esc(preview.payableNo || '—')}</b></span><span>廠商／收款人<b>${esc(preview.vendorName || '—')}</b></span><span>案場<b>${esc(preview.projectName || '—')}</b></span><span>來源類型<b>${esc(sourceLabel)}</b></span><span>應付金額<b>${money(preview.amount)}</b></span><span>已付金額<b>${money(preview.paid)}</b></span><span>付款紀錄數<b>${preview.paymentCount}</b></span><span>銀行流水數<b>${preview.bankTransactionCount}</b></span><span>發票狀態<b>${esc(preview.invoiceStatus)}</b></span><span>材料來源數<b>${preview.materialUsageCount + preview.inventoryReceiptCount}</b></span><span>案場成本來源數<b>${preview.projectCostCount}</b></span><span>未知關聯數<b>${preview.unknownRelationCount}</b></span></div><section class="payable-delete-result ${preview.allowed ? 'is-allowed' : 'is-blocked'}" aria-live="polite"><h3>安全檢查結果</h3>${preview.allowed ? '<p>此筆為未付款手動應付，沒有付款、銀行、發票或來源關聯，可安全刪除。</p>' : `<ul>${blockers}</ul>`}${testCleanupAllowed ? '<p class="payable-test-cleanup-available">此筆材料資料鏈通過技術清理檢查；僅在人工確認整組皆為測試資料時，才可進入受控清理。</p>' : ''}</section>${testCleanupDiagnostic}</div><footer><button type="button" class="commission-secondary" data-close-detail>取消</button>${testCleanupAllowed ? '<button type="button" class="commission-secondary danger" data-open-payable-test-cleanup>測試資料安全清理</button>' : ''}${preview.allowed ? '<button type="button" class="commission-secondary danger" data-confirm-payable-delete>確認刪除此筆應付</button>' : ''}</footer></section>`;
+    overlay.innerHTML = `<section class="erp-detail-card receipt-card payable-delete-modal" role="dialog" aria-modal="true" aria-labelledby="payableDeleteTitle"><header><div><span>應付帳款安全刪除</span><h2 id="payableDeleteTitle">刪除整筆帳務</h2><p>${esc(preview.payableNo || '—')}</p></div><button type="button" data-close-detail aria-label="關閉">×</button></header><div class="erp-detail-body"><div class="billing-detail-summary payable-delete-summary"><span>應付編號<b>${esc(preview.payableNo || '—')}</b></span><span>廠商／收款人<b>${esc(preview.vendorName || '—')}</b></span><span>案場<b>${esc(preview.projectName || '—')}</b></span><span>帳務來源<b>${esc(sourceLabel)}</b></span><span>應付金額<b>${money(preview.amount)}</b></span><span>已付金額<b>${money(preview.paid)}</b></span><span>付款紀錄數<b>${preview.paymentCount}</b></span><span>銀行交易紀錄數<b>${preview.bankTransactionCount}</b></span><span>發票狀態<b>${esc(preview.invoiceStatus)}</b></span><span>材料使用／入庫紀錄數<b>${preview.materialUsageCount + preview.inventoryReceiptCount}</b></span><span>案場成本紀錄數<b>${preview.projectCostCount}</b></span><span>其他未確認關聯數<b>${preview.unknownRelationCount}</b></span></div><section class="payable-delete-result ${preview.allowed ? 'is-allowed' : 'is-blocked'}" aria-live="polite"><h3>安全檢查結果</h3>${preview.allowed ? '<p>此筆為未付款手動新增應付，沒有付款、銀行、發票或來源關聯，可安全刪除。</p>' : `<ul>${blockers}</ul>`}${testCleanupAllowed ? '<p class="payable-test-cleanup-available">此筆材料資料鏈通過安全清理條件；僅在人工確認整組皆為測試資料時，才可進入受控清理。</p>' : ''}</section>${testCleanupDiagnostic}</div><footer><button type="button" class="commission-secondary" data-close-detail>取消</button>${testCleanupAllowed ? '<button type="button" class="commission-secondary danger" data-open-payable-test-cleanup>測試資料安全清理</button>' : ''}${preview.allowed ? '<button type="button" class="commission-secondary danger" data-confirm-payable-delete>確認刪除此筆應付</button>' : ''}</footer></section>`;
     document.body.appendChild(overlay);
     $$('[data-close-detail]', overlay).forEach((button) => { button.onclick = closeModal; });
     overlay.onclick = (event) => { if (event.target === overlay) closeModal(); };
