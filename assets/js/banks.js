@@ -22,7 +22,7 @@
     mismatch: { label: '金額不一致', group: 'abnormal' },
     duplicate: { label: '疑似重複入帳', group: 'abnormal' },
     'history-normal': { label: '歷史資料－金額正常', group: 'normal' },
-    'history-pending': { label: '歷史待確認', group: 'attention' }
+    'history-pending': { label: '歷史紀錄', group: 'attention' }
   };
 
   function localMonth(date = new Date()) {
@@ -115,7 +115,7 @@
   }
 
   function reconciliationSourceLabel(kind, legacy = false) {
-    if (legacy) return '歷史付款彙總';
+    if (legacy) return '歷史付款';
     if (kind === 'receipt') return '客戶收款';
     if (kind === 'retention') return '保留款收款';
     if (kind === 'payable') return '廠商付款';
@@ -193,7 +193,7 @@
     if (status === 'missing-source') return '銀行流水存在，但原付款、收款或薪資付款資料已不存在。';
     if (status === 'mismatch') return `原始帳務計算出的實際${sourceDirection(kind) === 'in' ? '入帳' : '扣款'}與銀行金額不同。${feeText}`;
     if (status === 'duplicate') return `同一筆帳務找到 ${transactionCount} 筆銀行交易，疑似重複入帳。`;
-    return '此筆為舊版彙總顯示，沒有獨立銀行流水；不會自動判定為缺漏或補帳。';
+    return '歷史付款紀錄，僅供核對，不影響銀行餘額。';
   }
 
   function finishReconciliationItem(item) {
@@ -595,6 +595,22 @@
     return amount > 0 ? `+${money(amount)}` : `-${money(Math.abs(amount))}`;
   }
 
+  function reconciliationStatusMarkup(item) {
+    const historyRecord = item.status === 'history-pending';
+    return `<div class="bank-reconciliation-status-stack">
+      <span class="bank-reconciliation-status is-${esc(item.statusGroup)}${historyRecord ? ' is-history-record' : ''}">${esc(item.statusLabel)}</span>
+      ${historyRecord ? '<small class="bank-reconciliation-status-note">僅供核對</small>' : ''}
+    </div>`;
+  }
+
+  function reconciliationDescriptionMarkup(item) {
+    const historySummary = item.status === 'history-pending' && item.rawSourceType === 'legacy-payment-summary';
+    const content = historySummary
+      ? '<div class="bank-reconciliation-history-copy"><strong>歷史付款紀錄</strong><small>僅供核對，不影響銀行餘額</small></div>'
+      : `<p>${esc(item.description)}</p>`;
+    return `${content}${reconciliationTechnicalInfo(item)}`;
+  }
+
   function renderReconciliationRows(items) {
     if (!items.length) return '<tr><td colspan="9" class="billing-empty">沒有符合目前篩選條件的對帳資料。</td></tr>';
     return items.map((item) => {
@@ -602,14 +618,14 @@
       const directionClass = item.direction === 'in' ? 'is-income' : item.direction === 'out' ? 'is-expense' : 'is-unknown';
       return `<tr data-reconciliation-status="${esc(item.status)}" data-reconciliation-source="${esc(item.sourceKind)}">
         <td class="bank-date">${esc(item.date || '—')}</td>
-        <td><span class="bank-reconciliation-status is-${esc(item.statusGroup)}">${esc(item.statusLabel)}</span></td>
+        <td>${reconciliationStatusMarkup(item)}</td>
         <td><span class="bank-direction ${directionClass}">${esc(directionText)}</span></td>
         <td><span class="bank-source">${esc(item.sourceLabel)}</span></td>
         <td class="bank-counterparty"><strong>${esc(item.party || '—')}</strong>${item.project ? `<small>${esc(item.project)}</small>` : ''}${item.sourceNo ? `<small>${esc(item.sourceNo)}</small>` : ''}</td>
         <td class="num">${item.accountingAmount === null ? '—' : money(item.accountingAmount)}</td>
         <td class="num">${item.bankAmount === null ? '—' : money(item.bankAmount)}</td>
         <td class="num bank-reconciliation-difference ${item.difference ? 'has-difference' : ''}">${reconciliationDifference(item.difference)}</td>
-        <td class="bank-reconciliation-description"><p>${esc(item.description)}</p>${reconciliationTechnicalInfo(item)}</td>
+        <td class="bank-reconciliation-description">${reconciliationDescriptionMarkup(item)}</td>
       </tr>`;
     }).join('');
   }
@@ -624,7 +640,7 @@
     ${renderReconciliationSummary(view)}
     ${renderReconciliationFilters(view)}
     <section class="commission-panel billing-list-panel bank-reconciliation-panel" data-receipt-check-count="${checks.receiptCount}" data-payable-check-count="${checks.payablePaymentCount}" data-salary-check-count="${checks.salaryPaymentCount}" data-legacy-summary-count="${checks.legacySummaryCount}">
-      <header class="project-section-title"><div><h2>逐筆對帳結果</h2><p>顯示 ${visibleItems.length}／${view.items.length} 筆；舊版付款彙總不會被當成缺銀行流水。</p></div></header>
+      <header class="project-section-title"><div><h2>逐筆對帳結果</h2><p>顯示 ${visibleItems.length}／${view.items.length} 筆；歷史付款以中性標籤呈現，僅供核對。</p></div></header>
       <div class="commission-table-wrap bank-reconciliation-scroll"><table class="commission-table bank-reconciliation-table">
         <thead><tr><th>日期</th><th>狀態</th><th>收／支</th><th>來源</th><th>對象／案場</th><th class="num">帳務金額</th><th class="num">銀行金額</th><th class="num">差額</th><th>說明</th></tr></thead>
         <tbody>${renderReconciliationRows(visibleItems)}</tbody>
