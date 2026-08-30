@@ -544,6 +544,106 @@
     });
   }
 
+  function historyGroupingValue(value) {
+    const text = cleanId(value);
+    return text && text !== '—' ? text : '';
+  }
+
+  function isLegacyHistoryPayment(item) {
+    return item.status === 'history-pending'
+      && item.sourceKind === 'history'
+      && item.rawSourceType === 'legacy-payment-summary';
+  }
+
+  function isValidHistoryDate(value) {
+    const text = cleanId(value);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+    const [year, month, day] = text.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+  }
+
+  function isGroupableHistoryPayment(item) {
+    return isLegacyHistoryPayment(item)
+      && isValidHistoryDate(item.date)
+      && ['in', 'out'].includes(item.direction)
+      && item.accountingAmount !== null
+      && item.accountingAmount !== undefined
+      && Number.isFinite(Number(item.accountingAmount))
+      && store.num(item.accountingAmount) > 0
+      && item.bankAmount === null
+      && Array.isArray(item.transactionIds)
+      && item.transactionIds.length === 0;
+  }
+
+  function historyGroupKey(item) {
+    return [item.date, item.direction, store.num(item.accountingAmount), item.rawSourceType].join('::');
+  }
+
+  function uniqueHistoryValue(items, key) {
+    const values = [...new Set(items.map((item) => historyGroupingValue(item[key])).filter(Boolean))];
+    return { value: values.length === 1 ? values[0] : '', conflict: values.length > 1 };
+  }
+
+  function reconciliationDisplayModel(items) {
+    const buckets = new Map();
+    items.filter(isGroupableHistoryPayment).forEach((item) => {
+      const key = historyGroupKey(item);
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(item);
+    });
+
+    const groupableBuckets = new Map();
+    buckets.forEach((bucket, key) => {
+      const party = uniqueHistoryValue(bucket, 'party');
+      const project = uniqueHistoryValue(bucket, 'project');
+      const sourceNo = uniqueHistoryValue(bucket, 'sourceNo');
+      if (bucket.length > 1 && !party.conflict && !project.conflict && !sourceNo.conflict) {
+        groupableBuckets.set(key, { items: bucket, party: party.value, project: project.value, sourceNo: sourceNo.value });
+      }
+    });
+
+    const rows = [];
+    const emitted = new Set();
+    let historyGroupCount = 0;
+    items.forEach((item) => {
+      if (!isGroupableHistoryPayment(item)) {
+        rows.push({ type: 'item', item });
+        if (isLegacyHistoryPayment(item)) historyGroupCount += 1;
+        return;
+      }
+      const key = historyGroupKey(item);
+      const bucket = groupableBuckets.get(key);
+      if (!bucket) {
+        rows.push({ type: 'item', item });
+        historyGroupCount += 1;
+        return;
+      }
+      if (emitted.has(key)) return;
+      emitted.add(key);
+      const groupId = `history-group-${emitted.size}`;
+      rows.push({
+        type: 'history-group',
+        id: groupId,
+        items: bucket.items,
+        item: {
+          ...bucket.items[0],
+          id: groupId,
+          party: bucket.party,
+          project: bucket.project,
+          sourceNo: bucket.sourceNo
+        }
+      });
+      historyGroupCount += 1;
+    });
+
+    return {
+      rows,
+      historyRecordCount: items.filter(isLegacyHistoryPayment).length,
+      historyGroupCount
+    };
+  }
+
   function renderReconciliationSummary(view) {
     const cards = [
       ['正常', view.normalCount, '來源與金額可核對', 'is-normal'],
@@ -611,39 +711,90 @@
     return `${content}${reconciliationTechnicalInfo(item)}`;
   }
 
-  function renderReconciliationRows(items) {
-    if (!items.length) return '<tr><td colspan="9" class="billing-empty">沒有符合目前篩選條件的對帳資料。</td></tr>';
-    return items.map((item) => {
-      const directionText = item.direction === 'in' ? '收入' : item.direction === 'out' ? '支出' : '未辨識';
-      const directionClass = item.direction === 'in' ? 'is-income' : item.direction === 'out' ? 'is-expense' : 'is-unknown';
-      return `<tr data-reconciliation-status="${esc(item.status)}" data-reconciliation-source="${esc(item.sourceKind)}">
-        <td class="bank-date">${esc(item.date || '—')}</td>
-        <td>${reconciliationStatusMarkup(item)}</td>
-        <td><span class="bank-direction ${directionClass}">${esc(directionText)}</span></td>
-        <td><span class="bank-source">${esc(item.sourceLabel)}</span></td>
-        <td class="bank-counterparty"><strong>${esc(item.party || '—')}</strong>${item.project ? `<small>${esc(item.project)}</small>` : ''}${item.sourceNo ? `<small>${esc(item.sourceNo)}</small>` : ''}</td>
-        <td class="num">${item.accountingAmount === null ? '—' : money(item.accountingAmount)}</td>
-        <td class="num">${item.bankAmount === null ? '—' : money(item.bankAmount)}</td>
-        <td class="num bank-reconciliation-difference ${item.difference ? 'has-difference' : ''}">${reconciliationDifference(item.difference)}</td>
-        <td class="bank-reconciliation-description">${reconciliationDescriptionMarkup(item)}</td>
-      </tr>`;
-    }).join('');
+  function reconciliationDirection(item) {
+    return {
+      text: item.direction === 'in' ? '收入' : item.direction === 'out' ? '支出' : '未辨識',
+      className: item.direction === 'in' ? 'is-income' : item.direction === 'out' ? 'is-expense' : 'is-unknown'
+    };
+  }
+
+  function renderReconciliationItemRow(item) {
+    const direction = reconciliationDirection(item);
+    return `<tr data-reconciliation-status="${esc(item.status)}" data-reconciliation-source="${esc(item.sourceKind)}">
+      <td class="bank-date">${esc(item.date || '—')}</td>
+      <td>${reconciliationStatusMarkup(item)}</td>
+      <td><span class="bank-direction ${direction.className}">${esc(direction.text)}</span></td>
+      <td><span class="bank-source">${esc(item.sourceLabel)}</span></td>
+      <td class="bank-counterparty"><strong>${esc(item.party || '—')}</strong>${item.project ? `<small>${esc(item.project)}</small>` : ''}${item.sourceNo ? `<small>${esc(item.sourceNo)}</small>` : ''}</td>
+      <td class="num">${item.accountingAmount === null ? '—' : money(item.accountingAmount)}</td>
+      <td class="num">${item.bankAmount === null ? '—' : money(item.bankAmount)}</td>
+      <td class="num bank-reconciliation-difference ${item.difference ? 'has-difference' : ''}">${reconciliationDifference(item.difference)}</td>
+      <td class="bank-reconciliation-description">${reconciliationDescriptionMarkup(item)}</td>
+    </tr>`;
+  }
+
+  function renderHistoryGroupDetail(group) {
+    const rows = group.items.map((item) => `<tr>
+      <td>${esc(item.date || '—')}</td>
+      <td>${esc(item.party || '—')}${item.project ? `<small>${esc(item.project)}</small>` : ''}</td>
+      <td>${esc(item.sourceNo || '—')}</td>
+      <td class="num">${item.accountingAmount === null ? '—' : money(item.accountingAmount)}</td>
+      <td>${reconciliationTechnicalInfo(item)}</td>
+    </tr>`).join('');
+    return `<tr class="bank-reconciliation-group-detail" id="${esc(group.id)}-detail" data-bank-history-group-detail="${esc(group.id)}" hidden>
+      <td colspan="9"><section class="bank-history-group-panel">
+        <header><strong>原始 ${group.items.length} 筆歷史紀錄</strong><span>僅展開查看，底層資料與筆數完全不變。</span></header>
+        <div class="bank-history-group-scroll"><table>
+          <thead><tr><th>原日期</th><th>原對象／案場</th><th>原來源單號</th><th class="num">原帳務金額</th><th>技術資訊</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>
+      </section></td>
+    </tr>`;
+  }
+
+  function renderHistoryGroupRows(group) {
+    const item = group.item;
+    const direction = reconciliationDirection(item);
+    const count = group.items.length;
+    return `<tr class="bank-reconciliation-group-row" data-reconciliation-status="${esc(item.status)}" data-reconciliation-source="${esc(item.sourceKind)}" data-bank-history-group-count="${count}">
+      <td class="bank-date">${esc(item.date || '—')}</td>
+      <td>${reconciliationStatusMarkup(item)}</td>
+      <td><span class="bank-direction ${direction.className}">${esc(direction.text)}</span></td>
+      <td><span class="bank-source">${esc(item.sourceLabel)}</span></td>
+      <td class="bank-counterparty"><strong>${esc(item.party || '—')}</strong>${item.project ? `<small>${esc(item.project)}</small>` : ''}${item.sourceNo ? `<small>${esc(item.sourceNo)}</small>` : ''}</td>
+      <td class="num">${money(item.accountingAmount)}</td>
+      <td class="num">—</td>
+      <td class="num bank-reconciliation-difference">—</td>
+      <td class="bank-reconciliation-description"><div class="bank-history-group-summary">
+        <div><strong>共 ${count} 筆歷史紀錄</strong><small>僅在畫面整理，原始資料未合併</small></div>
+        <button type="button" data-bank-history-group-toggle="${esc(group.id)}" data-bank-history-group-count="${count}" aria-expanded="false" aria-controls="${esc(group.id)}-detail"><span data-bank-history-group-label>查看 ${count} 筆</span><span aria-hidden="true">▾</span></button>
+      </div></td>
+    </tr>${renderHistoryGroupDetail(group)}`;
+  }
+
+  function renderReconciliationRows(display) {
+    if (!display.rows.length) return '<tr><td colspan="9" class="billing-empty">沒有符合目前篩選條件的對帳資料。</td></tr>';
+    return display.rows.map((row) => row.type === 'history-group' ? renderHistoryGroupRows(row) : renderReconciliationItemRow(row.item)).join('');
   }
 
   function renderReconciliation(state) {
     const view = bankReconciliationView(state);
     const visibleItems = reconciliationVisibleItems(view);
+    const display = reconciliationDisplayModel(visibleItems);
     const checks = view.sourceChecks;
+    const historyCaption = display.historyRecordCount
+      ? `其中 ${display.historyRecordCount} 筆歷史紀錄，共整理為 ${display.historyGroupCount} 組；原始資料未變更。`
+      : '歷史付款以中性標籤呈現，僅供核對。';
     return `<section class="bank-reconciliation-heading">
       <div><h2>銀行對帳中心</h2><p>只讀檢查帳務來源、銀行流水、手續費後金額與重複關聯；本頁不會修復或寫入資料。</p></div>
     </section>
     ${renderReconciliationSummary(view)}
     ${renderReconciliationFilters(view)}
-    <section class="commission-panel billing-list-panel bank-reconciliation-panel" data-receipt-check-count="${checks.receiptCount}" data-payable-check-count="${checks.payablePaymentCount}" data-salary-check-count="${checks.salaryPaymentCount}" data-legacy-summary-count="${checks.legacySummaryCount}">
-      <header class="project-section-title"><div><h2>逐筆對帳結果</h2><p>顯示 ${visibleItems.length}／${view.items.length} 筆；歷史付款以中性標籤呈現，僅供核對。</p></div></header>
+    <section class="commission-panel billing-list-panel bank-reconciliation-panel" data-receipt-check-count="${checks.receiptCount}" data-payable-check-count="${checks.payablePaymentCount}" data-salary-check-count="${checks.salaryPaymentCount}" data-legacy-summary-count="${checks.legacySummaryCount}" data-visible-raw-count="${visibleItems.length}" data-history-record-count="${display.historyRecordCount}" data-history-group-count="${display.historyGroupCount}" data-display-row-count="${display.rows.length}">
+      <header class="project-section-title"><div><h2>逐筆對帳結果</h2><p>顯示 ${visibleItems.length}／${view.items.length} 筆；${historyCaption}</p></div></header>
       <div class="commission-table-wrap bank-reconciliation-scroll"><table class="commission-table bank-reconciliation-table">
         <thead><tr><th>日期</th><th>狀態</th><th>收／支</th><th>來源</th><th>對象／案場</th><th class="num">帳務金額</th><th class="num">銀行金額</th><th class="num">差額</th><th>說明</th></tr></thead>
-        <tbody>${renderReconciliationRows(visibleItems)}</tbody>
+        <tbody>${renderReconciliationRows(display)}</tbody>
       </table></div>
     </section>`;
   }
@@ -675,6 +826,20 @@
     if (!app) return;
     bound = true;
     app.addEventListener('click', (event) => {
+      const historyGroupButton = event.target.closest('[data-bank-history-group-toggle]');
+      if (historyGroupButton) {
+        const groupId = historyGroupButton.dataset.bankHistoryGroupToggle;
+        const detail = app.querySelector(`[data-bank-history-group-detail="${groupId}"]`);
+        if (!detail) return;
+        const opening = detail.hidden;
+        detail.hidden = !opening;
+        historyGroupButton.setAttribute('aria-expanded', String(opening));
+        historyGroupButton.classList.toggle('is-expanded', opening);
+        const count = historyGroupButton.dataset.bankHistoryGroupCount;
+        const label = historyGroupButton.querySelector('[data-bank-history-group-label]');
+        if (label) label.textContent = `${opening ? '收合' : '查看'} ${count} 筆`;
+        return;
+      }
       const viewButton = event.target.closest('[data-bank-view]');
       if (viewButton) {
         activeBankView = viewButton.dataset.bankView === 'reconciliation' ? 'reconciliation' : 'ledger';
