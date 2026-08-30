@@ -12,6 +12,18 @@
   let ready = false;
   let bound = false;
   let selectedMonth = localMonth();
+  let activeBankView = 'ledger';
+  let reconciliationSearchTimer = null;
+  const reconciliationFilters = { month: '', status: 'all', direction: 'all', source: 'all', keyword: '' };
+  const RECONCILIATION_STATUSES = {
+    normal: { label: '正常', group: 'normal' },
+    'missing-bank': { label: '缺少銀行交易', group: 'abnormal' },
+    'missing-source': { label: '來源資料不存在', group: 'abnormal' },
+    mismatch: { label: '金額不一致', group: 'abnormal' },
+    duplicate: { label: '疑似重複入帳', group: 'abnormal' },
+    'history-normal': { label: '歷史資料－金額正常', group: 'normal' },
+    'history-pending': { label: '歷史待確認', group: 'attention' }
+  };
 
   function localMonth(date = new Date()) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -75,6 +87,246 @@
 
   function descriptionLabel(row) {
     return row.description || row.note || row.sourceNo || '—';
+  }
+
+  function collection(state, key) {
+    return Array.isArray(state?.[key]) ? state[key] : [];
+  }
+
+  function cleanId(value) {
+    return String(value || '').trim();
+  }
+
+  function transactionAmount(row) {
+    return store.num(row?.amount ?? row?.actualCredit ?? row?.actualDebit);
+  }
+
+  function sourceBankAmount(row, kind) {
+    if (row?.actualDebit !== undefined && ['payable', 'salary'].includes(kind)) return store.num(row.actualDebit);
+    if (row?.netAmount !== undefined && ['receipt', 'retention'].includes(kind)) return store.num(row.netAmount);
+    const amount = store.num(row?.amount);
+    const fee = Math.max(0, store.num(row?.fee));
+    if (['receipt', 'retention'].includes(kind)) return row?.feePayer === 'company' ? Math.max(0, amount - fee) : amount;
+    return row?.feePayer === 'company' ? amount + fee : amount;
+  }
+
+  function sourceDirection(kind) {
+    return ['receipt', 'retention'].includes(kind) ? 'in' : 'out';
+  }
+
+  function reconciliationSourceLabel(kind, legacy = false) {
+    if (legacy) return '歷史付款彙總';
+    if (kind === 'receipt') return '客戶收款';
+    if (kind === 'retention') return '保留款收款';
+    if (kind === 'payable') return '廠商付款';
+    if (kind === 'salary') return '薪資付款';
+    return '歷史銀行交易';
+  }
+
+  function transactionReferencesSource(transaction, row, kind) {
+    const id = cleanId(row?.id);
+    if (!id) return false;
+    const sourceType = cleanId(transaction?.sourceType);
+    const aliases = {
+      receipt: new Set(['receipt', 'receivable_receipt']),
+      retention: new Set(['retention_receipt']),
+      payable: new Set(['payable-payment', 'payable_payment']),
+      salary: new Set(['salary_payment'])
+    }[kind] || new Set();
+    return (cleanId(transaction?.sourceId) === id && aliases.has(sourceType))
+      || (kind === 'receipt' && cleanId(transaction?.receiptId) === id)
+      || (kind === 'retention' && cleanId(transaction?.retentionReceiptId) === id)
+      || (kind === 'salary' && cleanId(transaction?.salaryPaymentId) === id);
+  }
+
+  function sourceTransactions(state, row, kind) {
+    const id = cleanId(row?.id);
+    const transactionId = cleanId(row?.bankTransactionId);
+    const matches = collection(state, 'bankTransactions').filter((transaction) => {
+      return (transactionId && cleanId(transaction.id) === transactionId)
+        || transactionReferencesSource(transaction, row, kind);
+    });
+    const unique = new Map();
+    matches.forEach((transaction) => unique.set(cleanId(transaction.id) || transaction, transaction));
+    return [...unique.values()];
+  }
+
+  function sourceContext(state, row, kind, transaction) {
+    let source = null;
+    let party = transaction?.customerName || transaction?.vendorName || transaction?.employeeName || '';
+    let project = transaction?.projectName || '';
+    let sourceNo = transaction?.sourceNo || '';
+
+    if (['receipt', 'retention'].includes(kind)) {
+      source = collection(state, 'receivables').find((item) => cleanId(item.id) === cleanId(row.receivableId));
+      const customer = collection(state, 'customers').find((item) => cleanId(item.id) === cleanId(source?.customer));
+      party ||= source?.customerName || customer?.name || '';
+      project ||= source?.projectName || '';
+      sourceNo ||= source?.sourceNo || '';
+    } else if (kind === 'payable') {
+      source = collection(state, 'payables').find((item) => cleanId(item.id) === cleanId(row.payableId));
+      const vendor = collection(state, 'vendors').find((item) => cleanId(item.id) === cleanId(source?.vendor));
+      party ||= source?.vendorName || vendor?.name || '';
+      project ||= source?.projectName || '';
+      sourceNo ||= source?.payableNo || source?.sourceNo || '';
+    } else if (kind === 'salary') {
+      source = collection(state, 'payroll').find((item) => cleanId(item.id) === cleanId(row.payrollId));
+      const employee = collection(state, 'employees').find((item) => cleanId(item.id) === cleanId(source?.employee));
+      party ||= source?.employeeName || employee?.name || '';
+      sourceNo ||= source?.month || '';
+    }
+
+    return { party: party || '—', project, sourceNo, source };
+  }
+
+  function isHistoricalTransaction(row, source) {
+    return source?.legacy === true || !row?.direction || ['receipt', 'receivable', 'payable', 'payroll'].includes(cleanId(row?.sourceType));
+  }
+
+  function reconciliationDescription(status, row, kind, transactionCount) {
+    const amount = money(store.num(row?.amount));
+    const fee = Math.max(0, store.num(row?.fee));
+    const feeText = fee ? `原始金額 ${amount}，手續費 ${money(fee)}。` : '';
+    if (status === 'normal') return `原始帳務、唯一銀行流水與實際${sourceDirection(kind) === 'in' ? '入帳' : '扣款'}一致。${feeText}`;
+    if (status === 'history-normal') return `舊版資料格式較早，但日期、對象與金額可可靠核對一致。${feeText}`;
+    if (status === 'missing-bank') return '帳務紀錄存在，但找不到對應的銀行交易。';
+    if (status === 'missing-source') return '銀行流水存在，但原付款、收款或薪資付款資料已不存在。';
+    if (status === 'mismatch') return `原始帳務計算出的實際${sourceDirection(kind) === 'in' ? '入帳' : '扣款'}與銀行金額不同。${feeText}`;
+    if (status === 'duplicate') return `同一筆帳務找到 ${transactionCount} 筆銀行交易，疑似重複入帳。`;
+    return '此筆為舊版彙總顯示，沒有獨立銀行流水；不會自動判定為缺漏或補帳。';
+  }
+
+  function finishReconciliationItem(item) {
+    const statusMeta = RECONCILIATION_STATUSES[item.status] || RECONCILIATION_STATUSES['history-pending'];
+    const searchText = [item.date, statusMeta.label, item.sourceLabel, item.party, item.project, item.sourceNo, item.description].join(' ').toLocaleLowerCase('zh-Hant');
+    return { ...item, statusLabel: statusMeta.label, statusGroup: statusMeta.group, searchText };
+  }
+
+  function sourceReconciliationItem(state, row, kind) {
+    const legacy = row?.legacy === true;
+    const matches = sourceTransactions(state, row, kind);
+    const expected = sourceBankAmount(row, kind);
+    const bankTotal = matches.reduce((sum, transaction) => sum + transactionAmount(transaction), 0);
+    const linkMismatch = matches.length === 1 && !transactionReferencesSource(matches[0], row, kind);
+    let status = 'normal';
+    if (!matches.length) status = legacy ? 'history-pending' : 'missing-bank';
+    else if (matches.length > 1) status = 'duplicate';
+    else if (linkMismatch) status = 'history-pending';
+    else if (Math.round(bankTotal) !== Math.round(expected)) status = 'mismatch';
+    else if (legacy || isHistoricalTransaction(matches[0], row)) status = 'history-normal';
+    const transaction = matches[0] || null;
+    const context = sourceContext(state, row, kind, transaction);
+    return finishReconciliationItem({
+      id: `source:${kind}:${cleanId(row.id)}`,
+      date: transaction?.date || row.date || '',
+      status,
+      direction: sourceDirection(kind),
+      sourceKind: legacy ? 'history' : kind,
+      sourceLabel: reconciliationSourceLabel(kind, legacy),
+      party: context.party,
+      project: context.project,
+      sourceNo: context.sourceNo,
+      accountingAmount: expected,
+      bankAmount: matches.length ? bankTotal : null,
+      difference: matches.length ? bankTotal - expected : null,
+      description: linkMismatch ? '銀行流水編號可找到，但來源關聯與帳務紀錄不一致，需要人工確認。' : reconciliationDescription(status, row, kind, matches.length),
+      transactionIds: matches.map((transactionRow) => cleanId(transactionRow.id)),
+      sourceId: cleanId(row.id),
+      rawSourceType: transaction?.sourceType || (legacy ? 'legacy-payment-summary' : kind)
+    });
+  }
+
+  function unmatchedTransactionItem(state, row) {
+    const sourceType = cleanId(row.sourceType);
+    const bankAmount = transactionAmount(row);
+    let status = 'history-pending';
+    let kind = 'history';
+    let source = null;
+    let description = '此筆為舊版銀行流水，目前資料不足以安全判定來源。';
+
+    if (sourceType === 'receivable') {
+      kind = 'receipt';
+      source = collection(state, 'receivables').find((item) => cleanId(item.id) === cleanId(row.sourceId));
+      if (!source) {
+        status = 'missing-source';
+        description = reconciliationDescription(status, row, kind, 1);
+      } else if (Math.round(store.num(source.legacyReceived)) === Math.round(bankAmount)) {
+        status = 'history-normal';
+        description = '此筆為舊版直接收款流水，應收帳款保留相同的歷史收款金額，可可靠核對。';
+      }
+    } else if (['receipt', 'receivable_receipt', 'retention_receipt'].includes(sourceType)) {
+      kind = sourceType === 'retention_receipt' ? 'retention' : 'receipt';
+      status = 'missing-source';
+      description = reconciliationDescription(status, row, kind, 1);
+    } else if (['payable', 'payable-payment', 'payable_payment'].includes(sourceType)) {
+      kind = 'payable';
+      source = collection(state, 'payables').find((item) => cleanId(item.id) === cleanId(row.sourceId));
+      status = 'missing-source';
+      description = reconciliationDescription(status, row, kind, 1);
+    } else if (['payroll', 'salary_payment'].includes(sourceType)) {
+      kind = 'salary';
+      source = collection(state, 'payroll').find((item) => cleanId(item.id) === cleanId(row.sourceId));
+      status = 'missing-source';
+      description = sourceType === 'payroll' && source
+        ? '銀行流水與薪資月份仍存在，但原薪資付款紀錄已不存在。'
+        : reconciliationDescription(status, row, kind, 1);
+    }
+
+    const contextRow = source
+      ? kind === 'receipt' ? { receivableId: source.id }
+        : kind === 'payable' ? { payableId: source.id }
+          : kind === 'salary' ? { payrollId: source.id }
+            : row
+      : row;
+    const context = sourceContext(state, contextRow, kind, row);
+    return finishReconciliationItem({
+      id: `bank:${cleanId(row.id)}`,
+      date: row.date || '',
+      status,
+      direction: transactionDirection(row),
+      sourceKind: kind,
+      sourceLabel: reconciliationSourceLabel(kind),
+      party: context.party,
+      project: context.project,
+      sourceNo: row.sourceNo || context.sourceNo,
+      accountingAmount: status === 'history-normal' ? bankAmount : null,
+      bankAmount,
+      difference: status === 'history-normal' ? 0 : null,
+      description,
+      transactionIds: [cleanId(row.id)],
+      sourceId: cleanId(row.sourceId),
+      rawSourceType: sourceType
+    });
+  }
+
+  function bankReconciliationView(state) {
+    const sourceRows = [
+      ...collection(state, 'receipts').map((row) => ({ row, kind: 'receipt' })),
+      ...collection(state, 'retentionReceipts').map((row) => ({ row, kind: 'retention' })),
+      ...collection(state, 'payments').map((row) => ({ row, kind: 'payable' })),
+      ...collection(state, 'salaryPayments').map((row) => ({ row, kind: 'salary' }))
+    ];
+    const items = sourceRows.map(({ row, kind }) => sourceReconciliationItem(state, row, kind));
+    const usedTransactionIds = new Set(items.flatMap((item) => item.transactionIds).filter(Boolean));
+    collection(state, 'bankTransactions').forEach((transaction) => {
+      if (!usedTransactionIds.has(cleanId(transaction.id))) items.push(unmatchedTransactionItem(state, transaction));
+    });
+    items.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.id).localeCompare(String(a.id)));
+    const counts = Object.fromEntries(Object.keys(RECONCILIATION_STATUSES).map((status) => [status, items.filter((item) => item.status === status).length]));
+    return {
+      items,
+      counts,
+      normalCount: counts.normal + counts['history-normal'],
+      attentionCount: counts['history-pending'],
+      abnormalCount: counts['missing-bank'] + counts['missing-source'] + counts.mismatch + counts.duplicate,
+      sourceChecks: {
+        receiptCount: collection(state, 'receipts').length,
+        retentionReceiptCount: collection(state, 'retentionReceipts').length,
+        payablePaymentCount: collection(state, 'payments').filter((row) => row.legacy !== true).length,
+        salaryPaymentCount: collection(state, 'salaryPayments').length,
+        legacySummaryCount: collection(state, 'payments').filter((row) => row.legacy === true).length
+      }
+    };
   }
 
   function bankMonthView(state, month) {
@@ -161,24 +413,16 @@
     }).join('');
   }
 
-  function render() {
-    if (!active) return;
-    const state = store.getState();
-    selectedMonth = normalizeMonth(selectedMonth);
-    const view = bankMonthView(state, selectedMonth);
-    const actualBalance = state.banks.reduce((sum, row) => sum + store.num(row.balance), 0);
-    const accountName = state.banks.length === 1 ? bankName(state.banks[0]) : `${state.banks.length} 個銀行帳戶`;
-    const app = $('#banksApp');
-    if (!app) return;
+  function renderBankTabs() {
+    return `<nav class="bank-view-tabs" aria-label="銀行功能">
+      <button type="button" data-bank-view="ledger" class="${activeBankView === 'ledger' ? 'is-active' : ''}" aria-pressed="${activeBankView === 'ledger'}">月份查帳</button>
+      <button type="button" data-bank-view="reconciliation" class="${activeBankView === 'reconciliation' ? 'is-active' : ''}" aria-pressed="${activeBankView === 'reconciliation'}">銀行對帳</button>
+    </nav>`;
+  }
 
-    app.innerHTML = `<section class="commissions-heading bank-ledger-heading">
-      <div><h1>銀行查帳</h1><p>依月份查看銀行收支與逐筆餘額</p></div>
-    </section>
-    <section class="bank-current-balance-card" aria-label="目前銀行餘額">
-      <div class="bank-current-balance-amount"><span>目前銀行餘額</span><strong>${money(actualBalance)}</strong></div>
-      <div class="bank-current-balance-context"><strong>${esc(accountName)}</strong><span>依目前全部銀行收支計算</span></div>
-    </section>
-    <section class="commission-panel bank-month-panel">
+  function renderLedger(state) {
+    const view = bankMonthView(state, selectedMonth);
+    return `<section class="commission-panel bank-month-panel">
       <div class="bank-month-toolbar" aria-label="銀行查帳月份">
         <button type="button" class="bank-month-button bank-month-prev" data-bank-month-action="previous" aria-label="上一月">← <span>上一月</span></button>
         <label class="bank-month-picker"><span>查詢月份</span><input type="month" data-bank-month-input value="${esc(selectedMonth)}" max="${esc(localMonth())}"></label>
@@ -196,6 +440,130 @@
         <tbody>${renderRows(view)}</tbody>
       </table></div>
     </section>`;
+  }
+
+  function option(value, label, current) {
+    return `<option value="${esc(value)}" ${String(value) === String(current) ? 'selected' : ''}>${esc(label)}</option>`;
+  }
+
+  function reconciliationVisibleItems(view) {
+    const keyword = reconciliationFilters.keyword.trim().toLocaleLowerCase('zh-Hant');
+    return view.items.filter((item) => {
+      if (reconciliationFilters.month && String(item.date || '').slice(0, 7) !== reconciliationFilters.month) return false;
+      if (reconciliationFilters.status === 'attention' && item.statusGroup === 'normal') return false;
+      if (!['all', 'attention'].includes(reconciliationFilters.status) && item.status !== reconciliationFilters.status) return false;
+      if (reconciliationFilters.direction !== 'all' && item.direction !== reconciliationFilters.direction) return false;
+      if (reconciliationFilters.source !== 'all' && item.sourceKind !== reconciliationFilters.source) return false;
+      return !keyword || item.searchText.includes(keyword);
+    });
+  }
+
+  function renderReconciliationSummary(view) {
+    const cards = [
+      ['正常', view.normalCount, '來源與金額可核對', 'is-normal'],
+      ['待確認', view.attentionCount, '舊版彙總，僅供查核', 'is-attention'],
+      ['異常', view.abnormalCount, '需要人工確認', 'is-abnormal']
+    ];
+    const breakdown = Object.entries(RECONCILIATION_STATUSES).map(([status, meta]) => `<div><span>${esc(meta.label)}</span><strong>${view.counts[status] || 0}</strong></div>`).join('');
+    return `<section class="bank-reconciliation-summary" aria-label="銀行對帳摘要" data-normal-count="${view.normalCount}" data-attention-count="${view.attentionCount}" data-abnormal-count="${view.abnormalCount}">
+      ${cards.map(([label, count, note, className]) => `<article class="${className}"><span>${label}</span><strong>${count}</strong><small>${note}</small></article>`).join('')}
+    </section>
+    <section class="bank-reconciliation-breakdown" aria-label="對帳狀態細分">${breakdown}</section>`;
+  }
+
+  function renderReconciliationFilters(view) {
+    const months = [...new Set(view.items.map((item) => String(item.date || '').slice(0, 7)).filter((month) => /^\d{4}-\d{2}$/.test(month)))].sort().reverse();
+    const statusOptions = [
+      option('all', '全部狀態', reconciliationFilters.status),
+      option('attention', '需要注意', reconciliationFilters.status),
+      ...Object.entries(RECONCILIATION_STATUSES).map(([value, meta]) => option(value, meta.label, reconciliationFilters.status))
+    ].join('');
+    return `<section class="commission-panel bank-reconciliation-filter-panel">
+      <div class="bank-reconciliation-quick" aria-label="快速篩選">
+        <button type="button" data-bank-reconciliation-quick="all" class="${reconciliationFilters.status === 'all' ? 'is-active' : ''}">全部</button>
+        <button type="button" data-bank-reconciliation-quick="attention" class="${reconciliationFilters.status === 'attention' ? 'is-active' : ''}">只看需要注意</button>
+      </div>
+      <div class="bank-reconciliation-filters">
+        <label><span>月份</span><select data-bank-reconciliation-filter="month">${option('', '全部月份', reconciliationFilters.month)}${months.map((month) => option(month, monthLabel(month), reconciliationFilters.month)).join('')}</select></label>
+        <label><span>對帳狀態</span><select data-bank-reconciliation-filter="status">${statusOptions}</select></label>
+        <label><span>收／支</span><select data-bank-reconciliation-filter="direction">${option('all', '全部收支', reconciliationFilters.direction)}${option('in', '收入', reconciliationFilters.direction)}${option('out', '支出', reconciliationFilters.direction)}</select></label>
+        <label><span>來源</span><select data-bank-reconciliation-filter="source">${option('all', '全部來源', reconciliationFilters.source)}${option('receipt', '客戶收款', reconciliationFilters.source)}${option('retention', '保留款收款', reconciliationFilters.source)}${option('payable', '廠商付款', reconciliationFilters.source)}${option('salary', '薪資付款', reconciliationFilters.source)}${option('history', '歷史資料', reconciliationFilters.source)}</select></label>
+        <label class="bank-reconciliation-search"><span>關鍵字</span><input type="search" data-bank-reconciliation-filter="keyword" value="${esc(reconciliationFilters.keyword)}" placeholder="客戶、廠商、員工、案場、單號、說明"></label>
+      </div>
+    </section>`;
+  }
+
+  function reconciliationTechnicalInfo(item) {
+    const transactionIds = item.transactionIds.filter(Boolean).join('、') || '—';
+    return `<details class="bank-reconciliation-technical"><summary>技術資訊</summary><dl>
+      <div><dt>帳務資料 ID</dt><dd>${esc(item.sourceId || '—')}</dd></div>
+      <div><dt>銀行交易 ID</dt><dd>${esc(transactionIds)}</dd></div>
+      <div><dt>原始來源格式</dt><dd>${esc(item.rawSourceType || '—')}</dd></div>
+    </dl></details>`;
+  }
+
+  function reconciliationDifference(value) {
+    if (value === null || value === undefined) return '—';
+    const amount = Math.round(store.num(value));
+    if (!amount) return '$0';
+    return amount > 0 ? `+${money(amount)}` : `-${money(Math.abs(amount))}`;
+  }
+
+  function renderReconciliationRows(items) {
+    if (!items.length) return '<tr><td colspan="9" class="billing-empty">沒有符合目前篩選條件的對帳資料。</td></tr>';
+    return items.map((item) => {
+      const directionText = item.direction === 'in' ? '收入' : item.direction === 'out' ? '支出' : '未辨識';
+      const directionClass = item.direction === 'in' ? 'is-income' : item.direction === 'out' ? 'is-expense' : 'is-unknown';
+      return `<tr data-reconciliation-status="${esc(item.status)}" data-reconciliation-source="${esc(item.sourceKind)}">
+        <td class="bank-date">${esc(item.date || '—')}</td>
+        <td><span class="bank-reconciliation-status is-${esc(item.statusGroup)}">${esc(item.statusLabel)}</span></td>
+        <td><span class="bank-direction ${directionClass}">${esc(directionText)}</span></td>
+        <td><span class="bank-source">${esc(item.sourceLabel)}</span></td>
+        <td class="bank-counterparty"><strong>${esc(item.party || '—')}</strong>${item.project ? `<small>${esc(item.project)}</small>` : ''}${item.sourceNo ? `<small>${esc(item.sourceNo)}</small>` : ''}</td>
+        <td class="num">${item.accountingAmount === null ? '—' : money(item.accountingAmount)}</td>
+        <td class="num">${item.bankAmount === null ? '—' : money(item.bankAmount)}</td>
+        <td class="num bank-reconciliation-difference ${item.difference ? 'has-difference' : ''}">${reconciliationDifference(item.difference)}</td>
+        <td class="bank-reconciliation-description"><p>${esc(item.description)}</p>${reconciliationTechnicalInfo(item)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  function renderReconciliation(state) {
+    const view = bankReconciliationView(state);
+    const visibleItems = reconciliationVisibleItems(view);
+    const checks = view.sourceChecks;
+    return `<section class="bank-reconciliation-heading">
+      <div><h2>銀行對帳中心</h2><p>只讀檢查帳務來源、銀行流水、手續費後金額與重複關聯；本頁不會修復或寫入資料。</p></div>
+    </section>
+    ${renderReconciliationSummary(view)}
+    ${renderReconciliationFilters(view)}
+    <section class="commission-panel billing-list-panel bank-reconciliation-panel" data-receipt-check-count="${checks.receiptCount}" data-payable-check-count="${checks.payablePaymentCount}" data-salary-check-count="${checks.salaryPaymentCount}" data-legacy-summary-count="${checks.legacySummaryCount}">
+      <header class="project-section-title"><div><h2>逐筆對帳結果</h2><p>顯示 ${visibleItems.length}／${view.items.length} 筆；舊版付款彙總不會被當成缺銀行流水。</p></div></header>
+      <div class="commission-table-wrap bank-reconciliation-scroll"><table class="commission-table bank-reconciliation-table">
+        <thead><tr><th>日期</th><th>狀態</th><th>收／支</th><th>來源</th><th>對象／案場</th><th class="num">帳務金額</th><th class="num">銀行金額</th><th class="num">差額</th><th>說明</th></tr></thead>
+        <tbody>${renderReconciliationRows(visibleItems)}</tbody>
+      </table></div>
+    </section>`;
+  }
+
+  function render() {
+    if (!active) return;
+    const state = store.getState();
+    selectedMonth = normalizeMonth(selectedMonth);
+    const actualBalance = state.banks.reduce((sum, row) => sum + store.num(row.balance), 0);
+    const accountName = state.banks.length === 1 ? bankName(state.banks[0]) : `${state.banks.length} 個銀行帳戶`;
+    const app = $('#banksApp');
+    if (!app) return;
+
+    app.innerHTML = `<section class="commissions-heading bank-ledger-heading">
+      <div><h1>銀行查帳</h1><p>依月份查看銀行收支與逐筆餘額</p></div>
+    </section>
+    <section class="bank-current-balance-card" aria-label="目前銀行餘額">
+      <div class="bank-current-balance-amount"><span>目前銀行餘額</span><strong>${money(actualBalance)}</strong></div>
+      <div class="bank-current-balance-context"><strong>${esc(accountName)}</strong><span>依目前全部銀行收支計算</span></div>
+    </section>
+    ${renderBankTabs()}
+    ${activeBankView === 'reconciliation' ? renderReconciliation(state) : renderLedger(state)}`;
     window.KusheIcons?.render(app);
   }
 
@@ -205,6 +573,18 @@
     if (!app) return;
     bound = true;
     app.addEventListener('click', (event) => {
+      const viewButton = event.target.closest('[data-bank-view]');
+      if (viewButton) {
+        activeBankView = viewButton.dataset.bankView === 'reconciliation' ? 'reconciliation' : 'ledger';
+        render();
+        return;
+      }
+      const quickButton = event.target.closest('[data-bank-reconciliation-quick]');
+      if (quickButton) {
+        reconciliationFilters.status = quickButton.dataset.bankReconciliationQuick === 'attention' ? 'attention' : 'all';
+        render();
+        return;
+      }
       const button = event.target.closest('[data-bank-month-action]');
       if (!button || button.disabled) return;
       const action = button.dataset.bankMonthAction;
@@ -214,9 +594,28 @@
       render();
     });
     app.addEventListener('change', (event) => {
-      if (!event.target.matches('[data-bank-month-input]')) return;
-      selectedMonth = normalizeMonth(event.target.value);
+      if (event.target.matches('[data-bank-month-input]')) {
+        selectedMonth = normalizeMonth(event.target.value);
+        render();
+        return;
+      }
+      const filter = event.target.closest('[data-bank-reconciliation-filter]');
+      if (!filter) return;
+      reconciliationFilters[filter.dataset.bankReconciliationFilter] = filter.value;
       render();
+    });
+    app.addEventListener('input', (event) => {
+      const filter = event.target.closest('[data-bank-reconciliation-filter="keyword"]');
+      if (!filter) return;
+      const cursor = filter.selectionStart;
+      reconciliationFilters.keyword = filter.value;
+      clearTimeout(reconciliationSearchTimer);
+      reconciliationSearchTimer = setTimeout(() => {
+        render();
+        const replacement = app.querySelector('[data-bank-reconciliation-filter="keyword"]');
+        replacement?.focus();
+        replacement?.setSelectionRange(cursor, cursor);
+      }, 120);
     });
   }
 
