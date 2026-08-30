@@ -36,10 +36,6 @@
     return row?.name || row?.bank || row?.account || '銀行帳戶';
   }
 
-  function currentBalance(row) {
-    return store.num(row?.openingBalance) + store.num(row?.income) - store.num(row?.expense);
-  }
-
   function transactionBankId(row) {
     return String(row?.bankAccountId || row?.bankId || '');
   }
@@ -135,11 +131,12 @@
   }
 
   function renderSummary(view) {
+    const closingLabel = view.month === localMonth() ? '本月期末／目前餘額' : '該月底餘額';
     const cards = [
       ['月初餘額', view.monthOpening, `${monthLabel(view.month)}開始時`],
       ['本月收入', view.monthIncome, `${view.rows.filter((item) => item.direction === 'in').length} 筆收入`, 'is-income'],
       ['本月支出', view.monthExpense, `${view.rows.filter((item) => item.direction === 'out').length} 筆支出`, 'is-expense'],
-      ['月末餘額', view.monthClosing, `${monthLabel(view.month)}結束時`, 'is-closing']
+      [closingLabel, view.monthClosing, `${monthLabel(view.month)}結束時`, 'is-closing']
     ];
     return `<section class="bank-month-summary" aria-label="${esc(monthLabel(view.month))}銀行摘要">${cards.map(([label, amount, note, className = '']) => `<article class="${className}"><span>${esc(label)}</span><strong>${money(amount)}</strong><small>${esc(note)}</small></article>`).join('')}</section>`;
   }
@@ -169,14 +166,17 @@
     const state = store.getState();
     selectedMonth = normalizeMonth(selectedMonth);
     const view = bankMonthView(state, selectedMonth);
-    const actualBalance = state.banks.reduce((sum, row) => sum + currentBalance(row), 0);
+    const actualBalance = state.banks.reduce((sum, row) => sum + store.num(row.balance), 0);
     const accountName = state.banks.length === 1 ? bankName(state.banks[0]) : `${state.banks.length} 個銀行帳戶`;
     const app = $('#banksApp');
     if (!app) return;
 
     app.innerHTML = `<section class="commissions-heading bank-ledger-heading">
-      <div><h1>銀行查帳</h1><p>${esc(accountName)}</p></div>
-      <div class="bank-current-balance"><span>目前實際餘額</span><strong>${money(actualBalance)}</strong></div>
+      <div><h1>銀行查帳</h1><p>依月份查看銀行收支與逐筆餘額</p></div>
+    </section>
+    <section class="bank-current-balance-card" aria-label="目前銀行餘額">
+      <div class="bank-current-balance-amount"><span>目前銀行餘額</span><strong>${money(actualBalance)}</strong></div>
+      <div class="bank-current-balance-context"><strong>${esc(accountName)}</strong><span>依目前全部銀行收支計算</span></div>
     </section>
     <section class="commission-panel bank-month-panel">
       <div class="bank-month-toolbar" aria-label="銀行查帳月份">
