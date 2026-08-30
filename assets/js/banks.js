@@ -183,17 +183,27 @@
     return source?.legacy === true || !row?.direction || ['receipt', 'receivable', 'payable', 'payroll'].includes(cleanId(row?.sourceType));
   }
 
-  function reconciliationDescription(status, row, kind, transactionCount) {
-    const amount = money(store.num(row?.amount));
+  function reconciliationDifferenceNote(difference) {
+    if (difference === null || difference === undefined) return '';
+    const amount = Math.abs(Math.round(store.num(difference)));
+    return amount ? `相差 ${money(amount)}。` : '';
+  }
+
+  function reconciliationDescription(status, row, kind, transactionCount, difference = null) {
     const fee = Math.max(0, store.num(row?.fee));
-    const feeText = fee ? `原始金額 ${amount}，手續費 ${money(fee)}。` : '';
-    if (status === 'normal') return `原始帳務、唯一銀行流水與實際${sourceDirection(kind) === 'in' ? '入帳' : '扣款'}一致。${feeText}`;
-    if (status === 'history-normal') return `舊版資料格式較早，但日期、對象與金額可可靠核對一致。${feeText}`;
-    if (status === 'missing-bank') return '帳務紀錄存在，但找不到對應的銀行交易。';
-    if (status === 'missing-source') return '銀行流水存在，但原付款、收款或薪資付款資料已不存在。';
-    if (status === 'mismatch') return `原始帳務計算出的實際${sourceDirection(kind) === 'in' ? '入帳' : '扣款'}與銀行金額不同。${feeText}`;
-    if (status === 'duplicate') return `同一筆帳務找到 ${transactionCount} 筆銀行交易，疑似重複入帳。`;
-    return '歷史付款紀錄，僅供核對，不影響銀行餘額。';
+    const feeText = fee ? `手續費 ${money(fee)} 也已一併核對。` : '';
+    if (status === 'normal') return `這筆${sourceDirection(kind) === 'in' ? '收款' : '付款'}已和銀行對上，金額正確。${feeText}`;
+    if (status === 'history-normal') {
+      if (kind === 'salary') return `這筆是舊薪資付款，薪資和銀行金額對得上。${feeText}`;
+      if (['receipt', 'retention'].includes(kind)) return `這筆是舊客戶收款，收款和銀行金額對得上。${feeText}`;
+      if (kind === 'payable') return `這筆是舊廠商付款，付款和銀行金額對得上。${feeText}`;
+      return `這筆是舊資料，但金額和銀行紀錄對得上。${feeText}`;
+    }
+    if (status === 'missing-bank') return `帳務裡有這筆${sourceDirection(kind) === 'in' ? '收款' : '付款'}，但銀行紀錄裡找不到，請確認。`;
+    if (status === 'missing-source') return '銀行有這筆交易，但原本的帳務資料已找不到，請人工確認。';
+    if (status === 'mismatch') return `帳務金額和銀行金額不同，請確認。${reconciliationDifferenceNote(difference)}`;
+    if (status === 'duplicate') return `同一筆帳務可能重複連到銀行，請確認。共找到 ${transactionCount} 筆銀行紀錄。`;
+    return '歷史付款紀錄，舊系統留下的紀錄，只供查帳，不影響銀行餘額。';
   }
 
   function finishReconciliationItem(item) {
@@ -229,7 +239,7 @@
       accountingAmount: expected,
       bankAmount: matches.length ? bankTotal : null,
       difference: matches.length ? bankTotal - expected : null,
-      description: linkMismatch ? '銀行流水編號可找到，但來源關聯與帳務紀錄不一致，需要人工確認。' : reconciliationDescription(status, row, kind, matches.length),
+      description: linkMismatch ? '銀行有這筆交易，但目前無法確認它對應哪筆帳務，請人工確認。' : reconciliationDescription(status, row, kind, matches.length, matches.length ? bankTotal - expected : null),
       transactionIds: matches.map((transactionRow) => cleanId(transactionRow.id)),
       sourceId: cleanId(row.id),
       rawSourceType: transaction?.sourceType || (legacy ? 'legacy-payment-summary' : kind)
@@ -305,7 +315,7 @@
     let status = 'history-pending';
     let kind = 'history';
     let source = null;
-    let description = '此筆為舊版銀行流水，目前資料不足以安全判定來源。';
+    let description = '這筆是舊銀行紀錄，目前還無法確認原本對應哪筆帳務。';
     let accountingAmount = null;
     let difference = null;
 
@@ -317,7 +327,7 @@
         description = reconciliationDescription(status, row, kind, 1);
       } else if (Math.round(store.num(source.legacyReceived)) === Math.round(bankAmount)) {
         status = 'history-normal';
-        description = '此筆為舊版直接收款流水，應收帳款保留相同的歷史收款金額，可可靠核對。';
+        description = '這筆是舊客戶收款，收款和銀行金額對得上。';
       }
     } else if (['receipt', 'receivable_receipt', 'retention_receipt'].includes(sourceType)) {
       kind = sourceType === 'retention_receipt' ? 'retention' : 'receipt';
@@ -332,8 +342,8 @@
         accountingAmount = historicalTaxPayment.accountingAmount;
         difference = historicalTaxPayment.bankAmount - historicalTaxPayment.accountingAmount;
         description = status === 'history-normal'
-          ? '原舊應付關聯已不存在，但現有合併應付、材料、進項發票與銀行付款金額可完整核對。'
-          : '現有合併應付、材料與進項發票可核對，但含稅總額與銀行付款金額不一致。';
+          ? '這筆是舊廠商付款，材料、發票和銀行金額都對得上。'
+          : `帳務金額和銀行金額不同，請確認。${reconciliationDifferenceNote(difference)}`;
       } else {
         status = 'missing-source';
         description = reconciliationDescription(status, row, kind, 1);
@@ -347,14 +357,14 @@
         description = reconciliationDescription(status, row, kind, 1);
       } else if (!legacyPayroll || legacyPayroll.status === 'history-pending') {
         status = 'history-pending';
-        description = '薪資月份仍存在，但目前關聯不足以唯一核對這筆舊版銀行流水。';
+        description = '這筆是舊薪資付款，目前還無法確認是否和銀行對上，請人工確認。';
       } else {
         status = legacyPayroll.status;
         accountingAmount = legacyPayroll.accountingAmount;
         difference = legacyPayroll.bankAmount - legacyPayroll.accountingAmount;
         description = status === 'history-normal'
-          ? '此筆為舊版薪資付款資料，薪資月份與銀行流水仍可完整核對，金額正常。'
-          : '舊版薪資付款資料仍可連回薪資月份，但帳務金額與銀行支出不一致。';
+          ? '這筆是舊薪資付款，薪資和銀行金額對得上。'
+          : `帳務金額和銀行金額不同，請確認。${reconciliationDifferenceNote(difference)}`;
       }
     }
 
@@ -647,7 +657,7 @@
   function renderReconciliationSummary(view) {
     const cards = [
       ['正常', view.normalCount, '來源與金額可核對', 'is-normal'],
-      ['待確認', view.attentionCount, '舊版彙總，僅供查核', 'is-attention'],
+      ['待確認', view.attentionCount, '舊系統紀錄，請人工查看', 'is-attention'],
       ['異常', view.abnormalCount, '需要人工確認', 'is-abnormal']
     ];
     const breakdown = Object.entries(RECONCILIATION_STATUSES).map(([status, meta]) => `<div><span>${esc(meta.label)}</span><strong>${view.counts[status] || 0}</strong></div>`).join('');
@@ -706,7 +716,7 @@
   function reconciliationDescriptionMarkup(item) {
     const historySummary = item.status === 'history-pending' && item.rawSourceType === 'legacy-payment-summary';
     const content = historySummary
-      ? '<div class="bank-reconciliation-history-copy"><strong>歷史付款紀錄</strong><small>僅供核對，不影響銀行餘額</small></div>'
+      ? '<div class="bank-reconciliation-history-copy"><strong>歷史付款紀錄</strong><small>舊系統留下的紀錄，只供查帳，不影響銀行餘額。</small></div>'
       : `<p>${esc(item.description)}</p>`;
     return `${content}${reconciliationTechnicalInfo(item)}`;
   }
@@ -743,7 +753,7 @@
     </tr>`).join('');
     return `<tr class="bank-reconciliation-group-detail" id="${esc(group.id)}-detail" data-bank-history-group-detail="${esc(group.id)}" hidden>
       <td colspan="9"><section class="bank-history-group-panel">
-        <header><strong>原始 ${group.items.length} 筆歷史紀錄</strong><span>僅展開查看，底層資料與筆數完全不變。</span></header>
+        <header><strong>原始 ${group.items.length} 筆歷史付款紀錄</strong><span>以下保留每筆原始內容，方便逐筆查帳。</span></header>
         <div class="bank-history-group-scroll"><table>
           <thead><tr><th>原日期</th><th>原對象／案場</th><th>原來源單號</th><th class="num">原帳務金額</th><th>技術資訊</th></tr></thead>
           <tbody>${rows}</tbody>
@@ -766,7 +776,7 @@
       <td class="num">—</td>
       <td class="num bank-reconciliation-difference">—</td>
       <td class="bank-reconciliation-description"><div class="bank-history-group-summary">
-        <div><strong>共 ${count} 筆歷史紀錄</strong><small>僅在畫面整理，原始資料未合併</small></div>
+        <div><strong>共 ${count} 筆歷史付款紀錄</strong><small>展開即可查看每筆紀錄</small></div>
         <button type="button" data-bank-history-group-toggle="${esc(group.id)}" data-bank-history-group-count="${count}" aria-expanded="false" aria-controls="${esc(group.id)}-detail"><span data-bank-history-group-label>查看 ${count} 筆</span><span aria-hidden="true">▾</span></button>
       </div></td>
     </tr>${renderHistoryGroupDetail(group)}`;
@@ -783,10 +793,10 @@
     const display = reconciliationDisplayModel(visibleItems);
     const checks = view.sourceChecks;
     const historyCaption = display.historyRecordCount
-      ? `其中 ${display.historyRecordCount} 筆歷史紀錄，共整理為 ${display.historyGroupCount} 組；原始資料未變更。`
-      : '歷史付款以中性標籤呈現，僅供核對。';
+      ? `其中 ${display.historyRecordCount} 筆歷史付款紀錄，共整理為 ${display.historyGroupCount} 組；每筆紀錄都仍完整保留。`
+      : '歷史付款以中性標籤呈現，只供查帳。';
     return `<section class="bank-reconciliation-heading">
-      <div><h2>銀行對帳中心</h2><p>只讀檢查帳務來源、銀行流水、手續費後金額與重複關聯；本頁不會修復或寫入資料。</p></div>
+      <div><h2>銀行對帳中心</h2><p>逐筆比對收付款與銀行紀錄；本頁只供查看，不會修改任何資料。</p></div>
     </section>
     ${renderReconciliationSummary(view)}
     ${renderReconciliationFilters(view)}
