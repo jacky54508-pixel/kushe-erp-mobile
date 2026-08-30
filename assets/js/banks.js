@@ -14,6 +14,7 @@
   let selectedMonth = localMonth();
   let activeBankView = 'ledger';
   let reconciliationSearchTimer = null;
+  let reconciliationNormalOpen = false;
   const reconciliationFilters = { month: '', status: 'all', direction: 'all', source: 'all', keyword: '' };
   const RECONCILIATION_STATUSES = {
     normal: { label: '正常', group: 'normal' },
@@ -656,15 +657,18 @@
 
   function renderReconciliationSummary(view) {
     const cards = [
-      ['正常', view.normalCount, '來源與金額可核對', 'is-normal'],
-      ['待確認', view.attentionCount, '舊系統紀錄，請人工查看', 'is-attention'],
-      ['異常', view.abnormalCount, '需要人工確認', 'is-abnormal']
+      ['需要處理', view.abnormalCount, view.abnormalCount ? '請查看下方需要確認的項目' : '目前沒有需要處理的銀行對帳問題', 'is-abnormal'],
+      ['歷史紀錄', view.attentionCount, '舊系統留下的紀錄，僅供查帳', 'is-attention'],
+      ['已核對正常', view.normalCount, '銀行金額已核對', 'is-normal']
     ];
     const breakdown = Object.entries(RECONCILIATION_STATUSES).map(([status, meta]) => `<div><span>${esc(meta.label)}</span><strong>${view.counts[status] || 0}</strong></div>`).join('');
     return `<section class="bank-reconciliation-summary" aria-label="銀行對帳摘要" data-normal-count="${view.normalCount}" data-attention-count="${view.attentionCount}" data-abnormal-count="${view.abnormalCount}">
       ${cards.map(([label, count, note, className]) => `<article class="${className}"><span>${label}</span><strong>${count}</strong><small>${note}</small></article>`).join('')}
     </section>
-    <section class="bank-reconciliation-breakdown" aria-label="對帳狀態細分">${breakdown}</section>`;
+    <details class="bank-reconciliation-breakdown-details">
+      <summary>查看詳細統計 <span aria-hidden="true">▾</span></summary>
+      <section class="bank-reconciliation-breakdown" aria-label="對帳狀態細分">${breakdown}</section>
+    </details>`;
   }
 
   function renderReconciliationFilters(view) {
@@ -676,7 +680,7 @@
     ].join('');
     return `<section class="commission-panel bank-reconciliation-filter-panel">
       <div class="bank-reconciliation-quick" aria-label="快速篩選">
-        <button type="button" data-bank-reconciliation-quick="all" class="${reconciliationFilters.status === 'all' ? 'is-active' : ''}">全部</button>
+        <button type="button" data-bank-reconciliation-quick="all" class="${reconciliationFilters.status === 'all' ? 'is-active' : ''}">查看全部</button>
         <button type="button" data-bank-reconciliation-quick="attention" class="${reconciliationFilters.status === 'attention' ? 'is-active' : ''}">只看需要注意</button>
       </div>
       <div class="bank-reconciliation-filters">
@@ -728,18 +732,41 @@
     };
   }
 
-  function renderReconciliationItemRow(item) {
+  function reconciliationResultText(item) {
+    if (item.status === 'normal') return '✓ 金額已對上';
+    if (item.status === 'history-normal') {
+      if (item.sourceKind === 'salary') return '✓ 薪資與銀行金額已對上';
+      if (item.sourceKind === 'payable' && /材料、發票/.test(item.description || '')) return '✓ 材料、發票與銀行金額已對上';
+      if (item.sourceKind === 'receipt' || item.sourceKind === 'retention') return '✓ 收款與銀行金額已對上';
+      return '✓ 付款與銀行金額已對上';
+    }
+    if (item.status === 'history-pending') return '○ 僅供查帳';
+    if (item.status === 'missing-bank') return '! 銀行紀錄找不到，請確認';
+    if (item.status === 'missing-source') return '! 原帳務資料找不到，請確認';
+    if (item.status === 'mismatch') return '! 金額不同，請確認';
+    if (item.status === 'duplicate') return '! 可能重複入帳，請確認';
+    return '! 請人工確認';
+  }
+
+  function reconciliationPurposeMarkup(item) {
     const direction = reconciliationDirection(item);
+    return `<div class="bank-reconciliation-purpose"><strong>${esc(item.sourceLabel)}</strong><small><span class="bank-direction ${direction.className}">${esc(direction.text)}</span></small></div>`;
+  }
+
+  function reconciliationResultMarkup(item) {
+    return `<div class="bank-reconciliation-result is-${esc(item.statusGroup)}"><strong>${esc(reconciliationResultText(item))}</strong>
+      <details><summary>查看詳情</summary><div>${reconciliationDescriptionMarkup(item)}</div></details>
+    </div>`;
+  }
+
+  function renderReconciliationItemRow(item) {
     return `<tr data-reconciliation-status="${esc(item.status)}" data-reconciliation-source="${esc(item.sourceKind)}">
       <td class="bank-date">${esc(item.date || '—')}</td>
-      <td>${reconciliationStatusMarkup(item)}</td>
-      <td><span class="bank-direction ${direction.className}">${esc(direction.text)}</span></td>
-      <td><span class="bank-source">${esc(item.sourceLabel)}</span></td>
       <td class="bank-counterparty"><strong>${esc(item.party || '—')}</strong>${item.project ? `<small>${esc(item.project)}</small>` : ''}${item.sourceNo ? `<small>${esc(item.sourceNo)}</small>` : ''}</td>
+      <td>${reconciliationPurposeMarkup(item)}</td>
       <td class="num">${item.accountingAmount === null ? '—' : money(item.accountingAmount)}</td>
       <td class="num">${item.bankAmount === null ? '—' : money(item.bankAmount)}</td>
-      <td class="num bank-reconciliation-difference ${item.difference ? 'has-difference' : ''}">${reconciliationDifference(item.difference)}</td>
-      <td class="bank-reconciliation-description">${reconciliationDescriptionMarkup(item)}</td>
+      <td>${reconciliationResultMarkup(item)}</td>
     </tr>`;
   }
 
@@ -752,7 +779,7 @@
       <td>${reconciliationTechnicalInfo(item)}</td>
     </tr>`).join('');
     return `<tr class="bank-reconciliation-group-detail" id="${esc(group.id)}-detail" data-bank-history-group-detail="${esc(group.id)}" hidden>
-      <td colspan="9"><section class="bank-history-group-panel">
+      <td colspan="6"><section class="bank-history-group-panel">
         <header><strong>原始 ${group.items.length} 筆歷史付款紀錄</strong><span>以下保留每筆原始內容，方便逐筆查帳。</span></header>
         <div class="bank-history-group-scroll"><table>
           <thead><tr><th>原日期</th><th>原對象／案場</th><th>原來源單號</th><th class="num">原帳務金額</th><th>技術資訊</th></tr></thead>
@@ -764,49 +791,71 @@
 
   function renderHistoryGroupRows(group) {
     const item = group.item;
-    const direction = reconciliationDirection(item);
     const count = group.items.length;
     return `<tr class="bank-reconciliation-group-row" data-reconciliation-status="${esc(item.status)}" data-reconciliation-source="${esc(item.sourceKind)}" data-bank-history-group-count="${count}">
       <td class="bank-date">${esc(item.date || '—')}</td>
-      <td>${reconciliationStatusMarkup(item)}</td>
-      <td><span class="bank-direction ${direction.className}">${esc(direction.text)}</span></td>
-      <td><span class="bank-source">${esc(item.sourceLabel)}</span></td>
       <td class="bank-counterparty"><strong>${esc(item.party || '—')}</strong>${item.project ? `<small>${esc(item.project)}</small>` : ''}${item.sourceNo ? `<small>${esc(item.sourceNo)}</small>` : ''}</td>
+      <td>${reconciliationPurposeMarkup(item)}</td>
       <td class="num">${money(item.accountingAmount)}</td>
       <td class="num">—</td>
-      <td class="num bank-reconciliation-difference">—</td>
-      <td class="bank-reconciliation-description"><div class="bank-history-group-summary">
-        <div><strong>共 ${count} 筆歷史付款紀錄</strong><small>展開即可查看每筆紀錄</small></div>
+      <td><div class="bank-history-group-summary">
+        <div><strong>○ 僅供查帳</strong><small>共 ${count} 筆歷史付款紀錄</small></div>
         <button type="button" data-bank-history-group-toggle="${esc(group.id)}" data-bank-history-group-count="${count}" aria-expanded="false" aria-controls="${esc(group.id)}-detail"><span data-bank-history-group-label>查看 ${count} 筆</span><span aria-hidden="true">▾</span></button>
       </div></td>
     </tr>${renderHistoryGroupDetail(group)}`;
   }
 
   function renderReconciliationRows(display) {
-    if (!display.rows.length) return '<tr><td colspan="9" class="billing-empty">沒有符合目前篩選條件的對帳資料。</td></tr>';
+    if (!display.rows.length) return '<tr><td colspan="6" class="billing-empty">沒有符合目前篩選條件的對帳資料。</td></tr>';
     return display.rows.map((row) => row.type === 'history-group' ? renderHistoryGroupRows(row) : renderReconciliationItemRow(row.item)).join('');
   }
 
-  function renderReconciliation(state) {
-    const view = bankReconciliationView(state);
-    const visibleItems = reconciliationVisibleItems(view);
-    const display = reconciliationDisplayModel(visibleItems);
-    const checks = view.sourceChecks;
-    const historyCaption = display.historyRecordCount
-      ? `其中 ${display.historyRecordCount} 筆歷史付款紀錄，共整理為 ${display.historyGroupCount} 組；每筆紀錄都仍完整保留。`
-      : '歷史付款以中性標籤呈現，只供查帳。';
-    return `<section class="bank-reconciliation-heading">
-      <div><h2>銀行對帳中心</h2><p>逐筆比對收付款與銀行紀錄；本頁只供查看，不會修改任何資料。</p></div>
-    </section>
-    ${renderReconciliationSummary(view)}
-    ${renderReconciliationFilters(view)}
-    <section class="commission-panel billing-list-panel bank-reconciliation-panel" data-receipt-check-count="${checks.receiptCount}" data-payable-check-count="${checks.payablePaymentCount}" data-salary-check-count="${checks.salaryPaymentCount}" data-legacy-summary-count="${checks.legacySummaryCount}" data-visible-raw-count="${visibleItems.length}" data-history-record-count="${display.historyRecordCount}" data-history-group-count="${display.historyGroupCount}" data-display-row-count="${display.rows.length}">
-      <header class="project-section-title"><div><h2>逐筆對帳結果</h2><p>顯示 ${visibleItems.length}／${view.items.length} 筆；${historyCaption}</p></div></header>
-      <div class="commission-table-wrap bank-reconciliation-scroll"><table class="commission-table bank-reconciliation-table">
-        <thead><tr><th>日期</th><th>狀態</th><th>收／支</th><th>來源</th><th>對象／案場</th><th class="num">帳務金額</th><th class="num">銀行金額</th><th class="num">差額</th><th>說明</th></tr></thead>
+  function renderReconciliationTable(items, options = {}) {
+    const display = reconciliationDisplayModel(items);
+    return `<section class="commission-panel billing-list-panel bank-reconciliation-panel ${esc(options.className || '')}" data-history-record-count="${display.historyRecordCount}" data-history-group-count="${display.historyGroupCount}" data-display-row-count="${display.rows.length}">
+      <header class="project-section-title"><div><h2>${esc(options.title || '對帳資料')}</h2>${options.note ? `<p>${esc(options.note)}</p>` : ''}</div>${options.countLabel ? `<strong class="bank-reconciliation-section-count">${esc(options.countLabel)}</strong>` : ''}</header>
+      <div class="commission-table-wrap bank-reconciliation-scroll"><table class="commission-table bank-reconciliation-table bank-reconciliation-overview-table">
+        <thead><tr><th>日期</th><th>對象</th><th>用途</th><th class="num">帳務金額</th><th class="num">銀行金額</th><th>核對結果</th></tr></thead>
         <tbody>${renderReconciliationRows(display)}</tbody>
       </table></div>
     </section>`;
+  }
+
+  function renderReconciliation(state, actualBalance) {
+    const view = bankReconciliationView(state);
+    const visibleItems = reconciliationVisibleItems(view);
+    const issueStatuses = new Set(['missing-bank', 'missing-source', 'mismatch', 'duplicate']);
+    const issueItems = visibleItems.filter((item) => issueStatuses.has(item.status));
+    const historyItems = visibleItems.filter((item) => item.status === 'history-pending');
+    const normalItems = visibleItems.filter((item) => item.status === 'normal' || item.status === 'history-normal');
+    const historyDisplay = reconciliationDisplayModel(historyItems);
+    const checks = view.sourceChecks;
+    const issueSection = issueItems.length
+      ? renderReconciliationTable(issueItems, { title: '需要處理', note: '只列出需要人工確認的銀行對帳問題。', countLabel: `共 ${issueItems.length} 筆`, className: 'is-issues' })
+      : view.abnormalCount === 0
+        ? `<section class="commission-panel bank-reconciliation-empty-success" data-bank-reconciliation-issues-empty="true"><strong>✓ 目前沒有需要處理的銀行對帳問題。</strong><span>收付款與銀行紀錄目前沒有發現異常</span></section>`
+        : `<section class="commission-panel bank-reconciliation-empty-success is-filtered" data-bank-reconciliation-issues-filtered="true"><strong>目前篩選條件下沒有需要處理的項目。</strong><span>完整資料仍有 ${view.abnormalCount} 筆需要人工確認</span></section>`;
+    const historySection = renderReconciliationTable(historyItems, {
+      title: '歷史紀錄',
+      note: '舊系統留下的紀錄，僅供查帳，不影響銀行餘額。',
+      countLabel: historyDisplay.historyRecordCount ? `${historyDisplay.historyRecordCount} 筆紀錄，共 ${historyDisplay.historyGroupCount} 組` : '0 筆',
+      className: 'is-history'
+    });
+    const normalSection = `<details class="bank-reconciliation-normal-section" data-bank-reconciliation-normal-section ${reconciliationNormalOpen ? 'open' : ''}>
+      <summary><span><strong>已核對正常</strong><small>銀行金額已核對，平常可保持收合。</small></span><span class="bank-reconciliation-normal-action">共 ${normalItems.length} 筆　查看</span></summary>
+      ${renderReconciliationTable(normalItems, { title: '已核對正常明細', note: '包含一般正常資料與已驗證的歷史資料。', countLabel: `共 ${normalItems.length} 筆`, className: 'is-normal' })}
+    </details>`;
+    return `<section class="bank-reconciliation-heading">
+      <div><h2>銀行對帳中心</h2><p>逐筆比對收付款與銀行紀錄；本頁只供查看，不會修改任何資料。</p></div>
+      <span class="bank-reconciliation-current-balance">目前銀行餘額 <strong>${money(actualBalance)}</strong></span>
+    </section>
+    ${renderReconciliationSummary(view)}
+    ${renderReconciliationFilters(view)}
+    <div class="bank-reconciliation-sections" data-receipt-check-count="${checks.receiptCount}" data-payable-check-count="${checks.payablePaymentCount}" data-salary-check-count="${checks.salaryPaymentCount}" data-legacy-summary-count="${checks.legacySummaryCount}" data-visible-raw-count="${visibleItems.length}" data-history-record-count="${historyDisplay.historyRecordCount}" data-history-group-count="${historyDisplay.historyGroupCount}">
+      ${issueSection}
+      ${historySection}
+      ${normalSection}
+    </div>`;
   }
 
   function render() {
@@ -821,12 +870,12 @@
     app.innerHTML = `<section class="commissions-heading bank-ledger-heading">
       <div><h1>銀行查帳</h1><p>依月份查看銀行收支與逐筆餘額</p></div>
     </section>
-    <section class="bank-current-balance-card" aria-label="目前銀行餘額">
+    ${activeBankView === 'ledger' ? `<section class="bank-current-balance-card" aria-label="目前銀行餘額">
       <div class="bank-current-balance-amount"><span>目前銀行餘額</span><strong>${money(actualBalance)}</strong></div>
       <div class="bank-current-balance-context"><strong>${esc(accountName)}</strong><span>依目前全部銀行收支計算</span></div>
-    </section>
+    </section>` : ''}
     ${renderBankTabs()}
-    ${activeBankView === 'reconciliation' ? renderReconciliation(state) : renderLedger(state)}`;
+    ${activeBankView === 'reconciliation' ? renderReconciliation(state, actualBalance) : renderLedger(state)}`;
     window.KusheIcons?.render(app);
   }
 
@@ -858,7 +907,15 @@
       }
       const quickButton = event.target.closest('[data-bank-reconciliation-quick]');
       if (quickButton) {
-        reconciliationFilters.status = quickButton.dataset.bankReconciliationQuick === 'attention' ? 'attention' : 'all';
+        const attentionOnly = quickButton.dataset.bankReconciliationQuick === 'attention';
+        reconciliationFilters.status = attentionOnly ? 'attention' : 'all';
+        if (!attentionOnly) {
+          reconciliationFilters.month = '';
+          reconciliationFilters.direction = 'all';
+          reconciliationFilters.source = 'all';
+          reconciliationFilters.keyword = '';
+        }
+        reconciliationNormalOpen = !attentionOnly;
         render();
         return;
       }
@@ -881,6 +938,9 @@
       reconciliationFilters[filter.dataset.bankReconciliationFilter] = filter.value;
       render();
     });
+    app.addEventListener('toggle', (event) => {
+      if (event.target.matches('[data-bank-reconciliation-normal-section]')) reconciliationNormalOpen = event.target.open;
+    }, true);
     app.addEventListener('input', (event) => {
       const filter = event.target.closest('[data-bank-reconciliation-filter="keyword"]');
       if (!filter) return;
