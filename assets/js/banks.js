@@ -236,6 +236,50 @@
     });
   }
 
+  function verifiedLegacyPayrollReconciliation(state, transaction) {
+    const transactionId = cleanId(transaction?.id);
+    const sourceId = cleanId(transaction?.sourceId);
+    const payrollId = cleanId(transaction?.payrollId);
+    const payrollRows = collection(state, 'payroll');
+    const payrollGroupIdentity = (row) => {
+      const month = cleanId(row?.month);
+      let employee = cleanId(row?.employee || row?.employeeId);
+      if (!employee && cleanId(row?.employeeName)) {
+        const matches = collection(state, 'employees').filter((item) => cleanId(item.name) === cleanId(row.employeeName));
+        if (matches.length === 1) employee = cleanId(matches[0].id);
+      }
+      return employee && month ? `${employee}::${month}` : '';
+    };
+    const directSources = payrollRows.filter((row) => {
+      const id = cleanId(row.id);
+      return id && (id === payrollId || id === sourceId);
+    });
+    const transactionSources = payrollRows.filter((row) => cleanId(row.paymentTransactionId) === transactionId);
+    const source = directSources.length === 1 && payrollGroupIdentity(directSources[0]) ? directSources[0] : null;
+    const fallbackGroups = new Set(transactionSources.map(payrollGroupIdentity).filter(Boolean));
+    const payroll = source || (fallbackGroups.size === 1 ? transactionSources[0] : null);
+    if (!payroll) return null;
+
+    const truth = store.payrollPaymentTruth(payroll);
+    if (truth?.integrity !== 'verified-legacy') return { payroll, truth, status: 'history-pending' };
+    const verifiedTransactions = truth?.verifiedLegacyTransactions || [];
+    const verifiedMatches = verifiedTransactions.filter((row) => cleanId(row.id) === transactionId);
+    if (verifiedMatches.length !== 1) return { payroll, truth, status: 'history-pending' };
+
+    const historyMatches = (truth.history || []).filter((row) => cleanId(row.bankTransactionId) === transactionId);
+    if (historyMatches.length !== 1) return { payroll, truth, status: 'history-pending' };
+    const history = historyMatches[0];
+    const accountingAmount = store.num(history.actualDebit ?? history.amount);
+    const bankAmount = transactionAmount(transaction);
+    return {
+      payroll,
+      truth,
+      status: Math.round(accountingAmount) === Math.round(bankAmount) ? 'history-normal' : 'mismatch',
+      accountingAmount,
+      bankAmount
+    };
+  }
+
   function unmatchedTransactionItem(state, row) {
     const sourceType = cleanId(row.sourceType);
     const bankAmount = transactionAmount(row);
@@ -243,6 +287,8 @@
     let kind = 'history';
     let source = null;
     let description = '此筆為舊版銀行流水，目前資料不足以安全判定來源。';
+    let accountingAmount = null;
+    let difference = null;
 
     if (sourceType === 'receivable') {
       kind = 'receipt';
@@ -265,11 +311,22 @@
       description = reconciliationDescription(status, row, kind, 1);
     } else if (['payroll', 'salary_payment'].includes(sourceType)) {
       kind = 'salary';
-      source = collection(state, 'payroll').find((item) => cleanId(item.id) === cleanId(row.sourceId));
-      status = 'missing-source';
-      description = sourceType === 'payroll' && source
-        ? '銀行流水與薪資月份仍存在，但原薪資付款紀錄已不存在。'
-        : reconciliationDescription(status, row, kind, 1);
+      const legacyPayroll = verifiedLegacyPayrollReconciliation(state, row);
+      source = legacyPayroll?.payroll || collection(state, 'payroll').find((item) => cleanId(item.id) === cleanId(row.payrollId || row.sourceId));
+      if (!source) {
+        status = 'missing-source';
+        description = reconciliationDescription(status, row, kind, 1);
+      } else if (!legacyPayroll || legacyPayroll.status === 'history-pending') {
+        status = 'history-pending';
+        description = '薪資月份仍存在，但目前關聯不足以唯一核對這筆舊版銀行流水。';
+      } else {
+        status = legacyPayroll.status;
+        accountingAmount = legacyPayroll.accountingAmount;
+        difference = legacyPayroll.bankAmount - legacyPayroll.accountingAmount;
+        description = status === 'history-normal'
+          ? '此筆為舊版薪資付款資料，薪資月份與銀行流水仍可完整核對，金額正常。'
+          : '舊版薪資付款資料仍可連回薪資月份，但帳務金額與銀行支出不一致。';
+      }
     }
 
     const contextRow = source
@@ -289,9 +346,9 @@
       party: context.party,
       project: context.project,
       sourceNo: row.sourceNo || context.sourceNo,
-      accountingAmount: status === 'history-normal' ? bankAmount : null,
+      accountingAmount: accountingAmount ?? (status === 'history-normal' ? bankAmount : null),
       bankAmount,
-      difference: status === 'history-normal' ? 0 : null,
+      difference: difference ?? (status === 'history-normal' ? 0 : null),
       description,
       transactionIds: [cleanId(row.id)],
       sourceId: cleanId(row.sourceId),
