@@ -273,6 +273,103 @@
       payableNo: row.payableNo || row.number || row.sourceNo || '—'
     };
   }
+  function historicalTaxPaymentTruth(payable, state = store.getState()) {
+    const rows = (key) => Array.isArray(state?.[key]) ? state[key] : [];
+    const clean = (value) => String(value || '').trim();
+    const label = (value) => clean(value).replace(/\s+/g, '').toLocaleLowerCase('zh-Hant');
+    const amount = (value) => Math.round(store.num(value));
+    const payableId = clean(payable?.id);
+    if (!payableId || clean(payable?.sourceType) !== 'material-merged' || !rows('payables').some((row) => clean(row.id) === payableId)) return null;
+
+    const netAmount = amount(payable.amount), paidAmount = amount(payable.paid);
+    if (netAmount <= 0 || paidAmount !== netAmount) return null;
+    const vendorId = clean(payable.vendor || payable.vendorId);
+    const vendorName = label(payable.vendorName || rows('vendors').find((row) => clean(row.id) === vendorId)?.name);
+    const sourceNo = label(payable.sourceNo || payable.item);
+    if ((!vendorId && !vendorName) || !sourceNo) return null;
+
+    const usageIds = Array.isArray(payable.usageIds) ? payable.usageIds.map(clean).filter(Boolean) : [];
+    const uniqueUsageIds = new Set(usageIds);
+    const sourceUsageIds = new Set(clean(payable.sourceId).split(',').map(clean).filter(Boolean));
+    if (!usageIds.length || uniqueUsageIds.size !== usageIds.length || sourceUsageIds.size !== uniqueUsageIds.size || [...uniqueUsageIds].some((id) => !sourceUsageIds.has(id))) return null;
+    const materialUsages = usageIds.map((id) => rows('materialUsages').find((row) => clean(row.id) === id));
+    if (materialUsages.some((row) => !row)) return null;
+    const sameVendor = (row) => {
+      const rowVendorId = clean(row?.vendor || row?.vendorId);
+      if (vendorId && rowVendorId) return rowVendorId === vendorId;
+      return Boolean(vendorName && label(row?.vendorName || row?.party || rows('vendors').find((vendor) => clean(vendor.id) === rowVendorId)?.name) === vendorName);
+    };
+    if (!materialUsages.every(sameVendor)) return null;
+    const materialTotal = materialUsages.reduce((sum, row) => sum + amount(row.amount ?? store.num(row.quantity) * store.num(row.unitPrice)), 0);
+    if (materialTotal !== netAmount) return null;
+
+    const inputInvoices = rows('invoices').filter((row) => {
+      const invoiceType = clean(row.invoiceType), type = clean(row.type);
+      const invoiceNumber = clean(row.invoiceNumber || row.invoiceNo || row.number);
+      const invoiceNet = amount(row.netAmount ?? row.amount);
+      const invoiceTax = amount(row.taxAmount ?? row.tax);
+      const invoiceGross = amount(row.grossAmount ?? row.total) || invoiceNet + invoiceTax;
+      const invoiceSourceNo = label(row.sourceNo);
+      return (invoiceType === 'input' || /進項/.test(type))
+        && clean(row.status) !== 'void'
+        && invoiceNumber
+        && sameVendor(row)
+        && label(row.party || row.vendorName || rows('vendors').find((vendor) => clean(vendor.id) === clean(row.vendorId || row.vendor))?.name) === vendorName
+        && invoiceSourceNo === sourceNo
+        && invoiceNet === netAmount
+        && invoiceTax > 0
+        && invoiceGross === invoiceNet + invoiceTax;
+    });
+    if (inputInvoices.length !== 1) return null;
+    const invoice = inputInvoices[0];
+    const taxAmount = amount(invoice.taxAmount ?? invoice.tax);
+    const grossAmount = amount(invoice.grossAmount ?? invoice.total) || netAmount + taxAmount;
+
+    const linkedPaymentTransactionIds = new Set(rows('payments').map((row) => clean(row.bankTransactionId)).filter(Boolean));
+    const paymentIds = new Set(rows('payments').map((row) => clean(row.id)).filter(Boolean));
+    const bankTransactions = rows('bankTransactions').filter((row) => {
+      const directionText = `${clean(row.direction)} ${clean(row.type)} ${clean(row.category)}`;
+      const bankId = clean(row.bankAccountId || row.bankId);
+      const oldSourceId = clean(row.sourceId);
+      const bankSourceNo = label(row.sourceNo);
+      const bankAmount = amount(row.actualDebit ?? row.amount);
+      return /out|支出|付款/.test(directionText)
+        && /payable|應付/i.test(`${clean(row.sourceType)} ${clean(row.category)}`)
+        && sameVendor(row)
+        && bankSourceNo === sourceNo
+        && bankAmount === grossAmount
+        && /^\d{4}-\d{2}-\d{2}$/.test(clean(row.date))
+        && bankId
+        && rows('banks').some((bank) => clean(bank.id) === bankId)
+        && oldSourceId
+        && !rows('payables').some((other) => clean(other.id) === oldSourceId)
+        && !linkedPaymentTransactionIds.has(clean(row.id))
+        && !paymentIds.has(oldSourceId);
+    });
+    if (bankTransactions.length !== 1) return null;
+    const bankTransaction = bankTransactions[0];
+    const bankId = clean(bankTransaction.bankAccountId || bankTransaction.bankId);
+    const bank = rows('banks').find((row) => clean(row.id) === bankId);
+    return {
+      verified: true,
+      payableId,
+      payableNo: payable.payableNo || payable.number || payable.sourceNo || '',
+      vendorName: payable.vendorName || rows('vendors').find((row) => clean(row.id) === vendorId)?.name || '',
+      sourceLabel: `${payable.category || '材料採購'}／${payableSourceLabel(payable.sourceType)}`,
+      materialUsages,
+      materialTotal,
+      netAmount,
+      taxAmount,
+      grossAmount,
+      invoice,
+      invoiceNumber: invoice.invoiceNumber || invoice.invoiceNo || invoice.number || '',
+      bankTransaction,
+      bankAmount: amount(bankTransaction.actualDebit ?? bankTransaction.amount),
+      bankDate: bankTransaction.date || '',
+      bankName: bank?.name || bank?.bank || bank?.account || '銀行帳戶',
+      paymentCount: 1
+    };
+  }
   function allRows() {
     const state = store.getState();
     return state.payables.filter((row) => !/payroll|salary/i.test(row.sourceType || '')).map((row) => payableView(row, state));
@@ -365,19 +462,28 @@
     const project = payable.projectName || state.projects.find((row) => row.id === payable.project)?.name || '—';
     return `<section class="payable-source-section"><header><div><h3>費用明細</h3><p>直接顯示此筆應付既有來源</p></div></header><div class="payable-detail-scroll"><table class="payable-expense-table"><thead><tr><th>日期</th><th>案場</th><th>類別／來源</th><th>項目／說明</th><th class="num">金額</th><th>備註</th></tr></thead><tbody><tr><td>${esc(payable.date || '—')}</td><td>${esc(project)}</td><td>${esc(payable.category || payable.sourceNo || '其他')}</td><td>${esc(payable.item || payable.description || payable.sourceNo || '—')}</td><td class="num"><b>${money(payable.amount)}</b></td><td>${esc(payable.note || '—')}</td></tr></tbody></table></div></section>`;
   }
-  function paymentHistoryMarkup(payable, state) {
+  function verifiedHistoricalPaymentMarkup(payable, truth) {
+    return `<section class="payable-payment-section"><header><div><h3>付款紀錄</h3><p>${truth.paymentCount} 次付款（歷史資料已核對）</p></div></header><div class="payable-history-scroll"><table class="payable-detail-table payable-tax-payment-table"><thead><tr><th>付款日期</th><th class="num">未稅沖帳</th><th class="num">進項稅額</th><th class="num">銀行實際付款</th><th>銀行帳戶</th><th>付款狀態</th><th>備註</th></tr></thead><tbody><tr><td>${esc(truth.bankDate || '—')}</td><td class="num">${money(truth.netAmount)}</td><td class="num">${money(truth.taxAmount)}</td><td class="num"><b>${money(truth.bankAmount)}</b></td><td>${esc(truth.bankName)}</td><td><span class="commission-status settled">已完成</span></td><td>歷史付款資料，材料、發票與銀行金額已完整核對</td></tr></tbody></table></div></section>`;
+  }
+  function paymentHistoryMarkup(payable, state, taxPayment = null) {
+    if (taxPayment?.verified) return verifiedHistoricalPaymentMarkup(payable, taxPayment);
     const history = state.payments.filter((row) => row.payableId === payable.id).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
     return `<section class="payable-payment-section"><header><div><h3>付款紀錄</h3><p>${history.length ? `${history.length} 次付款` : '尚未付款'}</p></div></header>${history.length ? `<div class="payable-history-scroll"><table class="payable-detail-table"><thead><tr><th>付款日期</th><th class="num">本次付款</th><th>銀行帳戶</th><th>付款方式</th><th class="num">手續費</th><th class="num">實際扣款</th><th>備註</th><th>操作</th></tr></thead><tbody>${history.map((payment) => {
       const bank = state.banks.find((item) => item.id === payment.bankId);
       return `<tr><td>${esc(payment.date || '—')}</td><td class="num">${money(payment.amount)}</td><td>${esc(bank?.name || bank?.bank || bank?.account || '—')}</td><td>${esc(payment.paymentMethod || '銀行轉帳')}</td><td class="num">${money(payment.fee)}</td><td class="num">${money(payment.actualDebit ?? payment.amount)}</td><td>${esc(payment.note || '—')}</td><td>${payment.legacy?'—':`<button class="commission-link" type="button" data-edit-payment="${esc(payment.id)}">編輯</button><button class="commission-link" type="button" data-delete-payment="${esc(payment.id)}">刪除</button>`}</td></tr>`;
     }).join('')}</tbody></table></div>` : `<div class="payable-empty-state"><span>尚無付款紀錄</span><button class="commission-secondary compact" type="button" data-empty-pay="${esc(payable.id)}">＋ 新增付款</button></div>`}</section>`;
   }
+  function taxPaymentDetailsMarkup(payable, truth) {
+    if (!truth?.verified) return '';
+    return `<section class="payable-tax-payment-section"><header><div><h3>實際付款資訊</h3><p>${esc(truth.sourceLabel)}；未稅應付與含稅銀行付款分開呈現</p></div></header><div class="payable-tax-payment-groups"><article><h4>應付資訊</h4><dl><div><dt>材料未稅</dt><dd>${money(truth.netAmount)}</dd></div><div><dt>稅額</dt><dd>${money(truth.taxAmount)}</dd></div><div><dt>含稅總額</dt><dd>${money(truth.grossAmount)}</dd></div><div><dt>付款狀態</dt><dd>已付清</dd></div></dl></article><article><h4>發票</h4><dl><div><dt>發票號碼</dt><dd>${esc(truth.invoiceNumber)}</dd></div><div><dt>未稅</dt><dd>${money(truth.netAmount)}</dd></div><div><dt>稅額</dt><dd>${money(truth.taxAmount)}</dd></div><div><dt>含稅</dt><dd>${money(truth.grossAmount)}</dd></div></dl></article><article><h4>銀行付款</h4><dl><div><dt>實際付款</dt><dd>${money(truth.bankAmount)}</dd></div><div><dt>銀行交易日期</dt><dd>${esc(truth.bankDate)}</dd></div><div><dt>付款銀行</dt><dd>${esc(truth.bankName)}</dd></div><div><dt>付款狀態</dt><dd>已完成</dd></div></dl></article></div><p class="payable-tax-history-note">此筆為歷史付款資料，原始舊應付關聯已不存在，但目前材料、發票與銀行付款可完整核對。</p></section>`;
+  }
   function detailMarkup(id, state) {
     const raw = state.payables.find((row) => row.id === id);
     if (!raw) return '';
     const payable = payableView(raw, state);
+    const taxPayment = historicalTaxPaymentTruth(raw, state);
     const source = materialSource(payable) ? materialDetailsMarkup(payable, state) : expenseDetailsMarkup(payable, state);
-    return `<tr class="payable-history-row" data-payment-detail="${esc(id)}"><td colspan="9"><div class="payable-expanded-content">${source}${paymentHistoryMarkup(payable,state)}</div></td></tr>`;
+    return `<tr class="payable-history-row" data-payment-detail="${esc(id)}"><td colspan="9"><div class="payable-expanded-content">${taxPaymentDetailsMarkup(payable,taxPayment)}${source}${paymentHistoryMarkup(payable,state,taxPayment)}</div></td></tr>`;
   }
   function toggleDetail(id) {
     const main = $(`[data-expand-payable="${CSS.escape(id)}"]`);
@@ -621,9 +727,11 @@
       <section class="commission-panel commission-filters"><div class="payable-filter-grid"><label><span>月份</span><input id="payableMonth" type="month" value="${esc(filters.month)}"></label><label><span>廠商／收款人</span><select id="payableVendor">${selectOptions(state.vendors,filters.vendor,'全部廠商／收款人')}</select></label><label><span>案場</span><select id="payableProject">${selectOptions(state.projects,filters.project,'全部案場')}</select></label><label><span>類別</span><select id="payableCategory"><option value="">全部類別</option>${categories.map((value) => `<option ${filters.category === value ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select></label><label><span>付款狀態</span><select id="payableStatus"><option value="">全部狀態</option>${['未付款','部分付款','已付清'].map((value) => `<option ${filters.status === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label class="payable-search"><span>關鍵字</span><input id="payableQuery" type="search" value="${esc(filters.query)}" placeholder="廠商、案場、材料或費用"></label></div></section>
       <section class="commission-panel billing-list-panel"><div class="commission-table-wrap"><table class="commission-table payable-table"><thead><tr><th>日期</th><th>廠商／收款人</th><th>案場</th><th>類別／來源</th><th class="num">應付金額</th><th class="num">已付</th><th class="num">未付</th><th>狀態</th><th>操作</th></tr></thead><tbody>${rows.map((row) => {
         const history = state.payments.filter((payment) => payment.payableId === row.id);
+        const taxPayment = historicalTaxPaymentTruth(state.payables.find((payable) => payable.id === row.id), state);
         const project = projectLabel(row, state);
         const source = row.sourceNo || row.item || row.category;
-        return `<tr class="payable-main-row" data-expand-payable="${esc(row.id)}" tabindex="0" aria-expanded="false"><td>${esc(row.date || '—')}</td><td><b>${esc(row.vendorName)}</b>${history.length ? `<span class="receipt-count-badge">${history.length} 次付款</span>` : ''}</td><td><b>${esc(project)}</b></td><td><span class="payable-category">${esc(row.category)}</span><small class="payable-source-label">${esc(source)}</small></td><td class="num">${money(row.amount)}</td><td class="num">${money(row.paid)}</td><td class="num"><b>${money(row.outstanding)}</b></td><td><span class="commission-status ${row.baseStatus === '已付清' ? 'settled' : row.baseStatus === '部分付款' ? 'partial' : row.overdue ? 'overdue' : ''}">${esc(row.status)}</span></td><td><div class="receivable-actions payable-row-actions">${row.outstanding > 0 ? `<button class="commission-primary compact" type="button" data-pay="${esc(row.id)}">付款</button>` : ''}<button class="receivable-expand" type="button" data-expand-button="${esc(row.id)}" aria-label="展開應付明細" aria-expanded="false"><span aria-hidden="true">⌄</span></button><div class="payable-more"><button class="payable-more-toggle" type="button" data-payable-more="${esc(row.id)}" aria-label="更多操作" aria-expanded="false">⋯</button></div></div></td></tr>`;
+        const paymentCount = taxPayment?.verified ? taxPayment.paymentCount : history.length;
+        return `<tr class="payable-main-row" data-expand-payable="${esc(row.id)}" tabindex="0" aria-expanded="false"><td>${esc(row.date || '—')}</td><td><b>${esc(row.vendorName)}</b>${paymentCount ? `<span class="receipt-count-badge">${paymentCount} 次付款</span>` : ''}</td><td><b>${esc(project)}</b></td><td><span class="payable-category">${esc(row.category)}</span><small class="payable-source-label">${esc(source)}</small></td><td class="num"><span class="payable-net-amount">${money(row.amount)}</span>${taxPayment?.verified ? `<small class="payable-tax-paid">含稅實付 ${money(taxPayment.bankAmount)}</small>` : ''}</td><td class="num">${money(row.paid)}</td><td class="num"><b>${money(row.outstanding)}</b></td><td><span class="commission-status ${row.baseStatus === '已付清' ? 'settled' : row.baseStatus === '部分付款' ? 'partial' : row.overdue ? 'overdue' : ''}">${esc(row.status)}</span></td><td><div class="receivable-actions payable-row-actions">${row.outstanding > 0 ? `<button class="commission-primary compact" type="button" data-pay="${esc(row.id)}">付款</button>` : ''}<button class="receivable-expand" type="button" data-expand-button="${esc(row.id)}" aria-label="展開應付明細" aria-expanded="false"><span aria-hidden="true">⌄</span></button><div class="payable-more"><button class="payable-more-toggle" type="button" data-payable-more="${esc(row.id)}" aria-label="更多操作" aria-expanded="false">⋯</button></div></div></td></tr>`;
       }).join('') || '<tr><td colspan="9" class="billing-empty">此篩選條件下沒有應付帳款。</td></tr>'}</tbody></table></div></section>`;
     bindListEvents();
     requestAnimationFrame(scheduleStickyScrollbar);
@@ -719,5 +827,5 @@
     if (document.body.dataset.route !== 'payables') hideStickyScrollbar();
   }
   window.addEventListener('kushe:data-updated', () => { if (active) render(); });
-  window.KushePayables = {activate,deactivate,render};
+  window.KushePayables = {activate,deactivate,render,historicalTaxPaymentTruth};
 }());

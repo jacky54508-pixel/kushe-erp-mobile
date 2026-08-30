@@ -280,6 +280,25 @@
     };
   }
 
+  function verifiedLegacyPayableTaxReconciliation(state, transaction) {
+    const analyze = window.KushePayables?.historicalTaxPaymentTruth;
+    if (typeof analyze !== 'function') return null;
+    const transactionId = cleanId(transaction?.id);
+    const matches = collection(state, 'payables').map((payable) => {
+      const truth = analyze(payable, state);
+      return truth?.verified && cleanId(truth.bankTransaction?.id) === transactionId ? { payable, truth } : null;
+    }).filter(Boolean);
+    if (matches.length !== 1) return null;
+    const match = matches[0];
+    const bankAmount = transactionAmount(transaction);
+    return {
+      ...match,
+      status: Math.round(match.truth.grossAmount) === Math.round(bankAmount) ? 'history-normal' : 'mismatch',
+      accountingAmount: match.truth.grossAmount,
+      bankAmount
+    };
+  }
+
   function unmatchedTransactionItem(state, row) {
     const sourceType = cleanId(row.sourceType);
     const bankAmount = transactionAmount(row);
@@ -306,9 +325,19 @@
       description = reconciliationDescription(status, row, kind, 1);
     } else if (['payable', 'payable-payment', 'payable_payment'].includes(sourceType)) {
       kind = 'payable';
-      source = collection(state, 'payables').find((item) => cleanId(item.id) === cleanId(row.sourceId));
-      status = 'missing-source';
-      description = reconciliationDescription(status, row, kind, 1);
+      const historicalTaxPayment = verifiedLegacyPayableTaxReconciliation(state, row);
+      source = historicalTaxPayment?.payable || collection(state, 'payables').find((item) => cleanId(item.id) === cleanId(row.sourceId));
+      if (historicalTaxPayment) {
+        status = historicalTaxPayment.status;
+        accountingAmount = historicalTaxPayment.accountingAmount;
+        difference = historicalTaxPayment.bankAmount - historicalTaxPayment.accountingAmount;
+        description = status === 'history-normal'
+          ? '原舊應付關聯已不存在，但現有合併應付、材料、進項發票與銀行付款金額可完整核對。'
+          : '現有合併應付、材料與進項發票可核對，但含稅總額與銀行付款金額不一致。';
+      } else {
+        status = 'missing-source';
+        description = reconciliationDescription(status, row, kind, 1);
+      }
     } else if (['payroll', 'salary_payment'].includes(sourceType)) {
       kind = 'salary';
       const legacyPayroll = verifiedLegacyPayrollReconciliation(state, row);
