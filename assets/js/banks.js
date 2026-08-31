@@ -842,7 +842,7 @@
       className: 'is-history'
     });
     const normalSection = `<details class="bank-reconciliation-normal-section" data-bank-reconciliation-normal-section ${reconciliationNormalOpen ? 'open' : ''}>
-      <summary><span><strong>已核對正常</strong><small>銀行金額已核對，平常可保持收合。</small></span><span class="bank-reconciliation-normal-action">共 ${normalItems.length} 筆　查看</span></summary>
+      <summary><span><strong>已核對正常</strong><small>銀行金額已核對，平常可保持收合。</small></span><span class="bank-reconciliation-normal-action" role="button" tabindex="0" data-bank-reconciliation-normal-toggle aria-expanded="${reconciliationNormalOpen}">共 ${normalItems.length} 筆　${reconciliationNormalOpen ? '收合' : '查看'}</span></summary>
       ${renderReconciliationTable(normalItems, { title: '已核對正常明細', note: '包含一般正常資料與已驗證的歷史資料。', countLabel: `共 ${normalItems.length} 筆`, className: 'is-normal' })}
     </details>`;
     return `<section class="bank-reconciliation-heading">
@@ -885,6 +885,14 @@
     if (!app) return;
     bound = true;
     app.addEventListener('click', (event) => {
+      const normalSummary = event.target.closest('[data-bank-reconciliation-normal-section] > summary');
+      if (normalSummary) {
+        event.preventDefault();
+        if (!event.target.closest('[data-bank-reconciliation-normal-toggle]')) return;
+        reconciliationNormalOpen = !reconciliationNormalOpen;
+        render();
+        return;
+      }
       const historyGroupButton = event.target.closest('[data-bank-history-group-toggle]');
       if (historyGroupButton) {
         const groupId = historyGroupButton.dataset.bankHistoryGroupToggle;
@@ -901,7 +909,9 @@
       }
       const viewButton = event.target.closest('[data-bank-view]');
       if (viewButton) {
-        activeBankView = viewButton.dataset.bankView === 'reconciliation' ? 'reconciliation' : 'ledger';
+        const nextView = viewButton.dataset.bankView === 'reconciliation' ? 'reconciliation' : 'ledger';
+        if (nextView !== activeBankView) reconciliationNormalOpen = false;
+        activeBankView = nextView;
         render();
         return;
       }
@@ -915,7 +925,6 @@
           reconciliationFilters.source = 'all';
           reconciliationFilters.keyword = '';
         }
-        reconciliationNormalOpen = !attentionOnly;
         render();
         return;
       }
@@ -938,9 +947,14 @@
       reconciliationFilters[filter.dataset.bankReconciliationFilter] = filter.value;
       render();
     });
-    app.addEventListener('toggle', (event) => {
-      if (event.target.matches('[data-bank-reconciliation-normal-section]')) reconciliationNormalOpen = event.target.open;
-    }, true);
+    app.addEventListener('keydown', (event) => {
+      const normalToggle = event.target.closest('[data-bank-reconciliation-normal-toggle]');
+      if (!normalToggle || !['Enter', ' '].includes(event.key)) return;
+      event.preventDefault();
+      reconciliationNormalOpen = !reconciliationNormalOpen;
+      render();
+      app.querySelector('[data-bank-reconciliation-normal-toggle]')?.focus();
+    });
     app.addEventListener('input', (event) => {
       const filter = event.target.closest('[data-bank-reconciliation-filter="keyword"]');
       if (!filter) return;
