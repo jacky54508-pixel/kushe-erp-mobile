@@ -370,6 +370,66 @@
       paymentCount: 1
     };
   }
+  function monthlyPaidPrincipal(state, month) {
+    const payables = Array.isArray(state?.payables) ? state.payables : [];
+    const payments = Array.isArray(state?.payments) ? state.payments : [];
+    const bankTransactions = Array.isArray(state?.bankTransactions) ? state.bankTransactions : [];
+    const payableIds = new Set(payables.map((row) => String(row.id || '')).filter(Boolean));
+    const paymentIdCounts = payments.reduce((map, row) => {
+      const id = String(row.id || '');
+      if (id) map.set(id, (map.get(id) || 0) + 1);
+      return map;
+    }, new Map());
+    const countedPaymentIds = new Set();
+    const countedBankTransactionIds = new Set();
+    const payablesWithFormalPayments = new Set(payments.filter((payment) => {
+      const id = String(payment.id || '');
+      const payableId = String(payment.payableId || '');
+      return id
+        && payment.legacy !== true
+        && !/^legacy-/i.test(id)
+        && payableIds.has(payableId);
+    }).map((payment) => String(payment.payableId || '')));
+    let total = 0;
+
+    payments.forEach((payment) => {
+      const id = String(payment.id || '');
+      const payableId = String(payment.payableId || '');
+      if (!id || paymentIdCounts.get(id) !== 1 || countedPaymentIds.has(id)) return;
+      if (payment.legacy === true || /^legacy-/i.test(id)) return;
+      if (!payableIds.has(payableId) || monthOf(payment.date) !== month) return;
+      const bankTransactionId = String(payment.bankTransactionId || '');
+      const linkedTransactions = bankTransactions.filter((transaction) => {
+        const transactionId = String(transaction.id || '');
+        const sourceId = String(transaction.sourceId || '');
+        return (bankTransactionId && transactionId === bankTransactionId) || sourceId === id;
+      });
+      if (linkedTransactions.some((row) => !String(row.id || ''))) return;
+      const uniqueTransactions = [...new Map(linkedTransactions.map((row) => [String(row.id), row])).values()];
+      if (uniqueTransactions.length > 1 || (bankTransactionId && uniqueTransactions.length !== 1)) return;
+      const linkedTransactionId = String(uniqueTransactions[0]?.id || '');
+      if (linkedTransactionId && countedBankTransactionIds.has(linkedTransactionId)) return;
+      const amount = Math.max(0, store.num(payment.amount));
+      if (!amount) return;
+      countedPaymentIds.add(id);
+      if (linkedTransactionId) countedBankTransactionIds.add(linkedTransactionId);
+      total += amount;
+    });
+
+    payables.forEach((payable) => {
+      const payableId = String(payable.id || '');
+      if (!payableId || payablesWithFormalPayments.has(payableId)) return;
+      const truth = historicalTaxPaymentTruth(payable, state);
+      if (!truth?.verified || monthOf(truth.bankDate) !== month) return;
+      const bankTransactionId = String(truth.bankTransaction?.id || '');
+      if (!bankTransactionId || countedBankTransactionIds.has(bankTransactionId)) return;
+      const amount = Math.max(0, store.num(truth.netAmount));
+      if (!amount) return;
+      countedBankTransactionIds.add(bankTransactionId);
+      total += amount;
+    });
+    return total;
+  }
   function allRows() {
     const state = store.getState();
     return state.payables.filter((row) => !/payroll|salary/i.test(row.sourceType || '')).map((row) => payableView(row, state));
@@ -715,9 +775,8 @@
     const rows = filteredRows();
     const all = allRows();
     const month = monthOf(today());
-    const payments = state.payments.filter((row) => monthOf(row.date) === month);
     const total = all.reduce((sum, row) => sum + row.amount, 0);
-    const monthPaid = payments.reduce((sum, row) => sum + store.num(row.amount), 0);
+    const monthPaid = monthlyPaidPrincipal(state, month);
     const open = all.reduce((sum, row) => sum + row.outstanding, 0);
     const overdue = all.filter((row) => row.overdue).reduce((sum, row) => sum + row.outstanding, 0);
     const monthAdded = all.filter((row) => monthOf(row.date) === month).reduce((sum, row) => sum + row.amount, 0);
