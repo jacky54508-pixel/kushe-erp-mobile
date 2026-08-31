@@ -1090,6 +1090,282 @@
     const row = {id,payableNo:nextPayableNumber(date),date,vendor:vendor?.id||'',vendorName:vendor?.name||payeeName,project:project?.id||'',projectName:project?.name||'',category:values.category||'其他',item:String(values.item||'').trim(),amount,paid:0,dueDate:values.dueDate||'',status:'未付款',note:values.note||'',sourceType:'manual-payable',sourceId:values.sourceId||id,createdAt:now,updatedAt:now};
     state.payables.unshift(row); await persist(`新增應付 ${row.payableNo}`); return row;
   }
+  function payableDeletePreview(payableId) {
+    const id=clean(payableId),payable=state?.payables?.find((row)=>String(row.id)===id),empty={payableId:id,allowed:false,blockers:[],sourceType:'',amount:0,paid:0,paymentCount:0,bankTransactionCount:0,invoiceNo:'',invoiceRecordCount:0,materialUsageCount:0,inventoryReceiptCount:0,projectCostCount:0,unknownRelationCount:0,payableNo:'',vendorName:'',projectName:'',invoiceStatus:'無正式發票'};
+    if(!payable)return {...empty,blockers:[{key:'notFound',label:'應付帳款',count:1,message:'找不到應付帳款資料。'}]};
+    const payments=(state.payments||[]).filter((row)=>String(row.payableId||'')===id),paymentIds=new Set(payments.map((row)=>String(row.id||'')).filter(Boolean)),paymentTransactionIds=new Set(payments.map((row)=>String(row.bankTransactionId||'')).filter(Boolean));
+    const bankTransactions=(state.bankTransactions||[]).filter((row)=>String(row.payableId||'')===id||paymentTransactionIds.has(String(row.id||''))||paymentIds.has(String(row.sourceId||''))||(String(row.sourceId||'')===id&&/payable|應付/i.test(`${row.sourceType||''} ${row.type||''} ${row.category||''}`))||(String(payable.paymentTransactionId||'')&&String(row.id||'')===String(payable.paymentTransactionId)));
+    const invoiceRecords=(state.invoices||[]).filter((row)=>String(row.payableId||'')===id||String(row.sourceId||'')===id);
+    const materialUsageIds=new Set();
+    (state.materialUsages||[]).forEach((row,index)=>{if(String(row.payableId||'')===id)materialUsageIds.add(String(row.id||`direct-${index}`))});
+    (Array.isArray(payable.usageIds)?payable.usageIds:[]).forEach((usageId,index)=>materialUsageIds.add(String(usageId||`source-${index}`)));
+    const inventoryReceipts=(Array.isArray(state.inventoryReceipts)?state.inventoryReceipts:[]).filter((row)=>String(row.payableId||'')===id);
+    const projectCosts=(state.projectCosts||[]).filter((row)=>String(row.payableId||'')===id||(clean(payable.sourceId)&&String(row.id||'')===String(payable.sourceId||'')));
+    const knownCollections=new Set(['payables','payments','bankTransactions','invoices','materialUsages','inventoryReceipts','projectCosts','audit']);
+    let unknownRelationCount=String(payable.sourceType||'')==='manual-payable'&&clean(payable.sourceId)&&String(payable.sourceId)!==id?1:0;
+    Object.entries(state||{}).forEach(([key,rows])=>{
+      if(knownCollections.has(key)||!Array.isArray(rows))return;
+      rows.forEach((row)=>{
+        if(!row||typeof row!=='object')return;
+        const direct=[row.payableId,row.payable].some((value)=>clean(value)===id),listed=Array.isArray(row.payableIds)&&row.payableIds.some((value)=>clean(value)===id),typedSource=clean(row.sourceId)===id&&/payable|應付/i.test(`${row.sourceType||''} ${row.type||''} ${row.category||''}`);
+        if(direct||listed||typedSource)unknownRelationCount+=1;
+      });
+    });
+    const sourceType=String(payable.sourceType||''),paid=num(payable.paid),invoiceNo=String(payable.invoiceNo||'').trim(),issuedInvoice=invoiceRecords.some((row)=>invoiceStatus(row.status,row.invoiceNumber||row.invoiceNo||row.number)==='issued'||String(row.invoiceNumber||row.invoiceNo||row.number||'').trim()),issuedPayableStatus=['issued','invoiced','已開票','已開發票'].includes(String(payable.invoiceStatus||'').trim());
+    const blockers=[],add=(key,label,count,message)=>{if(count>0)blockers.push({key,label,count,message})};
+    if(sourceType!=='manual-payable')add('sourceType','來源類型',1,sourceType==='material-project'?'此筆由材料使用自動建立，請從材料來源處理。':sourceType==='project-cost'?'此筆由案場成本建立，請從案場成本來源處理。':'此筆不是可安全刪除的手動應付，未知或歷史來源一律禁止直接刪除。');
+    add('paid','已付金額',paid!==0?1:0,'此筆已有付款金額，銀行對帳完成前禁止整筆刪除。');
+    add('payments','付款紀錄',payments.length,'此筆已有付款紀錄，銀行對帳完成前禁止整筆刪除。');
+    add('bankTransactions','銀行流水',bankTransactions.length,'此筆已有關聯銀行流水，銀行對帳完成前禁止整筆刪除。');
+    add('invoiceNo','發票號碼',invoiceNo?1:0,'此筆已有正式進項發票號碼，不可直接刪除。');
+    add('invoiceStatus','發票狀態',issuedPayableStatus?1:0,'此筆已標記正式進項發票，不可直接刪除。');
+    add('invoices','進項發票',invoiceRecords.length,'此筆已有持久化進項發票紀錄，不可直接刪除。');
+    add('materialUsages','材料來源',materialUsageIds.size,'此筆由材料使用關聯，請從材料來源處理。');
+    add('inventoryReceipts','入庫來源',inventoryReceipts.length,'此筆已有材料入庫來源，請從材料來源處理。');
+    add('projectCosts','案場成本來源',projectCosts.length,'此筆由案場成本建立，請從案場成本來源處理。');
+    add('unknownRelations','未知關聯',unknownRelationCount,'此筆存在未識別的來源關聯，為避免帳務斷鏈已停止刪除。');
+    return {payableId:id,allowed:blockers.length===0,blockers,sourceType,amount:num(payable.amount),paid,paymentCount:payments.length,bankTransactionCount:bankTransactions.length,invoiceNo,invoiceRecordCount:invoiceRecords.length,materialUsageCount:materialUsageIds.size,inventoryReceiptCount:inventoryReceipts.length,projectCostCount:projectCosts.length,unknownRelationCount,payableNo:payable.payableNo||payable.number||payable.sourceNo||'',vendorName:payable.vendorName||state.vendors?.find((row)=>String(row.id)===String(payable.vendor||''))?.name||'',projectName:payable.projectName||state.projects?.find((row)=>String(row.id)===String(payable.project||''))?.name||'',invoiceStatus:invoiceRecords.length?(issuedInvoice?'已有正式進項發票':'已有進項發票紀錄'):invoiceNo?'已填發票號碼':'無正式發票'};
+  }
+  async function deletePayable(payableId) {
+    await load();
+    const id=clean(payableId),payable=state.payables.find((row)=>String(row.id)===id);
+    if(!payable)throw new Error('找不到應付帳款資料');
+    const preview=payableDeletePreview(id);
+    if(preview.allowed!==true)throw new Error(`此筆應付帳款不能刪除：${preview.blockers.map((row)=>row.message).join(' ')}`);
+    const previousPayables=state.payables,previousMeta={...state.meta},previousAudit=[...state.audit];
+    state.payables=state.payables.filter((row)=>row!==payable);
+    try{await persist(`刪除未付款手動應付帳款｜${payable.payableNo||payable.sourceNo||payable.id}｜${payable.vendorName||''}｜${num(payable.amount)}`)}
+    catch(error){
+      state.payables=previousPayables;state.meta=previousMeta;state.audit=previousAudit;
+      try{if(!db)db=await openDB();if(db)await dbSet(STATE_KEY,state);localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state))}catch(_){/* 原始錯誤優先；記憶體狀態已完整還原 */}
+      throw error;
+    }
+    return preview;
+  }
+  function materialPayableTestCleanupPreview(payableId) {
+    const id=clean(payableId),payable=state?.payables?.find((row)=>String(row.id)===id),empty={payableId:id,allowed:false,blockers:[],sourceType:'',payableNo:'',vendorName:'',projectName:'',amount:0,paid:0,paymentCount:0,bankTransactionCount:0,invoiceRecordCount:0,materialUsageCount:0,inventoryReceiptCount:0,projectCostCount:0,sharedMaterialUsageCount:0,sharedMaterialUsageDetails:[],unknownRelationCount:0,invoices:[],materialUsages:[]};
+    if(!payable)return {...empty,blockers:[{key:'notFound',label:'應付帳款',count:1,message:'找不到應付帳款資料。'}]};
+    const payments=(state.payments||[]).filter((row)=>String(row.payableId||'')===id),paymentIds=new Set(payments.map((row)=>clean(row.id)).filter(Boolean)),paymentTransactionIds=new Set(payments.map((row)=>clean(row.bankTransactionId)).filter(Boolean));
+    const bankTransactions=(state.bankTransactions||[]).filter((row)=>String(row.payableId||'')===id||paymentTransactionIds.has(clean(row.id))||paymentIds.has(clean(row.sourceId))||(clean(row.sourceId)===id&&/payable|應付/i.test(`${row.sourceType||''} ${row.type||''} ${row.category||''}`))||(clean(payable.paymentTransactionId)&&clean(row.id)===clean(payable.paymentTransactionId)));
+    const inputInvoices=(state.invoices||[]).filter((row)=>(row.invoiceType==='input'||/進項/.test(String(row.type||'')))&&legacyInvoicePayable(row)===payable);
+    const directInvoiceRelations=(state.invoices||[]).filter((row)=>clean(row.payableId)===id||clean(row.sourceId)===id),unrecognizedInvoices=directInvoiceRelations.filter((row)=>!inputInvoices.includes(row));
+    const usageIds=Array.isArray(payable.usageIds)?payable.usageIds.map((value)=>clean(value)).filter(Boolean):[],usageIdSet=new Set(usageIds),materialUsages=(state.materialUsages||[]).filter((row)=>clean(row.payableId)===id||usageIdSet.has(clean(row.id)));
+    const materialUsageIds=materialUsages.map((row)=>clean(row.id)),missingUsageIds=[...usageIdSet].filter((usageId)=>!(state.materialUsages||[]).some((row)=>clean(row.id)===usageId)),duplicateUsageIds=[...materialUsageIds.filter((usageId,index,rows)=>!usageId||rows.indexOf(usageId)!==index),...usageIds.filter((usageId,index,rows)=>rows.indexOf(usageId)!==index)];
+    const sharedMaterialUsages=materialUsages.filter((usage)=>{
+      const usageId=clean(usage.id),directOwner=clean(usage.payableId);
+      return Boolean(directOwner&&directOwner!==id)||state.payables.some((row)=>row!==payable&&(Array.isArray(row.usageIds)&&row.usageIds.some((value)=>clean(value)===usageId)||String(row.sourceType||'')==='material-project'&&clean(row.sourceId)===usageId));
+    });
+    const sharedMaterialUsageDetails=sharedMaterialUsages.map((usage)=>{
+      const usageId=clean(usage.id),relations=new Map(),addRelation=(otherPayable,referenceType,relatedId='')=>{
+        const payableId=clean(otherPayable?.id||relatedId),key=payableId||`${referenceType}:${relations.size}`;
+        if(!relations.has(key))relations.set(key,{payable:otherPayable||null,payableId,referenceTypes:new Set()});
+        relations.get(key).referenceTypes.add(referenceType);
+      };
+      const directOwner=clean(usage.payableId);
+      if(directOwner&&directOwner!==id)addRelation(state.payables.find((row)=>clean(row.id)===directOwner),'materialUsage.payableId',directOwner);
+      state.payables.forEach((row)=>{
+        if(row===payable)return;
+        if(Array.isArray(row.usageIds)&&row.usageIds.some((value)=>clean(value)===usageId))addRelation(row,'payable.usageIds[]');
+        if(String(row.sourceType||'')==='material-project'&&clean(row.sourceId)===usageId)addRelation(row,'payable.sourceId');
+      });
+      return {usageId,materialName:usage.materialName||state.materials?.find((row)=>clean(row.id)===clean(usage.material||usage.materialId))?.name||'',projectName:usage.projectName||state.projects?.find((row)=>clean(row.id)===clean(usage.project||usage.projectId))?.name||'',amount:num(usage.amount??num(usage.quantity)*num(usage.unitPrice)),currentPayableId:id,currentPayableNo:payable.payableNo||payable.number||payable.sourceNo||'',otherPayables:[...relations.values()].map(({payable:other,payableId,referenceTypes})=>({payableId,payableNo:other?.payableNo||other?.number||other?.sourceNo||'',vendorName:other?.vendorName||state.vendors?.find((row)=>clean(row.id)===clean(other?.vendor))?.name||'',amount:num(other?.amount),paid:num(other?.paid),sourceType:String(other?.sourceType||''),referenceType:[...referenceTypes].join('、')}))};
+    });
+    const inventoryReceipts=(Array.isArray(state.inventoryReceipts)?state.inventoryReceipts:[]).filter((row)=>clean(row.payableId)===id),projectCosts=(state.projectCosts||[]).filter((row)=>clean(row.payableId)===id||(clean(payable.sourceId)&&clean(row.id)===clean(payable.sourceId)));
+    const knownCollections=new Set(['payables','payments','bankTransactions','invoices','materialUsages','inventoryReceipts','projectCosts','audit']);
+    let unknownRelationCount=unrecognizedInvoices.length+missingUsageIds.length+duplicateUsageIds.length;
+    Object.entries(state||{}).forEach(([key,rows])=>{
+      if(knownCollections.has(key)||!Array.isArray(rows))return;
+      rows.forEach((row)=>{
+        if(!row||typeof row!=='object')return;
+        const direct=[row.payableId,row.payable].some((value)=>clean(value)===id),listed=Array.isArray(row.payableIds)&&row.payableIds.some((value)=>clean(value)===id),typedSource=clean(row.sourceId)===id&&/payable|應付/i.test(`${row.sourceType||''} ${row.type||''} ${row.category||''}`);
+        if(direct||listed||typedSource)unknownRelationCount+=1;
+      });
+    });
+    const sourceId=clean(payable.sourceId),knownSourceId=Boolean(sourceId)&&materialUsages.some((row)=>clean(row.id)===sourceId);
+    if(!knownSourceId)unknownRelationCount+=1;
+    const sourceType=String(payable.sourceType||''),paid=num(payable.paid),invoiceIds=inputInvoices.map((row)=>clean(row.id)),invalidInvoiceIdentity=invoiceIds.some((invoiceId)=>!invoiceId)||new Set(invoiceIds).size!==invoiceIds.length;
+    const blockers=[],add=(key,label,count,message)=>{if(count>0)blockers.push({key,label,count,message})};
+    add('sourceType','來源類型',sourceType==='material-project'?0:1,'只允許清理材料使用所建立的測試應付資料。');
+    add('paid','已付金額',paid===0?0:1,'此筆已有付款金額，禁止測試資料清理。');
+    add('payments','付款紀錄',payments.length,'此筆已有付款紀錄，禁止測試資料清理。');
+    add('bankTransactions','銀行流水',bankTransactions.length,'此筆已有關聯銀行流水，禁止測試資料清理。');
+    add('materialUsages','材料使用',materialUsages.length>0?0:1,'找不到可唯一對應的材料使用來源。');
+    add('sharedMaterialUsages','共用材料來源',sharedMaterialUsages.length,'材料使用同時被其他應付引用，禁止清理。');
+    add('inventoryReceipts','入庫來源',inventoryReceipts.length,'此筆存在材料入庫關聯，禁止清理。');
+    add('projectCosts','案場成本',projectCosts.length,'此筆存在案場成本關聯，禁止清理。');
+    add('invoiceRecordCount','進項發票',inputInvoices.length===1?0:Math.abs(inputInvoices.length-1)||1,inputInvoices.length?'關聯進項發票不唯一，禁止清理。':'找不到唯一的持久化進項發票紀錄。');
+    add('invoiceIdentity','發票識別',invalidInvoiceIdentity?1:0,'進項發票缺少唯一識別，禁止清理。');
+    add('unknownRelations','未知關聯',unknownRelationCount,'此筆存在未識別、缺失或衝突關聯，禁止清理。');
+    return {payableId:id,allowed:blockers.length===0,blockers,sourceType,payableNo:payable.payableNo||payable.number||payable.sourceNo||'',vendorName:payable.vendorName||state.vendors?.find((row)=>clean(row.id)===clean(payable.vendor))?.name||'',projectName:payable.projectName||state.projects?.find((row)=>clean(row.id)===clean(payable.project))?.name||'',amount:num(payable.amount),paid,paymentCount:payments.length,bankTransactionCount:bankTransactions.length,invoiceRecordCount:inputInvoices.length,materialUsageCount:materialUsages.length,inventoryReceiptCount:inventoryReceipts.length,projectCostCount:projectCosts.length,sharedMaterialUsageCount:sharedMaterialUsages.length,sharedMaterialUsageDetails,unknownRelationCount,invoices:inputInvoices.map((row)=>({id:clean(row.id),invoiceNo:String(row.invoiceNumber||row.invoiceNo||row.number||''),date:row.invoiceDate||row.date||'',status:invoiceStatus(row.status,row.invoiceNumber||row.invoiceNo||row.number),amount:num(row.grossAmount??row.total??row.netAmount??row.amount),sourceNo:row.sourceNo||''})),materialUsages:materialUsages.map((row)=>({id:clean(row.id),date:row.date||'',projectId:row.project||row.projectId||'',projectName:row.projectName||state.projects?.find((project)=>clean(project.id)===clean(row.project||row.projectId))?.name||'',materialId:row.material||row.materialId||'',materialName:row.materialName||state.materials?.find((material)=>clean(material.id)===clean(row.material||row.materialId))?.name||'',amount:num(row.amount??num(row.quantity)*num(row.unitPrice))}))};
+  }
+  async function cleanupMaterialPayableTestData(payableId, confirmation={}) {
+    await load();
+    const id=clean(payableId),preview=materialPayableTestCleanupPreview(id),reason=clean(confirmation?.reason);
+    if(confirmation?.confirmed!==true)throw new Error('必須明確確認整組資料為測試資料。');
+    if(!reason)throw new Error('請輸入測試資料清理原因。');
+    if(preview.allowed!==true)throw new Error(`此組資料不可安全清理：${preview.blockers.map((row)=>row.message).join(' ')}`);
+    const snapshot=JSON.parse(JSON.stringify(state)),invoiceIds=new Set(preview.invoices.map((row)=>row.id)),usageIds=new Set(preview.materialUsages.map((row)=>row.id)),fingerprint=(value)=>JSON.stringify(value),protectedFingerprints={payments:fingerprint(state.payments),bankTransactions:fingerprint(state.bankTransactions),banks:fingerprint(state.banks)},otherFingerprints={invoices:fingerprint(state.invoices.filter((row)=>!invoiceIds.has(clean(row.id)))),materialUsages:fingerprint(state.materialUsages.filter((row)=>!usageIds.has(clean(row.id)))),payables:fingerprint(state.payables.filter((row)=>clean(row.id)!==id))};
+    const assertUnchanged=()=>{
+      if(fingerprint(state.payments)!==protectedFingerprints.payments)throw new Error('付款紀錄發生非預期變動，已停止清理。');
+      if(fingerprint(state.bankTransactions)!==protectedFingerprints.bankTransactions)throw new Error('銀行流水發生非預期變動，已停止清理。');
+      if(fingerprint(state.banks)!==protectedFingerprints.banks)throw new Error('銀行帳戶發生非預期變動，已停止清理。');
+    };
+    try {
+      state.invoices=state.invoices.filter((row)=>!invoiceIds.has(clean(row.id)));
+      state.materialUsages=state.materialUsages.filter((row)=>!usageIds.has(clean(row.id)));
+      const target=state.payables.find((row)=>clean(row.id)===id);
+      if(!target)throw new Error('清理過程找不到目標應付帳款。');
+      target.usageIds=[];
+      state.payables=state.payables.filter((row)=>row!==target);
+      assertUnchanged();
+      if(state.invoices.some((row)=>invoiceIds.has(clean(row.id))||clean(row.payableId)===id||clean(row.sourceId)===id))throw new Error('目標進項發票未完整移除。');
+      if(state.materialUsages.some((row)=>usageIds.has(clean(row.id))||clean(row.payableId)===id))throw new Error('目標材料使用未完整移除。');
+      if(state.payables.some((row)=>clean(row.id)===id))throw new Error('目標應付帳款未完整移除。');
+      if(fingerprint(state.invoices)!==otherFingerprints.invoices)throw new Error('其他進項發票發生非預期變動。');
+      if(fingerprint(state.materialUsages)!==otherFingerprints.materialUsages)throw new Error('其他材料使用發生非預期變動。');
+      if(fingerprint(state.payables)!==otherFingerprints.payables)throw new Error('其他應付帳款發生非預期變動。');
+      if(state.payables.some((row)=>Array.isArray(row.usageIds)&&row.usageIds.some((usageId)=>usageIds.has(clean(usageId)))))throw new Error('刪除後仍有應付引用目標材料使用。');
+      if((state.inventoryReceipts||[]).some((row)=>clean(row.payableId)===id))throw new Error('刪除後留下入庫孤兒關聯。');
+      if((state.projectCosts||[]).some((row)=>clean(row.payableId)===id))throw new Error('刪除後留下案場成本孤兒關聯。');
+      await persist(`測試資料安全清理｜材料→應付→進項發票｜${preview.payableNo||id}｜原因：${reason}`);
+      assertUnchanged();
+      return {...preview,reason,deletedInvoiceCount:invoiceIds.size,deletedMaterialUsageCount:usageIds.size,deletedPayableCount:1};
+    } catch(error) {
+      state=snapshot;
+      try{if(!db)db=await openDB();if(db)await dbSet(STATE_KEY,state)}catch(_){/* 持久層採最大努力還原，原始錯誤優先 */}
+      try{localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state))}catch(_){/* 緊急備份採最大努力還原，原始錯誤優先 */}
+      throw error;
+    }
+  }
+  function mergedPayableRepairPreview(duplicatePayableId) {
+    const id=clean(duplicatePayableId),duplicate=state?.payables?.find((row)=>clean(row.id)===id),empty={duplicatePayableId:id,allowed:false,blockers:[],duplicatePayable:null,mergedPayable:null,materialUsages:[],truePayments:[],legacySummary:null,testInvoice:null,materialTotal:0,truePaymentTotal:0,trueFeeTotal:0,bankActualDebitTotal:0,bankTransactionCount:0,orphanPayableIds:[],unknownRelationCount:0};
+    if(!duplicate)return {...empty,blockers:[{key:'notFound',label:'舊應付帳款',count:1,message:'找不到要檢查的舊應付帳款。'}]};
+    const blockers=[],add=(key,label,count,message)=>{if(count>0)blockers.push({key,label,count,message})},moneyEqual=(left,right)=>Math.abs(num(left)-num(right))<0.001,vendorName=(row)=>row?.vendorName||state.vendors?.find((vendor)=>clean(vendor.id)===clean(row?.vendor||row?.vendorId))?.name||'',sameVendor=(left,right)=>{
+      const leftId=clean(left?.vendor||left?.vendorId),rightId=clean(right?.vendor||right?.vendorId);
+      if(leftId&&rightId)return leftId===rightId;
+      return Boolean(normalizedMasterLabel(vendorName(left))&&normalizedMasterLabel(vendorName(left))===normalizedMasterLabel(vendorName(right)));
+    };
+    const duplicateUsageIds=new Set((Array.isArray(duplicate.usageIds)?duplicate.usageIds:[]).map(clean).filter(Boolean)),duplicateSourceId=clean(duplicate.sourceId);
+    if(duplicateSourceId&&(state.materialUsages||[]).some((row)=>clean(row.id)===duplicateSourceId))duplicateUsageIds.add(duplicateSourceId);
+    (state.materialUsages||[]).forEach((row)=>{if(clean(row.payableId)===id)duplicateUsageIds.add(clean(row.id))});
+    const duplicateUsages=[...duplicateUsageIds].map((usageId)=>(state.materialUsages||[]).find((row)=>clean(row.id)===usageId)).filter(Boolean),missingDuplicateUsages=[...duplicateUsageIds].filter((usageId)=>!duplicateUsages.some((row)=>clean(row.id)===usageId)),duplicateMaterialTotal=duplicateUsages.reduce((sum,row)=>sum+num(row.amount??num(row.quantity)*num(row.unitPrice)),0);
+    const candidates=(state.payables||[]).filter((row)=>row!==duplicate&&String(row.sourceType||'')==='material-merged'&&sameVendor(row,duplicate)&&duplicateUsageIds.size>0&&[...duplicateUsageIds].every((usageId)=>(Array.isArray(row.usageIds)?row.usageIds:[]).some((value)=>clean(value)===usageId))),merged=candidates.length===1?candidates[0]:null;
+    const mergedUsageIds=merged?(Array.isArray(merged.usageIds)?merged.usageIds:[]).map(clean).filter(Boolean):[],duplicateMergedUsageIds=mergedUsageIds.filter((usageId,index,rows)=>rows.indexOf(usageId)!==index),mergedUsages=mergedUsageIds.map((usageId)=>(state.materialUsages||[]).filter((row)=>clean(row.id)===usageId)),missingMergedUsageIds=mergedUsages.filter((rows)=>rows.length!==1).length,materialUsages=mergedUsages.flat(),materialTotal=materialUsages.reduce((sum,row)=>sum+num(row.amount??num(row.quantity)*num(row.unitPrice)),0);
+    const relatedPayables=merged?state.payables.filter((row)=>row!==merged&&row!==duplicate&&materialUsages.some((usage)=>{
+      const usageId=clean(usage.id);
+      return (Array.isArray(row.usageIds)&&row.usageIds.some((value)=>clean(value)===usageId))||(String(row.sourceType||'')==='material-project'&&clean(row.sourceId)===usageId);
+    })):[];
+    const ownerIds=new Set(materialUsages.map((row)=>clean(row.payableId)).filter(Boolean)),orphanPayableIds=[...ownerIds].filter((ownerId)=>ownerId!==id&&ownerId!==clean(merged?.id)&&!state.payables.some((row)=>clean(row.id)===ownerId)),conflictingOwners=[...ownerIds].filter((ownerId)=>ownerId!==id&&ownerId!==clean(merged?.id)&&!orphanPayableIds.includes(ownerId));
+    const truePayments=(state.payments||[]).filter((row)=>orphanPayableIds.includes(clean(row.payableId))),ownerIdsWithoutPayments=orphanPayableIds.filter((ownerId)=>!truePayments.some((row)=>clean(row.payableId)===ownerId)),duplicatePayments=(state.payments||[]).filter((row)=>clean(row.payableId)===id),mergedPayments=merged?(state.payments||[]).filter((row)=>clean(row.payableId)===clean(merged.id)):[],legacySummaries=mergedPayments.filter((row)=>row.legacy===true&&clean(row.id)===`legacy-${clean(merged.id)}`),unexpectedMergedPayments=mergedPayments.filter((row)=>!legacySummaries.includes(row));
+    const transactionUse=new Map(),paymentDetails=truePayments.map((payment)=>{
+      const paymentId=clean(payment.id),matches=(state.bankTransactions||[]).filter((row)=>clean(row.id)===clean(payment.bankTransactionId)||(clean(row.sourceId)===paymentId&&['payable-payment','payable_payment'].includes(String(row.sourceType||'')))),transaction=matches.length===1?matches[0]:null;
+      if(transaction){const transactionId=clean(transaction.id);transactionUse.set(transactionId,(transactionUse.get(transactionId)||0)+1)}
+      const paymentBankId=clean(payment.bankAccountId||payment.bankId),transactionBankId=clean(transaction?.bankAccountId||transaction?.bankId),expectedDebit=num(payment.actualDebit??payment.amount),issues=[];
+      if(matches.length!==1)issues.push(matches.length?'一筆付款對應多筆銀行交易。':'付款缺少對應銀行交易。');
+      if(!clean(payment.id))issues.push('付款紀錄缺少唯一編號。');
+      if(num(payment.amount)<=0||num(payment.fee)<0||expectedDebit<=0)issues.push('付款金額、手續費或實際扣款不符合有效付款條件。');
+      if(transaction&&clean(transaction.sourceId)!==paymentId)issues.push('銀行交易未指向原付款紀錄。');
+      if(transaction&&clean(transaction.payableId)!==clean(payment.payableId))issues.push('付款與銀行交易目前指向不同舊帳。');
+      if(transaction&&String(transaction.direction||'').toLowerCase()!=='out'&&String(transaction.type||'')!=='支出')issues.push('銀行交易不是支出紀錄。');
+      if(!paymentBankId||!state.banks.some((row)=>clean(row.id)===paymentBankId))issues.push('付款銀行帳戶無法確認。');
+      if(transaction&&paymentBankId!==transactionBankId)issues.push('付款與銀行交易的銀行帳戶不一致。');
+      if(transaction&&!moneyEqual(transaction.amount,expectedDebit))issues.push('銀行實際扣款與付款紀錄不一致。');
+      if(transaction&&transaction.payableAmount!==undefined&&!moneyEqual(transaction.payableAmount,payment.amount))issues.push('銀行交易的應付金額與付款金額不一致。');
+      if(transaction&&transaction.fee!==undefined&&!moneyEqual(transaction.fee,payment.fee))issues.push('付款與銀行交易的手續費不一致。');
+      if(transaction&&clean(transaction.feePayer)&&clean(payment.feePayer)&&clean(transaction.feePayer)!==clean(payment.feePayer))issues.push('付款與銀行交易的手續費負擔方式不一致。');
+      if(transaction&&clean(transaction.paymentMethod)&&clean(payment.paymentMethod)&&clean(transaction.paymentMethod)!==clean(payment.paymentMethod))issues.push('付款方式與銀行交易不一致。');
+      if(transaction&&merged&&!sameVendor(transaction,merged))issues.push('銀行交易廠商與合併應付不一致。');
+      return {payment,transaction,matches,issues};
+    });
+    const matchedTransactionIds=new Set(paymentDetails.flatMap((row)=>row.matches.map((transaction)=>clean(transaction.id)))),oldTransactions=(state.bankTransactions||[]).filter((row)=>orphanPayableIds.includes(clean(row.payableId))||truePayments.some((payment)=>clean(row.sourceId)===clean(payment.id))),unmatchedOldTransactions=oldTransactions.filter((row)=>!matchedTransactionIds.has(clean(row.id))),duplicateTransactions=(state.bankTransactions||[]).filter((row)=>clean(row.payableId)===id||duplicatePayments.some((payment)=>clean(row.sourceId)===clean(payment.id)||clean(row.id)===clean(payment.bankTransactionId)));
+    const truePaymentTotal=truePayments.reduce((sum,row)=>sum+num(row.amount),0),trueFeeTotal=truePayments.reduce((sum,row)=>sum+num(row.fee),0),bankActualDebitTotal=paymentDetails.reduce((sum,row)=>sum+num(row.transaction?.amount),0),legacySummary=legacySummaries.length===1?legacySummaries[0]:null,legacyTransactions=legacySummary?(state.bankTransactions||[]).filter((row)=>clean(row.id)===clean(legacySummary.bankTransactionId)||clean(row.sourceId)===clean(legacySummary.id)):[];
+    const inputInvoices=(state.invoices||[]).filter((row)=>(row.invoiceType==='input'||/進項/.test(String(row.type||'')))&&legacyInvoicePayable(row)===duplicate),directDuplicateInvoices=(state.invoices||[]).filter((row)=>clean(row.payableId)===id||clean(row.sourceId)===id),unknownDuplicateInvoices=directDuplicateInvoices.filter((row)=>!inputInvoices.includes(row)),testInvoice=inputInvoices.length===1?inputInvoices[0]:null;
+    const duplicateInventory=(state.inventoryReceipts||[]).filter((row)=>clean(row.payableId)===id),duplicateProjectCosts=(state.projectCosts||[]).filter((row)=>clean(row.payableId)===id),oldInventory=(state.inventoryReceipts||[]).filter((row)=>orphanPayableIds.includes(clean(row.payableId))),oldProjectCosts=(state.projectCosts||[]).filter((row)=>orphanPayableIds.includes(clean(row.payableId)));
+    const knownCollections=new Set(['payables','payments','bankTransactions','invoices','materialUsages','inventoryReceipts','projectCosts','audit']),checkedIds=new Set([id,...orphanPayableIds]),unknownRelations=[];
+    Object.entries(state||{}).forEach(([key,rows])=>{
+      if(knownCollections.has(key)||!Array.isArray(rows))return;
+      rows.forEach((row)=>{if(!row||typeof row!=='object')return;const direct=[row.payableId,row.payable].some((value)=>checkedIds.has(clean(value))),listed=Array.isArray(row.payableIds)&&row.payableIds.some((value)=>checkedIds.has(clean(value))),typedSource=checkedIds.has(clean(row.sourceId))&&/payable|應付/i.test(`${row.sourceType||''} ${row.type||''} ${row.category||''}`);if(direct||listed||typedSource)unknownRelations.push({collection:key,id:clean(row.id)})});
+    });
+    add('duplicateSource','舊帳來源',String(duplicate.sourceType||'')==='material-project'?0:1,'只有單筆材料應付才能進行歷史合併帳務修復。');
+    add('duplicateUsages','舊帳材料來源',duplicateUsageIds.size===1&&missingDuplicateUsages.length===0?0:1,'舊帳必須只能對應一筆可唯一辨識的材料來源。');
+    add('duplicateMaterialAmount','舊帳材料金額',moneyEqual(duplicateMaterialTotal,duplicate.amount)?0:1,'舊帳金額與其單筆材料金額不一致。');
+    add('mergedPayable','合併應付',candidates.length===1?0:Math.abs(candidates.length-1)||1,candidates.length?'找到多筆可能的合併應付，禁止自動判斷。':'找不到唯一包含此材料的合併應付。');
+    add('mergedVendor','廠商',merged&&sameVendor(merged,duplicate)?0:1,'舊帳與合併應付的廠商不一致。');
+    add('mergedUsages','合併材料',mergedUsageIds.length>0&&missingMergedUsageIds===0&&duplicateMergedUsageIds.length===0?0:1,'合併應付的材料來源缺失、重複或不唯一。');
+    add('materialAmounts','材料金額',materialUsages.some((row)=>num(row.amount??num(row.quantity)*num(row.unitPrice))<=0)?1:0,'合併應付包含無效的材料金額。');
+    add('materialTotal','材料合計',merged&&moneyEqual(materialTotal,merged.amount)?0:1,'材料合計與合併應付金額不一致。');
+    add('sharedPayables','其他材料帳務',relatedPayables.length,'材料仍被第三筆應付帳款引用，禁止修復。');
+    add('conflictingOwners','材料歸屬',conflictingOwners.length,'材料目前指向仍存在的其他應付帳款，禁止修復。');
+    add('orphanOwners','歷史舊帳線索',orphanPayableIds.length>0?0:1,'找不到材料所指向的已不存在舊帳，無法證明歷史付款來源。');
+    add('orphanOwnerPayments','歷史舊帳付款',ownerIdsWithoutPayments.length,'材料指向的歷史舊帳缺少可核對的真正付款。');
+    add('truePayments','真正付款',truePayments.length>0?0:1,'找不到掛在歷史舊帳上的真正付款紀錄。');
+    add('paymentIdentity','付款識別',truePayments.some((row)=>!clean(row.id))?1:0,'真正付款紀錄缺少唯一識別。');
+    add('paymentVendor','付款廠商',truePayments.filter((row)=>vendorName(row)&&merged&&!sameVendor(row,merged)).length,'付款紀錄廠商與合併應付不一致。');
+    add('paymentBankLinks','付款與銀行關聯',paymentDetails.reduce((sum,row)=>sum+row.issues.length,0),paymentDetails.flatMap((row)=>row.issues).join(' ')||'付款與銀行交易關聯不完整。');
+    add('bankTransactionReuse','銀行交易重複關聯',[...transactionUse.values()].filter((count)=>count!==1).length,'同一筆銀行交易被多筆付款共用。');
+    add('unmatchedBankTransactions','銀行交易',unmatchedOldTransactions.length,'歷史舊帳仍有無法唯一歸屬的銀行交易。');
+    add('legacySummary','歷史彙總',legacySummaries.length===1&&unexpectedMergedPayments.length===0?0:Math.abs(legacySummaries.length-1)+unexpectedMergedPayments.length||1,'合併應付的歷史彙總付款不唯一，或同時存在其他付款紀錄。');
+    add('legacySummaryBank','歷史彙總銀行紀錄',legacyTransactions.length,'歷史彙總已有自己的銀行交易，禁止移除。');
+    add('legacySummaryAmount','歷史彙總金額',legacySummary&&moneyEqual(legacySummary.amount,truePaymentTotal)&&moneyEqual(legacySummary.fee,trueFeeTotal)&&moneyEqual(merged?.paid,truePaymentTotal)?0:1,'真正付款合計、帳面已付與歷史彙總金額不一致。');
+    add('legacySummaryDebit','歷史彙總實際扣款',legacySummary&&moneyEqual(legacySummary.actualDebit,bankActualDebitTotal)?0:1,'歷史彙總的實際扣款與真正銀行交易合計不一致。');
+    add('duplicatePaid','舊帳已付款',num(duplicate.paid)===0?0:1,'要清理的舊帳已有付款金額。');
+    add('duplicatePayments','舊帳付款',duplicatePayments.length,'要清理的舊帳仍有付款紀錄。');
+    add('duplicateTransactions','舊帳銀行交易',duplicateTransactions.length,'要清理的舊帳仍有銀行交易。');
+    add('testInvoice','測試進項發票',inputInvoices.length===1&&clean(testInvoice?.id)?0:Math.abs(inputInvoices.length-1)||1,inputInvoices.length?'舊帳的進項發票不唯一。':'找不到舊帳唯一對應的進項發票。');
+    add('unknownInvoices','其他發票關聯',unknownDuplicateInvoices.length,'舊帳仍有無法辨識的發票關聯。');
+    add('inventoryReceipts','材料入庫',duplicateInventory.length+oldInventory.length,'舊帳或歷史帳務仍有材料入庫關聯。');
+    add('projectCosts','案場成本',duplicateProjectCosts.length+oldProjectCosts.length,'舊帳或歷史帳務仍有案場成本關聯。');
+    add('unknownRelations','其他未確認關聯',unknownRelations.length,'發現其他未確認關聯，為避免帳務斷鏈已停止修復。');
+    const mappedPayments=paymentDetails.map(({payment,transaction,issues})=>({id:clean(payment.id),date:payment.date||'',amount:num(payment.amount),fee:num(payment.fee),actualDebit:num(payment.actualDebit??payment.amount),bankId:clean(payment.bankAccountId||payment.bankId),bankName:state.banks.find((row)=>clean(row.id)===clean(payment.bankAccountId||payment.bankId))?.name||'',paymentMethod:payment.paymentMethod||'',feePayer:payment.feePayer||'',oldPayableId:clean(payment.payableId),bankTransaction:transaction?{id:clean(transaction.id),date:transaction.date||'',amount:num(transaction.amount),payableAmount:num(transaction.payableAmount),fee:num(transaction.fee),actualDebit:num(transaction.actualDebit??transaction.amount),bankId:clean(transaction.bankAccountId||transaction.bankId),sourceId:clean(transaction.sourceId),sourceNo:transaction.sourceNo||''}:null,issues}));
+    return {duplicatePayableId:id,allowed:blockers.length===0,blockers,duplicatePayable:{id,payableNo:duplicate.payableNo||duplicate.number||duplicate.sourceNo||'',vendorName:vendorName(duplicate),projectName:duplicate.projectName||state.projects?.find((row)=>clean(row.id)===clean(duplicate.project))?.name||'',sourceType:String(duplicate.sourceType||''),sourceId:clean(duplicate.sourceId),usageIds:[...duplicateUsageIds],amount:num(duplicate.amount),paid:num(duplicate.paid),createdAt:duplicate.createdAt||'',updatedAt:duplicate.updatedAt||''},mergedPayable:merged?{id:clean(merged.id),payableNo:merged.payableNo||merged.number||merged.sourceNo||'',vendorName:vendorName(merged),projectName:merged.projectName||state.projects?.find((row)=>clean(row.id)===clean(merged.project))?.name||'',sourceType:String(merged.sourceType||''),sourceId:clean(merged.sourceId),usageIds:mergedUsageIds,amount:num(merged.amount),paid:num(merged.paid),fee:num(merged.fee),createdAt:merged.createdAt||'',updatedAt:merged.updatedAt||''}:null,materialUsages:materialUsages.map((row)=>({id:clean(row.id),materialName:row.materialName||state.materials?.find((material)=>clean(material.id)===clean(row.material||row.materialId))?.name||'',projectName:row.projectName||state.projects?.find((project)=>clean(project.id)===clean(row.project||row.projectId))?.name||'',amount:num(row.amount??num(row.quantity)*num(row.unitPrice)),currentPayableId:clean(row.payableId)})),truePayments:mappedPayments,legacySummary:legacySummary?{id:clean(legacySummary.id),amount:num(legacySummary.amount),fee:num(legacySummary.fee),actualDebit:num(legacySummary.actualDebit??legacySummary.amount),bankTransactionId:clean(legacySummary.bankTransactionId),legacy:legacySummary.legacy===true}:null,testInvoice:testInvoice?{id:clean(testInvoice.id),invoiceNo:String(testInvoice.invoiceNumber||testInvoice.invoiceNo||testInvoice.number||''),date:testInvoice.invoiceDate||testInvoice.date||'',status:invoiceStatus(testInvoice.status,testInvoice.invoiceNumber||testInvoice.invoiceNo||testInvoice.number),amount:num(testInvoice.grossAmount??testInvoice.total??testInvoice.netAmount??testInvoice.amount)}:null,materialTotal,truePaymentTotal,trueFeeTotal,bankActualDebitTotal,bankTransactionCount:matchedTransactionIds.size,orphanPayableIds,unknownRelationCount:unknownRelations.length};
+  }
+  async function repairMergedPayableHistory(duplicatePayableId, confirmation={}) {
+    await load();
+    const id=clean(duplicatePayableId),reason=clean(confirmation?.reason),preview=mergedPayableRepairPreview(id);
+    if(confirmation?.confirmed!==true)throw new Error('必須明確確認舊帳與進項發票為測試／歷史殘留資料。');
+    if(!reason)throw new Error('請輸入歷史帳務修復原因。');
+    if(preview.allowed!==true)throw new Error(`此筆歷史帳務不可安全修復：${preview.blockers.map((row)=>row.message).join(' ')}`);
+    const snapshot=JSON.parse(JSON.stringify(state)),fingerprint=(value)=>JSON.stringify(value),omit=(row,keys)=>Object.fromEntries(Object.entries(row||{}).filter(([key])=>!keys.includes(key))),mergedId=preview.mergedPayable.id,legacyId=preview.legacySummary.id,invoiceId=preview.testInvoice.id,truePaymentIds=new Set(preview.truePayments.map((row)=>row.id)),transactionIds=new Set(preview.truePayments.map((row)=>row.bankTransaction?.id).filter(Boolean)),usageIds=new Set(preview.materialUsages.map((row)=>row.id)),oldOwnerIds=new Set(preview.orphanPayableIds),bankFingerprint=fingerprint(state.banks),beforeCounts={payments:state.payments.length,bankTransactions:state.bankTransactions.length,materialUsages:state.materialUsages.length,invoices:state.invoices.length,payables:state.payables.length},otherFingerprints={payments:fingerprint(state.payments.filter((row)=>!truePaymentIds.has(clean(row.id))&&clean(row.id)!==legacyId)),bankTransactions:fingerprint(state.bankTransactions.filter((row)=>!transactionIds.has(clean(row.id)))),materialUsages:fingerprint(state.materialUsages.filter((row)=>!usageIds.has(clean(row.id)))),invoices:fingerprint(state.invoices.filter((row)=>clean(row.id)!==invoiceId)),payables:fingerprint(state.payables.filter((row)=>![id,mergedId].includes(clean(row.id))))},paymentBefore=new Map(state.payments.filter((row)=>truePaymentIds.has(clean(row.id))).map((row)=>[clean(row.id),fingerprint(omit(row,['payableId']))])),transactionBefore=new Map(state.bankTransactions.filter((row)=>transactionIds.has(clean(row.id))).map((row)=>[clean(row.id),fingerprint(omit(row,['payableId','sourceNo']))])),usageBefore=new Map(state.materialUsages.filter((row)=>usageIds.has(clean(row.id))).map((row)=>[clean(row.id),fingerprint(omit(row,['payableId']))]));
+    const restore=async()=>{state=snapshot;try{if(!db)db=await openDB();if(db)await dbSet(STATE_KEY,state)}catch(_){/* 持久層採最大努力還原，原始錯誤優先 */}try{localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state))}catch(_){/* 緊急備份採最大努力還原，原始錯誤優先 */}};
+    try {
+      state.payments.forEach((row)=>{if(truePaymentIds.has(clean(row.id)))row.payableId=mergedId});
+      state.bankTransactions.forEach((row)=>{if(transactionIds.has(clean(row.id))){row.payableId=mergedId;row.sourceNo=preview.mergedPayable.payableNo}});
+      state.payments=state.payments.filter((row)=>clean(row.id)!==legacyId);
+      state.materialUsages.forEach((row)=>{if(usageIds.has(clean(row.id)))row.payableId=mergedId});
+      state.invoices=state.invoices.filter((row)=>clean(row.id)!==invoiceId);
+      state.payables=state.payables.filter((row)=>clean(row.id)!==id);
+      const merged=state.payables.find((row)=>clean(row.id)===mergedId);
+      if(!merged)throw new Error('修復過程找不到要保留的合併應付帳款。');
+      const mergedAmount=num(merged.amount),now=new Date().toISOString();
+      syncPayableSummary(merged,now);
+      if(num(merged.amount)!==mergedAmount||num(merged.amount)!==preview.mergedPayable.amount)throw new Error('合併應付金額發生非預期變動。');
+      if(num(merged.paid)!==preview.truePaymentTotal||num(merged.fee)!==preview.trueFeeTotal)throw new Error('重新彙總後的已付金額或手續費不一致。');
+      if(state.payments.length!==beforeCounts.payments-1||state.bankTransactions.length!==beforeCounts.bankTransactions||state.materialUsages.length!==beforeCounts.materialUsages||state.invoices.length!==beforeCounts.invoices-1||state.payables.length!==beforeCounts.payables-1)throw new Error('修復後的資料筆數不符合預期。');
+      if(fingerprint(state.banks)!==bankFingerprint)throw new Error('銀行帳戶金額發生非預期變動。');
+      if(fingerprint(state.payments.filter((row)=>!truePaymentIds.has(clean(row.id))))!==otherFingerprints.payments)throw new Error('其他付款紀錄發生非預期變動。');
+      if(fingerprint(state.bankTransactions.filter((row)=>!transactionIds.has(clean(row.id))))!==otherFingerprints.bankTransactions)throw new Error('其他銀行交易發生非預期變動。');
+      if(fingerprint(state.materialUsages.filter((row)=>!usageIds.has(clean(row.id))))!==otherFingerprints.materialUsages)throw new Error('其他材料紀錄發生非預期變動。');
+      if(fingerprint(state.invoices)!==otherFingerprints.invoices)throw new Error('其他進項發票發生非預期變動。');
+      if(fingerprint(state.payables.filter((row)=>clean(row.id)!==mergedId))!==otherFingerprints.payables)throw new Error('其他應付帳款發生非預期變動。');
+      state.payments.filter((row)=>truePaymentIds.has(clean(row.id))).forEach((row)=>{if(clean(row.payableId)!==mergedId||fingerprint(omit(row,['payableId']))!==paymentBefore.get(clean(row.id)))throw new Error('真正付款除歸屬外發生非預期變動。')});
+      state.bankTransactions.filter((row)=>transactionIds.has(clean(row.id))).forEach((row)=>{if(clean(row.payableId)!==mergedId||clean(row.sourceId)!==clean(state.payments.find((payment)=>clean(payment.bankTransactionId)===clean(row.id)||clean(row.sourceId)===clean(payment.id))?.id)||fingerprint(omit(row,['payableId','sourceNo']))!==transactionBefore.get(clean(row.id)))throw new Error('銀行交易除應付歸屬外發生非預期變動。')});
+      state.materialUsages.filter((row)=>usageIds.has(clean(row.id))).forEach((row)=>{if(clean(row.payableId)!==mergedId||fingerprint(omit(row,['payableId']))!==usageBefore.get(clean(row.id)))throw new Error('材料紀錄除應付歸屬外發生非預期變動。')});
+      if(state.payments.some((row)=>oldOwnerIds.has(clean(row.payableId))||clean(row.payableId)===id||clean(row.id)===legacyId))throw new Error('修復後仍有付款指向舊帳。');
+      if(state.bankTransactions.some((row)=>oldOwnerIds.has(clean(row.payableId))||clean(row.payableId)===id))throw new Error('修復後仍有銀行交易指向舊帳。');
+      if(state.materialUsages.some((row)=>usageIds.has(clean(row.id))&&clean(row.payableId)!==mergedId))throw new Error('修復後仍有材料指向舊帳。');
+      if(state.payables.some((row)=>clean(row.id)===id)||state.invoices.some((row)=>clean(row.id)===invoiceId))throw new Error('舊帳或測試進項發票未完整清理。');
+      const repairedPayments=state.payments.filter((row)=>clean(row.payableId)===mergedId),repairedTotal=repairedPayments.reduce((sum,row)=>sum+num(row.amount),0),repairedFee=repairedPayments.reduce((sum,row)=>sum+num(row.fee),0),repairedBankTotal=state.bankTransactions.filter((row)=>transactionIds.has(clean(row.id))).reduce((sum,row)=>sum+num(row.amount),0),repairedMaterialTotal=state.materialUsages.filter((row)=>usageIds.has(clean(row.id))).reduce((sum,row)=>sum+num(row.amount??num(row.quantity)*num(row.unitPrice)),0);
+      if(repairedPayments.length!==truePaymentIds.size||repairedTotal!==preview.truePaymentTotal||repairedFee!==preview.trueFeeTotal)throw new Error('合併應付的真正付款彙總不正確。');
+      if(repairedBankTotal!==preview.bankActualDebitTotal)throw new Error('銀行實際支出合計發生非預期變動。');
+      if(repairedMaterialTotal!==preview.materialTotal)throw new Error('材料金額合計發生非預期變動。');
+      await persist(`歷史合併帳務修復｜付款、材料與應付關聯整理｜原因：${reason}`);
+      if(fingerprint(state.banks)!==bankFingerprint)throw new Error('儲存後銀行帳戶金額發生非預期變動。');
+      return {...preview,reason,repairedPayableId:mergedId,removedLegacyPaymentCount:1,removedDuplicatePayableCount:1,removedTestInvoiceCount:1,remainingAmount:Math.max(0,preview.mergedPayable.amount-preview.truePaymentTotal)};
+    } catch(error) {
+      await restore();
+      throw error;
+    }
+  }
   async function addPayablePayment(values) {
     await load();
     const idempotencyKey = String(values.idempotencyKey || '').trim();
@@ -1622,5 +1898,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
