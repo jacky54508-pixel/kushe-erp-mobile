@@ -429,6 +429,17 @@
     await load();
     return historicalCommissionRepairPlan();
   }
+  function recalculateHistoricalCommissionPayroll(group, now) {
+    const rows=(state.payroll||[]).filter((row)=>String(row.id||'')===group.payrollId);
+    if(rows.length!==1)throw new Error(`${group.month} ${group.employeeName} 無法精確找到核准的薪資紀錄。`);
+    const payroll=rows[0],employeeId=String(payroll.employee||payroll.employeeId||''),month=String(payroll.month||'');
+    if(employeeId!==group.employeeId||month!==group.month)throw new Error(`${group.month} ${group.employeeName} 的薪資編號、員工或月份不符合核准目標。`);
+    const nextCommission=(state.commissions||[]).filter((row)=>String(row.employee||row.employeeId||'')===group.employeeId&&monthOf(row.date)===group.month&&String(row.status||'')==='已列入薪資').reduce((sum,row)=>sum+num(row.commission),0);
+    payroll.commission=nextCommission;
+    payroll.total=payrollNet({...payroll,commission:nextCommission});
+    payroll.updatedAt=now;
+    return payroll;
+  }
   async function repairHistoricalCommissionData(confirmation={}) {
     await load();
     const reason=String(confirmation?.reason||'').trim();
@@ -457,7 +468,8 @@
         commission.commission=target.expectedCommission;
         if(target.billingId){dailyLog.performance=target.expectedPerformance;commission.untaxedAmount=target.expectedPerformance}
       });
-      HISTORICAL_COMMISSION_REPAIR_PAYROLLS.forEach((group)=>rebuildPayrollFor(group.month,group.employeeId));
+      const now=new Date().toISOString();
+      HISTORICAL_COMMISSION_REPAIR_PAYROLLS.forEach((group)=>recalculateHistoricalCommissionPayroll(group,now));
       if(state.commissions.length!==countsBefore.commissions||state.dailyLogs.length!==countsBefore.dailyLogs||state.payroll.length!==countsBefore.payroll)throw new Error('修復後 commissions、dailyLogs 或 payroll 筆數改變。');
       HISTORICAL_COMMISSION_REPAIR_TARGETS.forEach((target)=>{
         const commissions=state.commissions.filter((row)=>String(row.id||'')===target.commissionId),dailyLogs=state.dailyLogs.filter((row)=>String(row.id||'')===target.dailyLogId),commission=commissions[0],dailyLog=dailyLogs[0];
