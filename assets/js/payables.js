@@ -6,7 +6,11 @@
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const money = (value) => new Intl.NumberFormat('zh-TW', {style:'currency',currency:'TWD',maximumFractionDigits:0}).format(store.num(value));
-  const today = () => new Date().toISOString().slice(0, 10);
+  const businessDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Taipei', year:'numeric', month:'2-digit', day:'2-digit' });
+  const today = (date = new Date()) => {
+    const parts = Object.fromEntries(businessDateFormatter.formatToParts(date).map((part) => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  };
   const monthOf = (value) => String(value || '').slice(0, 7);
   const filters = {month:'',paymentMonth:'',vendor:'',project:'',category:'',status:'',query:''};
   let active = false;

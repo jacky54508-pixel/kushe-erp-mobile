@@ -6,6 +6,13 @@
   const number = (value) => { const n = Number(String(value ?? '').replace(/[$,\s]/g, '')); return Number.isFinite(n) ? n : 0; };
   const text = (value) => String(value ?? '').trim();
   const sum = (rows, getter) => rows.reduce((total, row) => total + number(getter(row)), 0);
+  const businessDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Taipei', year:'numeric', month:'2-digit', day:'2-digit' });
+  const businessDate = (date = new Date()) => {
+    const parts = Object.fromEntries(businessDateFormatter.formatToParts(date).map((part) => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  };
+  const businessMonth = (date = new Date()) => businessDate(date).slice(0, 7);
+  const businessDateValue = (value) => /^\d{4}-\d{2}-\d{2}$/.test(text(value).slice(0, 10)) ? text(value).slice(0, 10) : '';
   const monthOf = (row, keys = ['date']) => { for (const key of keys) if (row?.[key]) return String(row[key]).slice(0, 7); return ''; };
   const inMonth = (row, month, keys) => monthOf(row, keys) === month;
   const previousMonth = (month) => { const d = new Date(`${month}-01T00:00:00`); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
@@ -25,7 +32,7 @@
   const expenseTx = (row) => /支出|付款|expense/i.test(text(row.type));
   const entityName = (map, id, fallback) => text(map.get(id)?.name || fallback) || '—';
 
-  function selectedMonth() { return $('#dashboardMonth')?.value || new Date().toISOString().slice(0, 7); }
+  function selectedMonth() { return $('#dashboardMonth')?.value || businessMonth(); }
   function relationMaps(data) {
     return {
       projects: new Map(data.projects.map((row) => [text(row.id), row])),
@@ -100,9 +107,9 @@
       return { id, name: text(project.name) || '—', customer: entityName(maps.customers, text(project.customer), project.customerName), billed, received, outstanding, material, labor, other, profit, margin, status: text(project.status) || '進行中', activity: billed + received + outstanding + material + labor + other };
     }).filter((row) => row.activity > 0).sort((a, b) => b.billed - a.billed || b.activity - a.activity).slice(0, 6);
 
-    const now = new Date();
-    const overdue = openAR.filter((row) => { const due = validDate(row.dueDate); return due && due < now; });
-    const overduePayables = openAP.filter((row) => { const due = validDate(row.dueDate); return due && due < now; });
+    const today = businessDate();
+    const overdue = openAR.filter((row) => { const due = businessDateValue(row.dueDate); return due && due < today; });
+    const overduePayables = openAP.filter((row) => { const due = businessDateValue(row.dueDate); return due && due < today; });
     const missingInvoices = data.billings.filter((row) => invoiceState(row) === 'invoice_pending');
     const missingInvoiceAmount = sum(missingInvoices, (billing) => {
       const ar = data.receivables.find((row) => text(row.billingId) === text(billing.id) || text(row.sourceNo) === text(billing.number));

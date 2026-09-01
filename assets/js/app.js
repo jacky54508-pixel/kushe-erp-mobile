@@ -3,6 +3,11 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
   const config = window.KUSHE_PHASE1_CONFIG || {};
+  const businessMonthFormatter = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Taipei', year:'numeric', month:'2-digit' });
+  const businessMonth = (date = new Date()) => {
+    const parts = Object.fromEntries(businessMonthFormatter.formatToParts(date).map((part) => [part.type, part.value]));
+    return `${parts.year}-${parts.month}`;
+  };
   const ui = { collapsed: false, mobileOpen: false, route: 'dashboard' };
   let initialized = false;
   let authUiBound = false;
@@ -318,7 +323,7 @@
     (data.payroll||[]).forEach((row)=>{if(/^\d{4}-\d{2}$/.test(row.month||''))values.push(row.month)}); return values;
   }
   function setupPeriod() {
-    const select=$('#dashboardMonth'); const data=window.KuSheLegacyData.getState(); const current=new Date().toISOString().slice(0,7); const keys=dateKeys(data); const latest=[current,...keys].sort().at(-1); const cursor=new Date(`${latest}-01T00:00:00`); const options=[];
+    const select=$('#dashboardMonth'); const data=window.KuSheLegacyData.getState(); const current=businessMonth(); const keys=dateKeys(data); const latest=[current,...keys].sort().at(-1); const cursor=new Date(`${latest}-01T00:00:00`); const options=[];
     for(let i=0;i<24;i+=1){const d=new Date(cursor.getFullYear(),cursor.getMonth()-i,1);const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;options.push(`<option value="${key}" ${key===current?'selected':''}>${d.getFullYear()}年${d.getMonth()+1}月</option>`)}
     select.innerHTML=options.join(''); if(!options.some((html)=>html.includes(`value="${current}"`)))select.value=latest;
     select.addEventListener('change',()=>window.KusheDashboard.refresh());

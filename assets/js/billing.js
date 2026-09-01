@@ -4,7 +4,8 @@
   const store=window.KuSheERPStore;
   const esc=(value)=>String(value??'').replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const money=(value)=>new Intl.NumberFormat('zh-TW',{style:'currency',currency:'TWD',maximumFractionDigits:0}).format(Number(value)||0);
-  const today=()=>new Date().toISOString().slice(0,10);
+  const businessDateFormatter=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'});
+  const today=(date=new Date())=>{const parts=Object.fromEntries(businessDateFormatter.formatToParts(date).map((part)=>[part.type,part.value]));return `${parts.year}-${parts.month}-${parts.day}`};
   const monthOf=(value)=>String(value||'').slice(0,7);
   const stateFor=(id)=>store.getState().billings.find((row)=>row.id===id);
   const invoiceState=(row)=>['no_invoice','invoice_pending','invoiced'].includes(row?.invoiceStatus)?row.invoiceStatus:row?.invoiceNo?'invoiced':row?.sourceType==='daily-work'&&row?.hasInvoice===false?'no_invoice':'invoice_pending';
