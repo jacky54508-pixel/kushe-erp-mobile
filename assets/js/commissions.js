@@ -14,8 +14,12 @@
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const money = (value) => new Intl.NumberFormat('zh-TW', { style:'currency', currency:'TWD', maximumFractionDigits:0 }).format(Number(value) || 0);
   const number = (value) => Number(value) || 0;
-  const monthNow = () => new Date().toISOString().slice(0, 7);
-  const today = () => new Date().toISOString().slice(0, 10);
+  const businessDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Taipei', year:'numeric', month:'2-digit', day:'2-digit' });
+  const today = (date = new Date()) => {
+    const parts = Object.fromEntries(businessDateFormatter.formatToParts(date).map((part) => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  };
+  const monthNow = (date = new Date()) => today(date).slice(0, 7);
   function label(state, module, id, fallback = '—') {
     const row = (state[module] || []).find((item) => item.id === id);
     return row?.name || row?.number || fallback;
