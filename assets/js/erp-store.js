@@ -1523,6 +1523,30 @@
   function salaryPaymentTransaction(payment) {
     return state.bankTransactions.find((row)=>row.id===payment.bankTransactionId||(row.sourceType==='salary_payment'&&row.sourceId===payment.id));
   }
+  function salaryPaymentDeletionPlan(payment) {
+    const paymentId=String(payment?.id||''),transactionId=String(payment?.bankTransactionId||''),sourceMatches=state.bankTransactions.filter((row)=>row.sourceType==='salary_payment'&&(String(row.sourceId||'')===paymentId||String(row.salaryPaymentId||'')===paymentId));
+    if(!paymentId)throw new Error('薪資付款缺少可驗證的系統編號，為避免帳務不一致已停止刪除');
+    let transaction;
+    if(transactionId){
+      const idMatches=state.bankTransactions.filter((row)=>String(row.id||'')===transactionId),candidates=state.bankTransactions.filter((row)=>String(row.id||'')===transactionId||sourceMatches.includes(row));
+      if(idMatches.length!==1)throw new Error(idMatches.length?'薪資付款對應到多筆相同編號的銀行流水，為避免帳務不一致已停止刪除':'薪資付款找不到指定的銀行流水，為避免帳務不一致已停止刪除');
+      if(candidates.length!==1)throw new Error('薪資付款對應到多筆銀行流水，為避免重複沖回已停止刪除');
+      transaction=idMatches[0];
+    }else{
+      if(sourceMatches.length!==1)throw new Error(sourceMatches.length?'薪資付款對應到多筆銀行流水，為避免重複沖回已停止刪除':'薪資付款找不到銀行流水，為避免帳務不一致已停止刪除');
+      transaction=sourceMatches[0];
+    }
+    const sourceMatchesPayment=transaction.sourceType==='salary_payment'&&(String(transaction.sourceId||'')===paymentId||String(transaction.salaryPaymentId||'')===paymentId);
+    if(!sourceMatchesPayment)throw new Error('銀行流水與薪資付款的來源不一致，為避免帳務不一致已停止刪除');
+    const paymentBankIds=[payment.bankAccountId,payment.bankId].map((value)=>String(value||'')).filter(Boolean),transactionBankIds=[transaction.bankAccountId,transaction.bankId].map((value)=>String(value||'')).filter(Boolean),uniquePaymentBankIds=[...new Set(paymentBankIds)],uniqueTransactionBankIds=[...new Set(transactionBankIds)];
+    if(uniquePaymentBankIds.length!==1||uniqueTransactionBankIds.length!==1||uniquePaymentBankIds[0]!==uniqueTransactionBankIds[0])throw new Error('薪資付款與銀行流水的帳戶不一致，為避免帳務不一致已停止刪除');
+    const bankMatches=state.banks.filter((row)=>String(row.id||'')===uniquePaymentBankIds[0]);
+    if(bankMatches.length!==1)throw new Error('薪資付款無法唯一找到銀行帳戶，為避免帳務不一致已停止刪除');
+    const hasActualDebit=payment.actualDebit!==undefined&&payment.actualDebit!==null&&payment.actualDebit!=='';
+    const actualDebit=hasActualDebit?num(payment.actualDebit):num(payment.amount)+(payment.feePayer==='recipient'?0:Math.max(0,num(payment.fee)));
+    if(actualDebit<=0||num(transaction.amount)!==actualDebit||(transaction.actualDebit!==undefined&&transaction.actualDebit!==null&&transaction.actualDebit!==''&&num(transaction.actualDebit)!==actualDebit))throw new Error('薪資付款與銀行流水的扣款金額不一致，為避免帳務不一致已停止刪除');
+    return {transaction,bank:bankMatches[0],actualDebit};
+  }
   function syncSalarySummary(payroll, now) {
     const summary=salaryPaymentSummary(payroll),latest=[...summary.history].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];
     payroll.paidAmount=summary.paid;payroll.status=summary.status==='已付清'?'已付款':summary.status;payroll.bankId=latest?.bankAccountId||latest?.bankId||'';payroll.payDate=latest?.date||'';payroll.paymentTransactionId=summary.history.length===1?summary.history[0].bankTransactionId||'':'';payroll.paidAt=summary.outstanding<=0&&summary.paid>0?(payroll.paidAt||now):'';payroll.updatedAt=now;
@@ -1546,8 +1570,19 @@
     const now=new Date().toISOString();Object.assign(payment,{date:values.date||payment.date||businessDate(new Date(now)),amount,fee,feePayer,actualDebit,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||payment.paymentMethod||'銀行轉帳',note:values.note===undefined?payment.note:String(values.note||''),updatedAt:now});syncSalaryBankTransaction(payment,payroll,now);syncSalarySummary(payroll,now);await persist(`修改薪資付款 ${payroll.month||''}`);return payment;
   }
   async function deleteSalaryPayment(id) {
-    await load();const payment=state.salaryPayments.find((row)=>row.id===id);if(!payment)throw new Error('找不到薪資付款紀錄');const payroll=state.payroll.find((row)=>row.id===payment.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const now=new Date().toISOString(),transaction=salaryPaymentTransaction(payment);if(transaction){const bank=state.banks.find((row)=>row.id===(transaction.bankAccountId||transaction.bankId));adjustBankExpense(bank,-num(transaction.amount),now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==transaction)}
-    state.salaryPayments=state.salaryPayments.filter((row)=>row!==payment);syncSalarySummary(payroll,now);await persist(`刪除薪資付款 ${payroll.month||''}`);return true;
+    await load();const payment=state.salaryPayments.find((row)=>row.id===id);if(!payment)throw new Error('找不到薪資付款紀錄');const payroll=state.payroll.find((row)=>row.id===payment.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const plan=salaryPaymentDeletionPlan(payment),snapshot=JSON.parse(JSON.stringify(state)),now=new Date().toISOString();
+    try {
+      adjustBankExpense(plan.bank,-plan.actualDebit,now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==plan.transaction);state.salaryPayments=state.salaryPayments.filter((row)=>row!==payment);syncSalarySummary(payroll,now);await persist(`刪除薪資付款 ${payroll.month||''}`);return true;
+    } catch (error) {
+      state=snapshot;
+      try {
+        if(!db){try{db=await openDB()}catch(_){db=null}}
+        if(db)await dbSet(STATE_KEY,state);
+        localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state));
+        window.KuSheLegacyData?.refresh();
+      } catch (rollbackError) { error.rollbackError=rollbackError; }
+      throw error;
+    }
   }
   async function updateBillingInvoice(id, values = {}) {
     await load(); const billing=state.billings.find((row)=>row.id===id);if(!billing)throw new Error('找不到請款單');
