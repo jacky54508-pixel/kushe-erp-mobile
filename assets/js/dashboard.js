@@ -42,6 +42,120 @@
     };
   }
   function monthRevenue(data, month) { return sum(data.billings.filter((row) => inMonth(row, month)), billingAmount); }
+  function collectionTransaction(data, receipt, retention = false) {
+    const transactions = Array.isArray(data.bankTransactions) ? data.bankTransactions : [];
+    const transactionId = text(receipt?.bankTransactionId);
+    const receiptId = text(receipt?.retentionReceiptId || receipt?.receiptId || receipt?.id);
+    const explicit = transactionId ? transactions.filter((row) => text(row.id) === transactionId) : [];
+    if (explicit.length === 1) return explicit[0];
+    const sourceTypes = retention ? ['retention_receipt'] : ['receipt', 'receivable_receipt'];
+    const linked = receiptId ? transactions.filter((row) => {
+      const sourceType = text(row.sourceType).toLowerCase();
+      return (sourceTypes.includes(sourceType) && text(row.sourceId) === receiptId)
+        || (retention && text(row.retentionReceiptId) === receiptId)
+        || (!retention && text(row.receiptId) === receiptId);
+    }) : [];
+    return linked.length === 1 ? linked[0] : null;
+  }
+  function actualCollectionMonth(data, receipt, retention = false) {
+    const transaction = collectionTransaction(data, receipt, retention);
+    const transactionMonth = monthOf(transaction);
+    return /^\d{4}-\d{2}$/.test(transactionMonth) ? transactionMonth : monthOf(receipt);
+  }
+  function collectionIdentityKeys(data, receipt, retention = false) {
+    const keys = new Set();
+    const addRecordKey = (value) => { const id = text(value); if (id) keys.add(`record:${id}`); };
+    const addTransactionKey = (value) => { const id = text(value); if (id) keys.add(`transaction:${id}`); };
+    addRecordKey(receipt?.id);
+    addRecordKey(receipt?.receiptId);
+    addRecordKey(receipt?.retentionReceiptId);
+    if (['receipt', 'receivable_receipt', 'retention_receipt'].includes(text(receipt?.sourceType).toLowerCase())) addRecordKey(receipt?.sourceId);
+    addTransactionKey(receipt?.bankTransactionId);
+    const transaction = collectionTransaction(data, receipt, retention);
+    if (transaction) {
+      addTransactionKey(transaction.id);
+      if (['receipt', 'receivable_receipt', 'retention_receipt'].includes(text(transaction.sourceType).toLowerCase())) addRecordKey(transaction.sourceId);
+      addRecordKey(transaction.receiptId);
+      addRecordKey(transaction.retentionReceiptId);
+    }
+    return keys;
+  }
+  function verifiedLegacyReceivablePrincipalForMonth(data, month) {
+    const receivables = Array.isArray(data.receivables) ? data.receivables : [];
+    const receipts = Array.isArray(data.receipts) ? data.receipts : [];
+    const retentionReceipts = Array.isArray(data.retentionReceipts) ? data.retentionReceipts : [];
+    const transactions = Array.isArray(data.bankTransactions) ? data.bankTransactions : [];
+    const receiptIds = new Set(receipts.flatMap((row) => [text(row.id), text(row.receiptId)]).filter(Boolean));
+    const receiptTransactionIds = new Set(receipts.map((row) => text(row.bankTransactionId)).filter(Boolean));
+    const retentionIds = new Set(retentionReceipts.flatMap((row) => [text(row.id), text(row.retentionReceiptId)]).filter(Boolean));
+    const retentionTransactionIds = new Set(retentionReceipts.map((row) => text(row.bankTransactionId)).filter(Boolean));
+    const usedTransactionIds = new Set();
+    const isModernReceiptTransaction = (row) => receiptTransactionIds.has(text(row.id))
+      || receiptIds.has(text(row.receiptId))
+      || receiptIds.has(text(row.sourceId)) && ['receipt', 'receivable_receipt'].includes(text(row.sourceType).toLowerCase());
+    const isRetentionTransaction = (row) => retentionTransactionIds.has(text(row.id))
+      || retentionIds.has(text(row.retentionReceiptId))
+      || retentionIds.has(text(row.sourceId))
+      || text(row.sourceType).toLowerCase() === 'retention_receipt'
+      || /保留款/.test(`${row.category || ''} ${row.description || ''} ${row.note || ''}`);
+    const isReceivableIncome = (row) => {
+      const direction = text(row.direction).toLowerCase();
+      const type = text(row.type).toLowerCase();
+      const sourceType = text(row.sourceType).toLowerCase();
+      const semantic = `${sourceType} ${row.category || ''} ${row.description || ''} ${row.note || ''}`;
+      if (direction && direction !== 'in' || /expense|支出|付款/.test(type)) return false;
+      if (!direction && !['income', '收入', '收款', '入帳'].some((value) => type.includes(value))) return false;
+      if (/payable|salary|payroll|manual|應付|薪資|廠商付款/i.test(semantic)) return false;
+      return /receivable|receipt|應收|收款|入帳/i.test(semantic);
+    };
+    const principalMatches = (row, principal) => {
+      const fee = Math.max(0, number(row.fee));
+      const values = [row.receiptAmount, row.amount, row.actualCredit, row.netAmount]
+        .filter((value) => value !== undefined && value !== null && value !== '')
+        .map(number);
+      return values.some((value) => value === principal || row.feePayer === 'company' && value + fee === principal);
+    };
+    const eligible = (row, receivable, principal) => {
+      const id = text(receivable.id);
+      const sourceType = text(row.sourceType).toLowerCase();
+      if (!text(row.id) || isModernReceiptTransaction(row) || isRetentionTransaction(row) || !isReceivableIncome(row) || !principalMatches(row, principal)) return false;
+      if (row.receivableId && text(row.receivableId) !== id) return false;
+      if (sourceType === 'receivable' && row.sourceId && text(row.sourceId) !== id) return false;
+      return true;
+    };
+    return receivables.reduce((total, receivable) => {
+      const principal = number(receivable.legacyReceived);
+      const id = text(receivable.id);
+      if (principal <= 0 || !id) return total;
+      let candidates = transactions.filter((row) => eligible(row, receivable, principal)
+        && (text(row.receivableId) === id || text(row.sourceType).toLowerCase() === 'receivable' && text(row.sourceId) === id));
+      if (candidates.length > 1) return total;
+      if (candidates.length === 0) {
+        const sourceNo = text(receivable.sourceNo);
+        if (!sourceNo || receivables.filter((row) => text(row.sourceNo) === sourceNo).length !== 1) return total;
+        candidates = transactions.filter((row) => eligible(row, receivable, principal) && text(row.sourceNo) === sourceNo);
+      }
+      if (candidates.length !== 1) return total;
+      const transaction = candidates[0];
+      const transactionId = text(transaction.id);
+      if (usedTransactionIds.has(transactionId) || monthOf(transaction) !== month) return total;
+      usedTransactionIds.add(transactionId);
+      return total + principal;
+    }, 0);
+  }
+  function collectionPrincipalForMonth(data, month) {
+    const usedKeys = new Set();
+    const addPrincipal = (receipt, retention = false) => {
+      if (actualCollectionMonth(data, receipt, retention) !== month) return 0;
+      const keys = collectionIdentityKeys(data, receipt, retention);
+      if ([...keys].some((key) => usedKeys.has(key))) return 0;
+      keys.forEach((key) => usedKeys.add(key));
+      return number(receipt.amount);
+    };
+    const receiptPrincipal = (Array.isArray(data.receipts) ? data.receipts : []).reduce((total, row) => total + addPrincipal(row), 0);
+    const retentionPrincipal = (Array.isArray(data.retentionReceipts) ? data.retentionReceipts : []).reduce((total, row) => total + addPrincipal(row, true), 0);
+    return receiptPrincipal + retentionPrincipal + verifiedLegacyReceivablePrincipalForMonth(data, month);
+  }
   function monthCollections(data, month) {
     const receipts = data.receipts.filter((row) => inMonth(row, month));
     if (receipts.length) return sum(receipts, (row) => row.amount);
@@ -74,7 +188,7 @@
     const maps = relationMaps(data);
     const prev = previousMonth(month);
     const revenue = monthRevenue(data, month);
-    const collected = monthCollections(data, month);
+    const collected = collectionPrincipalForMonth(data, month);
     const openAR = data.receivables.filter((row) => arAmount(row) > paidAR(row));
     const openAP = data.payables.filter((row) => apAmount(row) > paidAP(row));
     const outstandingAR = sum(openAR, (row) => Math.max(0, arAmount(row) - paidAR(row)));
@@ -136,7 +250,7 @@
       data, month, maps, bank: bankTotal(data), revenue, collected, outstandingAR, outstandingAP, cash: monthCash(data, month),
       deltas: {
         bank: { text: '即時', className: 'neutral' }, revenue: delta(revenue, monthRevenue(data, prev)),
-        collected: delta(collected, monthCollections(data, prev)), ar: delta(outstandingAR, prevOpenAR),
+        collected: delta(collected, collectionPrincipalForMonth(data, prev)), ar: delta(outstandingAR, prevOpenAR),
         ap: delta(outstandingAP, prevOpenAP), cash: delta(monthCash(data, month), monthCash(data, prev))
       }, structureTotal, structurePaid, structureOpen,
       collectionRate: structureTotal ? structurePaid / structureTotal * 100 : 0,
