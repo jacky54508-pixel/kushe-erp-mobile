@@ -7,11 +7,16 @@
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[char]));
   const money = (value) => `$${new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 0 }).format(Math.round(store.num(value)))}`;
+  const businessMonthFormatter = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Taipei', year:'numeric', month:'2-digit' });
+  const businessMonth = (date = new Date()) => {
+    const parts = Object.fromEntries(businessMonthFormatter.formatToParts(date).map((part) => [part.type, part.value]));
+    return `${parts.year}-${parts.month}`;
+  };
 
   let active = false;
   let ready = false;
   let bound = false;
-  let selectedMonth = localMonth();
+  let selectedMonth = businessMonth();
   let activeBankView = 'ledger';
   let reconciliationSearchTimer = null;
   let reconciliationNormalOpen = false;
@@ -26,18 +31,19 @@
     'history-pending': { label: '歷史紀錄', group: 'attention' }
   };
 
-  function localMonth(date = new Date()) {
+  function calendarMonth(date) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
   }
 
   function normalizeMonth(value) {
-    const month = /^\d{4}-\d{2}$/.test(String(value || '')) ? String(value) : localMonth();
-    return month > localMonth() ? localMonth() : month;
+    const current = businessMonth();
+    const month = /^\d{4}-\d{2}$/.test(String(value || '')) ? String(value) : current;
+    return month > current ? current : month;
   }
 
   function shiftMonth(month, delta) {
     const [year, value] = normalizeMonth(month).split('-').map(Number);
-    return localMonth(new Date(year, value - 1 + delta, 1));
+    return calendarMonth(new Date(year, value - 1 + delta, 1));
   }
 
   function monthLabel(month) {
@@ -480,7 +486,7 @@
   }
 
   function renderSummary(view) {
-    const closingLabel = view.month === localMonth() ? '本月期末／目前餘額' : '該月底餘額';
+    const closingLabel = view.month === businessMonth() ? '本月期末／目前餘額' : '該月底餘額';
     const cards = [
       ['月初餘額', view.monthOpening, `${monthLabel(view.month)}開始時`],
       ['本月收入', view.monthIncome, `${view.rows.filter((item) => item.direction === 'in').length} 筆收入`, 'is-income'],
@@ -522,9 +528,9 @@
     return `<section class="commission-panel bank-month-panel">
       <div class="bank-month-toolbar" aria-label="銀行查帳月份">
         <button type="button" class="bank-month-button bank-month-prev" data-bank-month-action="previous" aria-label="上一月">← <span>上一月</span></button>
-        <label class="bank-month-picker"><span>查詢月份</span><input type="month" data-bank-month-input value="${esc(selectedMonth)}" max="${esc(localMonth())}"></label>
-        <button type="button" class="bank-month-button bank-month-next" data-bank-month-action="next" aria-label="下一月" ${selectedMonth >= localMonth() ? 'disabled' : ''}><span>下一月</span> →</button>
-        <button type="button" class="bank-month-today" data-bank-month-action="today" ${selectedMonth === localMonth() ? 'disabled' : ''}>回到本月</button>
+        <label class="bank-month-picker"><span>查詢月份</span><input type="month" data-bank-month-input value="${esc(selectedMonth)}" max="${esc(businessMonth())}"></label>
+        <button type="button" class="bank-month-button bank-month-next" data-bank-month-action="next" aria-label="下一月" ${selectedMonth >= businessMonth() ? 'disabled' : ''}><span>下一月</span> →</button>
+        <button type="button" class="bank-month-today" data-bank-month-action="today" ${selectedMonth === businessMonth() ? 'disabled' : ''}>回到本月</button>
       </div>
       <p class="bank-month-caption">目前查看：<strong>${esc(monthLabel(selectedMonth))}</strong></p>
       ${view.unknownCount ? `<div class="bank-month-warning" role="status">此月份存在無法辨識的歷史交易，摘要可能不完整。</div>` : ''}
@@ -933,7 +939,7 @@
       const action = button.dataset.bankMonthAction;
       if (action === 'previous') selectedMonth = shiftMonth(selectedMonth, -1);
       if (action === 'next') selectedMonth = normalizeMonth(shiftMonth(selectedMonth, 1));
-      if (action === 'today') selectedMonth = localMonth();
+      if (action === 'today') selectedMonth = businessMonth();
       render();
     });
     app.addEventListener('change', (event) => {

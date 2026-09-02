@@ -3,7 +3,9 @@
   const store=window.KuSheERPStore,$=(selector,root=document)=>root.querySelector(selector),$$=(selector,root=document)=>Array.from(root.querySelectorAll(selector));
   const money=(value)=>new Intl.NumberFormat('zh-TW',{style:'currency',currency:'TWD',maximumFractionDigits:0}).format(store.num(value));
   const esc=(value)=>String(value??'').replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-  const today=()=>new Date().toISOString().slice(0,10),monthOf=(value)=>String(value||'').slice(0,7),text=(value)=>String(value??'').trim();
+  const businessDateFormatter=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'});
+  const today=(date=new Date())=>{const parts=Object.fromEntries(businessDateFormatter.formatToParts(date).map((part)=>[part.type,part.value]));return `${parts.year}-${parts.month}-${parts.day}`};
+  const monthOf=(value)=>String(value||'').slice(0,7),text=(value)=>String(value??'').trim();
   let active=false,ready=false,selectedProjectId='',detailTab='overview',customerManagerPending=false;
   let projectScrollbar=null,projectScrollbarInner=null,projectScrollTarget=null,projectScrollFrame=0,projectScrollSync=false;
   const filters={customer:'',project:'',status:'',year:String(new Date().getFullYear()),query:''};

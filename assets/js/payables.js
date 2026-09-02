@@ -6,9 +6,13 @@
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const money = (value) => new Intl.NumberFormat('zh-TW', {style:'currency',currency:'TWD',maximumFractionDigits:0}).format(store.num(value));
-  const today = () => new Date().toISOString().slice(0, 10);
+  const businessDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Taipei', year:'numeric', month:'2-digit', day:'2-digit' });
+  const today = (date = new Date()) => {
+    const parts = Object.fromEntries(businessDateFormatter.formatToParts(date).map((part) => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  };
   const monthOf = (value) => String(value || '').slice(0, 7);
-  const filters = {month:'',vendor:'',project:'',category:'',status:'',query:''};
+  const filters = {month:'',paymentMonth:'',vendor:'',project:'',category:'',status:'',query:''};
   let active = false;
   let ready = false;
   let queryTimer = 0;
@@ -370,6 +374,52 @@
       paymentCount: 1
     };
   }
+  function payablePaymentMonths(payable, state = store.getState()) {
+    const payableId = String(payable?.id || '');
+    const payables = Array.isArray(state?.payables) ? state.payables : [];
+    const payments = Array.isArray(state?.payments) ? state.payments : [];
+    const bankTransactions = Array.isArray(state?.bankTransactions) ? state.bankTransactions : [];
+    const months = new Set();
+    if (!payableId || !payables.some((row) => String(row.id || '') === payableId)) return months;
+
+    const paymentIdCounts = payments.reduce((map, row) => {
+      const id = String(row.id || '');
+      if (id) map.set(id, (map.get(id) || 0) + 1);
+      return map;
+    }, new Map());
+
+    let hasFormalPayment = false;
+    payments.forEach((payment) => {
+      const paymentId = String(payment.id || '');
+      if (String(payment.payableId || '') !== payableId
+        || !paymentId
+        || paymentIdCounts.get(paymentId) !== 1
+        || payment.legacy === true
+        || /^legacy-/i.test(paymentId)) return;
+      hasFormalPayment = true;
+
+      const bankTransactionId = String(payment.bankTransactionId || '');
+      const linkedTransactions = bankTransactions.filter((transaction) => {
+        const transactionId = String(transaction.id || '');
+        const sourceId = String(transaction.sourceId || '');
+        return (bankTransactionId && transactionId === bankTransactionId) || sourceId === paymentId;
+      });
+      if (linkedTransactions.some((transaction) => !String(transaction.id || ''))) return;
+      const uniqueTransactions = [...new Map(linkedTransactions.map((transaction) => [String(transaction.id), transaction])).values()];
+      if (uniqueTransactions.length > 1 || linkedTransactions.length !== uniqueTransactions.length) return;
+      if (bankTransactionId && uniqueTransactions.length !== 1) return;
+
+      const paymentMonth = monthOf(uniqueTransactions.length === 1 ? uniqueTransactions[0].date : payment.date);
+      if (/^\d{4}-\d{2}$/.test(paymentMonth)) months.add(paymentMonth);
+    });
+
+    const historicalTruth = hasFormalPayment ? null : historicalTaxPaymentTruth(payable, state);
+    if (historicalTruth?.verified) {
+      const historicalMonth = monthOf(historicalTruth.bankDate);
+      if (/^\d{4}-\d{2}$/.test(historicalMonth)) months.add(historicalMonth);
+    }
+    return months;
+  }
   function monthlyPaidPrincipal(state, month) {
     const payables = Array.isArray(state?.payables) ? state.payables : [];
     const payments = Array.isArray(state?.payments) ? state.payments : [];
@@ -493,6 +543,7 @@
       const projectMatch = !filters.project || row.project === filters.project || relatedProjects.has(filters.project);
       const searchableDetails = materialLines.map((line) => `${line.projectName} ${line.materialName} ${line.model}`).join(' ');
       return (!filters.month || monthOf(row.date) === filters.month)
+        && (!filters.paymentMonth || payablePaymentMonths(row, state).has(filters.paymentMonth))
         && (!filters.vendor || row.vendor === filters.vendor)
         && projectMatch
         && (!filters.category || row.category === filters.category)
@@ -739,7 +790,7 @@
     };
   }
   function bindListEvents() {
-    [['payableMonth','month'],['payableVendor','vendor'],['payableProject','project'],['payableCategory','category'],['payableStatus','status']].forEach(([id,key]) => {
+    [['payableMonth','month'],['payablePaymentMonth','paymentMonth'],['payableVendor','vendor'],['payableProject','project'],['payableCategory','category'],['payableStatus','status']].forEach(([id,key]) => {
       $(`#${id}`).onchange = (event) => { filters[key] = event.target.value; render(); };
     });
     $('#payableQuery').oninput = (event) => {
@@ -783,7 +834,7 @@
     const categories = [...new Set(all.map((row) => row.category).filter(Boolean))].sort();
     $('#payablesApp').innerHTML = `<section class="commissions-heading"><div><h1>應付帳款</h1><p>管理廠商款項、分次付款與銀行實際扣款</p></div><button class="commission-primary" id="newPayable" type="button">＋ 新增應付</button></section>
       <section class="commission-kpis payable-kpis"><article><span>應付總額</span><strong>${money(total)}</strong><small>${all.length} 筆應付</small></article><article class="is-success"><span>本月已付</span><strong>${money(monthPaid)}</strong><small>${esc(month)} 付款</small></article><article class="is-warning"><span>未付帳款</span><strong>${money(open)}</strong><small>含部分付款餘額</small></article><article class="is-warning"><span>逾期應付</span><strong>${money(overdue)}</strong><small>已超過到期日</small></article><article><span>本月新增應付</span><strong>${money(monthAdded)}</strong><small>${esc(month)} 新增</small></article></section>
-      <section class="commission-panel commission-filters"><div class="payable-filter-grid"><label><span>月份</span><input id="payableMonth" type="month" value="${esc(filters.month)}"></label><label><span>廠商／收款人</span><select id="payableVendor">${selectOptions(state.vendors,filters.vendor,'全部廠商／收款人')}</select></label><label><span>案場</span><select id="payableProject">${selectOptions(state.projects,filters.project,'全部案場')}</select></label><label><span>類別</span><select id="payableCategory"><option value="">全部類別</option>${categories.map((value) => `<option ${filters.category === value ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select></label><label><span>付款狀態</span><select id="payableStatus"><option value="">全部狀態</option>${['未付款','部分付款','已付清'].map((value) => `<option ${filters.status === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label class="payable-search"><span>關鍵字</span><input id="payableQuery" type="search" value="${esc(filters.query)}" placeholder="廠商、案場、材料或費用"></label></div></section>
+      <section class="commission-panel commission-filters"><div class="payable-filter-grid"><label><span>應付月份</span><input id="payableMonth" type="month" value="${esc(filters.month)}"></label><label><span>付款月份</span><input id="payablePaymentMonth" type="month" value="${esc(filters.paymentMonth)}"></label><label><span>廠商／收款人</span><select id="payableVendor">${selectOptions(state.vendors,filters.vendor,'全部廠商／收款人')}</select></label><label><span>案場</span><select id="payableProject">${selectOptions(state.projects,filters.project,'全部案場')}</select></label><label><span>類別</span><select id="payableCategory"><option value="">全部類別</option>${categories.map((value) => `<option ${filters.category === value ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select></label><label><span>付款狀態</span><select id="payableStatus"><option value="">全部狀態</option>${['未付款','部分付款','已付清'].map((value) => `<option ${filters.status === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label class="payable-search" style="grid-column:1/-1"><span>關鍵字</span><input id="payableQuery" type="search" value="${esc(filters.query)}" placeholder="廠商、案場、材料或費用"></label></div><p class="payable-filter-note" style="margin:10px 0 0;color:#718096;font-size:12px">應付月份＝帳款建立月份｜付款月份＝實際付款月份</p></section>
       <section class="commission-panel billing-list-panel"><div class="commission-table-wrap"><table class="commission-table payable-table"><thead><tr><th>日期</th><th>廠商／收款人</th><th>案場</th><th>類別／來源</th><th class="num">應付金額</th><th class="num">已付</th><th class="num">未付</th><th>狀態</th><th>操作</th></tr></thead><tbody>${rows.map((row) => {
         const history = state.payments.filter((payment) => payment.payableId === row.id);
         const taxPayment = historicalTaxPaymentTruth(state.payables.find((payable) => payable.id === row.id), state);

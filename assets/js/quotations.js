@@ -3,7 +3,9 @@
   const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>Array.from(r.querySelectorAll(s));
   const store=window.KuSheERPStore,esc=(v)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const money=(v)=>new Intl.NumberFormat('zh-TW',{style:'currency',currency:'TWD',maximumFractionDigits:0}).format(Number(v)||0);
-  const num=(v)=>Number(v)||0,today=()=>new Date().toISOString().slice(0,10),monthOf=(v)=>String(v||'').slice(0,7);
+  const businessDateFormatter=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'});
+  const today=(date=new Date())=>{const parts=Object.fromEntries(businessDateFormatter.formatToParts(date).map((part)=>[part.type,part.value]));return `${parts.year}-${parts.month}-${parts.day}`};
+  const num=(v)=>Number(v)||0,monthOf=(v)=>String(v||'').slice(0,7);
   const sourceLabel={project:'案場價',customer:'客戶價',company:'公司標準價',manual:'本次手動',legacy:'歷史價'};
   const pricingLabel={actual:'實做實算',lump_sum:'總價承攬',mixed:'混合計價'};
   const filters={month:'',customer:'',project:'',status:'',query:''};
