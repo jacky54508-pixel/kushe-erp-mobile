@@ -612,7 +612,7 @@
       group.items.forEach(({item,index,groupKey}) => {
         const amount = num(item.untaxedSubtotal) || num(item.qty) * num(item.price);
         target.amount += amount; target.actualAmount += amount; target.count += 1; target.dates.push(first.date || '');
-        target.details.push({sourceType:'daily-work',pricingType:'actual',quotationId:item.quotationId||'',quotationLineId:item.quotationLineId||'',date:first.date||'',employees,item:item.item||'',unit:item.unit||'式',price:num(item.price),inputPrice:num(item.inputPrice??item.price),qty:num(item.qty),subtotal:amount,grossSubtotal:num(item.subtotal)||amount,taxMode:item.taxMode||'未稅',note:first.note||'',workItemId:item.workItemId||'',sourceGroupKey:groupKey,sourceItemIndex:index,dailyLogIds:group.logs.map((log)=>log.id)});
+        target.details.push({sourceType:'daily-work',pricingType:'actual',quotationId:item.quotationId||'',quotationLineId:item.quotationLineId||'',date:first.date||'',employees,house:item.house||'',item:item.item||'',unit:item.unit||'式',price:num(item.price),inputPrice:num(item.inputPrice??item.price),qty:num(item.qty),subtotal:amount,grossSubtotal:num(item.subtotal)||amount,taxMode:item.taxMode||'未稅',note:first.note||'',workItemId:item.workItemId||'',sourceGroupKey:groupKey,sourceItemIndex:index,dailyLogIds:group.logs.map((log)=>log.id)});
       });
     });
     state.quotations.filter((quote)=>quote.status==='已確認'&&['lump_sum','mixed'].includes(pricingMode(quote.pricingMode))).forEach((quote)=>{
@@ -648,7 +648,7 @@
       const gross=type==='actual'?qty*inputPrice:0,taxMode=quoteItem?.taxMode||line.taxMode||'未稅';
       const untaxedSubtotal=taxMode==='含稅'?Math.round(gross/(1+(num(state.settings.defaultTax)||5)/100)):gross;
       const billable=type==='actual'&&line.billable!==false;
-      return {...line,item:quoteItem?.item||line.item,itemName:quoteItem?.item||line.item,unit:quoteItem?.unit||line.unit,qty,inputPrice,unitPrice:inputPrice,price:qty&&type==='actual'?untaxedSubtotal/qty:0,subtotal:gross,untaxedSubtotal,taxMode,pricingType:type,sourceType:quoteItem?'quotation':'manual',quotationId:quoteItem?.quotationId||'',quotationLineId:quoteItem?.quotationLineId||'',quoteId:quoteItem?.quotationId||'',quoteLineId:quoteItem?.quotationLineId||'',quotationNo:quoteItem?.quotationNo||'',lumpSumAmount:num(quoteItem?.lumpSumAmount),workItemId:line.workItemId||uid(),billable,billingStatus:billable?'未請款':'',billingId:''};
+      return {...line,house:String(line.house||'').trim(),item:quoteItem?.item||line.item,itemName:quoteItem?.item||line.item,unit:quoteItem?.unit||line.unit,qty,inputPrice,unitPrice:inputPrice,price:qty&&type==='actual'?untaxedSubtotal/qty:0,subtotal:gross,untaxedSubtotal,taxMode,pricingType:type,sourceType:quoteItem?'quotation':'manual',quotationId:quoteItem?.quotationId||'',quotationLineId:quoteItem?.quotationLineId||'',quoteId:quoteItem?.quotationId||'',quoteLineId:quoteItem?.quotationLineId||'',quotationNo:quoteItem?.quotationNo||'',lumpSumAmount:num(quoteItem?.lumpSumAmount),workItemId:line.workItemId||uid(),billable,billingStatus:billable?'未請款':'',billingId:''};
     });
     const byProject = new Map();
     prepared.forEach((line) => { if (!byProject.has(line.project)) byProject.set(line.project, []); byProject.get(line.project).push(line); });
