@@ -244,6 +244,20 @@ html,body{height:100%;overflow:hidden}
 #billingEditForm>.erp-detail-body{flex:1 1 auto;min-width:0;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding-bottom:24px}
 #billingEditForm>.erp-detail-body>*{min-width:0;max-width:100%}
 #billingEditForm .commission-table-wrap{max-width:100%;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain}
+#billingEditForm .billing-edit-table{table-layout:fixed;width:100%;min-width:990px}
+#billingEditForm .billing-edit-table .billing-edit-date{width:110px}
+#billingEditForm .billing-edit-table .billing-edit-house{width:75px}
+#billingEditForm .billing-edit-table .billing-edit-item{width:240px}
+#billingEditForm .billing-edit-table .billing-edit-unit{width:65px}
+#billingEditForm .billing-edit-table .billing-edit-qty{width:75px}
+#billingEditForm .billing-edit-table .billing-edit-price{width:115px}
+#billingEditForm .billing-edit-table .billing-edit-subtotal{width:125px}
+#billingEditForm .billing-edit-table .billing-edit-source{width:85px}
+#billingEditForm .billing-edit-table th,#billingEditForm .billing-edit-table td{width:auto;min-width:0;padding:10px 6px;white-space:normal;overflow-wrap:anywhere}
+#billingEditForm .billing-edit-table th{font-size:13px}
+#billingEditForm .billing-edit-table input{box-sizing:border-box;width:100%;min-width:0;max-width:100%;padding:8px 5px;font-size:13px}
+#billingEditForm .billing-edit-table input[type="number"]{text-align:right}
+#billingEditForm .billing-edit-table td.num{white-space:nowrap;overflow-wrap:normal}
 #billingEditForm>footer{position:sticky;bottom:0;z-index:2;flex:0 0 auto;background:#fff}
 
 /* Scoped long-form dialogs: keep actions visible while only the form body scrolls. */
