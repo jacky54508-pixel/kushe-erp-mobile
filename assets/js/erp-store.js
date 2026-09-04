@@ -1294,10 +1294,32 @@
     return {allowed:blockers.length===0,previewOnly:true,executeAvailable:true,blockers,warnings,arRebuilds,apRepair,preservedLegacy,manualReview,protectedFingerprints,expectedPostRepairSummary,audits:{financialIntegrityAuditVersion:baseAudit.auditVersion,financialIntegrityPhase2AuditVersion:phase2Audit.auditVersion}};
   }
   async function financialIntegrityPhase2RepairPreview() {await load();const before=financialRepairFingerprint(state),preview=financialIntegrityPhase2RepairPlan();if(financialRepairFingerprint(state)!==before)throw new Error('financialIntegrityPhase2RepairPreview 不得修改 Business state。');return preview}
-  const FINANCIAL_PHASE2_EXECUTE_EXPECTED_SUMMARY=Object.freeze({billingCount:12,exactBillingReceivablePairs:12,orphanBillingCount:0,ambiguousBillingCount:0,orphanReceivableCount:4,billingAmountMismatchCount:0,orphanInvoiceCount:2,dailyBillingOrphanCount:0,orphanPayrollCount:0,stalePayrollCount:0,orphanPayableCount:0,paymentIntegrityIssueCount:4,orphanBankTransactionCount:0,duplicateIdentityCount:0,blockingIssueCount:9,warningIssueCount:7});
+  const FINANCIAL_PHASE2_EXECUTE_EXPECTED_SUMMARY=Object.freeze({billingCount:12,exactBillingReceivablePairs:12,orphanBillingCount:0,ambiguousBillingCount:0,orphanReceivableCount:4,billingAmountMismatchCount:0,orphanInvoiceCount:2,dailyBillingOrphanCount:0,orphanPayrollCount:0,stalePayrollCount:0,orphanPayableCount:0,paymentIntegrityIssueCount:4,orphanBankTransactionCount:0,duplicateIdentityCount:0,blockingIssueCount:9,warningIssueCount:3});
   const FINANCIAL_PHASE2_EXECUTE_EXPECTED_PHASE2=Object.freeze({phase2OrphanReceivableCount:4,phase2OrphanInvoiceCount:2,phase2OrphanPaymentCount:4,phase2MissingPayableBundleCount:0,phase2MaterialUsageCount:0,payableInvoiceMismatchCount:0,preservedLegacyCount:5,rebuildCandidateCount:0,relinkCandidateCount:0,staleCandidateCount:4,manualReviewCount:5,crossBundleCount:2});
+  const FINANCIAL_PHASE2_RESOLVED_WARNING_IDS=Object.freeze(FINANCIAL_PHASE2_REPAIR_TARGETS.ar.map((row)=>row.receivableId));
   const financialPhase2ExecuteOmit=(row,keys)=>Object.fromEntries(Object.entries(row||{}).filter(([key])=>!keys.includes(key)));
   const financialPhase2ExecuteRows=(source,key)=>Array.isArray(source?.[key])?source[key]:[];
+  const financialPhase2ExecuteWarningIdentity=(row)=>[financialAuditText(row?.section),financialAuditText(row?.id),financialAuditText(row?.code)].join('|');
+  const financialPhase2ExecuteWarningSnapshot=(report)=>{
+    const rows=(report?.issues||[]).filter((row)=>row.severity==='WARNING').map((row)=>financialPhase2Clone(row)).sort((left,right)=>{
+      const identityOrder=financialPhase2ExecuteWarningIdentity(left).localeCompare(financialPhase2ExecuteWarningIdentity(right));
+      return identityOrder||financialRepairFingerprint(left).localeCompare(financialRepairFingerprint(right));
+    });
+    return {count:rows.length,keys:rows.map(financialPhase2ExecuteWarningIdentity),fingerprint:financialRepairFingerprint(rows),rows};
+  };
+  function financialPhase2ExecuteWarningProtection(report) {
+    const warnings=financialPhase2ExecuteWarningSnapshot(report),targetIds=new Set(FINANCIAL_PHASE2_RESOLVED_WARNING_IDS),isResolvedTarget=(row)=>row.section==='receivable'&&row.code==='ORPHAN_EMPTY'&&targetIds.has(financialAuditText(row.id)),resolvedTargets=warnings.rows.filter(isResolvedTarget),nonTargets=warnings.rows.filter((row)=>!isResolvedTarget(row));
+    if(report?.summary?.warningIssueCount!==7||warnings.count!==7)throw new Error(`Phase 2 Repair 前 WARNING 必須精確為 7，summary=${report?.summary?.warningIssueCount}，issues=${warnings.count}。`);
+    if(resolvedTargets.length!==4||FINANCIAL_PHASE2_RESOLVED_WARNING_IDS.some((id)=>resolvedTargets.filter((row)=>financialAuditText(row.id)===id).length!==1))throw new Error('Phase 2 Repair 前四筆 AR target 必須各有且只有一個 ORPHAN_EMPTY WARNING。');
+    if(nonTargets.length!==3)throw new Error(`Phase 2 Repair 前非目標 WARNING 必須精確為 3，實際 ${nonTargets.length}。`);
+    return {beforeCount:warnings.count,resolvedTargetCount:resolvedTargets.length,resolvedTargetKeys:resolvedTargets.map(financialPhase2ExecuteWarningIdentity),nonTargetCount:nonTargets.length,nonTargetKeys:nonTargets.map(financialPhase2ExecuteWarningIdentity),nonTargetFingerprint:financialRepairFingerprint(nonTargets)};
+  }
+  function financialPhase2ExecuteAssertWarnings(report,stage,protection) {
+    const warnings=financialPhase2ExecuteWarningSnapshot(report),resolvedKeys=new Set(protection.resolvedTargetKeys),remainingResolved=warnings.rows.filter((row)=>resolvedKeys.has(financialPhase2ExecuteWarningIdentity(row))),nonTargets=warnings.rows.filter((row)=>!resolvedKeys.has(financialPhase2ExecuteWarningIdentity(row)));
+    if(remainingResolved.length)throw new Error(`${stage}：四筆 target ORPHAN_EMPTY WARNING 尚未全部消失。`);
+    if(financialRepairFingerprint(nonTargets)!==protection.nonTargetFingerprint||financialRepairFingerprint(nonTargets.map(financialPhase2ExecuteWarningIdentity))!==financialRepairFingerprint(protection.nonTargetKeys))throw new Error(`${stage}：非目標 WARNING identity 或內容發生變動。`);
+    if(warnings.count!==protection.nonTargetCount||report?.summary?.warningIssueCount!==3)throw new Error(`${stage}：WARNING 應由 ${protection.beforeCount} 減少 ${protection.resolvedTargetCount} 成為 3，實際 issues=${warnings.count}、summary=${report?.summary?.warningIssueCount}。`);
+  }
   const financialPhase2ExecuteOne=(rows,id,label)=>{
     const matches=(rows||[]).filter((row)=>financialAuditText(row.id||row.invoiceId)===id);
     if(matches.length!==1)throw new Error(`${label} ${id} 必須精確存在 1 筆，實際 ${matches.length} 筆。`);
@@ -1367,8 +1389,8 @@
     });
     return financialRepairFingerprint(result);
   }
-  function financialPhase2ExecuteProtection(snapshot,preview,targets) {
-    return {snapshotFingerprint:financialRepairFingerprint(snapshot),counts:globalFinancialRepairCounts(snapshot),metaFingerprint:financialRepairFingerprint(snapshot.meta),auditFingerprint:financialRepairFingerprint(snapshot.audit),auditBaselineFingerprint:financialRepairFingerprint({global:financialIntegrityAuditReport().summary,phase2:financialIntegrityPhase2AuditReport().summary}),normalizedStateFingerprint:financialPhase2ExecuteNormalizedState(snapshot),existingBillingFingerprints:new Map((snapshot.billings||[]).map((row)=>[financialAuditText(row.id),financialRepairFingerprint(row)])),targetReceivables:targets.arTargets.map(({repair,receivable})=>({id:repair.receivableId,immutable:financialRepairFingerprint(financialPhase2ExecuteOmit(receivable,Object.keys(repair.receivablePatch))),patch:financialPhase2Clone(repair.receivablePatch)})),targetInvoices:targets.arTargets.map(({repair,invoice})=>({id:repair.invoiceId,immutable:financialRepairFingerprint(financialPhase2ExecuteOmit(invoice,Object.keys(repair.invoicePatch))),patch:financialPhase2Clone(repair.invoicePatch)})),targetMaterials:targets.materialRows.map(({patch,row})=>({id:patch.id,immutable:financialRepairFingerprint(financialPhase2ExecuteOmit(row,['payableId']))})),payableFingerprint:financialRepairFingerprint(targets.payable),inputInvoiceFingerprint:financialRepairFingerprint(targets.inputInvoice),preservedPaymentFingerprint:financialRepairFingerprint(targets.preservedPayment),previewFingerprints:financialPhase2Clone(preview.protectedFingerprints)};
+  function financialPhase2ExecuteProtection(snapshot,preview,targets,beforeAudit,beforePhase2Audit) {
+    return {snapshotFingerprint:financialRepairFingerprint(snapshot),counts:globalFinancialRepairCounts(snapshot),metaFingerprint:financialRepairFingerprint(snapshot.meta),auditFingerprint:financialRepairFingerprint(snapshot.audit),auditBaselineFingerprint:financialRepairFingerprint({global:beforeAudit.summary,phase2:beforePhase2Audit.summary}),warningProtection:financialPhase2ExecuteWarningProtection(beforeAudit),normalizedStateFingerprint:financialPhase2ExecuteNormalizedState(snapshot),existingBillingFingerprints:new Map((snapshot.billings||[]).map((row)=>[financialAuditText(row.id),financialRepairFingerprint(row)])),targetReceivables:targets.arTargets.map(({repair,receivable})=>({id:repair.receivableId,immutable:financialRepairFingerprint(financialPhase2ExecuteOmit(receivable,Object.keys(repair.receivablePatch))),patch:financialPhase2Clone(repair.receivablePatch)})),targetInvoices:targets.arTargets.map(({repair,invoice})=>({id:repair.invoiceId,immutable:financialRepairFingerprint(financialPhase2ExecuteOmit(invoice,Object.keys(repair.invoicePatch))),patch:financialPhase2Clone(repair.invoicePatch)})),targetMaterials:targets.materialRows.map(({patch,row})=>({id:patch.id,immutable:financialRepairFingerprint(financialPhase2ExecuteOmit(row,['payableId']))})),payableFingerprint:financialRepairFingerprint(targets.payable),inputInvoiceFingerprint:financialRepairFingerprint(targets.inputInvoice),preservedPaymentFingerprint:financialRepairFingerprint(targets.preservedPayment),previewFingerprints:financialPhase2Clone(preview.protectedFingerprints)};
   }
   function financialPhase2ExecuteAssertState(source,preview,protection,stage,afterPersist=false) {
     const target=FINANCIAL_PHASE2_REPAIR_TARGETS,text=financialAuditText;
@@ -1389,7 +1411,8 @@
     const counts=globalFinancialRepairCounts(source);
     Object.keys(protection.counts).forEach((key)=>{let expected=protection.counts[key];if(key==='billings')expected+=4;else if(key==='payments')expected-=1;else if(key==='audit'&&afterPersist)expected=Math.min(300,expected+1);if(counts[key]!==expected)throw new Error(`${stage}：${key} collection count 不符合精確 scope。`)});
   }
-  function financialPhase2ExecuteAssertGlobalAudit(report,stage) {
+  function financialPhase2ExecuteAssertGlobalAudit(report,stage,warningProtection) {
+    financialPhase2ExecuteAssertWarnings(report,stage,warningProtection);
     Object.entries(FINANCIAL_PHASE2_EXECUTE_EXPECTED_SUMMARY).forEach(([key,value])=>{if(report?.summary?.[key]!==value)throw new Error(`${stage}：Global Audit ${key} 預期 ${value}，實際 ${report?.summary?.[key]}。`)});
     if((report.payables||[]).filter((row)=>row.invoiceMismatch).length!==0||(report.materialPayableLinks||[]).filter((row)=>row.orphanMaterialPayable).length!==0)throw new Error(`${stage}：AP invoice mismatch 或 material orphan 尚未歸零。`);
     const expectedIds=new Set(FINANCIAL_PHASE2_REPAIR_TARGETS.ar.map((row)=>`legacy-billing-${row.receivableId}`)),sources=(report.billingSources||[]).filter((row)=>expectedIds.has(row.billingId));
@@ -1405,7 +1428,7 @@
     const preview=await financialIntegrityPhase2RepairPreview(),reason=String(confirmation?.reason||'').trim();
     if(confirmation?.confirmed!==true)throw new Error('必須明確確認執行 GLOBAL FINANCIAL PHASE 2 REPAIR。');
     if(!reason)throw new Error('請輸入 GLOBAL FINANCIAL PHASE 2 REPAIR 原因。');
-    const scope=financialPhase2ExecuteScope(preview),targets=financialPhase2ExecuteTargetGate(preview,scope),snapshot=financialPhase2Clone(state),protection=financialPhase2ExecuteProtection(snapshot,preview,targets),persistAction=`GLOBAL FINANCIAL PHASE 2 REPAIR｜4 Legacy Billing + Material AP relink + duplicate legacy payment cleanup｜原因：${reason}`;
+    const scope=financialPhase2ExecuteScope(preview),targets=financialPhase2ExecuteTargetGate(preview,scope),snapshot=financialPhase2Clone(state),beforeAudit=financialIntegrityAuditReport(),beforePhase2Audit=financialIntegrityPhase2AuditReport(),protection=financialPhase2ExecuteProtection(snapshot,preview,targets,beforeAudit,beforePhase2Audit),persistAction=`GLOBAL FINANCIAL PHASE 2 REPAIR｜4 Legacy Billing + Material AP relink + duplicate legacy payment cleanup｜原因：${reason}`;
     const restore=async()=>{
       state=financialPhase2Clone(snapshot);
       if(!db)db=await openDB();
@@ -1424,7 +1447,7 @@
       financialPhase2ExecuteAssertState(state,preview,protection,'persist 前');
       if(financialRepairFingerprint(state.meta)!==protection.metaFingerprint||financialRepairFingerprint(state.audit)!==protection.auditFingerprint)throw new Error('persist 前：meta 或 audit 提前發生變動。');
       const prePersistAudit=financialIntegrityAuditReport(),prePersistPhase2Audit=financialIntegrityPhase2AuditReport();
-      financialPhase2ExecuteAssertGlobalAudit(prePersistAudit,'persist 前');
+      financialPhase2ExecuteAssertGlobalAudit(prePersistAudit,'persist 前',protection.warningProtection);
       financialPhase2ExecuteAssertPhase2Audit(prePersistPhase2Audit,'persist 前');
       let persistCount=0;
       persistCount+=1;
@@ -1437,9 +1460,9 @@
       financialPhase2ExecuteAssertState(emergencyState,preview,protection,'persist 後 Emergency backup',true);
       if(financialRepairFingerprint(dbState)!==persistedFingerprint||financialRepairFingerprint(emergencyState)!==persistedFingerprint)throw new Error('Phase 2 Repair persist 後三層完整 state fingerprint 不一致。');
       const postRepairSummary=financialIntegrityAuditReport(),phase2PostRepairSummary=financialIntegrityPhase2AuditReport();
-      financialPhase2ExecuteAssertGlobalAudit(postRepairSummary,'persist 後');
+      financialPhase2ExecuteAssertGlobalAudit(postRepairSummary,'persist 後',protection.warningProtection);
       financialPhase2ExecuteAssertPhase2Audit(phase2PostRepairSummary,'persist 後');
-      return {repaired:true,singlePersist:true,reason,arRepair:{billingCreated:4,receivablesLinked:4,invoicesLinked:4},apRepair:{payableId:FINANCIAL_PHASE2_REPAIR_TARGETS.ap.existingPayableId,materialRelinked:21,duplicateLegacyPaymentDeleted:FINANCIAL_PHASE2_REPAIR_TARGETS.ap.legacyPaymentId,preservedLegacyPayment:'legacy-msypsa7zelvm1l'},protected:{fuhua:true,stalePayments:4,verifiedLegacyReceivables:3,verifiedLegacyInvoices:2,banksUnchanged:true},postRepairSummary:postRepairSummary.summary,phase2PostRepairSummary:phase2PostRepairSummary.summary};
+      return {repaired:true,singlePersist:true,reason,arRepair:{billingCreated:4,receivablesLinked:4,invoicesLinked:4},apRepair:{payableId:FINANCIAL_PHASE2_REPAIR_TARGETS.ap.existingPayableId,materialRelinked:21,duplicateLegacyPaymentDeleted:FINANCIAL_PHASE2_REPAIR_TARGETS.ap.legacyPaymentId,preservedLegacyPayment:'legacy-msypsa7zelvm1l'},protected:{fuhua:true,stalePayments:4,verifiedLegacyReceivables:3,verifiedLegacyInvoices:2,banksUnchanged:true,warningIssues:{before:protection.warningProtection.beforeCount,resolvedTargets:protection.warningProtection.resolvedTargetCount,after:postRepairSummary.summary.warningIssueCount}},postRepairSummary:postRepairSummary.summary,phase2PostRepairSummary:phase2PostRepairSummary.summary};
     } catch(error) {
       try { await restore(); error.rollbackVerified=true; }
       catch(rollbackError) { error.rollbackVerified=false; error.rollbackError=rollbackError; }
