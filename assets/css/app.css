@@ -236,6 +236,55 @@ html,body{height:100%;overflow:hidden}
 .quotation-unit-menu[hidden]{display:none}.quotation-unit-option{display:block;width:100%;min-height:34px;border:0;border-radius:6px;background:#fff;padding:7px 9px;color:#173d69;font:inherit;text-align:left;cursor:pointer;white-space:nowrap}.quotation-unit-option:hover,.quotation-unit-option.is-active{background:#eaf3ff;color:#075bd8}.quotation-unit-empty{padding:9px;color:#718197;font-size:10px;white-space:nowrap}
 .quotation-unit-menu.is-scrollable::-webkit-scrollbar{width:11px}.quotation-unit-menu.is-scrollable::-webkit-scrollbar-track{background:#eef3f8;border-radius:8px}.quotation-unit-menu.is-scrollable::-webkit-scrollbar-thumb{border:2px solid #eef3f8;border-radius:8px;background:#9aaec4}.quotation-unit-menu.is-scrollable::-webkit-scrollbar-thumb:hover{background:#7289a3}
 
+/* P12 house groups: presentation only; each child remains a flat daily line. */
+.daily-drawer:has(.daily-house-editor){max-width:100vw;overflow:hidden}
+#dailyWorkForm.daily-house-editor{min-width:0;min-height:0;display:flex;flex:1;flex-direction:column;overflow:hidden}
+#dailyWorkForm.daily-house-editor>.daily-drawer-body{display:block;min-width:0;min-height:0;flex:1;overflow-x:hidden;overflow-y:auto}
+#dailyWorkForm.daily-house-editor>.daily-drawer-body>*{min-width:0;max-width:100%}
+#dailyWorkForm.daily-house-editor>footer{flex:0 0 auto;position:sticky;bottom:0;background:#fff;z-index:2}
+#dailyWorkForm .daily-house-groups{display:grid;gap:14px;padding:12px;min-width:0}
+#dailyWorkForm .daily-house-group{min-width:0;max-width:100%;border:1px solid #dfe7f0;border-radius:10px;overflow:hidden;background:#fff}
+#dailyWorkForm .daily-house-header{display:grid;grid-template-columns:minmax(180px,1fr) 95px 140px auto;gap:12px;align-items:end;padding:12px;background:#f5f8fc;border-bottom:1px solid #e5ebf2}
+#dailyWorkForm .daily-house-header label{display:grid;gap:5px;min-width:0}
+#dailyWorkForm .daily-house-header span{color:#65778e;font-size:12px}
+#dailyWorkForm .daily-house-header input,#dailyWorkForm .daily-house-header select{width:100%;min-width:0;height:38px;border:1px solid #d5e0ed;border-radius:8px;padding:0 8px;font:inherit;font-size:13px;background:#fff}
+#dailyWorkForm .daily-house-name{font-weight:800;color:#0a386f}
+#dailyWorkForm .daily-house-amount{display:grid;gap:7px;min-width:0}
+#dailyWorkForm .daily-house-subtotal{color:#0a386f;font-size:17px;overflow-wrap:anywhere}
+#dailyWorkForm .daily-house-actions{display:flex;flex-wrap:wrap;gap:6px}
+#dailyWorkForm .daily-house-actions button{font-size:12px;padding:0 9px;min-height:36px;height:auto;white-space:normal}
+#dailyWorkForm .daily-house-group>footer{display:flex;justify-content:flex-start;padding:9px 12px;border-top:1px solid #e5ebf2}
+#dailyWorkForm .daily-house-items{table-layout:fixed;min-width:960px;width:100%}
+#dailyWorkForm .daily-house-items .daily-col-item{width:auto}
+#dailyWorkForm .daily-house-items .daily-col-unit{width:65px}
+#dailyWorkForm .daily-house-items .daily-col-qty{width:75px}
+#dailyWorkForm .daily-house-items .daily-col-tax{width:75px}
+#dailyWorkForm .daily-house-items .daily-col-price{width:105px}
+#dailyWorkForm .daily-house-items .daily-col-total{width:110px}
+#dailyWorkForm .daily-house-items .daily-col-purpose{width:120px}
+#dailyWorkForm .daily-house-items .daily-col-actions{width:135px}
+#dailyWorkForm .daily-house-items th,#dailyWorkForm .daily-house-items td{width:auto;min-width:0;padding:8px 6px;font-size:12px;vertical-align:top}
+#dailyWorkForm .daily-house-items .daily-line-context[hidden]{display:none}
+#dailyWorkForm .daily-house-items input,#dailyWorkForm .daily-house-items select{width:100%;min-width:0;max-width:100%;border:1px solid #d7e1ec;border-radius:7px;background:#fff}
+#dailyWorkForm .daily-house-items input[type=number]{text-align:right}
+#dailyWorkForm .daily-house-items input[readonly],#dailyWorkForm .daily-house-items select:disabled{background:#f2f5f9;color:#52667e}
+#dailyWorkForm .daily-house-items .daily-quote-hint{display:block;overflow-wrap:anywhere;font-size:11px;color:#718197;margin-top:5px}
+#dailyWorkForm .daily-house-items .daily-line-actions{min-width:0;gap:5px}
+#dailyWorkForm .daily-house-items .daily-billable input{width:15px}
+#dailyWorkForm .daily-house-items .daily-line-total{font-size:13px}
+@media(max-width:720px){
+  #dailyWorkForm.daily-house-editor>.daily-drawer-body{padding:12px}
+  #dailyWorkForm.daily-house-editor .daily-form-grid{grid-template-columns:1fr}
+  #dailyWorkForm.daily-house-editor .daily-wide{grid-column:auto}
+  #dailyWorkForm.daily-house-editor .daily-section-title{flex-wrap:wrap}
+  #dailyWorkForm .daily-house-groups{padding:8px;gap:12px}
+  #dailyWorkForm .daily-house-header{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+  #dailyWorkForm .daily-house-header>label:first-child,#dailyWorkForm .daily-house-actions{grid-column:1/-1}
+  #dailyWorkForm.daily-house-editor .daily-total-bar{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #dailyWorkForm.daily-house-editor .daily-pay-grid{grid-template-columns:minmax(0,1fr)}
+  #dailyWorkForm.daily-house-editor .daily-form-grid input,#dailyWorkForm.daily-house-editor .daily-pay-grid input,#dailyWorkForm.daily-house-editor .daily-pay-grid select{min-width:0;max-width:100%}
+}
+
 /* Billing safe editor: keep only its body scrollable and its actions visible. */
 .erp-detail-overlay:has(#billingEditForm){overflow:hidden;padding:8px;overscroll-behavior:contain}
 .erp-detail-card:has(#billingEditForm){width:min(1120px,calc(100vw - 16px));max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);max-height:calc(100dvh - 16px);display:flex;flex-direction:column;overflow:hidden}
