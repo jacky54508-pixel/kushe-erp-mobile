@@ -501,6 +501,157 @@
       throw error;
     }
   }
+  const ORPHAN_B920384_CLEANUP_TARGET = Object.freeze({
+    billing:{id:'msgxwjuofipz7e',number:'B920384',sourceType:'daily-log-summary',grossTotal:8925,total:8925,invoiceStatus:'invoice_pending',invoiceNo:''},
+    dailyLog:{id:'msfwqn64lb9ub2',batchId:'msfwqn64x468hs',date:'2026-08-04',employee:'ms4pb1q8m834ic',employeeName:'林子嶽',project:'ms4p1u5lc5d5ft',projectName:'富宇大地C1區',billingStatus:'已請款',performance:8500,commission:0,workMode:'daily',workQty:1,workRate:2000},
+    items:[
+      {workItemId:'mspu25iecwamqv',house:'C28',item:'鋁門窗框',qty:7,price:400,untaxedSubtotal:2800},
+      {workItemId:'mspu25ie9qwh6h',house:'C28',item:'木門框',qty:10,price:400,untaxedSubtotal:4000},
+      {workItemId:'mspu25iel7vx5h',house:'C28',item:'玄關門框',qty:2,price:400,untaxedSubtotal:800},
+      {workItemId:'mspu25ie1g46tk',house:'C28',item:'地壁磚',qty:1,price:400,untaxedSubtotal:400},
+      {workItemId:'mspu25ieqngi5i',house:'C28',item:'門檻',qty:1,price:500,untaxedSubtotal:500}
+    ],
+    commission:{id:'msgxwjup65wr8x',sourceType:'daily-log',sourceId:'msfwqn64lb9ub2',employee:'ms4pb1q8m834ic',date:'2026-08-04',commission:0,status:'已列入薪資'},
+    attendance:{id:'msgxwjup9zhmb3',sourceType:'daily-log',sourceId:'msfwqn64lb9ub2',employee:'ms4pb1q8m834ic',date:'2026-08-04',days:1,hours:0,amount:2000},
+    sibling:{id:'msfwqn658k7id3',batchId:'msfwqn64x468hs',date:'2026-08-04',employee:'ms4pb1q8m834ic',employeeName:'林子嶽',project:'msfwqn63nfvm5t',projectName:'小賴(親家)',billingId:'msfwtqet8zssvp',billingNo:'B643124',billingStatus:'已請款',performance:1750,workMode:'none',workItemId:'mspu25ie7lk4w6',house:'13G',item:'玄關框',qty:1,price:1750},
+    payroll:{employee:'ms4pb1q8m834ic',month:'2026-08',unpaid:{id:'msypkfjaycya0r',status:'未付款',days:1,baseSalary:2000,commission:0,total:2000},paid:{id:'msdfc59cbvc6p7',status:'已付款',days:2,baseSalary:4000,commission:0,total:4000,paidAt:'2026-08-17T07:25:34.099Z'}}
+  });
+  const orphanBillingCleanupText = (value) => String(value ?? '').trim();
+  const orphanBillingCleanupClone = (value) => JSON.parse(JSON.stringify(value));
+  const orphanBillingCleanupFingerprint = (value) => JSON.stringify(value);
+  function orphanBillingCleanupProtectedFingerprints(source) {
+    const target=ORPHAN_B920384_CLEANUP_TARGET,mutableKeys=new Set(['billings','dailyLogs','commissions','attendance','payroll','meta','audit']),topLevel={};
+    Object.keys(source||{}).sort().forEach((key)=>{if(!mutableKeys.has(key))topLevel[key]=orphanBillingCleanupFingerprint(source[key])});
+    return {
+      topLevel,
+      billings:orphanBillingCleanupFingerprint((source?.billings||[]).filter((row)=>orphanBillingCleanupText(row.id)!==target.billing.id)),
+      dailyLogs:orphanBillingCleanupFingerprint((source?.dailyLogs||[]).filter((row)=>orphanBillingCleanupText(row.id)!==target.dailyLog.id)),
+      commissions:orphanBillingCleanupFingerprint((source?.commissions||[]).filter((row)=>orphanBillingCleanupText(row.id)!==target.commission.id)),
+      attendance:orphanBillingCleanupFingerprint((source?.attendance||[]).filter((row)=>orphanBillingCleanupText(row.id)!==target.attendance.id)),
+      payroll:orphanBillingCleanupFingerprint((source?.payroll||[]).filter((row)=>orphanBillingCleanupText(row.id)!==target.payroll.unpaid.id))
+    };
+  }
+  function assertOrphanBillingCleanupProtectedFingerprints(source, expected, stage) {
+    const actual=orphanBillingCleanupProtectedFingerprints(source);
+    Object.keys(expected.topLevel).forEach((key)=>{if(actual.topLevel[key]!==expected.topLevel[key])throw new Error(`${stage}：非目標資料 ${key} 發生變動。`)});
+    ['billings','dailyLogs','commissions','attendance','payroll'].forEach((key)=>{if(actual[key]!==expected[key])throw new Error(`${stage}：非目標 ${key} 發生變動。`)});
+  }
+  function orphanBillingTestCleanupPlan() {
+    const target=ORPHAN_B920384_CLEANUP_TARGET,blockers=[],block=(key,message)=>blockers.push({key,message}),text=orphanBillingCleanupText;
+    const billingById=(state.billings||[]).filter((row)=>text(row.id)===target.billing.id),billingByNo=(state.billings||[]).filter((row)=>text(row.number)===target.billing.number),billing=billingById.length===1&&billingByNo.length===1&&billingById[0]===billingByNo[0]?billingById[0]:null;
+    if(!billing)block('billing-identity',`Billing ${target.billing.id} / ${target.billing.number} 必須同時唯一且指向同一筆資料。`);
+    if(billing&&!(text(billing.sourceType)===target.billing.sourceType&&num(billing.grossTotal)===target.billing.grossTotal&&num(billing.total)===target.billing.total&&text(billing.invoiceStatus)===target.billing.invoiceStatus&&text(billing.invoiceNo)===''))block('billing-values','Billing 類型、金額或待開票狀態已不同於核准基準。');
+
+    const dailyMatches=(state.dailyLogs||[]).filter((row)=>text(row.id)===target.dailyLog.id),dailyLog=dailyMatches[0],dailyIdentity=Boolean(dailyLog)&&text(dailyLog.batchId||dailyLog.id)===target.dailyLog.batchId&&text(dailyLog.date)===target.dailyLog.date&&text(dailyLog.employee||dailyLog.employeeId)===target.dailyLog.employee&&text(dailyLog.employeeName)===target.dailyLog.employeeName&&text(dailyLog.project||dailyLog.projectId)===target.dailyLog.project&&text(dailyLog.projectName)===target.dailyLog.projectName&&text(dailyLog.billingId)===target.billing.id&&text(dailyLog.billingNo)===target.billing.number&&text(dailyLog.billingStatus)===target.dailyLog.billingStatus&&num(dailyLog.performance)===target.dailyLog.performance&&num(dailyLog.commission)===target.dailyLog.commission&&text(dailyLog.workMode)===target.dailyLog.workMode&&num(dailyLog.workQty)===target.dailyLog.workQty&&num(dailyLog.workRate)===target.dailyLog.workRate;
+    if(dailyMatches.length!==1||!dailyIdentity)block('daily-log-identity',`Daily Log ${target.dailyLog.id} 不唯一或欄位已不同於核准基準。`);
+
+    const itemRows=Array.isArray(dailyLog?.items)?dailyLog.items:[],itemChecks=target.items.map((expected)=>{
+      const matches=itemRows.filter((item)=>text(item.workItemId)===expected.workItemId),item=matches[0],valid=matches.length===1&&text(item.house)===expected.house&&text(item.item||item.itemName)===expected.item&&num(item.qty)===expected.qty&&num(item.price)===expected.price&&num(item.untaxedSubtotal)===expected.untaxedSubtotal&&text(item.billingId)===target.billing.id&&text(item.billingStatus)===target.dailyLog.billingStatus;
+      return {...expected,matchCount:matches.length,valid};
+    }),itemTotal=itemRows.reduce((sum,item)=>sum+num(item.untaxedSubtotal),0),itemsValid=itemRows.length===target.items.length&&itemChecks.every((row)=>row.valid)&&itemTotal===8500;
+    if(!itemsValid)block('work-items','5 個 workItem、戶別、項目、數量、單價、未稅小計或請款鎖定已不同於核准基準。');
+
+    const batchRows=(state.dailyLogs||[]).filter((row)=>text(row.batchId||row.id)===target.dailyLog.batchId),siblingMatches=(state.dailyLogs||[]).filter((row)=>text(row.id)===target.sibling.id),sibling=siblingMatches[0],siblingItems=Array.isArray(sibling?.items)?sibling.items:[],siblingItemMatches=siblingItems.filter((item)=>text(item.workItemId)===target.sibling.workItemId),siblingItem=siblingItemMatches[0];
+    const siblingValid=siblingMatches.length===1&&batchRows.length===2&&batchRows.includes(dailyLog)&&batchRows.includes(sibling)&&text(sibling.batchId||sibling.id)===target.sibling.batchId&&text(sibling.date)===target.sibling.date&&text(sibling.employee||sibling.employeeId)===target.sibling.employee&&text(sibling.employeeName)===target.sibling.employeeName&&text(sibling.project||sibling.projectId)===target.sibling.project&&text(sibling.projectName)===target.sibling.projectName&&text(sibling.billingId)===target.sibling.billingId&&text(sibling.billingNo)===target.sibling.billingNo&&text(sibling.billingStatus)===target.sibling.billingStatus&&num(sibling.performance)===target.sibling.performance&&text(sibling.workMode)===target.sibling.workMode&&siblingItems.length===1&&siblingItemMatches.length===1&&text(siblingItem.house)===target.sibling.house&&text(siblingItem.item||siblingItem.itemName)===target.sibling.item&&num(siblingItem.qty)===target.sibling.qty&&num(siblingItem.price)===target.sibling.price;
+    if(!siblingValid)block('sibling-daily-log',`同 batch sibling ${target.sibling.id} / ${target.sibling.billingNo} 不存在、不是唯一 sibling，或內容已改變。`);
+    const siblingBillingsById=(state.billings||[]).filter((row)=>text(row.id)===target.sibling.billingId),siblingBillingsByNo=(state.billings||[]).filter((row)=>text(row.number)===target.sibling.billingNo),siblingBilling=siblingBillingsById.length===1&&siblingBillingsByNo.length===1&&siblingBillingsById[0]===siblingBillingsByNo[0]?siblingBillingsById[0]:null;
+    if(!siblingBilling)block('sibling-billing',`受保護的 sibling Billing ${target.sibling.billingNo} 不唯一或不存在。`);
+
+    const receivableId=text(billing?.receivableId),receivables=billing?(state.receivables||[]).filter((row)=>(receivableId&&text(row.id)===receivableId)||text(row.billingId)===target.billing.id||text(row.sourceId)===target.billing.id||text(row.sourceNo)===target.billing.number):[],receivableIds=new Set(receivables.map((row)=>text(row.id)).filter(Boolean));
+    const receipts=billing?(state.receipts||[]).filter((row)=>text(row.billingId)===target.billing.id||text(row.sourceId)===target.billing.id||text(row.sourceNo)===target.billing.number||receivableIds.has(text(row.receivableId))):[];
+    const retentionReceipts=billing?(state.retentionReceipts||[]).filter((row)=>text(row.billingId)===target.billing.id||text(row.sourceId)===target.billing.id||text(row.sourceNo)===target.billing.number||receivableIds.has(text(row.receivableId))):[];
+    const receiptIds=new Set([...receipts,...retentionReceipts].flatMap((row)=>[text(row.id),text(row.retentionReceiptId)]).filter(Boolean));
+    const bankTransactions=billing?(state.bankTransactions||[]).filter((row)=>text(row.billingId)===target.billing.id||text(row.sourceId)===target.billing.id||text(row.sourceNo)===target.billing.number||receivableIds.has(text(row.receivableId))||receivableIds.has(text(row.sourceId))||receiptIds.has(text(row.sourceId))||receiptIds.has(text(row.receiptId))||receiptIds.has(text(row.retentionReceiptId))):[];
+    const invoices=billing?(state.invoices||[]).filter((row)=>text(row.billingId)===target.billing.id||text(row.sourceId)===target.billing.id||text(row.sourceNo)===target.billing.number||receivableIds.has(text(row.receivableId))):[];
+    if(receivables.length)block('receivables',`找到 ${receivables.length} 筆應收，Billing 不是可清除的孤兒。`);
+    if(receipts.length)block('receipts',`找到 ${receipts.length} 筆一般收款。`);
+    if(retentionReceipts.length)block('retention-receipts',`找到 ${retentionReceipts.length} 筆保留款收回。`);
+    if(bankTransactions.length)block('bank-transactions',`找到 ${bankTransactions.length} 筆關聯銀行交易。`);
+    if(invoices.length)block('invoices',`找到 ${invoices.length} 筆關聯發票。`);
+
+    const relatedCommissions=(state.commissions||[]).filter((row)=>text(row.sourceId)===target.dailyLog.id||text(row.billingId)===target.billing.id||text(row.sourceNo)===target.billing.number),commission=relatedCommissions[0],commissionValid=relatedCommissions.length===1&&text(commission.id)===target.commission.id&&text(commission.sourceType)===target.commission.sourceType&&text(commission.sourceId)===target.commission.sourceId&&text(commission.employee||commission.employeeId)===target.commission.employee&&text(commission.date)===target.commission.date&&num(commission.commission)===target.commission.commission&&text(commission.status)===target.commission.status;
+    if(!commissionValid)block('commission',`目標 Daily Log 的 Commission 必須精確且唯一為 ${target.commission.id}。`);
+    const relatedAttendance=(state.attendance||[]).filter((row)=>text(row.sourceId)===target.dailyLog.id),attendance=relatedAttendance[0],attendanceValid=relatedAttendance.length===1&&text(attendance.id)===target.attendance.id&&text(attendance.sourceType)===target.attendance.sourceType&&text(attendance.sourceId)===target.attendance.sourceId&&text(attendance.employee||attendance.employeeId)===target.attendance.employee&&text(attendance.date)===target.attendance.date&&num(attendance.days)===target.attendance.days&&num(attendance.hours)===target.attendance.hours&&num(attendance.amount)===target.attendance.amount;
+    if(!attendanceValid)block('attendance',`目標 Daily Log 的 Attendance 必須精確且唯一為 ${target.attendance.id} / $2,000。`);
+    const employeeMonthAttendance=(state.attendance||[]).filter((row)=>text(row.employee||row.employeeId)===target.payroll.employee&&monthOf(row.date)===target.payroll.month),employeeMonthIncludedCommissions=(state.commissions||[]).filter((row)=>text(row.employee||row.employeeId)===target.payroll.employee&&monthOf(row.date)===target.payroll.month&&text(row.status)==='已列入薪資');
+    if(employeeMonthAttendance.length!==1||employeeMonthAttendance[0]!==attendance)block('payroll-attendance-source','2026-08 林子嶽的 Attendance 不只目標一筆，禁止重建未付款薪資。');
+    if(employeeMonthIncludedCommissions.length!==1||employeeMonthIncludedCommissions[0]!==commission)block('payroll-commission-source','2026-08 林子嶽的已列入薪資 Commission 不只目標一筆，禁止重建未付款薪資。');
+
+    const employeeMonthPayroll=(state.payroll||[]).filter((row)=>text(row.employee||row.employeeId)===target.payroll.employee&&text(row.month)===target.payroll.month),unpaidMatches=(state.payroll||[]).filter((row)=>text(row.id)===target.payroll.unpaid.id),paidMatches=(state.payroll||[]).filter((row)=>text(row.id)===target.payroll.paid.id),unpaid=unpaidMatches[0],paid=paidMatches[0],unpaidNoAdjustments=Boolean(unpaid)&&['fuel','manualFuel','meal','other','overtime','bonus','allowance','advance','laborInsurance','incomeTax','deduction'].every((key)=>num(unpaid[key])===0);
+    const unpaidValid=unpaidMatches.length===1&&employeeMonthPayroll.length===2&&text(unpaid.employee||unpaid.employeeId)===target.payroll.employee&&text(unpaid.month)===target.payroll.month&&text(unpaid.status)===target.payroll.unpaid.status&&num(unpaid.days)===target.payroll.unpaid.days&&num(unpaid.baseSalary)===target.payroll.unpaid.baseSalary&&num(unpaid.commission)===target.payroll.unpaid.commission&&num(unpaid.total)===target.payroll.unpaid.total&&unpaidNoAdjustments;
+    const paidValid=paidMatches.length===1&&employeeMonthPayroll.includes(paid)&&text(paid.employee||paid.employeeId)===target.payroll.employee&&text(paid.month)===target.payroll.month&&text(paid.status)===target.payroll.paid.status&&num(paid.days)===target.payroll.paid.days&&num(paid.baseSalary)===target.payroll.paid.baseSalary&&num(paid.commission)===target.payroll.paid.commission&&num(paid.total)===target.payroll.paid.total&&text(paid.paidAt)===target.payroll.paid.paidAt;
+    if(!unpaidValid)block('unpaid-payroll',`未付款 Payroll ${target.payroll.unpaid.id} 不唯一、金額不符、有人工調整或同月薪資列數異常。`);
+    if(!paidValid)block('paid-payroll',`受保護的已付款 Payroll ${target.payroll.paid.id} 不唯一或內容已不同於核准基準。`);
+    const payrollRecordIds=new Set([target.payroll.unpaid.id,target.payroll.paid.id]),salaryPayments=(state.salaryPayments||[]).filter((row)=>payrollRecordIds.has(text(row.payrollId))||(!text(row.payrollId)&&text(row.employee||row.employeeId)===target.payroll.employee&&monthOf(row.month||row.date)===target.payroll.month));
+    const paymentTruth=employeeMonthPayroll.length?payrollPaymentTruth({employee:target.payroll.employee,month:target.payroll.month,recordIds:employeeMonthPayroll.map((row)=>row.id),total:Math.max(0,...employeeMonthPayroll.map((row)=>num(row.total)))}):null,payrollLock=payrollHistoryLock(target.payroll.employee,target.payroll.month),salaryBankTransactions=(state.bankTransactions||[]).filter((row)=>text(row.sourceType)==='salary_payment'&&(payrollRecordIds.has(text(row.payrollId))||text(row.employee||row.employeeId)===target.payroll.employee&&monthOf(row.month||row.date)===target.payroll.month));
+    const payrollPaymentSafe=salaryPayments.length===0&&salaryBankTransactions.length===0&&paymentTruth?.hasVerifiedPayment===false&&(paymentTruth?.bankTransactionIds||[]).length===0&&payrollLock.locked===false;
+    if(!payrollPaymentSafe)block('payroll-payment-lock','2026-08 林子嶽存在 Salary Payment、已驗證薪資銀行交易或 Payroll lock。');
+    if(!db)block('indexeddb','IndexedDB 尚未可用，禁止執行需要直接 rollback 的專用修復。');
+
+    return {
+      allowed:blockers.length===0,blockers,target:{billingId:target.billing.id,billingNo:target.billing.number,dailyLogId:target.dailyLog.id,batchId:target.dailyLog.batchId},
+      identity:{billingByIdCount:billingById.length,billingByNoCount:billingByNo.length,dailyLogCount:dailyMatches.length,batchRowCount:batchRows.length,siblingCount:siblingMatches.length,siblingBillingIdCount:siblingBillingsById.length,siblingBillingNoCount:siblingBillingsByNo.length},
+      amounts:{itemUntaxedTotal:itemTotal,billingGross:num(billing?.grossTotal),billingTotal:num(billing?.total)},itemChecks,
+      accounting:{receivableCount:receivables.length,receiptCount:receipts.length,retentionReceiptCount:retentionReceipts.length,bankTransactionCount:bankTransactions.length,invoiceCount:invoices.length},
+      derived:{commissionCount:relatedCommissions.length,attendanceCount:relatedAttendance.length,employeeMonthAttendanceCount:employeeMonthAttendance.length,employeeMonthIncludedCommissionCount:employeeMonthIncludedCommissions.length},
+      payroll:{rowCount:employeeMonthPayroll.length,unpaidId:unpaid?.id||'',paidId:paid?.id||'',salaryPaymentCount:salaryPayments.length,verifiedSalaryBankTransactionCount:Math.max(salaryBankTransactions.length,(paymentTruth?.bankTransactionIds||[]).length),payrollLocked:Boolean(payrollLock.locked)},
+      sibling:{dailyLogId:sibling?.id||'',billingId:siblingBilling?.id||'',billingNo:siblingBilling?.number||'',workItemId:siblingItem?.workItemId||''}
+    };
+  }
+  async function orphanBillingTestCleanupPreview() {
+    await load();
+    return orphanBillingTestCleanupPlan();
+  }
+  async function cleanupOrphanBillingTestData(confirmation={}) {
+    await load();
+    const target=ORPHAN_B920384_CLEANUP_TARGET,reason=orphanBillingCleanupText(confirmation?.reason),preview=orphanBillingTestCleanupPlan();
+    if(confirmation?.confirmed!==true)throw new Error(`必須明確確認只清除孤兒測試帳務 ${target.billing.number}。`);
+    if(!reason)throw new Error('請輸入孤兒測試帳務清理原因。');
+    if(preview.allowed!==true)throw new Error(`孤兒測試帳務不可安全清理：${preview.blockers.map((row)=>row.message).join(' ')}`);
+    const snapshot=orphanBillingCleanupClone(state),snapshotFingerprint=orphanBillingCleanupFingerprint(snapshot),protectedBefore=orphanBillingCleanupProtectedFingerprints(state),metaBefore=orphanBillingCleanupFingerprint(state.meta),auditBefore=orphanBillingCleanupFingerprint(state.audit),paidBefore=orphanBillingCleanupFingerprint(state.payroll.find((row)=>orphanBillingCleanupText(row.id)===target.payroll.paid.id)),siblingBefore=orphanBillingCleanupFingerprint(state.dailyLogs.find((row)=>orphanBillingCleanupText(row.id)===target.sibling.id)),siblingBillingBefore=orphanBillingCleanupFingerprint(state.billings.find((row)=>orphanBillingCleanupText(row.id)===target.sibling.billingId)),countsBefore={billings:state.billings.length,dailyLogs:state.dailyLogs.length,commissions:state.commissions.length,attendance:state.attendance.length,payroll:state.payroll.length};
+    const assertPostState=(source,stage)=>{
+      if((source.billings||[]).some((row)=>orphanBillingCleanupText(row.id)===target.billing.id||orphanBillingCleanupText(row.number)===target.billing.number))throw new Error(`${stage}：${target.billing.number} 尚未完整移除。`);
+      if((source.dailyLogs||[]).some((row)=>orphanBillingCleanupText(row.id)===target.dailyLog.id))throw new Error(`${stage}：目標 Daily Log 尚未移除。`);
+      if((source.commissions||[]).some((row)=>orphanBillingCleanupText(row.id)===target.commission.id))throw new Error(`${stage}：目標 Commission 尚未移除。`);
+      if((source.attendance||[]).some((row)=>orphanBillingCleanupText(row.id)===target.attendance.id))throw new Error(`${stage}：目標 Attendance 尚未移除。`);
+      if((source.payroll||[]).some((row)=>orphanBillingCleanupText(row.id)===target.payroll.unpaid.id))throw new Error(`${stage}：無來源的未付款 Payroll 尚未移除。`);
+      if(orphanBillingCleanupFingerprint((source.payroll||[]).find((row)=>orphanBillingCleanupText(row.id)===target.payroll.paid.id))!==paidBefore)throw new Error(`${stage}：歷史已付款 Payroll 發生變動。`);
+      if(orphanBillingCleanupFingerprint((source.dailyLogs||[]).find((row)=>orphanBillingCleanupText(row.id)===target.sibling.id))!==siblingBefore)throw new Error(`${stage}：同 batch sibling Daily Log 發生變動。`);
+      if(orphanBillingCleanupFingerprint((source.billings||[]).find((row)=>orphanBillingCleanupText(row.id)===target.sibling.billingId))!==siblingBillingBefore)throw new Error(`${stage}：受保護的 ${target.sibling.billingNo} 發生變動。`);
+      assertOrphanBillingCleanupProtectedFingerprints(source,protectedBefore,stage);
+    };
+    const restore=async()=>{
+      state=orphanBillingCleanupClone(snapshot);
+      if(!db)db=await openDB();
+      if(!db)throw new Error('rollback 無法取得 IndexedDB。');
+      await dbSet(STATE_KEY,state);
+      localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state));
+      window.KuSheLegacyData?.refresh();
+      const dbState=await dbGet(STATE_KEY),emergency=JSON.parse(localStorage.getItem(EMERGENCY_KEY)||'null');
+      if(orphanBillingCleanupFingerprint(state)!==snapshotFingerprint||orphanBillingCleanupFingerprint(dbState)!==snapshotFingerprint||orphanBillingCleanupFingerprint(emergency)!==snapshotFingerprint)throw new Error('rollback fingerprint 驗證失敗。');
+      return true;
+    };
+    try {
+      state.billings=state.billings.filter((row)=>orphanBillingCleanupText(row.id)!==target.billing.id);
+      state.dailyLogs=state.dailyLogs.filter((row)=>orphanBillingCleanupText(row.id)!==target.dailyLog.id);
+      state.commissions=state.commissions.filter((row)=>orphanBillingCleanupText(row.id)!==target.commission.id);
+      state.attendance=state.attendance.filter((row)=>orphanBillingCleanupText(row.id)!==target.attendance.id);
+      rebuildPayrollFor(target.payroll.month,target.payroll.employee);
+      assertPostState(state,'persist 前');
+      if(state.billings.length!==countsBefore.billings-1||state.dailyLogs.length!==countsBefore.dailyLogs-1||state.commissions.length!==countsBefore.commissions-1||state.attendance.length!==countsBefore.attendance-1||state.payroll.length!==countsBefore.payroll-1)throw new Error('persist 前：目標 collections 筆數不符合精確移除範圍。');
+      if(orphanBillingCleanupFingerprint(state.meta)!==metaBefore||orphanBillingCleanupFingerprint(state.audit)!==auditBefore)throw new Error('persist 前：meta 或 audit 提前發生變動。');
+      await persist(`孤兒測試帳務專用清理｜${target.billing.number}｜原因：${reason}`);
+      assertPostState(state,'persist 後記憶體');
+      const persistedState=await dbGet(STATE_KEY),emergencyState=JSON.parse(localStorage.getItem(EMERGENCY_KEY)||'null');
+      assertPostState(persistedState,'persist 後 IndexedDB');
+      assertPostState(emergencyState,'persist 後 emergency backup');
+      return {...preview,reason,cleaned:true,singlePersist:true,removed:{billing:1,dailyLog:1,commission:1,attendance:1,unpaidPayroll:1},protected:{paidPayroll:target.payroll.paid.id,siblingDailyLog:target.sibling.id,siblingBilling:target.sibling.billingNo}};
+    } catch(error) {
+      try { await restore(); error.rollbackVerified=true; }
+      catch(rollbackError) { error.rollbackVerified=false; error.rollbackError=rollbackError; }
+      throw error;
+    }
+  }
   async function persist(action) {
     state.meta.updatedAt = new Date().toISOString();
     if (action) {
@@ -2153,5 +2304,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, historicalCommissionRepairPreview, repairHistoricalCommissionData, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, historicalCommissionRepairPreview, repairHistoricalCommissionData, orphanBillingTestCleanupPreview, cleanupOrphanBillingTestData, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
