@@ -979,11 +979,141 @@
     const protectedFingerprints={healthyBillingReceivables:{count:healthyPairs.length,fingerprint:financialRepairFingerprint(healthyPairs)},payables:{count:state.payables.length,fingerprint:financialRepairFingerprint(state.payables)},payments:{count:state.payments.length,fingerprint:financialRepairFingerprint(state.payments)},bankTransactions:{count:state.bankTransactions.length,fingerprint:financialRepairFingerprint(state.bankTransactions)},b643124LegacyBank:{id:target.b643124.bankTransactionId,fingerprint:financialRepairFingerprint(state.bankTransactions.find((row)=>text(row.id)===target.b643124.bankTransactionId))}};
     const postRepairExpectedSummary={billingCount:audit.summary.billingCount,receivableCount:audit.summary.receivableCount,payrollCount:Math.max(0,state.payroll.length-(payrollReady?1:0)),billingAmountMismatchCount:Math.max(0,audit.summary.billingAmountMismatchCount-(b643Ready?1:0)),stalePayrollCount:Math.max(0,audit.summary.stalePayrollCount-(payrollReady?1:0)),orphanReceivableCount:audit.summary.orphanReceivableCount,orphanInvoiceCount:audit.summary.orphanInvoiceCount,paymentIntegrityIssueCount:audit.summary.paymentIntegrityIssueCount,orphanPayableCount:audit.summary.orphanPayableCount,orphanBankTransactionCount:audit.summary.orphanBankTransactionCount};
     if(manualReview.length)warn('MANUAL_REVIEW_PRESERVED','manualReview 項目不屬於可執行範圍，不影響確定性 repair 的 allowed。',{count:manualReview.length});
-    return {allowed:blockers.length===0&&deterministicRepairs.length===2,previewOnly:true,executeAvailable:false,blockers,warnings,deterministicRepairs,preservedLegacy,manualReview,orphanReceivables,orphanInvoices,paymentIntegrityPlan,protectedFingerprints,postRepairExpectedSummary,auditSummary:audit.summary};
+    return {allowed:blockers.length===0&&deterministicRepairs.length===2,previewOnly:true,executeAvailable:true,blockers,warnings,deterministicRepairs,preservedLegacy,manualReview,orphanReceivables,orphanInvoices,paymentIntegrityPlan,protectedFingerprints,postRepairExpectedSummary,auditSummary:audit.summary};
   }
   async function financialIntegrityRepairPreview(options={}) {
     await load();
     return financialIntegrityRepairPlan(options,financialIntegrityAuditReport());
+  }
+  const GLOBAL_FINANCIAL_REPAIR_PATCH = Object.freeze({amount:1838,grossTotal:1838,taxIncludedAmount:1838,untaxedAmount:1750,preTaxAmount:1750,tax:88,taxAmount:88,retention:0,retentionAmount:0,received:1750,legacyReceived:1750,status:'部分收款'});
+  const globalFinancialRepairClone=(value)=>JSON.parse(JSON.stringify(value));
+  const globalFinancialRepairOmit=(row,keys)=>Object.fromEntries(Object.entries(row||{}).filter(([key])=>!keys.includes(key)));
+  const globalFinancialRepairExactObject=(actual,expected)=>{
+    const actualKeys=Object.keys(actual||{}).sort(),expectedKeys=Object.keys(expected).sort();
+    return actualKeys.length===expectedKeys.length&&actualKeys.every((key,index)=>key===expectedKeys[index]&&financialRepairFingerprint(actual[key])===financialRepairFingerprint(expected[key]));
+  };
+  const globalFinancialRepairCounts=(source)=>Object.fromEntries(Object.keys(source||{}).filter((key)=>Array.isArray(source[key])).sort().map((key)=>[key,source[key].length]));
+  function globalFinancialRepairPreviewFingerprints(audit) {
+    const target=GLOBAL_FINANCIAL_REPAIR_TARGETS,healthyPairs=(audit?.billingReceivablePairs||[]).filter((row)=>row.relation==='EXACT'&&row.amountMatch&&row.number!==target.b643124.billingNo).map((row)=>({billing:state.billings.find((item)=>financialAuditText(item.id)===financialAuditText(row.id)),receivable:state.receivables.find((item)=>financialAuditText(item.id)===financialAuditText(row.receivableIds[0]))}));
+    return {healthyBillingReceivables:{count:healthyPairs.length,fingerprint:financialRepairFingerprint(healthyPairs)},payables:{count:state.payables.length,fingerprint:financialRepairFingerprint(state.payables)},payments:{count:state.payments.length,fingerprint:financialRepairFingerprint(state.payments)},bankTransactions:{count:state.bankTransactions.length,fingerprint:financialRepairFingerprint(state.bankTransactions)},b643124LegacyBank:{id:target.b643124.bankTransactionId,fingerprint:financialRepairFingerprint(state.bankTransactions.find((row)=>financialAuditText(row.id)===target.b643124.bankTransactionId))}};
+  }
+  function globalFinancialRepairStateFingerprints(source) {
+    const target=GLOBAL_FINANCIAL_REPAIR_TARGETS,rows=(key)=>Array.isArray(source?.[key])?source[key]:[],nonTarget={};
+    Object.keys(source||{}).sort().forEach((key)=>{
+      if(key==='meta'||key==='audit')return;
+      if(key==='receivables')nonTarget[key]=rows(key).filter((row)=>financialAuditText(row.id)!==target.b643124.receivableId);
+      else if(key==='payroll')nonTarget[key]=rows(key).filter((row)=>financialAuditText(row.id)!==target.stalePayroll.id);
+      else nonTarget[key]=source[key];
+    });
+    return {
+      allNonTarget:financialRepairFingerprint(nonTarget),
+      billings:financialRepairFingerprint(rows('billings')),
+      receivablesExceptTarget:financialRepairFingerprint(rows('receivables').filter((row)=>financialAuditText(row.id)!==target.b643124.receivableId)),
+      payrollExceptTarget:financialRepairFingerprint(rows('payroll').filter((row)=>financialAuditText(row.id)!==target.stalePayroll.id)),
+      receipts:financialRepairFingerprint(rows('receipts')),
+      retentionReceipts:financialRepairFingerprint(rows('retentionReceipts')),
+      invoices:financialRepairFingerprint(rows('invoices')),
+      salaryPayments:financialRepairFingerprint(rows('salaryPayments')),
+      attendance:financialRepairFingerprint(rows('attendance')),
+      commissions:financialRepairFingerprint(rows('commissions')),
+      dailyLogs:financialRepairFingerprint(rows('dailyLogs')),
+      banks:financialRepairFingerprint(rows('banks')),
+      projects:financialRepairFingerprint(rows('projects')),
+      customers:financialRepairFingerprint(rows('customers')),
+      quotations:financialRepairFingerprint(rows('quotations')),
+      payables:financialRepairFingerprint(rows('payables')),
+      payments:financialRepairFingerprint(rows('payments')),
+      bankTransactions:financialRepairFingerprint(rows('bankTransactions')),
+      materialData:financialRepairFingerprint({materialUsages:rows('materialUsages'),materials:rows('materials'),projectCosts:rows('projectCosts')})
+    };
+  }
+  function globalFinancialRepairAssertFingerprints(actual,expected,stage) {
+    Object.keys(expected).forEach((key)=>{if(actual[key]!==expected[key])throw new Error(`${stage}：受保護資料 ${key} 發生未核准變動。`)});
+  }
+  function globalFinancialRepairDeterministicScope(preview) {
+    if(preview?.allowed!==true)throw new Error(`GLOBAL Repair Preview 未通過：${(preview?.blockers||[]).map((row)=>row.message||row.code).join(' ')}`);
+    if(!Array.isArray(preview.blockers)||preview.blockers.length)throw new Error('GLOBAL Repair Preview 仍有 blocker。');
+    if(!Array.isArray(preview.deterministicRepairs)||preview.deterministicRepairs.length!==2)throw new Error('GLOBAL Repair deterministic repairs 必須精確為 2 筆。');
+    const receivableRepairs=preview.deterministicRepairs.filter((row)=>row.action==='UPDATE_RECEIVABLE_AMOUNT_ONLY'),payrollRepairs=preview.deterministicRepairs.filter((row)=>row.action==='DELETE_STALE_PAYROLL'),receivableRepair=receivableRepairs[0],payrollRepair=payrollRepairs[0];
+    if(receivableRepairs.length!==1||payrollRepairs.length!==1)throw new Error('GLOBAL Repair action scope 不符合核准的兩筆修復。');
+    if(!globalFinancialRepairExactObject(receivableRepair.target,{collection:'receivables',id:'msfwv2he9e3ep8',billingId:'msfwtqet8zssvp',sourceNo:'B643124'})||!globalFinancialRepairExactObject(payrollRepair.target,{collection:'payroll',id:'msdfc59cbvc6p7',employee:'ms4pb1q8m834ic',month:'2026-08'}))throw new Error('GLOBAL Repair target identity 不符合核准範圍。');
+    if(!globalFinancialRepairExactObject(receivableRepair.patch,GLOBAL_FINANCIAL_REPAIR_PATCH))throw new Error('B643124 Receivable patch 不符合核准內容。');
+    return {receivableRepair,payrollRepair};
+  }
+  function globalFinancialRepairTargetGate(preview) {
+    const target=GLOBAL_FINANCIAL_REPAIR_TARGETS,text=financialAuditText,billings=state.billings.filter((row)=>text(row.id)===target.b643124.billingId&&text(row.number)===target.b643124.billingNo),receivables=state.receivables.filter((row)=>text(row.id)===target.b643124.receivableId),payrollRows=state.payroll.filter((row)=>text(row.id)===target.stalePayroll.id),legacyBanks=state.bankTransactions.filter((row)=>text(row.id)===target.b643124.bankTransactionId);
+    if(billings.length!==1||receivables.length!==1||payrollRows.length!==1||legacyBanks.length!==1)throw new Error('GLOBAL Repair target identity 在 Execute 前已改變。');
+    const billing=billings[0],receivable=receivables[0],stalePayroll=payrollRows[0],legacyBank=legacyBanks[0],construction=legacyBillingConstructionAmount(billing);
+    if(!(text(billing.sourceType)==='daily-log-summary'&&text(billing.customerName||billing.customer)==='小賴'&&text(billing.projectName||billing.project)==='親家one city'&&construction.valid&&financialAuditMoneyEqual(construction.value,1750)&&financialAuditMoneyEqual(billing.amount,1750)&&financialAuditMoneyEqual(billing.preTaxAmount,1750)&&financialAuditMoneyEqual(billing.tax,88)&&financialAuditMoneyEqual(billing.taxAmount,88)&&financialAuditMoneyEqual(billing.grossTotal,1838)&&financialAuditMoneyEqual(billing.taxIncludedAmount,1838)&&financialAuditMoneyEqual(billing.retention,0)&&financialAuditMoneyEqual(billing.total,1838)&&text(billing.invoiceStatus)==='invoice_pending'&&!text(billing.invoiceNo)))throw new Error('B643124 Billing facts 在 Execute 前已改變。');
+    if(!(text(billing.receivableId)===target.b643124.receivableId&&text(receivable.billingId)===target.b643124.billingId&&text(receivable.sourceNo)===target.b643124.billingNo&&financialAuditMoneyEqual(receivable.amount,1750)&&financialAuditMoneyEqual(receivable.grossTotal,0)&&financialAuditMoneyEqual(receivable.untaxedAmount,1667)&&financialAuditMoneyEqual(receivable.tax,83)&&financialAuditMoneyEqual(receivable.received,1750)&&financialAuditMoneyEqual(receivable.legacyReceived,1750)))throw new Error('B643124 Receivable identity 或 stale values 在 Execute 前已改變。');
+    if(financialRepairFingerprint(legacyBank)!==preview.protectedFingerprints?.b643124LegacyBank?.fingerprint)throw new Error('B643124 verified legacy bank fingerprint 已改變。');
+    const attendance=state.attendance.filter((row)=>text(row.employee||row.employeeId)===target.stalePayroll.employee&&monthOf(row.date)===target.stalePayroll.month),commissions=state.commissions.filter((row)=>text(row.employee||row.employeeId)===target.stalePayroll.employee&&monthOf(row.date)===target.stalePayroll.month&&row.status==='已列入薪資'),adjustmentFields=['manualFuel','meal','other','overtime','bonus','allowance','advance','laborInsurance','incomeTax','deduction'],adjustmentTotal=adjustmentFields.reduce((sum,key)=>sum+Math.abs(num(stalePayroll[key])),0),salaryPayments=state.salaryPayments.filter((row)=>text(row.payrollId)===target.stalePayroll.id||!text(row.payrollId)&&text(row.employee||row.employeeId)===target.stalePayroll.employee&&monthOf(row.month||row.date)===target.stalePayroll.month),truth=payrollPaymentTruth(stalePayroll);
+    if(!(text(stalePayroll.employee||stalePayroll.employeeId)===target.stalePayroll.employee&&text(stalePayroll.month)===target.stalePayroll.month&&text(stalePayroll.status)==='已付款'&&financialAuditMoneyEqual(stalePayroll.total,4000)&&attendance.length===0&&commissions.length===0&&adjustmentTotal===0&&salaryPayments.length===0&&truth.hasVerifiedPayment===false&&truth.bankTransactionIds.length===0&&truth.integrity==='stale-payroll-status'))throw new Error('Stale Payroll facts 或付款 truth 在 Execute 前已改變。');
+    return {billing,receivable,stalePayroll,legacyBank};
+  }
+  function globalFinancialRepairAssertSummary(before,after,stage) {
+    if(before.billingAmountMismatchCount!==1||after.billingAmountMismatchCount!==0||after.billingAmountMismatchCount!==before.billingAmountMismatchCount-1)throw new Error(`${stage}：billingAmountMismatchCount 未精確減 1 至 0。`);
+    if(before.stalePayrollCount!==1||after.stalePayrollCount!==0||after.stalePayrollCount!==before.stalePayrollCount-1)throw new Error(`${stage}：stalePayrollCount 未精確減 1 至 0。`);
+    ['billingCount','receivableCount','orphanReceivableCount','orphanInvoiceCount','paymentIntegrityIssueCount','orphanPayableCount','orphanBankTransactionCount'].forEach((key)=>{if(after[key]!==before[key])throw new Error(`${stage}：${key} 發生非預期變動。`)});
+  }
+  function globalFinancialRepairAssertState(source,protection,stage,afterPersist=false) {
+    const target=GLOBAL_FINANCIAL_REPAIR_TARGETS,text=financialAuditText,receivables=(source?.receivables||[]).filter((row)=>text(row.id)===target.b643124.receivableId),billings=(source?.billings||[]).filter((row)=>text(row.id)===target.b643124.billingId&&text(row.number)===target.b643124.billingNo),legacyBanks=(source?.bankTransactions||[]).filter((row)=>text(row.id)===target.b643124.bankTransactionId),stalePayroll=(source?.payroll||[]).filter((row)=>text(row.id)===target.stalePayroll.id);
+    if(receivables.length!==1||billings.length!==1||legacyBanks.length!==1||stalePayroll.length!==0)throw new Error(`${stage}：Repair target post-state 不正確。`);
+    const receivable=receivables[0];
+    Object.entries(GLOBAL_FINANCIAL_REPAIR_PATCH).forEach(([key,value])=>{const matches=typeof value==='number'?financialAuditMoneyEqual(receivable[key],value):receivable[key]===value;if(!matches)throw new Error(`${stage}：B643124 Receivable.${key} 不正確。`)});
+    if(financialAuditMoneyEqual(num(receivable.amount)-num(receivable.received),88)===false||Object.prototype.hasOwnProperty.call(receivable,'remainingRetention')&&!financialAuditMoneyEqual(receivable.remainingRetention,0))throw new Error(`${stage}：B643124 outstanding 或 remainingRetention 不正確。`);
+    if(financialRepairFingerprint(globalFinancialRepairOmit(receivable,protection.receivableMutableFields))!==protection.receivableImmutableFingerprint)throw new Error(`${stage}：B643124 Receivable 非核准欄位發生變動。`);
+    if(financialRepairFingerprint(billings[0])!==protection.billingFingerprint||financialRepairFingerprint(legacyBanks[0])!==protection.legacyBankFingerprint)throw new Error(`${stage}：B643124 Billing 或 legacy bank 發生變動。`);
+    globalFinancialRepairAssertFingerprints(globalFinancialRepairStateFingerprints(source),protection.stateFingerprints,stage);
+    const counts=globalFinancialRepairCounts(source);
+    Object.keys(protection.counts).forEach((key)=>{const expected=key==='payroll'?protection.counts[key]-1:key==='audit'&&afterPersist?Math.min(300,protection.counts[key]+1):protection.counts[key];if(counts[key]!==expected)throw new Error(`${stage}：${key} collection count 發生非預期變動。`)});
+  }
+  async function financialIntegrityRepairExecute(confirmation={}) {
+    await load();
+    const decisions=confirmation?.decisions||{},preview=await financialIntegrityRepairPreview({decisions}),reason=String(confirmation?.reason||'').trim();
+    if(confirmation?.confirmed!==true)throw new Error('必須明確確認執行 GLOBAL FINANCIAL INTEGRITY REPAIR。');
+    if(!reason)throw new Error('請輸入 GLOBAL FINANCIAL INTEGRITY REPAIR 原因。');
+    const repairs=globalFinancialRepairDeterministicScope(preview),beforeAudit=financialIntegrityAuditReport(),previewFingerprints=globalFinancialRepairPreviewFingerprints(beforeAudit);
+    if(financialRepairFingerprint(preview.protectedFingerprints)!==financialRepairFingerprint(previewFingerprints))throw new Error('Preview protectedFingerprints 已失效。');
+    if(beforeAudit.summary.billingAmountMismatchCount!==1||beforeAudit.summary.stalePayrollCount!==1)throw new Error('GLOBAL Repair before-summary 不符合精確兩筆 deterministic repair。');
+    const targets=globalFinancialRepairTargetGate(preview),snapshot=globalFinancialRepairClone(state),snapshotFingerprint=financialRepairFingerprint(snapshot),counts=globalFinancialRepairCounts(snapshot),metaFingerprint=financialRepairFingerprint(snapshot.meta),auditFingerprint=financialRepairFingerprint(snapshot.audit),stateFingerprints=globalFinancialRepairStateFingerprints(snapshot),billingFingerprint=financialRepairFingerprint(targets.billing),legacyBankFingerprint=financialRepairFingerprint(targets.legacyBank),receivableMutableFields=[...Object.keys(GLOBAL_FINANCIAL_REPAIR_PATCH),'remainingRetention'],receivableImmutableFingerprint=financialRepairFingerprint(globalFinancialRepairOmit(targets.receivable,receivableMutableFields)),protection={counts,stateFingerprints,billingFingerprint,legacyBankFingerprint,receivableMutableFields,receivableImmutableFingerprint},persistAction=`GLOBAL FINANCIAL INTEGRITY REPAIR｜B643124 + stale payroll｜原因：${reason}`;
+    const restore=async()=>{
+      state=globalFinancialRepairClone(snapshot);
+      if(!db)db=await openDB();
+      if(!db)throw new Error('GLOBAL Repair rollback 無法取得 IndexedDB。');
+      await dbSet(STATE_KEY,state);
+      localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state));
+      window.KuSheLegacyData?.refresh();
+      const dbState=await dbGet(STATE_KEY),emergencyState=JSON.parse(localStorage.getItem(EMERGENCY_KEY)||'null');
+      if(financialRepairFingerprint(state)!==snapshotFingerprint||financialRepairFingerprint(dbState)!==snapshotFingerprint||financialRepairFingerprint(emergencyState)!==snapshotFingerprint)throw new Error('GLOBAL Repair rollback fingerprint 驗證失敗。');
+      return true;
+    };
+    try {
+      Object.assign(targets.receivable,repairs.receivableRepair.patch);
+      if(Object.prototype.hasOwnProperty.call(targets.receivable,'remainingRetention'))targets.receivable.remainingRetention=0;
+      state.payroll=state.payroll.filter((row)=>financialAuditText(row.id)!==GLOBAL_FINANCIAL_REPAIR_TARGETS.stalePayroll.id);
+      globalFinancialRepairAssertState(state,protection,'persist 前');
+      if(financialRepairFingerprint(state.meta)!==metaFingerprint||financialRepairFingerprint(state.audit)!==auditFingerprint)throw new Error('persist 前：meta 或 audit 提前發生變動。');
+      const prePersistAudit=financialIntegrityAuditReport();
+      globalFinancialRepairAssertSummary(beforeAudit.summary,prePersistAudit.summary,'persist 前 audit');
+      let persistCount=0;
+      persistCount+=1;
+      await persist(persistAction);
+      if(persistCount!==1)throw new Error('GLOBAL Repair persist 次數不等於 1。');
+      globalFinancialRepairAssertState(state,protection,'persist 後 memory',true);
+      if(!db)throw new Error('persist 後無法取得 IndexedDB。');
+      const persistedState=await dbGet(STATE_KEY),emergencyState=JSON.parse(localStorage.getItem(EMERGENCY_KEY)||'null'),persistedFingerprint=financialRepairFingerprint(state);
+      globalFinancialRepairAssertState(persistedState,protection,'persist 後 IndexedDB',true);
+      globalFinancialRepairAssertState(emergencyState,protection,'persist 後 Emergency backup',true);
+      if(financialRepairFingerprint(persistedState)!==persistedFingerprint||financialRepairFingerprint(emergencyState)!==persistedFingerprint)throw new Error('persist 後三層完整 state fingerprint 不一致。');
+      const postRepairAudit=financialIntegrityAuditReport();
+      globalFinancialRepairAssertSummary(beforeAudit.summary,postRepairAudit.summary,'persist 後 audit');
+      return {repaired:true,singlePersist:true,reason,repairs:{B643124:{receivableId:GLOBAL_FINANCIAL_REPAIR_TARGETS.b643124.receivableId,amountBefore:1750,amountAfter:1838,received:1750,outstanding:88,status:'部分收款'},stalePayroll:{id:GLOBAL_FINANCIAL_REPAIR_TARGETS.stalePayroll.id,removed:true}},protected:{legacyBank:GLOBAL_FINANCIAL_REPAIR_TARGETS.b643124.bankTransactionId,manualReviewCount:preview.manualReview.length,preservedLegacyCount:preview.preservedLegacy.length},postRepairSummary:postRepairAudit.summary};
+    } catch(error) {
+      try { await restore(); error.rollbackVerified=true; }
+      catch(rollbackError) { error.rollbackVerified=false; error.rollbackError=rollbackError; }
+      throw error;
+    }
   }
   async function persist(action) {
     state.meta.updatedAt = new Date().toISOString();
@@ -2637,5 +2767,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityRepairPreview, historicalCommissionRepairPreview, repairHistoricalCommissionData, orphanBillingTestCleanupPreview, cleanupOrphanBillingTestData, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityRepairPreview, financialIntegrityRepairExecute, historicalCommissionRepairPreview, repairHistoricalCommissionData, orphanBillingTestCleanupPreview, cleanupOrphanBillingTestData, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
