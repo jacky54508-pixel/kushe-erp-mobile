@@ -905,6 +905,21 @@
     for(let index=0;index<source.length;index+=1){hash^=source.charCodeAt(index);hash=Math.imul(hash,16777619)}
     return `${source.length}:${(hash>>>0).toString(16).padStart(8,'0')}`;
   };
+  const legacyBillingConstructionAmount=(billing)=>{
+    if(financialAuditHas(billing,'constructionAmount')){
+      const value=Number(billing.constructionAmount);
+      return {valid:Number.isFinite(value),value,source:'constructionAmount'};
+    }
+    if(financialAuditText(billing?.sourceType)!=='daily-log-summary'||!Array.isArray(billing?.lines)||!billing.lines.length)return {valid:false,value:null,source:'missing'};
+    let total=0;
+    for(const line of billing.lines){
+      if(!financialAuditText(line?.qty)||!financialAuditText(line?.price))return {valid:false,value:null,source:'invalid-lines'};
+      const qty=Number(line.qty),price=Number(line.price);
+      if(!Number.isFinite(qty)||!Number.isFinite(price))return {valid:false,value:null,source:'invalid-lines'};
+      total+=qty*price;
+    }
+    return {valid:Number.isFinite(total),value:Math.round(total),source:'derived-lines'};
+  };
   function financialIntegrityRepairPlan(options,audit) {
     const target=GLOBAL_FINANCIAL_REPAIR_TARGETS,decisions=options?.decisions||{},blockers=[],warnings=[],deterministicRepairs=[],preservedLegacy=[],manualReview=[];
     const block=(code,message,details={})=>blockers.push({code,message,...details}),warn=(code,message,details={})=>warnings.push({code,message,...details}),text=financialAuditText;
@@ -913,7 +928,8 @@
     if(decisions.B643124!==target.b643124.decision)block('B643124_DECISION_REQUIRED',`decisions.B643124 必須明確指定 ${target.b643124.decision}。`);
     if(!billing)block('B643124_BILLING_IDENTITY',`${target.b643124.billingNo} 的 Billing ID / No 無法同時唯一確認。`,{billingByIdCount:billingById.length,billingByNoCount:billingByNo.length});
     if(!receivable)block('B643124_RECEIVABLE_IDENTITY','B643124 的 Receivable 無法唯一確認。',{receivableMatchCount:receivableMatches.length});
-    if(billing&&!(text(billing.sourceType)==='daily-log-summary'&&text(billing.customerName||billing.customer)==='小賴'&&text(billing.projectName||billing.project)==='親家one city'&&financialAuditMoneyEqual(billing.constructionAmount,1750)&&financialAuditMoneyEqual(billing.amount,1750)&&financialAuditMoneyEqual(billing.preTaxAmount,1750)&&financialAuditMoneyEqual(billing.tax,88)&&financialAuditMoneyEqual(billing.taxAmount,88)&&financialAuditMoneyEqual(billing.grossTotal,1838)&&financialAuditMoneyEqual(billing.taxIncludedAmount,1838)&&financialAuditMoneyEqual(billing.retention,0)&&financialAuditMoneyEqual(billing.total,1838)&&text(billing.invoiceStatus)==='invoice_pending'&&!text(billing.invoiceNo)))block('B643124_BILLING_FACTS_CHANGED','B643124 Billing 金額、對象或狀態已偏離人工確認基準。');
+    const b643Construction=billing?legacyBillingConstructionAmount(billing):null;
+    if(billing&&!(text(billing.sourceType)==='daily-log-summary'&&text(billing.customerName||billing.customer)==='小賴'&&text(billing.projectName||billing.project)==='親家one city'&&b643Construction.valid&&financialAuditMoneyEqual(b643Construction.value,1750)&&financialAuditMoneyEqual(billing.amount,1750)&&financialAuditMoneyEqual(billing.preTaxAmount,1750)&&financialAuditMoneyEqual(billing.tax,88)&&financialAuditMoneyEqual(billing.taxAmount,88)&&financialAuditMoneyEqual(billing.grossTotal,1838)&&financialAuditMoneyEqual(billing.taxIncludedAmount,1838)&&financialAuditMoneyEqual(billing.retention,0)&&financialAuditMoneyEqual(billing.total,1838)&&text(billing.invoiceStatus)==='invoice_pending'&&!text(billing.invoiceNo)))block('B643124_BILLING_FACTS_CHANGED','B643124 Billing 金額、對象或狀態已偏離人工確認基準。',{constructionAmount:b643Construction});
     if(billing&&receivable&&!(text(billing.receivableId)===target.b643124.receivableId&&text(receivable.billingId)===target.b643124.billingId&&text(receivable.sourceNo)===target.b643124.billingNo))block('B643124_LINK_CHANGED','B643124 Billing / Receivable identity link 不完整。');
     if(receivable&&!(financialAuditMoneyEqual(receivable.amount,1750)&&financialAuditMoneyEqual(receivable.grossTotal,0)&&financialAuditMoneyEqual(receivable.untaxedAmount,1667)&&financialAuditMoneyEqual(receivable.tax,83)&&financialAuditMoneyEqual(receivable.received,1750)&&financialAuditMoneyEqual(receivable.legacyReceived,1750)))block('B643124_STALE_VALUES_CHANGED','B643124 Receivable 已不再符合已驗證的舊錯位值。');
     const b643Receipts=state.receipts.filter((row)=>text(row.receivableId)===target.b643124.receivableId||text(row.billingId)===target.b643124.billingId),b643Retention=state.retentionReceipts.filter((row)=>text(row.receivableId)===target.b643124.receivableId||text(row.billingId)===target.b643124.billingId),b643Invoices=state.invoices.filter((row)=>text(row.receivableId)===target.b643124.receivableId||text(row.billingId)===target.b643124.billingId||text(row.sourceId)===target.b643124.billingId||text(row.sourceNo)===target.b643124.billingNo),b643BankIds=b643Audit?.legacyBankTransactionIds||[],b643BankRows=state.bankTransactions.filter((row)=>b643BankIds.includes(text(row.id)));
