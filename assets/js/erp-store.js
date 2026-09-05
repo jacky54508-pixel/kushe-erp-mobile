@@ -1535,13 +1535,153 @@
     const protectedFingerprints={fullState:beforeFingerprint,existingBillings:financialRepairFingerprint(state.billings||[]),nonTargetReceivables:financialRepairFingerprint((state.receivables||[]).filter((row)=>financialAuditText(row.id)!==f.receivableId)),phase2RepairedReceivables:financialRepairFingerprint((state.receivables||[]).filter((row)=>phase2ARIds.includes(financialAuditText(row.id)))),phase2RepairedInvoices:financialRepairFingerprint((state.invoices||[]).filter((row)=>phase2InvoiceIds.includes(financialAuditText(row.id)))),B643124:financialRepairFingerprint({billing:(state.billings||[]).find((row)=>financialAuditText(row.number)==='B643124'),receivable:(state.receivables||[]).find((row)=>financialAuditText(row.sourceNo)==='B643124')}),verifiedLegacyReceivables:financialRepairFingerprint((state.receivables||[]).filter((row)=>verifiedARIds.includes(financialAuditText(row.id)))),verifiedLegacyInvoices:financialRepairFingerprint((state.invoices||[]).filter((row)=>verifiedInvoiceIds.includes(financialAuditText(row.id)))),allPayables:financialRepairFingerprint(state.payables||[]),jianhongPayable:financialRepairFingerprint(jianhongPayable.row),jianhongCanonicalPayment:financialRepairFingerprint(jianhongCanonical.row),weiyuanVendorMaster:financialRepairFingerprint(weiyuanVendor),nonTargetPayments:financialRepairFingerprint((state.payments||[]).filter((row)=>!targetPaymentIds.has(financialAuditText(row.id)))),banks:financialRepairFingerprint(state.banks||[]),bankTransactions:financialRepairFingerprint(state.bankTransactions||[]),receipts:financialRepairFingerprint(state.receipts||[]),retentionReceipts:financialRepairFingerprint(state.retentionReceipts||[]),materialUsages:financialRepairFingerprint(state.materialUsages||[]),payroll:financialRepairFingerprint(state.payroll||[]),attendance:financialRepairFingerprint(state.attendance||[]),commissions:financialRepairFingerprint(state.commissions||[]),nonTargetDailyLogs:financialRepairFingerprint((state.dailyLogs||[]).filter((row)=>!f.dailyLogIds.includes(financialAuditText(row.id)))),audit:financialRepairFingerprint(state.audit||[])};
     if(blockers.length)warn('PREVIEW_BLOCKED','Preview Gate 未全數通過；不得進入未來 Execute。',{blockerCount:blockers.length});
     if(financialRepairFingerprint(state)!==beforeFingerprint)throw new Error('finalHistoricalCleanupPreview 必須是純 READ-ONLY，state fingerprint 發生變動。');
-    return {allowed:blockers.length===0,readOnly:true,previewOnly:true,executeAvailable:false,blockers,warnings,baseline:{global:globalAudit.summary,phase2:{...phase2Audit.summary,phase2BlockingCount:phase2Audit.phase2BlockingCount}},fuhua,jianhong,weiyuan,protectedFingerprints,expectedPostAudit:financialPhase2Clone(FINAL_HISTORICAL_CLEANUP_EXPECTED)};
+    return {allowed:blockers.length===0,readOnly:true,previewOnly:true,executeAvailable:true,blockers,warnings,baseline:{global:globalAudit.summary,phase2:{...phase2Audit.summary,phase2BlockingCount:phase2Audit.phase2BlockingCount}},fuhua,jianhong,weiyuan,protectedFingerprints,expectedPostAudit:financialPhase2Clone(FINAL_HISTORICAL_CLEANUP_EXPECTED)};
   }
   async function finalHistoricalCleanupPreview() {
     await load();
     const before=financialRepairFingerprint(state),preview=finalHistoricalCleanupPlan();
     if(financialRepairFingerprint(state)!==before)throw new Error('finalHistoricalCleanupPreview 不得修改 Business state。');
     return preview;
+  }
+  const FINAL_HISTORICAL_CLEANUP_VENDOR_ID='ms5x3onxpsjs9q';
+  const finalHistoricalCleanupExecuteOne=(rows,id,label)=>{
+    const matches=(rows||[]).filter((row)=>financialAuditText(row.id)===id);
+    if(matches.length!==1)throw new Error(`${label} ${id} 必須精確存在 1 筆，實際 ${matches.length} 筆。`);
+    return matches[0];
+  };
+  const finalHistoricalCleanupExecuteExactObject=(actual,expected)=>{
+    const actualKeys=Object.keys(actual||{}).sort(),expectedKeys=Object.keys(expected||{}).sort();
+    return actualKeys.length===expectedKeys.length&&actualKeys.every((key,index)=>key===expectedKeys[index]&&financialRepairFingerprint(actual[key])===financialRepairFingerprint(expected[key]));
+  };
+  function finalHistoricalCleanupExecuteScope(preview) {
+    const target=FINAL_HISTORICAL_CLEANUP_TARGETS;
+    if(!preview?.allowed||preview.blockers?.length)throw new Error('Fresh FINAL HISTORICAL CLEANUP Preview 未通過。');
+    if(preview.executeAvailable!==true)throw new Error('Fresh Preview 尚未開放 Execute。');
+    Object.entries(FINAL_HISTORICAL_CLEANUP_BASELINE.global).forEach(([key,value])=>{if(preview.baseline?.global?.[key]!==value)throw new Error(`Global baseline ${key} 已改變。`)});
+    Object.entries(FINAL_HISTORICAL_CLEANUP_BASELINE.phase2).forEach(([key,value])=>{if(preview.baseline?.phase2?.[key]!==value)throw new Error(`Phase 2 baseline ${key} 已改變。`)});
+    const f=preview.fuhua,billing=f?.proposedBilling,sourceRefs=billing?.sourceItemRefs||[],lines=billing?.lines||[],dailyIds=(f?.dailyPatches||[]).map((row)=>row.id).sort();
+    if(f?.classification!=='SAME_WORK_GROUP_TWO_EMPLOYEES'||billing?.id!==target.fuhua.billingId||billing?.number!==target.fuhua.sourceNo||!financialAuditMoneyEqual(billing?.constructionAmount,39000)||!financialAuditMoneyEqual(billing?.amount,39000)||!financialAuditMoneyEqual(billing?.tax,1950)||!financialAuditMoneyEqual(billing?.grossTotal,40950)||sourceRefs.length!==1||sourceRefs[0].sourceGroupKey!==target.fuhua.groupId||num(sourceRefs[0].sourceItemIndex)!==0||lines.length!==1||!financialAuditMoneyEqual(lines[0].qty,39)||!financialAuditMoneyEqual(lines[0].price,1000)||!financialAuditMoneyEqual(lines[0].untaxedSubtotal,39000)||financialRepairFingerprint(dailyIds)!==financialRepairFingerprint([...target.fuhua.dailyLogIds].sort()))throw new Error('富華 B458413 Execute scope 已偏離 Preview v2。');
+    if(!finalHistoricalCleanupExecuteExactObject(f.receivablePatch,{billingId:target.fuhua.billingId,grossTotal:40950,taxIncludedAmount:40950,preTaxAmount:39000,taxAmount:1950}))throw new Error('富華 Receivable patch scope 不精確。');
+    (f.dailyPatches||[]).forEach((row)=>{if(!finalHistoricalCleanupExecuteExactObject(row.patch,{billingId:target.fuhua.billingId,billingNo:target.fuhua.sourceNo,billingStatus:'已請款'})||row.itemPatches?.length!==1||row.itemPatches[0].index!==0||!finalHistoricalCleanupExecuteExactObject(row.itemPatches[0].patch,{billingId:target.fuhua.billingId,billingNo:target.fuhua.sourceNo,billingStatus:'已請款'}))throw new Error(`富華 Daily ${row.id} patch scope 不精確。`)});
+    const j=preview.jianhong,jDelete=(j?.duplicateDeletes||[]).map((row)=>row.id).sort();
+    if(j?.classification!=='DELETE_DUPLICATE_LEGACY_PAYMENT_CANDIDATES'||j.payableId!==target.jianhong.payableId||j.canonicalPaymentId!==target.jianhong.canonicalPaymentId||financialRepairFingerprint(jDelete)!==financialRepairFingerprint([...target.jianhong.duplicatePaymentIds].sort())||(j.duplicateDeletes||[]).some((row)=>row.classification!=='DELETE_DUPLICATE_LEGACY_PAYMENT_CANDIDATE'||row.duplicateOf!==target.jianhong.canonicalPaymentId||row.valid!==true))throw new Error('健宏 duplicate Payment scope 已偏離 Preview。');
+    const w=preview.weiyuan;
+    if(w?.classification!=='REBUILD_CONFIRMED_LEGACY_PAYABLE'||w.canonicalPaymentId!=='legacy-msro3jackxpx6x'||w.duplicatePaymentId!=='legacy-mssfwwk0ggr5bj'||w.selectionEvidence?.rule!=='EARLIEST_CREATED_OR_UPDATED'||w.vendorResolution?.matchCount!==1||w.vendorResolution.vendorId!==FINAL_HISTORICAL_CLEANUP_VENDOR_ID||w.proposedPayable?.id!==target.weiyuan.payableId||w.proposedPayable?.payableNo!==target.weiyuan.payableNo||w.proposedPayable?.vendor!==FINAL_HISTORICAL_CLEANUP_VENDOR_ID||!financialAuditMoneyEqual(w.proposedPayable?.amount,900)||!financialAuditMoneyEqual(w.proposedPayable?.paid,900)||w.proposedPayable?.status!=='已付清'||w.proposedPayable?.sourceType!=='legacy-confirmed-payable'||w.proposedPayable?.category!=='歷史應付'||!finalHistoricalCleanupExecuteExactObject(w.canonicalPaymentPatch?.patch,{payableId:target.weiyuan.payableId})||w.duplicatePaymentDelete?.id!==w.duplicatePaymentId||w.duplicatePaymentDelete?.classification!=='DELETE_DUPLICATE_LEGACY_PAYMENT_CANDIDATE'||w.materialUsageCreates?.length||w.invoiceCreates?.length||w.bankTransactionCreates?.length||w.bankTransactionPatches?.length)throw new Error('威沅 historical Payable / Payment scope 已偏離 Preview v2。');
+    if(financialRepairFingerprint(preview.expectedPostAudit)!==financialRepairFingerprint(FINAL_HISTORICAL_CLEANUP_EXPECTED))throw new Error('Preview expected post Audit 已改變。');
+    return {f,j,w};
+  }
+  function finalHistoricalCleanupExecuteTargetGate(preview,scope) {
+    if(financialRepairFingerprint(state)!==preview.protectedFingerprints?.fullState)throw new Error('Fresh Preview 後 state fingerprint 已改變。');
+    const target=FINAL_HISTORICAL_CLEANUP_TARGETS,fReceivable=finalHistoricalCleanupExecuteOne(state.receivables,target.fuhua.receivableId,'富華 Receivable');
+    if(financialRepairFingerprint(fReceivable)!==scope.f.protected?.receivableFingerprint)throw new Error('富華 Receivable fingerprint 已改變。');
+    const fDaily=(scope.f.dailyPatches||[]).map((patch)=>{const row=finalHistoricalCleanupExecuteOne(state.dailyLogs,patch.id,'富華 Daily Log'),expected=(scope.f.protected?.dailyFingerprints||[]).find((item)=>item.id===patch.id);if(financialRepairFingerprint(row)!==expected?.fingerprint)throw new Error(`富華 Daily ${patch.id} fingerprint 已改變。`);return {row,patch}});
+    const performance=Object.fromEntries(fDaily.map(({row})=>[financialAuditText(row.employeeName||(state.employees||[]).find((employee)=>financialAuditText(employee.id)===financialAuditText(row.employee))?.name),num(row.performance)]));
+    if(!financialAuditMoneyEqual(performance['劉佳勳'],19500)||!financialAuditMoneyEqual(performance['柯智耀'],19500)||!financialAuditMoneyEqual(Object.values(performance).reduce((sum,value)=>sum+value,0),39000))throw new Error('富華 Daily performance 19,500 + 19,500 Gate 已改變。');
+    if((state.billings||[]).some((row)=>financialAuditText(row.id)===target.fuhua.billingId||financialAuditText(row.number)===target.fuhua.sourceNo))throw new Error('富華 Billing ID / number 已碰撞。');
+    const jPayable=finalHistoricalCleanupExecuteOne(state.payables,target.jianhong.payableId,'健宏 canonical Payable'),jCanonical=finalHistoricalCleanupExecuteOne(state.payments,target.jianhong.canonicalPaymentId,'健宏 canonical Payment');
+    if(financialRepairFingerprint(jPayable)!==scope.j.protected?.payableFingerprint||financialRepairFingerprint(jCanonical)!==scope.j.protected?.canonicalPaymentFingerprint)throw new Error('健宏 canonical Payable / Payment fingerprint 已改變。');
+    const jDeletes=scope.j.duplicateDeletes.map((proposal)=>{const row=finalHistoricalCleanupExecuteOne(state.payments,proposal.id,'健宏 duplicate Payment');if(financialRepairFingerprint(row)!==proposal.fingerprint)throw new Error(`健宏 duplicate Payment ${proposal.id} fingerprint 已改變。`);return row});
+    const vendorMatches=(state.vendors||[]).filter((row)=>sameName(financialAuditText(row.name||row.vendorName),target.weiyuan.vendorName)),vendor=vendorMatches.length===1?vendorMatches[0]:null;
+    if(vendorMatches.length!==1||financialAuditText(vendor?.id)!==FINAL_HISTORICAL_CLEANUP_VENDOR_ID||financialRepairFingerprint(vendor)!==preview.protectedFingerprints?.weiyuanVendorMaster)throw new Error('威沅 Vendor master 唯一解析結果已改變。');
+    if((state.payables||[]).some((row)=>financialAuditText(row.id)===target.weiyuan.payableId||financialAuditText(row.payableNo||row.number)===target.weiyuan.payableNo))throw new Error('威沅 historical Payable ID / number 已碰撞。');
+    const wCanonical=finalHistoricalCleanupExecuteOne(state.payments,scope.w.canonicalPaymentId,'威沅 canonical Payment'),wDuplicate=finalHistoricalCleanupExecuteOne(state.payments,scope.w.duplicatePaymentId,'威沅 duplicate Payment');
+    if(financialRepairFingerprint(finalHistoricalCleanupOmit(wCanonical,['payableId']))!==scope.w.canonicalPaymentPatch?.protectedFingerprint||financialRepairFingerprint(wDuplicate)!==scope.w.duplicatePaymentDelete?.fingerprint)throw new Error('威沅 canonical / duplicate Payment fingerprint 已改變。');
+    if(financialAuditText(wCanonical.createdAt)!=='2026-08-13T15:22:58.020Z'||financialAuditText(wDuplicate.createdAt)!=='2026-08-14T04:21:37.872Z')throw new Error('威沅 Payment createdAt selection evidence 已改變。');
+    return {fReceivable,fDaily,jPayable,jCanonical,jDeletes,vendor,wCanonical,wDuplicate};
+  }
+  function finalHistoricalCleanupExecuteNormalizedState(source) {
+    const target=FINAL_HISTORICAL_CLEANUP_TARGETS,deletedPaymentIds=new Set([...target.jianhong.duplicatePaymentIds,'legacy-mssfwwk0ggr5bj']),result={};
+    Object.keys(source||{}).sort().forEach((key)=>{
+      if(key==='meta'||key==='audit')return;
+      const value=source[key];
+      if(key==='billings')result[key]=(value||[]).filter((row)=>financialAuditText(row.id)!==target.fuhua.billingId);
+      else if(key==='receivables')result[key]=(value||[]).map((row)=>financialAuditText(row.id)===target.fuhua.receivableId?finalHistoricalCleanupOmit(row,['billingId','grossTotal','taxIncludedAmount','preTaxAmount','taxAmount']):row);
+      else if(key==='dailyLogs')result[key]=(value||[]).map((row)=>target.fuhua.dailyLogIds.includes(financialAuditText(row.id))?{...finalHistoricalCleanupOmit(row,['billingId','billingNo','billingStatus','items']),items:(row.items||[]).map((item)=>finalHistoricalCleanupOmit(item,['billingId','billingNo','billingStatus']))}:row);
+      else if(key==='payables')result[key]=(value||[]).filter((row)=>financialAuditText(row.id)!==target.weiyuan.payableId);
+      else if(key==='payments')result[key]=(value||[]).filter((row)=>!deletedPaymentIds.has(financialAuditText(row.id))).map((row)=>financialAuditText(row.id)==='legacy-msro3jackxpx6x'?finalHistoricalCleanupOmit(row,['payableId']):row);
+      else result[key]=value;
+    });
+    return financialRepairFingerprint(result);
+  }
+  function finalHistoricalCleanupExecuteProtection(snapshot,preview,scope,targets) {
+    return {snapshotFingerprint:financialRepairFingerprint(snapshot),counts:globalFinancialRepairCounts(snapshot),metaFingerprint:financialRepairFingerprint(snapshot.meta),auditFingerprint:financialRepairFingerprint(snapshot.audit),normalizedStateFingerprint:finalHistoricalCleanupExecuteNormalizedState(snapshot),existingBillings:new Map((snapshot.billings||[]).map((row)=>[financialAuditText(row.id),financialRepairFingerprint(row)])),existingPayables:new Map((snapshot.payables||[]).map((row)=>[financialAuditText(row.id),financialRepairFingerprint(row)])),fReceivableImmutable:financialRepairFingerprint(finalHistoricalCleanupOmit(targets.fReceivable,Object.keys(scope.f.receivablePatch))),fDaily:targets.fDaily.map(({row,patch})=>({id:patch.id,immutable:financialRepairFingerprint(finalHistoricalCleanupOmit(row,Object.keys(patch.patch).concat('items'))),itemImmutable:financialRepairFingerprint(finalHistoricalCleanupOmit(row.items?.[0],Object.keys(patch.itemPatches[0].patch))),patch:financialPhase2Clone(patch)})),jPayableFingerprint:financialRepairFingerprint(targets.jPayable),jCanonicalFingerprint:financialRepairFingerprint(targets.jCanonical),jDeleteFingerprints:new Map(targets.jDeletes.map((row)=>[financialAuditText(row.id),financialRepairFingerprint(row)])),vendorFingerprint:financialRepairFingerprint(targets.vendor),wCanonicalImmutable:financialRepairFingerprint(finalHistoricalCleanupOmit(targets.wCanonical,['payableId'])),wDuplicateFingerprint:financialRepairFingerprint(targets.wDuplicate),previewFingerprints:financialPhase2Clone(preview.protectedFingerprints)};
+  }
+  function finalHistoricalCleanupExecuteAssertState(source,preview,scope,protection,stage,afterPersist=false) {
+    const target=FINAL_HISTORICAL_CLEANUP_TARGETS,billing=finalHistoricalCleanupExecuteOne(source.billings,target.fuhua.billingId,'富華新 Billing'),receivable=finalHistoricalCleanupExecuteOne(source.receivables,target.fuhua.receivableId,'富華 Receivable'),payable=finalHistoricalCleanupExecuteOne(source.payables,target.weiyuan.payableId,'威沅新 Payable');
+    if(financialRepairFingerprint(billing)!==financialRepairFingerprint(scope.f.proposedBilling))throw new Error(`${stage}：富華 Billing 不等於 Preview proposedBilling。`);
+    protection.existingBillings.forEach((fingerprint,id)=>{if(financialRepairFingerprint(finalHistoricalCleanupExecuteOne(source.billings,id,'既有 Billing'))!==fingerprint)throw new Error(`${stage}：既有 Billing ${id} 發生變動。`)});
+    Object.entries(scope.f.receivablePatch).forEach(([key,value])=>{if(financialRepairFingerprint(receivable[key])!==financialRepairFingerprint(value))throw new Error(`${stage}：富華 Receivable.${key} patch 不符。`)});
+    if(financialRepairFingerprint(finalHistoricalCleanupOmit(receivable,Object.keys(scope.f.receivablePatch)))!==protection.fReceivableImmutable||!financialAuditMoneyEqual(receivable.amount,40950)||!financialAuditMoneyEqual(receivable.received,0)||!financialAuditMoneyEqual(receivable.legacyReceived,0)||receivable.status!=='未收'||financialAuditText(receivable.sourceNo)!=='B458413')throw new Error(`${stage}：富華 Receivable 非核准欄位或未收事實發生變動。`);
+    const performance={};
+    protection.fDaily.forEach((entry)=>{const row=finalHistoricalCleanupExecuteOne(source.dailyLogs,entry.id,'富華 Daily Log'),item=row.items?.[0];Object.entries(entry.patch.patch).forEach(([key,value])=>{if(financialRepairFingerprint(row[key])!==financialRepairFingerprint(value))throw new Error(`${stage}：Daily ${entry.id}.${key} patch 不符。`)});Object.entries(entry.patch.itemPatches[0].patch).forEach(([key,value])=>{if(financialRepairFingerprint(item?.[key])!==financialRepairFingerprint(value))throw new Error(`${stage}：Daily item ${entry.id}.${key} patch 不符。`)});if((row.items||[]).length!==1||financialRepairFingerprint(finalHistoricalCleanupOmit(row,Object.keys(entry.patch.patch).concat('items')))!==entry.immutable||financialRepairFingerprint(finalHistoricalCleanupOmit(item,Object.keys(entry.patch.itemPatches[0].patch)))!==entry.itemImmutable)throw new Error(`${stage}：Daily ${entry.id} 非核准欄位發生變動。`);const employeeName=financialAuditText(row.employeeName||(source.employees||[]).find((employee)=>financialAuditText(employee.id)===financialAuditText(row.employee))?.name);performance[employeeName]=num(row.performance)});
+    if(!financialAuditMoneyEqual(performance['劉佳勳'],19500)||!financialAuditMoneyEqual(performance['柯智耀'],19500)||!financialAuditMoneyEqual(Object.values(performance).reduce((sum,value)=>sum+value,0),39000))throw new Error(`${stage}：富華 performance 未完整保留。`);
+    if(financialRepairFingerprint(payable)!==financialRepairFingerprint(scope.w.proposedPayable))throw new Error(`${stage}：威沅 Payable 不等於 Preview proposedPayable。`);
+    protection.existingPayables.forEach((fingerprint,id)=>{if(financialRepairFingerprint(finalHistoricalCleanupExecuteOne(source.payables,id,'既有 Payable'))!==fingerprint)throw new Error(`${stage}：既有 Payable ${id} 發生變動。`)});
+    if(financialRepairFingerprint(finalHistoricalCleanupExecuteOne(source.payables,target.jianhong.payableId,'健宏 canonical Payable'))!==protection.jPayableFingerprint||financialRepairFingerprint(finalHistoricalCleanupExecuteOne(source.payments,target.jianhong.canonicalPaymentId,'健宏 canonical Payment'))!==protection.jCanonicalFingerprint)throw new Error(`${stage}：健宏 canonical Payable / Payment 發生變動。`);
+    target.jianhong.duplicatePaymentIds.forEach((id)=>{if((source.payments||[]).some((row)=>financialAuditText(row.id)===id))throw new Error(`${stage}：健宏 duplicate Payment ${id} 尚未移除。`)});
+    const wCanonical=finalHistoricalCleanupExecuteOne(source.payments,scope.w.canonicalPaymentId,'威沅 canonical Payment');
+    if(financialAuditText(wCanonical.payableId)!==target.weiyuan.payableId||financialRepairFingerprint(finalHistoricalCleanupOmit(wCanonical,['payableId']))!==protection.wCanonicalImmutable)throw new Error(`${stage}：威沅 canonical Payment 除 payableId 外發生變動。`);
+    if((source.payments||[]).some((row)=>financialAuditText(row.id)===scope.w.duplicatePaymentId))throw new Error(`${stage}：威沅 duplicate Payment 尚未移除。`);
+    if(financialRepairFingerprint(finalHistoricalCleanupExecuteOne(source.vendors,FINAL_HISTORICAL_CLEANUP_VENDOR_ID,'威沅 Vendor'))!==protection.vendorFingerprint)throw new Error(`${stage}：威沅 Vendor master 發生變動。`);
+    if(finalHistoricalCleanupExecuteNormalizedState(source)!==protection.normalizedStateFingerprint)throw new Error(`${stage}：非目標 Business state fingerprint 發生變動。`);
+    const counts=globalFinancialRepairCounts(source);
+    Object.keys(protection.counts).forEach((key)=>{let expected=protection.counts[key];if(key==='billings'||key==='payables')expected+=1;else if(key==='payments')expected-=3;else if(key==='audit'&&afterPersist)expected=Math.min(300,expected+1);if(counts[key]!==expected)throw new Error(`${stage}：${key} collection count 預期 ${expected}，實際 ${counts[key]}。`)});
+    if((source.receipts||[]).some((row)=>financialAuditText(row.receivableId)===target.fuhua.receivableId))throw new Error(`${stage}：富華歷史 Receipt 不得恢復。`);
+  }
+  function finalHistoricalCleanupExecuteAssertAudit(globalAudit,phase2Audit,stage) {
+    Object.entries(FINAL_HISTORICAL_CLEANUP_EXPECTED.global).forEach(([key,value])=>{if(globalAudit?.summary?.[key]!==value)throw new Error(`${stage}：Global Audit ${key} 預期 ${value}，實際 ${globalAudit?.summary?.[key]}。`)});
+    Object.entries(FINAL_HISTORICAL_CLEANUP_EXPECTED.phase2).forEach(([key,value])=>{const actual=key==='phase2BlockingCount'?phase2Audit?.phase2BlockingCount:phase2Audit?.summary?.[key];if(actual!==value)throw new Error(`${stage}：Phase 2 Audit ${key} 預期 ${value}，實際 ${actual}。`)});
+  }
+  async function finalHistoricalCleanupExecute(confirmation={}) {
+    await load();
+    const preview=await finalHistoricalCleanupPreview(),reason=String(confirmation?.reason||'').trim();
+    if(confirmation?.confirmed!==true)throw new Error('必須明確確認執行 FINAL HISTORICAL CLEANUP。');
+    if(!reason)throw new Error('請輸入 FINAL HISTORICAL CLEANUP 原因。');
+    const scope=finalHistoricalCleanupExecuteScope(preview),targets=finalHistoricalCleanupExecuteTargetGate(preview,scope),snapshot=financialPhase2Clone(state),protection=finalHistoricalCleanupExecuteProtection(snapshot,preview,scope,targets),persistAction=`FINAL HISTORICAL CLEANUP：重建富華 B458413 Billing、清除健宏 duplicate payments、重建威沅確認歷史應付並清除 duplicate payment｜原因：${reason}`;
+    if(financialRepairFingerprint(preview.protectedFingerprints)!==financialRepairFingerprint(protection.previewFingerprints))throw new Error('Preview protected fingerprints 已失效。');
+    const restore=async()=>{
+      state=financialPhase2Clone(snapshot);
+      if(!db)db=await openDB();
+      if(!db)throw new Error('FINAL HISTORICAL CLEANUP rollback 無法取得 IndexedDB。');
+      await dbSet(STATE_KEY,state);
+      localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state));
+      window.KuSheLegacyData?.refresh();
+      window.dispatchEvent(new CustomEvent('kushe:data-updated',{detail:{action:'FINAL HISTORICAL CLEANUP rollback'}}));
+      const dbState=await dbGet(STATE_KEY),emergencyState=JSON.parse(localStorage.getItem(EMERGENCY_KEY)||'null');
+      if(financialRepairFingerprint(state)!==protection.snapshotFingerprint||financialRepairFingerprint(dbState)!==protection.snapshotFingerprint||financialRepairFingerprint(emergencyState)!==protection.snapshotFingerprint)throw new Error('FINAL HISTORICAL CLEANUP rollback 三層 fingerprint 驗證失敗。');
+      return true;
+    };
+    try {
+      state.billings.push(financialPhase2Clone(scope.f.proposedBilling));
+      Object.assign(targets.fReceivable,financialPhase2Clone(scope.f.receivablePatch));
+      targets.fDaily.forEach(({row,patch})=>{Object.assign(row,financialPhase2Clone(patch.patch));Object.assign(row.items[patch.itemPatches[0].index],financialPhase2Clone(patch.itemPatches[0].patch))});
+      state.payments=state.payments.filter((row)=>!new Set(FINAL_HISTORICAL_CLEANUP_TARGETS.jianhong.duplicatePaymentIds).has(financialAuditText(row.id)));
+      state.payables.push(financialPhase2Clone(scope.w.proposedPayable));
+      Object.assign(targets.wCanonical,financialPhase2Clone(scope.w.canonicalPaymentPatch.patch));
+      state.payments=state.payments.filter((row)=>financialAuditText(row.id)!==scope.w.duplicatePaymentId);
+      finalHistoricalCleanupExecuteAssertState(state,preview,scope,protection,'persist 前');
+      if(financialRepairFingerprint(state.meta)!==protection.metaFingerprint||financialRepairFingerprint(state.audit)!==protection.auditFingerprint)throw new Error('persist 前：meta 或 audit 提前發生變動。');
+      const preGlobal=financialIntegrityAuditReport(),prePhase2=financialIntegrityPhase2AuditReport();
+      finalHistoricalCleanupExecuteAssertAudit(preGlobal,prePhase2,'persist 前');
+      let persistCount=0;
+      persistCount+=1;
+      await persist(persistAction);
+      if(persistCount!==1)throw new Error('FINAL HISTORICAL CLEANUP persist 次數不等於 1。');
+      finalHistoricalCleanupExecuteAssertState(state,preview,scope,protection,'persist 後 memory',true);
+      if(!db)throw new Error('persist 後無法取得 IndexedDB。');
+      const dbState=await dbGet(STATE_KEY),emergencyState=JSON.parse(localStorage.getItem(EMERGENCY_KEY)||'null'),persistedFingerprint=financialRepairFingerprint(state);
+      finalHistoricalCleanupExecuteAssertState(dbState,preview,scope,protection,'persist 後 IndexedDB',true);
+      finalHistoricalCleanupExecuteAssertState(emergencyState,preview,scope,protection,'persist 後 Emergency backup',true);
+      if(financialRepairFingerprint(dbState)!==persistedFingerprint||financialRepairFingerprint(emergencyState)!==persistedFingerprint)throw new Error('FINAL HISTORICAL CLEANUP persist 後三層完整 state fingerprint 不一致。');
+      const postGlobal=financialIntegrityAuditReport(),postPhase2=financialIntegrityPhase2AuditReport();
+      finalHistoricalCleanupExecuteAssertAudit(postGlobal,postPhase2,'persist 後');
+      if(financialRepairFingerprint(preGlobal.summary)!==financialRepairFingerprint(postGlobal.summary)||financialRepairFingerprint({...prePhase2.summary,phase2BlockingCount:prePhase2.phase2BlockingCount})!==financialRepairFingerprint({...postPhase2.summary,phase2BlockingCount:postPhase2.phase2BlockingCount}))throw new Error('persist 前後 Audit summary 不一致。');
+      return {repaired:true,singlePersist:true,reason,fuhua:{billingCreated:FINAL_HISTORICAL_CLEANUP_TARGETS.fuhua.billingId,receivableLinked:FINAL_HISTORICAL_CLEANUP_TARGETS.fuhua.receivableId,dailyLogsLinked:2,constructionAmount:39000,performancePreserved:{'劉佳勳':19500,'柯智耀':19500}},jianhong:{canonicalPayment:FINAL_HISTORICAL_CLEANUP_TARGETS.jianhong.canonicalPaymentId,duplicatePaymentsDeleted:[...FINAL_HISTORICAL_CLEANUP_TARGETS.jianhong.duplicatePaymentIds]},weiyuan:{payableCreated:FINAL_HISTORICAL_CLEANUP_TARGETS.weiyuan.payableId,vendorId:FINAL_HISTORICAL_CLEANUP_VENDOR_ID,canonicalPayment:scope.w.canonicalPaymentId,duplicatePaymentDeleted:scope.w.duplicatePaymentId,bankCreated:false,materialCreated:false,invoiceCreated:false},postRepairSummary:postGlobal.summary,phase2PostRepairSummary:{...postPhase2.summary,phase2BlockingCount:postPhase2.phase2BlockingCount}};
+    } catch(error) {
+      try {await restore();error.rollbackVerified=true;error.rollbackError=undefined}
+      catch(rollbackError){error.rollbackVerified=false;error.rollbackError=rollbackError}
+      throw error;
+    }
   }
   async function persist(action) {
     state.meta.updatedAt = new Date().toISOString();
@@ -3195,5 +3335,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, financialIntegrityPhase2RepairPreview, financialIntegrityPhase2RepairExecute, finalHistoricalCleanupPreview, financialIntegrityRepairPreview, financialIntegrityRepairExecute, historicalCommissionRepairPreview, repairHistoricalCommissionData, orphanBillingTestCleanupPreview, cleanupOrphanBillingTestData, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, financialIntegrityPhase2RepairPreview, financialIntegrityPhase2RepairExecute, finalHistoricalCleanupPreview, finalHistoricalCleanupExecute, financialIntegrityRepairPreview, financialIntegrityRepairExecute, historicalCommissionRepairPreview, repairHistoricalCommissionData, orphanBillingTestCleanupPreview, cleanupOrphanBillingTestData, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
