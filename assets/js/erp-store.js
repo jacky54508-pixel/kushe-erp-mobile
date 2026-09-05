@@ -1842,6 +1842,15 @@
     });
     return [...projects.values()].map((row) => ({...row,earliest:row.dates.filter(Boolean).sort()[0]||'—',latest:row.dates.filter(Boolean).sort().at(-1)||'—'})).sort((a,b) => String(a.earliest).localeCompare(String(b.earliest)));
   }
+  function splitPerformanceAmount(amount, count, index) {
+    const parts = Math.max(0, Math.trunc(num(count)));
+    const partIndex = Math.max(0, Math.trunc(num(index)));
+    if (!parts || partIndex >= parts) return 0;
+    const cents = Math.round(num(amount) * 100);
+    const base = Math.floor(cents / parts);
+    const remainder = cents - base * parts;
+    return (base + (partIndex < remainder ? 1 : 0)) / 100;
+  }
   async function saveDailyBatch(values, editingBatchId = '') {
     await load();
     const previous = editingBatchId ? batchRows(editingBatchId) : [];
@@ -1870,6 +1879,11 @@
     const byProject = new Map();
     prepared.forEach((line) => { if (!byProject.has(line.project)) byProject.set(line.project, []); byProject.get(line.project).push(line); });
     const batchId = editingBatchId || uid(), now = new Date().toISOString();
+    const sortedEmployeeIds = [...employeeIds].sort((a, b) => {
+      const left = String(a), right = String(b);
+      return left < right ? -1 : left > right ? 1 : 0;
+    });
+    const performanceIndexByEmployeeId = new Map(sortedEmployeeIds.map((employeeId, index) => [employeeId, index]));
     employeeIds.forEach((employeeId) => {
       const employee = state.employees.find((row) => row.id === employeeId) || {};
       const hasDaily = state.dailyLogs.some((row) => row.employee === employeeId && row.date === date && row.workMode === 'daily' && row.isPrimaryWork !== false);
@@ -1880,7 +1894,7 @@
         const total = projectLines.reduce((sum, line) => sum + num(line.untaxedSubtotal), 0);
         const billableTotal = projectLines.filter((line) => line.billable).reduce((sum, line) => sum + num(line.untaxedSubtotal), 0);
         const canAddWork = firstProject && !(values.workMode === 'daily' && hasDaily);
-        const performance = values.commissionEnabled === false ? 0 : total;
+        const performance = values.commissionEnabled === false ? 0 : splitPerformanceAmount(total, sortedEmployeeIds.length, performanceIndexByEmployeeId.get(employeeId));
         const workMode = canAddWork ? values.workMode : 'none';
         const log = {id:uid(),batchId,groupId:`${batchId}:${projectId}`,date,employee:employeeId,employeeName:employee.name||'',customer:project.customer||'',customerName:customer.name||project.customerName||'',project:projectId,projectName:project.name||'',payType:performance>0&&workMode!=='none'?'業績抽成／點工':performance>0?'業績抽成':'點工',items:projectLines.map((line)=>({...line})),groupTotal:total,grossTotal:projectLines.reduce((sum,line)=>sum+num(line.subtotal),0),billingTotal:billableTotal,billable:billableTotal>0,billingStatus:billableTotal>0?'未請款':'',billingId:'',billingNo:'',performance,rate:num(employee.commissionRate),commission:Math.round(performance*num(employee.commissionRate)/100),workMode,workQty:canAddWork?num(values.workQty):0,workRate:canAddWork?num(values.workRate):0,isPrimaryWork:canAddWork,note:values.note||'',createdAt:previous[0]?.createdAt||now,updatedAt:now};
         state.dailyLogs.unshift(log); syncDailyLogLinks(log); firstProject = false;
