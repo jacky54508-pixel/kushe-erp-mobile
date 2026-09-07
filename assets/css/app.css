@@ -692,6 +692,12 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 @media(max-width:620px){.bank-reconciliation-current-balance{display:flex;justify-content:space-between;margin-top:9px}.bank-reconciliation-summary{grid-template-columns:1fr}.bank-reconciliation-empty-success{display:grid;gap:5px}.bank-reconciliation-empty-success span{line-height:1.45}.bank-reconciliation-normal-section>summary{padding:11px 14px}.bank-reconciliation-normal-action{font-size:9px}.bank-reconciliation-overview-table{min-width:820px}.bank-reconciliation-section-count{font-size:9px}.bank-reconciliation-breakdown-details{margin-bottom:12px}}
 @media(max-width:620px){.bank-history-group-summary{display:grid;justify-items:start}.bank-history-group-summary button{width:100%;max-width:150px}.bank-history-group-panel{padding:11px 10px 13px}.bank-history-group-panel>header{display:grid;gap:3px}.bank-history-group-scroll{width:100%;max-width:100%}}
 
+/* P13-5.1 Dashboard month picker: preserve its appearance while making the full control clickable. */
+.date-display{position:relative;min-height:40px}
+.date-display #dashboardMonth{position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);margin:0;padding:0;opacity:0;cursor:pointer}
+.date-display:focus-within{border-color:#73a5eb;box-shadow:0 0 0 3px rgba(7,91,216,.1)}
+@media(max-width:620px){.date-display{height:44px;min-height:44px}}
+
 /* Payroll list: keep mobile row actions compact without changing the scrollable table. */
 @media(max-width:480px){
   #payrollApp .commission-table>tbody>tr:not(.receipt-history-row)>td{padding-top:6px;padding-bottom:6px;line-height:1.35}
