@@ -250,6 +250,12 @@ html,body{height:100%;overflow:hidden}
 #dailyWorkForm .daily-house-header label{display:grid;gap:5px;min-width:0}
 #dailyWorkForm .daily-house-header span{color:#65778e;font-size:12px}
 #dailyWorkForm .daily-house-header input,#dailyWorkForm .daily-house-header select{width:100%;min-width:0;height:38px;border:1px solid #d5e0ed;border-radius:8px;padding:0 8px;font:inherit;font-size:13px;background:#fff}
+#dailyWorkForm .daily-house-project-control{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:end;min-width:0}
+#dailyWorkForm .daily-quick-project-open{height:38px;min-height:38px;padding:0 10px;white-space:nowrap}
+.daily-quick-project-card{display:flex;max-height:calc(100dvh - 36px);flex-direction:column}
+.daily-quick-project-card>label+label{padding-top:0}
+.daily-quick-project-card>label input,.daily-quick-project-card>label select{width:100%;min-width:0;height:42px;border:1px solid #d5e0ed;border-radius:9px;background:#fff;padding:0 11px;font:inherit;font-size:13px}
+.daily-quick-project-card>footer button{min-height:40px}
 #dailyWorkForm .daily-house-name{font-weight:800;color:#0a386f}
 #dailyWorkForm .daily-house-amount{display:grid;gap:7px;min-width:0}
 #dailyWorkForm .daily-house-subtotal{color:#0a386f;font-size:17px;overflow-wrap:anywhere}
@@ -281,11 +287,13 @@ html,body{height:100%;overflow:hidden}
   #dailyWorkForm.daily-house-editor .daily-section-title{flex-wrap:wrap}
   #dailyWorkForm .daily-house-groups{padding:8px;gap:12px}
   #dailyWorkForm .daily-house-header{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+  #dailyWorkForm .daily-house-project-control{grid-column:1/-1}
   #dailyWorkForm .daily-house-header>label:first-child,#dailyWorkForm .daily-house-actions{grid-column:1/-1}
   #dailyWorkForm.daily-house-editor .daily-total-bar{grid-template-columns:repeat(2,minmax(0,1fr))}
   #dailyWorkForm.daily-house-editor .daily-pay-grid{grid-template-columns:minmax(0,1fr)}
   #dailyWorkForm.daily-house-editor .daily-form-grid input,#dailyWorkForm.daily-house-editor .daily-pay-grid input,#dailyWorkForm.daily-house-editor .daily-pay-grid select{min-width:0;max-width:100%}
 }
+@media(max-width:520px){.daily-quick-project-layer{padding:10px}.daily-quick-project-card{max-height:calc(100dvh - 20px)}.daily-quick-project-card>label{padding-right:14px;padding-left:14px}.daily-quick-project-card>footer{padding-right:14px;padding-left:14px}.daily-quick-project-card>footer button{flex:1}}
 
 /* Billing safe editor: keep only its body scrollable and its actions visible. */
 .erp-detail-overlay:has(#billingEditForm){overflow:hidden;padding:8px;overscroll-behavior:contain}
