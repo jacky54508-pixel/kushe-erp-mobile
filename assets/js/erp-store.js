@@ -10,6 +10,25 @@
   const num = (value) => Number(value) || 0;
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const monthOf = (value) => String(value || '').slice(0, 7);
+  const CUSTOMER_DEDUCTION_CATEGORIES = Object.freeze(['垃圾清運費','清潔費','修繕／缺失扣款','管理費／水電','工安／罰款','代墊／代扣','其他扣款']);
+  const receiptCashAmount = (receipt) => Math.max(0,Math.round(num(receipt?.cashAmount ?? receipt?.amount)));
+  function receiptDeductions(receipt) {
+    const rows=Array.isArray(receipt?.deductions)?receipt.deductions.filter((row)=>row&&num(row.amount)>0).map((row)=>({id:String(row.id||''),category:CUSTOMER_DEDUCTION_CATEGORIES.includes(row.category)?row.category:'其他扣款',amount:Math.max(0,Math.round(num(row.amount))),note:String(row.note||'')})):[];
+    if(rows.length)return rows;
+    const legacyAggregate=Math.max(0,Math.round(num(receipt?.deductionAmount)));
+    return legacyAggregate?[{id:'',category:'其他扣款',amount:legacyAggregate,note:''}]:[];
+  }
+  const receiptDeductionAmount = (receipt) => receiptDeductions(receipt).reduce((sum,row)=>sum+num(row.amount),0);
+  const receiptSettlementAmount = (receipt) => receipt?.settlementAmount===undefined?receiptCashAmount(receipt)+receiptDeductionAmount(receipt):Math.max(0,Math.round(num(receipt.settlementAmount)));
+  function normalizeCustomerDeductions(values) {
+    if(!Array.isArray(values))return [];
+    return values.map((row)=>{
+      const category=String(row?.category||'').trim(),amount=Math.round(num(row?.amount)),note=String(row?.note||'').trim();
+      if(!CUSTOMER_DEDUCTION_CATEGORIES.includes(category))throw new Error('請選擇有效的客戶扣款類別');
+      if(amount<=0)throw new Error('每筆客戶扣款金額必須大於 0');
+      return {id:String(row?.id||uid()),category,amount,note};
+    });
+  }
   const businessDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Taipei', year:'numeric', month:'2-digit', day:'2-digit' });
   const businessDate = (date = new Date()) => {
     const parts = Object.fromEntries(businessDateFormatter.formatToParts(date).map((part) => [part.type, part.value]));
@@ -273,7 +292,7 @@
     });
     state.receivables.forEach((receivable) => {
       if (receivable.legacyReceived === undefined) {
-        const recordedReceipts=state.receipts.filter((row)=>row.receivableId===receivable.id).reduce((sum,row)=>sum+num(row.amount),0);
+        const recordedReceipts=state.receipts.filter((row)=>row.receivableId===receivable.id).reduce((sum,row)=>sum+receiptSettlementAmount(row),0);
         receivable.legacyReceived=Math.max(0,num(receivable.received)-recordedReceipts);
       }
       const billing=state.billings.find((row)=>row.id===receivable.billingId||String(row.number||'')===String(receivable.sourceNo||''));
@@ -728,7 +747,7 @@
       return {legacyBankCandidateCount:candidates.length,legacyBankVerified:verified,legacyBankTransactionIds:candidates.map((row)=>financialAuditText(row.id)),candidateAmounts:candidates.map((row)=>({id:financialAuditText(row.id),amount:num(row.amount),netAmount:num(row.netAmount),actualCredit:num(row.actualCredit),fee:num(row.fee),amountMatches:amountMatches(row)}))};
     };
     const receiptTruthFor=(receivable,billing=null)=>{
-      const explicitRows=receivableReceiptRows(receivable),explicitReceiptTotal=explicitRows.reduce((sum,row)=>sum+num(row.amount),0),legacyReceived=num(receivable.legacyReceived),storedReceived=num(receivable.received),expectedReceived=Math.min(num(receivable.amount),legacyReceived+explicitReceiptTotal),legacyEvidence=legacyReceived>0?legacyBankEvidence(receivable,billing):{legacyBankCandidateCount:0,legacyBankVerified:false,legacyBankTransactionIds:[],candidateAmounts:[]};
+      const explicitRows=receivableReceiptRows(receivable),explicitReceiptTotal=explicitRows.reduce((sum,row)=>sum+receiptSettlementAmount(row),0),legacyReceived=num(receivable.legacyReceived),storedReceived=num(receivable.received),expectedReceived=Math.min(num(receivable.amount),legacyReceived+explicitReceiptTotal),legacyEvidence=legacyReceived>0?legacyBankEvidence(receivable,billing):{legacyBankCandidateCount:0,legacyBankVerified:false,legacyBankTransactionIds:[],candidateAmounts:[]};
       const classification=explicitReceiptTotal>0?'MODERN_RECEIPT':legacyReceived>0?(legacyEvidence.legacyBankVerified?'LEGACY_RECEIVED_VERIFIED':'LEGACY_RECEIVED_UNVERIFIED'):'NO_RECEIPT';
       return {classification,explicitReceiptCount:explicitRows.length,explicitReceiptTotal,legacyReceived,storedReceived,expectedReceived,storedReceivedMatch:financialAuditMoneyEqual(storedReceived,expectedReceived),...legacyEvidence};
     };
@@ -736,8 +755,9 @@
       const receiptId=financialAuditText(receipt.id),bankMatches=financialAuditUnique(bankTransactions.filter((transaction)=>
         financialAuditText(receipt.bankTransactionId)&&financialAuditText(transaction.id)===financialAuditText(receipt.bankTransactionId)||
         ['receipt','receivable_receipt'].includes(financialAuditText(transaction.sourceType))&&receiptId&&(financialAuditText(transaction.sourceId)===receiptId||financialAuditText(transaction.receiptId)===receiptId)
-      )),transaction=bankMatches.length===1?bankMatches[0]:null,expectedNet=num(financialAuditFirst(receipt,['netAmount'],num(receipt.amount)-(receipt.feePayer==='recipient'?num(receipt.fee):0)));
-      return Boolean(transaction&&financialAuditMoneyEqual(financialAuditFirst(transaction,['receiptAmount'],transaction.amount),receipt.amount)&&financialAuditMoneyEqual(financialAuditFirst(transaction,['actualCredit','netAmount','amount'],0),expectedNet));
+      )),transaction=bankMatches.length===1?bankMatches[0]:null,cashAmount=receiptCashAmount(receipt),expectedNet=num(financialAuditFirst(receipt,['netAmount'],cashAmount-(receipt.feePayer==='company'?num(receipt.fee):0)));
+      if(cashAmount===0)return bankMatches.length===0&&expectedNet===0;
+      return Boolean(transaction&&financialAuditMoneyEqual(financialAuditFirst(transaction,['receiptAmount'],transaction.amount),cashAmount)&&financialAuditMoneyEqual(financialAuditFirst(transaction,['actualCredit','netAmount','amount'],0),expectedNet));
     });
     const billingReceivablePairs=billings.map((billing)=>{
       const matches=receivableMatchesForBilling(billing),relation=matches.length===1?'EXACT':matches.length===0?'ORPHAN':'AMBIGUOUS',values=billingValues(billing),receivable=matches.length===1?matches[0]:null;
@@ -795,17 +815,20 @@
     });
     const auditReceipt=(receipt,isRetention=false)=>{
       const collection=isRetention?retentionReceipts:receipts,receivableMatches=receivables.filter((receivable)=>financialAuditText(receipt.receivableId)===financialAuditText(receivable.id)),billingMatches=financialAuditUnique(billings.filter((billing)=>financialAuditText(receipt.billingId)&&financialAuditText(receipt.billingId)===financialAuditText(billing.id)||receivableMatches.some((receivable)=>billingMatchesForReceivable(receivable).includes(billing)))),bankMatches=financialAuditUnique(bankMatchesForReceipt(receipt,isRetention)),transaction=bankMatches.length===1?bankMatches[0]:null;
-      const amountMismatch=Boolean(transaction&&!financialAuditMoneyEqual(financialAuditFirst(transaction,['receiptAmount'],transaction.amount),receipt.amount));
-      const expectedNet=num(financialAuditFirst(receipt,['netAmount'],num(receipt.amount)-(receipt.feePayer==='recipient'?num(receipt.fee):0))),netAmountMismatch=Boolean(transaction&&!financialAuditMoneyEqual(financialAuditFirst(transaction,['actualCredit','netAmount','amount'],0),expectedNet));
-      const orphanReceipt=receivableMatches.length===0,ambiguousReceipt=receivableMatches.length>1,missingBankTransaction=bankMatches.length===0,duplicateBankTransaction=bankMatches.length>1;
+      const cashAmount=isRetention?Math.max(0,num(receipt.amount)):receiptCashAmount(receipt),deductionAmount=isRetention?0:receiptDeductionAmount(receipt),settlementAmount=isRetention?cashAmount:receiptSettlementAmount(receipt),calculatedSettlement=cashAmount+deductionAmount,settlementMismatch=!isRetention&&(!financialAuditMoneyEqual(settlementAmount,calculatedSettlement)||receipt.deductionAmount!==undefined&&!financialAuditMoneyEqual(receipt.deductionAmount,deductionAmount));
+      const amountMismatch=Boolean(transaction&&!financialAuditMoneyEqual(financialAuditFirst(transaction,['receiptAmount'],transaction.amount),cashAmount));
+      const expectedNet=num(financialAuditFirst(receipt,['netAmount'],cashAmount-(receipt.feePayer==='company'?num(receipt.fee):0))),netAmountMismatch=Boolean(transaction&&!financialAuditMoneyEqual(financialAuditFirst(transaction,['actualCredit','netAmount','amount'],0),expectedNet));
+      const orphanReceipt=receivableMatches.length===0,ambiguousReceipt=receivableMatches.length>1,missingBankTransaction=cashAmount>0&&bankMatches.length===0,unexpectedBankTransaction=cashAmount===0&&bankMatches.length>0,duplicateBankTransaction=bankMatches.length>1;
       const section=isRetention?'retention-receipt':'receipt';
       if(orphanReceipt)addIssue(section,receipt.id,'ORPHAN_RECEIPT','BLOCKING',repair.MANUAL,'收款找不到 Receivable。');
       if(ambiguousReceipt)addIssue(section,receipt.id,'AMBIGUOUS_RECEIPT','BLOCKING',repair.MANUAL,'收款對應多筆 Receivable。');
       if(isRetention&&billingMatches.length!==1)addIssue(section,receipt.id,billingMatches.length?'AMBIGUOUS_RETENTION_BILLING':'ORPHAN_RETENTION_BILLING','BLOCKING',repair.MANUAL,'保留款收回無法唯一反查 Billing。');
       if(missingBankTransaction)addIssue(section,receipt.id,'MISSING_BANK_TRANSACTION','BLOCKING',repair.SEMANTIC,'收款缺少銀行流水。');
+      if(unexpectedBankTransaction)addIssue(section,receipt.id,'UNEXPECTED_BANK_TRANSACTION','BLOCKING',repair.SEMANTIC,'零現金客戶扣款不應建立銀行流水。');
       if(duplicateBankTransaction)addIssue(section,receipt.id,'DUPLICATE_BANK_TRANSACTION','BLOCKING',repair.MANUAL,'收款對應多筆銀行流水。');
       if(amountMismatch||netAmountMismatch)addIssue(section,receipt.id,'RECEIPT_BANK_AMOUNT_MISMATCH','BLOCKING',repair.SEMANTIC,'收款與銀行流水金額不一致。');
-      return {id:receipt.id,retentionReceiptId:receipt.retentionReceiptId||'',receivableId:receipt.receivableId||'',billingId:receipt.billingId||'',amount:num(receipt.amount),netAmount:expectedNet,duplicateIdentityCount:collection.filter((row)=>financialAuditText(row.id)===financialAuditText(receipt.id)).length,receivableMatchCount:receivableMatches.length,billingMatchCount:billingMatches.length,billingIds:billingMatches.map((row)=>row.id),bankTransactionIds:bankMatches.map((row)=>row.id),orphanReceipt,ambiguousReceipt,missingBankTransaction,duplicateBankTransaction,amountMismatch,netAmountMismatch,repairClassification:orphanReceipt||ambiguousReceipt||duplicateBankTransaction||isRetention&&billingMatches.length!==1?repair.MANUAL:missingBankTransaction||amountMismatch||netAmountMismatch?repair.SEMANTIC:null};
+      if(settlementMismatch)addIssue(section,receipt.id,'RECEIPT_SETTLEMENT_MISMATCH','BLOCKING',repair.SEMANTIC,'客戶扣款與本次沖銷應收加總不一致。');
+      return {id:receipt.id,retentionReceiptId:receipt.retentionReceiptId||'',receivableId:receipt.receivableId||'',billingId:receipt.billingId||'',amount:num(receipt.amount),cashAmount,deductionAmount,settlementAmount,netAmount:expectedNet,duplicateIdentityCount:collection.filter((row)=>financialAuditText(row.id)===financialAuditText(receipt.id)).length,receivableMatchCount:receivableMatches.length,billingMatchCount:billingMatches.length,billingIds:billingMatches.map((row)=>row.id),bankTransactionIds:bankMatches.map((row)=>row.id),orphanReceipt,ambiguousReceipt,missingBankTransaction,unexpectedBankTransaction,duplicateBankTransaction,amountMismatch,netAmountMismatch,settlementMismatch,repairClassification:orphanReceipt||ambiguousReceipt||duplicateBankTransaction||isRetention&&billingMatches.length!==1?repair.MANUAL:missingBankTransaction||unexpectedBankTransaction||amountMismatch||netAmountMismatch||settlementMismatch?repair.SEMANTIC:null};
     };
     const receiptAudit=receipts.map((row)=>auditReceipt(row,false)),retentionReceiptAudit=retentionReceipts.map((row)=>auditReceipt(row,true));
     const outputInvoices=invoices.filter((row)=>row.invoiceType!=='input'&&!/進項/u.test(financialAuditText(row.type)));
@@ -925,7 +948,7 @@
     const b643Pair=billingReceivablePairs.find((row)=>financialAuditText(row.number)==='B643124'),b643Billing=b643Pair?billings.find((row)=>financialAuditText(row.id)===financialAuditText(b643Pair.id)):null,b643Receivable=b643Billing&&receivableMatchesForBilling(b643Billing).length===1?receivableMatchesForBilling(b643Billing)[0]:null,b643Truth=b643Receivable?receiptTruthFor(b643Receivable,b643Billing):null;
     const b643124={billing:b643Billing?{id:b643Billing.id,number:b643Billing.number,sourceType:b643Billing.sourceType||''}:null,receivable:b643Receivable?{id:b643Receivable.id,sourceNo:b643Receivable.sourceNo||''}:null,billingTotal:b643Billing?billingValues(b643Billing).total:0,receivableAmount:num(b643Receivable?.amount),storedReceived:num(b643Receivable?.received),explicitReceiptTotal:b643Truth?.explicitReceiptTotal||0,legacyReceived:b643Truth?.legacyReceived||0,legacyBankCandidateCount:b643Truth?.legacyBankCandidateCount||0,legacyBankVerified:Boolean(b643Truth?.legacyBankVerified),legacyBankTransactionIds:b643Truth?.legacyBankTransactionIds||[],receiptTruthClassification:b643Truth?.classification||'NOT_FOUND',correctExpectedReceived:b643Truth?.classification==='LEGACY_RECEIVED_UNVERIFIED'?null:b643Truth?.expectedReceived??null,integrityResult:!b643Billing||!b643Receivable?'MISSING_TARGET':b643Truth.classification==='LEGACY_RECEIVED_VERIFIED'?'VERIFIED_LEGACY_RECEIPT':b643Truth.classification==='LEGACY_RECEIVED_UNVERIFIED'?'BLOCK_MANUAL_REVIEW_UNVERIFIED_LEGACY_RECEIVED':b643Truth.storedReceivedMatch?'PASS':'RECEIVED_MISMATCH',repairClassification:b643Truth?.classification==='LEGACY_RECEIVED_VERIFIED'?repair.LEGACY:b643Truth?.classification==='LEGACY_RECEIVED_UNVERIFIED'?repair.MANUAL:null};
     const specialPayroll=payrollAudit.find((row)=>financialAuditText(row.id)==='msdfc59cbvc6p7')||null;
-    const duplicateIdentityCount=Object.values(duplicates).reduce((sum,groups)=>sum+groups.length,0),billingAmountMismatchCount=billingReceivablePairs.filter((row)=>row.amountChecks&&!row.amountMatch).length,orphanReceiptCount=[...receiptAudit,...retentionReceiptAudit].filter((row)=>row.orphanReceipt).length,receiptBankMismatchCount=[...receiptAudit,...retentionReceiptAudit].filter((row)=>row.missingBankTransaction||row.duplicateBankTransaction||row.amountMismatch||row.netAmountMismatch).length,paymentIntegrityIssueCount=paymentAudit.filter((row)=>row.orphanPayment||row.ambiguousPayment||row.missingBank||row.duplicateBank||row.duplicatePayment||row.amountMismatch||row.netAmountMismatch).length;
+    const duplicateIdentityCount=Object.values(duplicates).reduce((sum,groups)=>sum+groups.length,0),billingAmountMismatchCount=billingReceivablePairs.filter((row)=>row.amountChecks&&!row.amountMatch).length,orphanReceiptCount=[...receiptAudit,...retentionReceiptAudit].filter((row)=>row.orphanReceipt).length,receiptBankMismatchCount=[...receiptAudit,...retentionReceiptAudit].filter((row)=>row.missingBankTransaction||row.unexpectedBankTransaction||row.duplicateBankTransaction||row.amountMismatch||row.netAmountMismatch||row.settlementMismatch).length,paymentIntegrityIssueCount=paymentAudit.filter((row)=>row.orphanPayment||row.ambiguousPayment||row.missingBank||row.duplicateBank||row.duplicatePayment||row.amountMismatch||row.netAmountMismatch).length;
     const summary={billingCount:billings.length,receivableCount:receivables.length,exactBillingReceivablePairs:billingReceivablePairs.filter((row)=>row.relation==='EXACT').length,orphanBillingCount:billingReceivablePairs.filter((row)=>row.relation==='ORPHAN').length,ambiguousBillingCount:billingReceivablePairs.filter((row)=>row.relation==='AMBIGUOUS').length,orphanReceivableCount:receivableAudit.filter((row)=>row.orphanClassification).length,legacyReceivableCount:receivableAudit.filter((row)=>/^LEGACY_/u.test(row.orphanClassification)||/^LEGACY_/u.test(row.receiptTruth.classification)).length,likelyDuplicateReceivableCount:receivableAudit.filter((row)=>row.orphanClassification==='LIKELY_DUPLICATE').length,billingAmountMismatchCount,unverifiedLegacyReceivedCount:receivableAudit.filter((row)=>row.receiptTruth.classification==='LEGACY_RECEIVED_UNVERIFIED').length,orphanReceiptCount,receiptBankMismatchCount,orphanInvoiceCount:invoiceAudit.filter((row)=>row.orphanInvoice).length,dailyBillingOrphanCount:dailyBillingLinks.filter((row)=>row.dailyOrphanBilling).length,orphanPayrollCount:payrollAudit.filter((row)=>row.classification==='ORPHAN_PAYROLL').length,stalePayrollCount:payrollAudit.filter((row)=>row.classification==='STALE_PAYROLL_STATUS').length,orphanPayableCount:payableAudit.filter((row)=>row.orphanPayable).length,paymentIntegrityIssueCount,orphanBankTransactionCount:bankAudit.filter((row)=>row.orphanBankTransaction).length,duplicateIdentityCount,blockingIssueCount:issues.filter((row)=>row.severity==='BLOCKING').length,warningIssueCount:issues.filter((row)=>row.severity==='WARNING').length,informationalIssueCount:issues.filter((row)=>row.severity==='INFO').length};
     return {readOnly:true,auditVersion:'global-financial-integrity-v1',generatedAt:new Date().toISOString(),repairClassifications:Object.values(repair),billingReceivablePairs,receivables:receivableAudit,receipts:receiptAudit,retentionReceipts:retentionReceiptAudit,invoices:invoiceAudit,billingSources,dailyBillingLinks,payroll:payrollAudit,payables:payableAudit,payments:paymentAudit,materialPayableLinks,bankTransactions:bankAudit,duplicates,special:{B643124:b643124,linZiYue202608PaidPayroll:specialPayroll},issues,summary};
   }
@@ -2219,7 +2242,7 @@
     if(num(receivable.legacyReceived)>0||num(receivable.legacyRetentionReceived)>0)throw new Error('存在無法逐筆解析的歷史收款，為避免帳務斷鏈已停止刪除。');
     const dailyRefs=billingSourceRefs(billing),contractRefs=[...(billing.sourceContractRefs||[]),...(billing.lines||[]).flatMap((line)=>line.sourceContractRefs||[])],requiresDailySource=['daily-work','mixed-pricing'].includes(String(billing.sourceType||''));
     if((requiresDailySource&&!dailyRefs.length)||dailyRefs.some((ref)=>!availableSourceCopies(ref).length)||contractRefs.some((ref)=>!ref?.contractKey||!contractSourceByKey(ref.contractKey))||!dailyRefs.length&&!contractRefs.length)throw new Error('找不到完整施工來源，為避免帳務斷鏈已停止刪除。');
-    const receiptTransactions=receipts.map((receipt)=>{const matches=receiptBankTransactions(receipt);if(matches.length!==1)throw new Error('一般收款的銀行交易關係不完整，為避免帳務斷鏈已停止刪除。');return matches[0]}),retentionTransactions=retentionReceipts.map((receipt)=>{const matches=retentionBankTransactions(receipt);if(matches.length!==1)throw new Error('保留款收回的銀行交易關係不完整，為避免帳務斷鏈已停止刪除。');return matches[0]}),transactions=[...receiptTransactions,...retentionTransactions],transactionIds=new Set(transactions.map((row)=>String(row.id)));
+    const receiptTransactions=receipts.flatMap((receipt)=>{const matches=receiptBankTransactions(receipt),cashAmount=receiptCashAmount(receipt);if(cashAmount===0){if(matches.length)throw new Error('零現金客戶扣款不應有銀行交易，為避免帳務斷鏈已停止刪除。');return []}if(matches.length!==1)throw new Error('一般收款的銀行交易關係不完整，為避免帳務斷鏈已停止刪除。');return matches}),retentionTransactions=retentionReceipts.map((receipt)=>{const matches=retentionBankTransactions(receipt);if(matches.length!==1)throw new Error('保留款收回的銀行交易關係不完整，為避免帳務斷鏈已停止刪除。');return matches[0]}),transactions=[...receiptTransactions,...retentionTransactions],transactionIds=new Set(transactions.map((row)=>String(row.id)));
     if(transactionIds.size!==transactions.length)throw new Error('銀行交易重複關聯多筆收款，為避免帳務斷鏈已停止刪除。');
     if(transactions.some((row)=>!state.banks.some((bank)=>String(bank.id)===String(row.bankAccountId||row.bankId||''))))throw new Error('找不到收款對應銀行帳戶，為避免帳務斷鏈已停止刪除。');
     const receiptIds=new Set([...receipts,...retentionReceipts].flatMap((row)=>[row.id,row.retentionReceiptId]).filter(Boolean).map(String)),linkedTransactions=state.bankTransactions.filter((row)=>String(row.billingId||'')===String(billing.id)||String(row.receivableId||'')===String(receivable.id)||[String(billing.id),String(receivable.id)].includes(String(row.sourceId||''))||receiptIds.has(String(row.sourceId||''))||receiptIds.has(String(row.receiptId||''))||receiptIds.has(String(row.retentionReceiptId||''))||(String(row.sourceNo||'')===String(billing.number||'')&&/receipt|receivable|retention|收款|應收|保留/i.test(`${row.sourceType||''} ${row.category||''}`)));
@@ -2327,6 +2350,8 @@
     if(rollbackError)error.rollbackError=rollbackError;
   }
   function receiptMutationPlan(receipt) {
+    const cashAmount=receiptCashAmount(receipt),matches=linkedBankTransactionCandidates(receipt,['receipt','receivable_receipt']).candidates;
+    if(cashAmount===0){if(matches.length)throw new Error('零現金客戶扣款不應有銀行流水，已停止操作');return {transaction:null,bank:null,amount:0}}
     const transaction=strictExistingBankTransaction(receipt,['receipt','receivable_receipt'],'一般收款'),receiptBank=strictBankReference(receipt,'一般收款'),transactionBank=strictBankReference(transaction,'一般收款銀行流水');
     if(receiptBank.id!==transactionBank.id)throw new Error('一般收款與銀行流水的帳戶不一致，已停止操作');
     if(!hasAccountingValue(receipt,'netAmount'))throw new Error('一般收款缺少可驗證的實際入帳金額，已停止操作');
@@ -2353,18 +2378,20 @@
     return {amount,fee,feePayer,netAmount:feePayer==='company'?amount-fee:amount};
   }
   function syncReceivableSummary(ar, now) {
-    const history=state.receipts.filter((row)=>row.receivableId===ar.id),received=num(ar.legacyReceived)+history.reduce((sum,row)=>sum+num(row.amount),0),latest=[...history].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];
+    const history=state.receipts.filter((row)=>row.receivableId===ar.id),received=num(ar.legacyReceived)+history.reduce((sum,row)=>sum+receiptSettlementAmount(row),0),latest=[...history].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];
     ar.received=Math.min(num(ar.amount),received);ar.bankId=latest?.bankAccountId||latest?.bankId||'';ar.receiptDate=latest?.date||'';ar.status=ar.received>=num(ar.amount)&&num(ar.amount)>0?'已收':ar.received>0?'部分收款':'未收';ar.updatedAt=now;
     const billing=state.billings.find((row)=>row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||''));
     if(billing){billing.status=ar.status==='已收'?'已收款':ar.status==='部分收款'?'部分收款':'未收款';billing.updatedAt=now}
   }
   function syncReceiptBankTransaction(receipt, ar, now, existingTransaction) {
-    const bankId=String(receipt.bankAccountId||receipt.bankId||''),bank=state.banks.find((row)=>row.id===bankId);
-    if(!bank)throw new Error('請選擇收款銀行帳戶');
-    const amount=Math.max(0,num(receipt.netAmount)),existing=existingTransaction===undefined?receiptBankTransaction(receipt):existingTransaction;
+    const bankId=String(receipt.bankAccountId||receipt.bankId||''),cashAmount=receiptCashAmount(receipt),existing=existingTransaction===undefined?receiptBankTransaction(receipt):existingTransaction;
     if(existing){const previousBank=state.banks.find((row)=>row.id===(existing.bankAccountId||existing.bankId));adjustBankIncome(previousBank,-num(existing.amount),now)}
+    if(cashAmount===0){if(existing)state.bankTransactions=state.bankTransactions.filter((row)=>row!==existing);receipt.bankId='';receipt.bankAccountId='';receipt.bankTransactionId='';receipt.netAmount=0;return null}
+    const bank=state.banks.find((row)=>row.id===bankId);
+    if(!bank)throw new Error('請選擇收款銀行帳戶');
+    const amount=Math.max(0,num(receipt.netAmount));
     const transaction=existing||{id:uid(),createdAt:now};
-    Object.assign(transaction,{date:receipt.date,bankId:bank.id,bankAccountId:bank.id,type:'收入',direction:'in',category:'應收收款',amount,receiptAmount:num(receipt.amount),fee:num(receipt.fee),feePayer:receipt.feePayer,netAmount:amount,actualCredit:amount,paymentMethod:receipt.paymentMethod||'銀行轉帳',sourceType:'receivable_receipt',sourceId:receipt.id,receivableId:ar.id,billingId:ar.billingId||'',customer:ar.customer,customerName:ar.customerName||'',project:ar.project,projectName:ar.projectName||'',sourceNo:ar.sourceNo||'',description:`${ar.projectName||ar.sourceNo||'應收帳款'} 收款`,note:receipt.note||`${ar.sourceNo||''} 收款`,updatedAt:now});
+    Object.assign(transaction,{date:receipt.date,bankId:bank.id,bankAccountId:bank.id,type:'收入',direction:'in',category:'應收收款',amount,receiptAmount:cashAmount,fee:num(receipt.fee),feePayer:receipt.feePayer,netAmount:amount,actualCredit:amount,paymentMethod:receipt.paymentMethod||'銀行轉帳',sourceType:'receivable_receipt',sourceId:receipt.id,receivableId:ar.id,billingId:ar.billingId||'',customer:ar.customer,customerName:ar.customerName||'',project:ar.project,projectName:ar.projectName||'',sourceNo:ar.sourceNo||'',description:`${ar.projectName||ar.sourceNo||'應收帳款'} 收款`,note:receipt.note||`${ar.sourceNo||''} 收款`,updatedAt:now});
     if(!existing)state.bankTransactions.unshift(transaction);
     receipt.bankId=bank.id;receipt.bankAccountId=bank.id;receipt.bankTransactionId=transaction.id;
     adjustBankIncome(bank,amount,now);
@@ -2409,17 +2436,19 @@
       const existing = state.receipts.find((row) => row.idempotencyKey === idempotencyKey);
       if (existing) {
         const ar=state.receivables.find((row)=>row.id===existing.receivableId);
-        if(ar&&!receiptBankTransaction(existing)){const now=new Date().toISOString();syncReceiptBankTransaction(existing,ar,now);syncReceivableSummary(ar,now);await persist(`補齊一般收款銀行交易 ${ar.sourceNo||''}`)}
+        if(ar&&receiptCashAmount(existing)>0&&!receiptBankTransaction(existing)){const now=new Date().toISOString();syncReceiptBankTransaction(existing,ar,now);syncReceivableSummary(ar,now);await persist(`補齊一般收款銀行交易 ${ar.sourceNo||''}`)}
         return existing;
       }
     }
     const ar = state.receivables.find((row) => row.id === values.receivableId);
     if (!ar) throw new Error('找不到對應應收帳款');
-    const settlement=incomeSettlement(values.amount,values.fee,values.feePayer),{amount,fee,feePayer,netAmount}=settlement,outstanding = Math.max(0,num(ar.amount)-num(ar.received));
-    if (amount <= 0 || amount > outstanding) throw new Error('本次收款金額不可超過未收餘額');
-    const bank = state.banks.find((row) => row.id === values.bankId);
-    if (!bank) throw new Error('請選擇收款銀行帳戶');
-    const now = new Date().toISOString(), receipt = {id:uid(),idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:ar.billingId||'',date:values.date||businessDate(new Date(now)),amount,fee,feePayer,netAmount,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:values.note||'',createdAt:now,updatedAt:now};
+    const deductions=normalizeCustomerDeductions(values.deductions),deductionAmount=deductions.reduce((sum,row)=>sum+num(row.amount),0),cashSettlement=incomeSettlement(values.cashAmount??values.amount,values.fee,values.feePayer),{amount:cashAmount,fee,feePayer,netAmount}=cashSettlement,settlementAmount=cashAmount+deductionAmount,outstanding = Math.max(0,num(ar.amount)-num(ar.received));
+    if(settlementAmount<=0)throw new Error('本次實際匯款與客戶扣款合計必須大於 0');
+    if(settlementAmount>outstanding)throw new Error('本次沖銷應收不可超過未收餘額');
+    if(cashAmount===0&&fee>0)throw new Error('零匯款收款不可填寫銀行手續費');
+    const bankId=cashAmount>0?String(values.bankAccountId||values.bankId||''):'';
+    if(cashAmount>0&&!state.banks.some((row)=>row.id===bankId))throw new Error('請選擇收款銀行帳戶');
+    const now = new Date().toISOString(), receipt = {id:uid(),idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:ar.billingId||'',date:values.date||businessDate(new Date(now)),amount:cashAmount,cashAmount,deductionAmount,settlementAmount,deductions,fee,feePayer,netAmount,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||'銀行轉帳',note:values.note||'',createdAt:now,updatedAt:now};
     state.receipts.unshift(receipt);syncReceiptBankTransaction(receipt,ar,now);syncReceivableSummary(ar,now);
     await persist(`新增分次收款 ${ar.sourceNo}`); return receipt;
   }
@@ -2427,11 +2456,12 @@
     await load();
     const receiptMatches=state.receipts.filter((row)=>String(row.id||'')===String(id||''));if(receiptMatches.length!==1)throw new Error(receiptMatches.length?'收款紀錄編號不唯一，已停止修改':'找不到收款紀錄');const receipt=receiptMatches[0];
     const arMatches=state.receivables.filter((row)=>String(row.id||'')===String(receipt.receivableId||''));if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止修改':'找不到對應應收帳款');const ar=arMatches[0];
-    const otherReceived=num(ar.legacyReceived)+state.receipts.filter((row)=>row!==receipt&&row.receivableId===ar.id).reduce((sum,row)=>sum+num(row.amount),0),settlement=incomeSettlement(values.amount,values.fee===undefined?receipt.fee:values.fee,values.feePayer===undefined?receipt.feePayer:values.feePayer),{amount,fee,feePayer,netAmount}=settlement,bankId=String(values.bankAccountId||values.bankId||'');
-    if(amount<=0||otherReceived+amount>num(ar.amount))throw new Error('本次收款金額不可超過本期剩餘應收');
-    strictBankReference({bankId},'新的收款銀行帳戶');const plan=receiptMutationPlan(receipt),snapshot=JSON.parse(JSON.stringify(state)),now=new Date().toISOString();
+    const otherReceived=num(ar.legacyReceived)+state.receipts.filter((row)=>row!==receipt&&row.receivableId===ar.id).reduce((sum,row)=>sum+receiptSettlementAmount(row),0),deductions=values.deductions===undefined?normalizeCustomerDeductions(receiptDeductions(receipt)):normalizeCustomerDeductions(values.deductions),deductionAmount=deductions.reduce((sum,row)=>sum+num(row.amount),0),cashSettlement=incomeSettlement(values.cashAmount??values.amount??receiptCashAmount(receipt),values.fee===undefined?receipt.fee:values.fee,values.feePayer===undefined?receipt.feePayer:values.feePayer),{amount:cashAmount,fee,feePayer,netAmount}=cashSettlement,settlementAmount=cashAmount+deductionAmount,bankId=cashAmount>0?String(values.bankAccountId||values.bankId||''):'';
+    if(settlementAmount<=0||otherReceived+settlementAmount>num(ar.amount))throw new Error('本次沖銷應收不可超過本期剩餘應收');
+    if(cashAmount===0&&fee>0)throw new Error('零匯款收款不可填寫銀行手續費');
+    if(cashAmount>0)strictBankReference({bankId},'新的收款銀行帳戶');const plan=receiptMutationPlan(receipt),snapshot=JSON.parse(JSON.stringify(state)),now=new Date().toISOString();
     try {
-      Object.assign(receipt,{date:values.date||receipt.date||businessDate(new Date(now)),amount,fee,feePayer,netAmount,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||receipt.paymentMethod||'銀行轉帳',note:values.note===undefined?receipt.note:String(values.note||''),updatedAt:now});
+      Object.assign(receipt,{date:values.date||receipt.date||businessDate(new Date(now)),amount:cashAmount,cashAmount,deductionAmount,settlementAmount,deductions,fee,feePayer,netAmount,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||receipt.paymentMethod||'銀行轉帳',note:values.note===undefined?receipt.note:String(values.note||''),updatedAt:now});
       syncReceiptBankTransaction(receipt,ar,now,plan.transaction);syncReceivableSummary(ar,now);await persist(`修改應收收款 ${ar.sourceNo||''}`);return receipt;
     } catch(error) { await restoreBankLinkedMutation(snapshot,error);throw error; }
   }
@@ -2440,7 +2470,7 @@
     const receiptMatches=state.receipts.filter((row)=>String(row.id||'')===String(id||''));if(receiptMatches.length!==1)throw new Error(receiptMatches.length?'收款紀錄編號不唯一，已停止刪除':'找不到收款紀錄');const receipt=receiptMatches[0];
     const arMatches=state.receivables.filter((row)=>String(row.id||'')===String(receipt.receivableId||''));if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止刪除':'找不到對應應收帳款');const ar=arMatches[0],plan=receiptMutationPlan(receipt),snapshot=token===accountingDeleteToken?null:JSON.parse(JSON.stringify(state)),now=new Date().toISOString();
     try {
-      adjustBankIncome(plan.bank,-plan.amount,now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==plan.transaction);state.receipts=state.receipts.filter((row)=>row!==receipt);syncReceivableSummary(ar,now);if(token!==accountingDeleteToken)await persist(`刪除應收收款 ${ar.sourceNo||''}`);return true;
+      if(plan.transaction){adjustBankIncome(plan.bank,-plan.amount,now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==plan.transaction)}state.receipts=state.receipts.filter((row)=>row!==receipt);syncReceivableSummary(ar,now);if(token!==accountingDeleteToken)await persist(`刪除應收收款 ${ar.sourceNo||''}`);return true;
     } catch(error) { if(snapshot)await restoreBankLinkedMutation(snapshot,error);throw error; }
   }
   async function addRetentionReceipt(values) {
@@ -3665,5 +3695,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
