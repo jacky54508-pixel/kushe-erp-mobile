@@ -470,7 +470,7 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 @media(max-width:1800px) and (min-width:621px){
   .kpi-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
-@media(max-width:740px){
+@media(max-width:820px){
   .kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media(max-width:620px){
