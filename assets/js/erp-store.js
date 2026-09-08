@@ -1718,10 +1718,12 @@
       throw error;
     }
   }
-  async function persist(action) {
+  async function persist(action, auditDetails = null) {
     state.meta.updatedAt = new Date().toISOString();
     if (action) {
-      state.audit.unshift({ id: uid(), time: new Date().toISOString(), action });
+      const entry={ id: uid(), time: new Date().toISOString(), action };
+      if(auditDetails&&typeof auditDetails==='object'&&!Array.isArray(auditDetails))Object.assign(entry,auditDetails);
+      state.audit.unshift(entry);
       state.audit = state.audit.slice(0, 300);
     }
     if (!db) { try { db = await openDB(); } catch (_) { db = null; } }
@@ -3171,6 +3173,285 @@
     if (referenceIds.length) return referenceIds.some((value) => clean(value) === String(project.id));
     return [row.projectName,row.projectLabel].some((value) => clean(value) && sameName(value,project.name));
   }
+  const PROJECT_MERGE_COLLECTIONS = [
+    ['quotations','報價'],
+    ['quotationPrices','價格歷史'],
+    ['quotationTemplates','報價模板'],
+    ['dailyLogs','每日施工'],
+    ['dailyItemPresets','施工項目預設'],
+    ['attendance','出勤／點工'],
+    ['commissions','業績／抽成'],
+    ['billings','請款'],
+    ['receivables','應收'],
+    ['invoices','發票'],
+    ['materialUsages','材料使用'],
+    ['projectCosts','案場成本'],
+    ['payables','應付'],
+    ['retentionReceipts','保留款收回'],
+    ['receipts','收款'],
+    ['payments','付款'],
+    ['salaryPayments','薪資付款'],
+    ['payroll','薪資'],
+    ['bankTransactions','銀行交易'],
+    ['inventoryReceipts','材料入庫'],
+    ['calendar','行事曆／排程']
+  ];
+  const PROJECT_MERGE_COLLECTION_KEYS = new Set(PROJECT_MERGE_COLLECTIONS.map(([key])=>key));
+  const PROJECT_MERGE_PROJECT_FIELDS = new Set(['project','projectId','projectName','projectLabel']);
+  const PROJECT_MERGE_CUSTOMER_FIELDS = new Set(['customer','customerId','customerName']);
+  const projectMergeOwn=(value,key)=>Object.prototype.hasOwnProperty.call(value,key);
+  const projectMergeClone=(value)=>value===undefined?undefined:JSON.parse(JSON.stringify(value));
+  const projectMergeRecordId=(row,index)=>clean(row?.id||row?.invoiceId||row?.number||row?.sourceNo||`#${index+1}`);
+  function projectMergeCustomer(project){
+    const customerId=clean(project?.customerId||project?.customer),customer=state?.customers?.find((row)=>clean(row.id)===customerId);
+    return {id:customerId,name:customer?.name||project?.customerName||''};
+  }
+  function projectMergeDirectRelation(value,project){
+    if(!value||typeof value!=='object'||Array.isArray(value))return {match:false,idMatch:false,nameMatch:false,hasId:false};
+    const ids=['projectId','project'].filter((key)=>projectMergeOwn(value,key)&&(typeof value[key]==='string'||typeof value[key]==='number')&&clean(value[key])).map((key)=>clean(value[key]));
+    const names=['projectName','projectLabel'].filter((key)=>projectMergeOwn(value,key)&&clean(value[key])).map((key)=>value[key]);
+    const idMatch=ids.some((id)=>id===clean(project?.id)),nameMatch=names.some((name)=>sameName(name,project?.name));
+    return {match:idMatch||(!ids.length&&nameMatch),idMatch,nameMatch,hasId:ids.length>0,ids,names};
+  }
+  function projectMergeRelationPaths(value,project,path='$',found=[]){
+    if(!value||typeof value!=='object')return found;
+    const relation=projectMergeDirectRelation(value,project);
+    if(relation.match)found.push({path,legacyNameOnly:!relation.idMatch&&relation.nameMatch});
+    Object.entries(value).forEach(([key,child])=>{
+      if(PROJECT_MERGE_PROJECT_FIELDS.has(key)&&(typeof child==='string'||typeof child==='number'))return;
+      if(child&&typeof child==='object')projectMergeRelationPaths(child,project,`${path}.${key}`,found);
+    });
+    return found;
+  }
+  function projectMergeCustomerMatches(value,customer){
+    const candidate=clean(value);
+    return !candidate||candidate===customer.id||Boolean(customer.name&&sameName(candidate,customer.name));
+  }
+  function projectMergeRelationConflicts(value,source,target,sourceCustomer,path='$',found=[]){
+    if(!value||typeof value!=='object')return found;
+    if(!Array.isArray(value)){
+      const sourceRelation=projectMergeDirectRelation(value,source),targetRelation=projectMergeDirectRelation(value,target);
+      if(sourceRelation.nameMatch&&sourceRelation.hasId&&!sourceRelation.idMatch)found.push({code:'PROJECT_ID_NAME_MISMATCH',path,message:'案場名稱指向來源，但案場 ID 指向其他案場'});
+      if(sourceRelation.match){
+        const customerValues=['customerId','customer'].filter((key)=>projectMergeOwn(value,key)&&clean(value[key])).map((key)=>value[key]);
+        if(customerValues.some((candidate)=>!projectMergeCustomerMatches(candidate,sourceCustomer)))found.push({code:'RELATION_CUSTOMER_MISMATCH',path,message:'關聯資料的客戶與來源案場不一致'});
+        if(sourceRelation.idMatch&&targetRelation.idMatch)found.push({code:'MIXED_PROJECT_RELATION',path,message:'同一資料節點同時指向來源與目標案場'});
+      }
+    }
+    Object.entries(value).forEach(([key,child])=>{
+      if(PROJECT_MERGE_PROJECT_FIELDS.has(key)&&(typeof child==='string'||typeof child==='number'))return;
+      if(child&&typeof child==='object')projectMergeRelationConflicts(child,source,target,sourceCustomer,`${path}.${key}`,found);
+    });
+    return found;
+  }
+  function projectMergeComparable(value,{semantic=false}={}){
+    if(Array.isArray(value))return value.map((item)=>projectMergeComparable(item,{semantic}));
+    if(!value||typeof value!=='object')return value;
+    const skipped=new Set([...PROJECT_MERGE_PROJECT_FIELDS,...PROJECT_MERGE_CUSTOMER_FIELDS]);
+    if(semantic)['id','createdAt','updatedAt','createdSource'].forEach((key)=>skipped.add(key));
+    return Object.keys(value).sort().reduce((result,key)=>{
+      if(!skipped.has(key))result[key]=projectMergeComparable(value[key],{semantic});
+      return result;
+    },{});
+  }
+  const projectMergeFingerprint=(value)=>financialRepairFingerprint(projectMergeComparable(value));
+  function projectMergeLegacyPlan(source,target){
+    const prices=state?.projectItemPrices;
+    if(!prices||typeof prices!=='object'||Array.isArray(prices))return {entries:[],conflicts:[]};
+    const entries=[],conflicts=[];
+    Object.keys(prices).forEach((sourceKey)=>{
+      const parts=String(sourceKey).split('::'),projectKey=clean(parts.shift());
+      if(!projectKey||(projectKey!==clean(source.id)&&!sameName(projectKey,source.name)))return;
+      const itemKey=parts.join('::'),targetKey=`${target.id}::${itemKey}`,targetExists=projectMergeOwn(prices,targetKey),sameValue=targetExists&&financialRepairFingerprint(prices[sourceKey])===financialRepairFingerprint(prices[targetKey]);
+      const entry={sourceKey,targetKey,item:itemKey,targetExists,sameValue};entries.push(entry);
+      if(targetExists&&!sameValue)conflicts.push({code:'LEGACY_PROJECT_PRICE_CONFLICT',key:'projectItemPrices',id:sourceKey,message:`舊版案場價格「${itemKey}」在目標案場已有不同價格`});
+    });
+    return {entries,conflicts};
+  }
+  function projectMergeCollectionRows(key,project){
+    return (Array.isArray(state?.[key])?state[key]:[]).map((row,index)=>({row,index,paths:projectMergeRelationPaths(row,project)})).filter((entry)=>entry.paths.length);
+  }
+  function projectMergeUnknownRelations(source){
+    const ignored=new Set(['projects','audit','projectItemPrices']),unknown=[];
+    Object.entries(state||{}).forEach(([key,value])=>{
+      if(ignored.has(key)||PROJECT_MERGE_COLLECTION_KEYS.has(key))return;
+      const entries=Array.isArray(value)?value.map((row,index)=>({row,index,paths:projectMergeRelationPaths(row,source)})).filter((entry)=>entry.paths.length):projectMergeRelationPaths(value,source).length?[{row:value,index:0,paths:projectMergeRelationPaths(value,source)}]:[];
+      if(entries.length)unknown.push({key,label:key,count:entries.length,ids:entries.map(({row,index})=>projectMergeRecordId(row,index)),paths:entries.flatMap(({paths})=>paths.map((item)=>item.path))});
+    });
+    return unknown;
+  }
+  function projectMergeFinancialSummary(collectionEntries){
+    const rows=(key)=>collectionEntries.get(key)||[],sum=(key,amount)=>rows(key).reduce((total,{row})=>total+num(amount(row)),0);
+    return {
+      materialUsageCount:rows('materialUsages').length,
+      materialAmount:sum('materialUsages',(row)=>row.amount??num(row.quantity)*num(row.unitPrice)),
+      payableCount:rows('payables').length,
+      payableAmount:sum('payables',(row)=>row.amount??row.total),
+      billingCount:rows('billings').length,
+      billingAmount:sum('billings',(row)=>row.grossTotal??row.taxIncludedAmount??row.total??row.amount),
+      receivableCount:rows('receivables').length,
+      receivableAmount:sum('receivables',(row)=>row.amount),
+      projectCostCount:rows('projectCosts').length,
+      projectCostAmount:sum('projectCosts',(row)=>row.amount),
+      dailyLogCount:rows('dailyLogs').length,
+      quotationCount:rows('quotations').length
+    };
+  }
+  function projectMergeFinancialLinkConflicts(collectionEntries){
+    const conflicts=[],rows=(key)=>Array.isArray(state?.[key])?state[key]:[],moved=(key)=>collectionEntries.get(key)||[],unique=(key,predicate)=>[...new Set(rows(key).filter(predicate))],add=(code,key,id,message)=>conflicts.push({code,key,id:clean(id),message});
+    moved('billings').forEach(({row})=>{
+      const matches=unique('receivables',(receivable)=>clean(receivable.billingId)===clean(row.id)||Boolean(clean(row.number)&&clean(receivable.sourceNo)===clean(row.number)));
+      if(matches.length!==1||clean(row.receivableId)&&clean(matches[0]?.id)!==clean(row.receivableId))add('BILLING_RECEIVABLE_LINK_NOT_UNIQUE','billings',row.id,'請款與應收不是唯一且一致的 1:1 關聯');
+    });
+    moved('receivables').forEach(({row})=>{
+      const matches=unique('billings',(billing)=>clean(row.billingId)===clean(billing.id)||Boolean(clean(row.sourceNo)&&clean(row.sourceNo)===clean(billing.number)));
+      if(matches.length!==1||clean(matches[0]?.receivableId)&&clean(matches[0].receivableId)!==clean(row.id))add('RECEIVABLE_BILLING_LINK_NOT_UNIQUE','receivables',row.id,'應收與請款不是唯一且一致的 1:1 關聯');
+    });
+    moved('payables').forEach(({row})=>{
+      const payableId=clean(row.id),usageIds=Array.isArray(row.usageIds)?row.usageIds.map(clean).filter(Boolean):[];
+      usageIds.forEach((usageId)=>{if(unique('materialUsages',(usage)=>clean(usage.id)===usageId).length!==1)add('PAYABLE_MATERIAL_LINK_NOT_UNIQUE','payables',payableId,`應付關聯的材料使用 ${usageId} 不唯一`) });
+      if(clean(row.sourceId)&&/material|inventory/iu.test(String(row.sourceType||''))&&unique('materialUsages',(usage)=>clean(usage.id)===clean(row.sourceId)).length!==1)add('PAYABLE_SOURCE_LINK_NOT_UNIQUE','payables',payableId,'材料應付 sourceId 無法唯一連回材料使用');
+      if(clean(row.sourceId)&&/project.?cost/iu.test(String(row.sourceType||''))&&unique('projectCosts',(cost)=>clean(cost.id)===clean(row.sourceId)).length!==1)add('PAYABLE_SOURCE_LINK_NOT_UNIQUE','payables',payableId,'成本應付 sourceId 無法唯一連回案場成本');
+      if(rows('invoices').filter((invoice)=>clean(invoice.payableId)===payableId).length>1)add('PAYABLE_INVOICE_LINK_NOT_UNIQUE','payables',payableId,'同一應付連到多張發票，需人工確認');
+      rows('payments').filter((payment)=>clean(payment.payableId)===payableId).forEach((payment)=>{
+        if(!clean(payment.id)||rows('payments').filter((candidate)=>clean(candidate.id)===clean(payment.id)).length!==1)add('PAYABLE_PAYMENT_LINK_NOT_UNIQUE','payables',payableId,'應付所連結的付款 ID 不唯一');
+        const bankMatches=unique('bankTransactions',(bank)=>clean(payment.bankTransactionId)===clean(bank.id)||Boolean(clean(payment.id)&&clean(bank.sourceId)===clean(payment.id)&&/payment/iu.test(String(bank.sourceType||''))));
+        if(bankMatches.length>1||clean(payment.bankTransactionId)&&bankMatches.length!==1)add('PAYABLE_PAYMENT_BANK_LINK_NOT_UNIQUE','payables',payableId,'應付付款與銀行交易不是唯一關聯');
+      });
+    });
+    moved('payments').forEach(({row})=>{
+      if(!clean(row.payableId)||unique('payables',(payable)=>clean(payable.id)===clean(row.payableId)).length!==1)add('PAYMENT_PAYABLE_LINK_NOT_UNIQUE','payments',row.id,'付款無法唯一連回同一筆應付');
+      const bankMatches=unique('bankTransactions',(bank)=>clean(row.bankTransactionId)===clean(bank.id)||Boolean(clean(row.id)&&clean(bank.sourceId)===clean(row.id)&&/payment/iu.test(String(bank.sourceType||''))));
+      if(bankMatches.length>1||clean(row.bankTransactionId)&&bankMatches.length!==1)add('PAYMENT_BANK_LINK_NOT_UNIQUE','payments',row.id,'付款與銀行交易不是唯一關聯');
+    });
+    ['receipts','retentionReceipts'].forEach((key)=>moved(key).forEach(({row})=>{
+      if(!clean(row.receivableId)||unique('receivables',(receivable)=>clean(receivable.id)===clean(row.receivableId)).length!==1)add('RECEIPT_RECEIVABLE_LINK_NOT_UNIQUE',key,row.id,'收款無法唯一連回同一筆應收');
+      const bankMatches=unique('bankTransactions',(bank)=>clean(row.bankTransactionId)===clean(bank.id)||Boolean(clean(row.id)&&clean(bank.sourceId)===clean(row.id)&&/receipt/iu.test(String(bank.sourceType||''))));
+      if(bankMatches.length>1||clean(row.bankTransactionId)&&bankMatches.length!==1)add('RECEIPT_BANK_LINK_NOT_UNIQUE',key,row.id,'收款與銀行交易不是唯一關聯');
+    }));
+    moved('invoices').forEach(({row})=>{
+      [['payableId','payables'],['billingId','billings'],['receivableId','receivables']].forEach(([field,key])=>{if(clean(row[field])&&unique(key,(linked)=>clean(linked.id)===clean(row[field])).length!==1)add('INVOICE_SOURCE_LINK_NOT_UNIQUE','invoices',row.id,`發票 ${field} 無法唯一連回來源`) });
+    });
+    moved('bankTransactions').forEach(({row})=>{
+      const sourceId=clean(row.sourceId),sourceType=String(row.sourceType||'');if(!sourceId)return;
+      const key=/retention/iu.test(sourceType)?'retentionReceipts':/receipt/iu.test(sourceType)?'receipts':/salary/iu.test(sourceType)?'salaryPayments':/payment/iu.test(sourceType)?'payments':'';
+      if(key&&unique(key,(source)=>clean(source.id||source.retentionReceiptId)===sourceId).length!==1)add('BANK_SOURCE_LINK_NOT_UNIQUE','bankTransactions',row.id,'銀行交易無法唯一連回原 financial source');
+    });
+    return conflicts;
+  }
+  function projectMergeGlobalFinancialTotals(){
+    const rules={materialUsages:(row)=>row.amount??num(row.quantity)*num(row.unitPrice),projectCosts:(row)=>row.amount,payables:(row)=>row.amount??row.total,billings:(row)=>row.grossTotal??row.taxIncludedAmount??row.total??row.amount,receivables:(row)=>row.amount,receipts:(row)=>row.amount,retentionReceipts:(row)=>row.amount,payments:(row)=>row.amount,salaryPayments:(row)=>row.amount,bankTransactions:(row)=>row.amount,commissions:(row)=>row.commission,attendance:(row)=>row.amount};
+    return Object.fromEntries(Object.entries(rules).map(([key,getAmount])=>[key,(Array.isArray(state?.[key])?state[key]:[]).reduce((sum,row)=>sum+num(getAmount(row)),0)]));
+  }
+  function projectMergePreview(sourceProjectId,targetProjectId){
+    const sourceId=clean(sourceProjectId),targetId=clean(targetProjectId),source=state?.projects?.find((row)=>clean(row.id)===sourceId),target=state?.projects?.find((row)=>clean(row.id)===targetId),sourceCustomer=projectMergeCustomer(source),targetCustomer=projectMergeCustomer(target),blockers=[],conflicts=[];
+    if(!source)blockers.push({code:'SOURCE_NOT_FOUND',message:'找不到來源案場'});
+    if(!target)blockers.push({code:'TARGET_NOT_FOUND',message:'找不到目標案場'});
+    if(source&&target&&source===target)blockers.push({code:'SAME_PROJECT',message:'來源案場與目標案場不可相同'});
+    if(source&&target&&(!sourceCustomer.id||!targetCustomer.id))blockers.push({code:'CUSTOMER_ID_REQUIRED',message:'來源或目標案場缺少客戶 ID，必須人工確認後處理'});
+    if(source&&target&&sourceCustomer.id&&targetCustomer.id&&sourceCustomer.id!==targetCustomer.id)blockers.push({code:'DIFFERENT_CUSTOMER',message:'只允許合併同一客戶底下的重複案場'});
+    const collectionEntries=new Map(),collections=[];
+    PROJECT_MERGE_COLLECTIONS.forEach(([key,label])=>{
+      const entries=source?projectMergeCollectionRows(key,source):[];collectionEntries.set(key,entries);
+      collections.push({key,label,count:entries.length,ids:entries.map(({row,index})=>projectMergeRecordId(row,index))});
+      if(!source||!target)return;
+      const targetEntries=projectMergeCollectionRows(key,target),targetIds=new Set(targetEntries.map(({row})=>clean(row?.id)).filter(Boolean));
+      entries.forEach(({row,index})=>{
+        projectMergeRelationConflicts(row,source,target,sourceCustomer).forEach((conflict)=>conflicts.push({...conflict,key,id:projectMergeRecordId(row,index)}));
+        if(clean(row?.id)&&(Array.isArray(state[key])?state[key]:[]).filter((candidate)=>clean(candidate?.id)===clean(row.id)).length!==1)conflicts.push({code:'RECORD_ID_NOT_UNIQUE',key,id:clean(row.id),message:'關聯資料的 record ID 不唯一'});
+        if(projectMergeRelationPaths(row,target).length)conflicts.push({code:'MIXED_SOURCE_TARGET_RECORD',key,id:projectMergeRecordId(row,index),message:'同一筆資料同時保存來源與目標案場關聯'});
+        if(clean(row?.id)&&targetIds.has(clean(row.id)))conflicts.push({code:'RECORD_ID_COLLISION',key,id:clean(row.id),message:'來源與目標關聯資料出現相同 record ID'});
+        if(['quotationPrices','quotationTemplates'].includes(key)){
+          const fingerprint=financialRepairFingerprint(projectMergeComparable(row,{semantic:true})),duplicate=targetEntries.find(({row:targetRow})=>financialRepairFingerprint(projectMergeComparable(targetRow,{semantic:true}))===fingerprint);
+          if(duplicate)conflicts.push({code:'DUPLICATE_PRICE_TEMPLATE_CANDIDATE',key,id:projectMergeRecordId(row,index),targetId:projectMergeRecordId(duplicate.row,duplicate.index),message:'目標案場已有語意相同的價格／模板，需人工確認'});
+        }
+      });
+    });
+    const legacy=source&&target?projectMergeLegacyPlan(source,target):{entries:[],conflicts:[]};
+    conflicts.push(...legacy.conflicts);
+    conflicts.push(...projectMergeFinancialLinkConflicts(collectionEntries));
+    collections.push({key:'legacyProjectItemPrices',label:'舊版案場價格',count:legacy.entries.length,ids:legacy.entries.map((entry)=>entry.sourceKey)});
+    const unknownRelations=source?projectMergeUnknownRelations(source):[];
+    return {
+      source:{id:sourceId,name:source?.name||'',customerId:sourceCustomer.id,customerName:sourceCustomer.name},
+      target:{id:targetId,name:target?.name||'',customerId:targetCustomer.id,customerName:targetCustomer.name},
+      allowed:Boolean(source&&target)&&blockers.length===0&&conflicts.length===0&&unknownRelations.length===0,
+      blockers,collections,financialSummary:projectMergeFinancialSummary(collectionEntries),conflicts,unknownRelations,
+      legacyProjectItemPrices:legacy.entries
+    };
+  }
+  function projectMergeRehomeValue(value,source,target,sourceCustomer,targetCustomer){
+    if(!value||typeof value!=='object')return;
+    if(!Array.isArray(value)){
+      const relation=projectMergeDirectRelation(value,source);
+      if(relation.match){
+        ['projectId','project'].forEach((key)=>{if(projectMergeOwn(value,key)&&(typeof value[key]==='string'||typeof value[key]==='number')&&clean(value[key])===clean(source.id))value[key]=target.id});
+        ['projectName','projectLabel'].forEach((key)=>{if(projectMergeOwn(value,key))value[key]=target.name});
+        ['customerId','customer'].forEach((key)=>{if(projectMergeOwn(value,key)&&projectMergeCustomerMatches(value[key],sourceCustomer))value[key]=targetCustomer.id});
+        if(projectMergeOwn(value,'customerName')&&projectMergeCustomerMatches(value.customerName,sourceCustomer))value.customerName=targetCustomer.name;
+      }
+    }
+    Object.entries(value).forEach(([key,child])=>{
+      if(PROJECT_MERGE_PROJECT_FIELDS.has(key)&&(typeof child==='string'||typeof child==='number'))return;
+      if(child&&typeof child==='object')projectMergeRehomeValue(child,source,target,sourceCustomer,targetCustomer);
+    });
+  }
+  async function projectMergeRestore(snapshot){
+    state=snapshot;
+    if(!db){try{db=await openDB()}catch(_){db=null}}
+    if(db)await dbSet(STATE_KEY,state);
+    localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state));
+    window.KuSheLegacyData?.refresh();
+    window.dispatchEvent(new CustomEvent('kushe:data-updated',{detail:{action:'project-merge-rollback'}}));
+  }
+  async function mergeProject(sourceProjectId,targetProjectId,confirmation){
+    await load();
+    const preview=projectMergePreview(sourceProjectId,targetProjectId),confirmationName=typeof confirmation==='string'?confirmation:confirmation?.targetName;
+    if(preview.allowed!==true){const reasons=[...preview.blockers,...preview.conflicts,...preview.unknownRelations].map((row)=>row.message||`${row.key} 有未知案場關聯`);throw new Error(reasons.join('；')||'此案場合併目前不可執行')}
+    if(String(confirmationName??'')!==String(preview.target.name))throw new Error('請輸入目標案場完整名稱以確認永久合併');
+    const source=state.projects.find((row)=>clean(row.id)===preview.source.id),target=state.projects.find((row)=>clean(row.id)===preview.target.id),sourceCustomer=projectMergeCustomer(source),targetCustomer=projectMergeCustomer(target);
+    if(!source||!target||source===target||!sourceCustomer.id||sourceCustomer.id!==targetCustomer.id)throw new Error('案場或客戶 identity 已變更，請重新預覽');
+    const snapshot=projectMergeClone(state),snapshotFingerprint=financialRepairFingerprint(snapshot),targetFingerprint=financialRepairFingerprint(target),financialBefore=projectMergeGlobalFinancialTotals(),sourceCounts={},targetCounts={},recordProtection=[];
+    PROJECT_MERGE_COLLECTIONS.forEach(([key])=>{
+      const sourceEntries=projectMergeCollectionRows(key,source),targetEntries=projectMergeCollectionRows(key,target);sourceCounts[key]=sourceEntries.length;targetCounts[key]=targetEntries.length;
+      sourceEntries.forEach(({row,index})=>recordProtection.push({key,id:clean(row?.id),index,fingerprint:projectMergeFingerprint(row)}));
+    });
+    let persistStarted=false;
+    try{
+      PROJECT_MERGE_COLLECTIONS.forEach(([key])=>projectMergeCollectionRows(key,source).forEach(({row})=>projectMergeRehomeValue(row,source,target,sourceCustomer,targetCustomer)));
+      const legacy=projectMergeLegacyPlan(source,target);
+      if(legacy.conflicts.length)throw new Error(legacy.conflicts[0].message);
+      legacy.entries.forEach((entry)=>{if(!entry.targetExists)state.projectItemPrices[entry.targetKey]=state.projectItemPrices[entry.sourceKey];delete state.projectItemPrices[entry.sourceKey]});
+      const postReferencePreview=projectMergePreview(source.id,target.id);
+      const remaining=postReferencePreview.collections.reduce((sum,row)=>sum+row.count,0)+postReferencePreview.unknownRelations.reduce((sum,row)=>sum+row.count,0);
+      if(remaining!==0)throw new Error('合併後仍有來源案場關聯，已停止並回滾');
+      PROJECT_MERGE_COLLECTIONS.forEach(([key])=>{
+        const actual=projectMergeCollectionRows(key,target).length,expected=targetCounts[key]+sourceCounts[key];
+        if(actual!==expected)throw new Error(`${key} 目標關聯數不符合預期，已停止並回滾`);
+      });
+      recordProtection.forEach((protectedRow)=>{
+        const rows=Array.isArray(state[protectedRow.key])?state[protectedRow.key]:[],row=protectedRow.id?rows.find((item)=>clean(item?.id)===protectedRow.id):rows[protectedRow.index];
+        if(!row||projectMergeFingerprint(row)!==protectedRow.fingerprint)throw new Error(`${protectedRow.key} 的 ID、金額或 financial source link 發生非預期變更`);
+      });
+      if(financialRepairFingerprint(target)!==targetFingerprint)throw new Error('目標案場主檔發生非預期變更');
+      const deletePreview=projectDeletePreview(source.id);
+      if(deletePreview.deletable!==true)throw new Error(`來源案場仍不可刪除：${projectDeleteBlockedMessage(deletePreview)}`);
+      const financialAfterRelocation=projectMergeGlobalFinancialTotals();
+      if(financialRepairFingerprint(financialAfterRelocation)!==financialRepairFingerprint(financialBefore))throw new Error('合併前後財務總額不一致');
+      state.projects=state.projects.filter((row)=>row!==source);
+      if(state.projects.some((row)=>clean(row.id)===preview.source.id)||!state.projects.some((row)=>clean(row.id)===preview.target.id))throw new Error('來源／目標案場主檔 post-condition 失敗');
+      const collectionCounts=Object.fromEntries(Object.entries(sourceCounts).filter(([,count])=>count>0));
+      if(preview.legacyProjectItemPrices.length)collectionCounts.legacyProjectItemPrices=preview.legacyProjectItemPrices.length;
+      persistStarted=true;
+      await persist(`合併案場 ${preview.source.name} → ${preview.target.name}`,{sourceProjectId:preview.source.id,targetProjectId:preview.target.id,collectionCounts,mergeTimestamp:new Date().toISOString()});
+      return {merged:true,singlePersist:true,source:preview.source,target:preview.target,collectionCounts,sourceDeletePreviewBeforeRemoval:deletePreview,financialTotalsBefore:financialBefore,financialTotalsAfter:projectMergeGlobalFinancialTotals(),sourceProjectRemoved:true,targetProjectPreserved:true};
+    }catch(error){
+      state=snapshot;
+      try{if(persistStarted)await projectMergeRestore(snapshot);error.rollbackVerified=financialRepairFingerprint(state)===snapshotFingerprint;error.rollbackError=undefined}
+      catch(rollbackError){error.rollbackVerified=financialRepairFingerprint(state)===snapshotFingerprint;error.rollbackError=rollbackError}
+      throw error;
+    }
+  }
   function legacyProjectItemPriceCount(project) {
     const prices=state.projectItemPrices;
     if (!prices || typeof prices !== 'object' || Array.isArray(prices)) return 0;
@@ -3384,5 +3665,5 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
 }());
