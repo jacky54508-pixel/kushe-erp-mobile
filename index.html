@@ -94,15 +94,15 @@
             <div class="chart-wrap"><canvas id="trendChart" aria-label="營業額趨勢圖"></canvas><div class="chart-tooltip" id="chartTooltip" hidden></div></div>
           </article>
           <article class="panel structure-panel">
-            <header class="panel-header"><h2>收支結構（本月）</h2><button class="text-button" type="button" data-module="reports">查看全部</button></header>
+            <header class="panel-header"><h2>本月應收結算結構</h2><button class="text-button" type="button" data-module="reports">查看全部</button></header>
             <div class="structure-body">
-              <div class="donut" id="collectionDonut"><div><span>收入總額</span><strong id="structureTotal">$0</strong></div></div>
+              <div class="donut" id="collectionDonut"><div><span>本期應收</span><strong id="structureTotal">$0</strong></div></div>
               <div class="structure-details">
-                <div class="legend-row"><span><i class="dot green"></i>已收款</span><b id="structurePaid">$0</b></div>
-                <div class="legend-row"><span><i class="dot orange"></i>未收款</span><b id="structureOpen">$0</b></div>
+                <div class="legend-row"><span><i class="dot green"></i>已沖銷應收（含客戶扣款）</span><b id="structurePaid">$0</b></div>
+                <div class="legend-row"><span><i class="dot orange"></i>尚未沖銷</span><b id="structureOpen">$0</b></div>
                 <hr>
-                <div class="progress-row"><div><span>收款進度</span><b id="collectionRate">0%</b></div><div class="progress"><i id="collectionBar"></i></div></div>
-                <div class="progress-row"><div><span>應收回收率</span><b id="recoveryRate">0%</b></div><div class="progress"><i id="recoveryBar"></i></div></div>
+                <div class="progress-row"><div><span>應收沖銷進度</span><b id="collectionRate">0%</b></div><div class="progress"><i id="collectionBar"></i></div></div>
+                <div class="progress-row"><div><span>應收沖銷率</span><b id="recoveryRate">0%</b></div><div class="progress"><i id="recoveryBar"></i></div></div>
               </div>
             </div>
           </article>
@@ -111,7 +111,7 @@
         <section class="middle-grid">
           <article class="panel projects-panel">
             <header class="panel-header"><h2>案場經營狀況 TOP 6</h2><button class="text-button" type="button" data-module="projects">查看全部</button></header>
-            <div class="table-wrap"><table class="project-table"><thead><tr><th>案場名稱</th><th>合約／請款金額</th><th>已收金額</th><th>未收金額</th><th>材料成本</th><th>人工成本</th><th>毛利</th><th>毛利率</th><th>狀態</th></tr></thead><tbody id="projectRows"></tbody></table></div>
+            <div class="table-wrap"><table class="project-table"><thead><tr><th>案場名稱</th><th>合約／請款金額</th><th>已沖銷應收</th><th>未沖銷應收</th><th>材料成本</th><th>人工成本</th><th>其他成本</th><th>客戶扣款</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>狀態</th></tr></thead><tbody id="projectRows"></tbody></table></div>
           </article>
           <article class="panel attention-panel">
             <header class="panel-header"><h2>需要處理</h2><button class="text-button" type="button" id="viewAllAttention">查看全部</button></header>
@@ -271,9 +271,9 @@
   <script src="assets/js/config.js?v=20260823-auth-p0-1"></script>
   <script src="assets/js/auth-gate.js?v=20260823-auth-p02-1"></script>
   <script src="assets/js/legacy-adapter.js?v=20260809-nav4"></script>
-  <script src="assets/js/erp-store.js?v=20260908-p17-1-customer-deductions1"></script>
+  <script src="assets/js/erp-store.js?v=20260909-p17-1a-safety-fix1"></script>
   <script src="assets/js/cloud-sync.js?v=20260824-cloud-p3-1"></script>
-  <script src="assets/js/dashboard.js?v=20260901-dashboard-collection-principal1"></script>
+  <script src="assets/js/dashboard.js?v=20260909-p17-1a-safety-fix1"></script>
   <script src="assets/js/commissions.js?v=20260908-p15-1-quick-project1"></script>
   <script src="assets/js/unbilled-work.js?v=20260908-p15-3-month-select1"></script>
   <script src="assets/js/payables.js?v=20260901-taipei-business-date-d1"></script>
@@ -283,11 +283,11 @@
   <script src="assets/js/payroll-print.js?v=20260828-payroll-vertical-center1"></script>
   <script src="assets/js/payroll.js?v=20260901-taipei-business-date1"></script>
   <script src="assets/js/invoices.js?v=20260901-pending-invoice-date1"></script>
-  <script src="assets/js/projects.js?v=20260908-p17-1-customer-deductions1"></script>
+  <script src="assets/js/projects.js?v=20260909-p17-1a-safety-fix1"></script>
   <script src="assets/js/table-scroll.js?v=20260809-global1"></script>
   <script src="assets/js/billing-print.js?v=20260907-p13-4-10-effective-itemfont1"></script>
   <script src="assets/js/billing-bundle-print.js?v=20260908-p15-2-combined-billing1"></script>
-  <script src="assets/js/billing.js?v=20260908-p17-1-customer-deductions1"></script>
+  <script src="assets/js/billing.js?v=20260909-p17-1a-safety-fix1"></script>
   <script src="assets/js/quotations.js?v=20260901-taipei-business-date1"></script>
   <script src="assets/js/app.js?v=20260901-taipei-business-date-d1"></script>
 </body>
