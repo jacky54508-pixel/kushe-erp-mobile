@@ -25,6 +25,7 @@
   const STATUS_TEXT = {
     AUTH_REQUIRED: '登入狀態已失效，請重新登入。',
     AUTH_CHANGED: '登入帳號已變更，請重新檢查並確認雲端操作。',
+    PRINCIPAL_UNBOUND: '本機資料尚未確認屬於目前帳號，請手動核對雲端同步。',
     REMOTE_EMPTY: '雲端尚無資料，可手動上傳本機備份。',
     SYNCED: '本機與雲端一致。',
     LOCAL_NEWER: '本機資料較新，可手動同步至雲端。',
@@ -47,6 +48,7 @@
     ERROR: '雲端檢查失敗，請稍後再試。'
   };
   const AUTO_STATUS_TEXT = {
+    PRINCIPAL_UNBOUND: '帳號同步基準未綁定，需要手動核對',
     STOPPED: '未啟用',
     CHECKING: '正在確認安全同步基準',
     ARMED: '已啟用',
@@ -75,6 +77,74 @@
   let autoController = null;
   let autoRetryMode = '';
   let autoPendingVerification = null;
+  // Only sync bookkeeping is invalidated. ERP snapshots are never touched here.
+  let principalId = null;
+  let syncGeneration = 0;
+  let operationTail = Promise.resolve();
+  let activeOperation = null;
+  const pendingOperations = new Map();
+  let syncOrigin = 'USER_LOCAL_EDIT';
+
+  function observedPrincipal() {
+    const gate = window.KusheAuthGate;
+    return gate?.session()?.access_token ? String(gate.user()?.id || '') : '';
+  }
+
+  function observePrincipal() {
+    const next = observedPrincipal();
+    if (principalId !== null && next !== principalId) {
+      stopAutoBackup();
+      currentStatus = failure('AUTH_CHANGED');
+      autoState = { code: 'PRINCIPAL_UNBOUND', message: AUTO_STATUS_TEXT.PRINCIPAL_UNBOUND, pending: false, armed: false, userId: next };
+      renderAutoState();
+    }
+    principalId = next;
+    return next;
+  }
+
+  function assertOperation(auth) {
+    const id = observePrincipal();
+    if ((auth && (auth.user.id !== id || auth.generation !== syncGeneration))
+      || (activeOperation && (activeOperation.userId !== id || activeOperation.generation !== syncGeneration))) {
+      throw new CloudSyncError('AUTH_CHANGED');
+    }
+  }
+
+  // Deduplicate each entry point and serialize different entry points. A stale
+  // operation keeps its slot until settlement, even if fetch ignores abort.
+  function coordinate(kind, work) {
+    const userId = observePrincipal(), generation = syncGeneration;
+    const key = generation + ':' + userId + ':' + kind;
+    if (pendingOperations.has(key)) {
+      if (kind === 'auto') scheduleAutoBackup();
+      return pendingOperations.get(key);
+    }
+    const promise = operationTail.then(async () => {
+      if (observePrincipal() !== userId || generation !== syncGeneration) return autoStatus();
+      activeOperation = { userId, generation, kind };
+      try { return await work(); }
+      finally { activeOperation = null; }
+    });
+    operationTail = promise.catch(() => {});
+    pendingOperations.set(key, promise);
+    promise.then(() => pendingOperations.delete(key), () => pendingOperations.delete(key));
+    return promise;
+  }
+
+  // Reserved source marker only: this does not apply, restore or persist data.
+  function setSyncOrigin(origin) {
+    if (!['USER_LOCAL_EDIT', 'REMOTE_APPLY'].includes(origin)) return false;
+    syncOrigin = origin;
+    if (origin === 'REMOTE_APPLY') { clearAutoTimer(); clearOnlineTimer(); }
+    return true;
+  }
+
+  function inspect() { return coordinate('inspect', inspectOperation); }
+  function uploadLocal() { return coordinate('upload', uploadOperation); }
+  function evaluateAutoStart(generation) { return coordinate('start', () => evaluateAutoStartOperation(generation)); }
+  function verifyPendingAutoUpload(generation) { return coordinate('verify', () => verifyPendingAutoUploadOperation(generation)); }
+  function autoBackupNow() { return coordinate('auto', autoBackupOperation); }
+
 
   class CloudSyncError extends Error {
     constructor(code = 'ERROR') {
@@ -206,7 +276,8 @@
     const session = gate.session();
     const user = gate.user();
     if (!session?.access_token || !user?.id) throw new CloudSyncError('AUTH_REQUIRED');
-    return { token: session.access_token, user: { id: String(user.id), email: String(user.email || '') } };
+    assertOperation();
+    return { token: session.access_token, generation: syncGeneration, user: { id: String(user.id), email: String(user.email || '') } };
   }
 
   async function revalidatePrincipal(expectedAuth) {
@@ -216,6 +287,8 @@
   }
 
   async function request(path, auth, options = {}) {
+    assertOperation(auth);
+    if (options.cas && syncOrigin === 'REMOTE_APPLY') throw new CloudSyncError('RACE_BLOCKED');
     const { url, key } = cloudConfig();
     const headers = {
       apikey: key,
@@ -229,6 +302,7 @@
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: options.signal
     });
+    assertOperation(auth);
     if (!response.ok) {
       const code = options.cas ? ([401, 403].includes(response.status) ? 'AUTH_REQUIRED' : 'SERVER_ERROR') : 'ERROR';
       const error = new CloudSyncError(code);
@@ -236,7 +310,10 @@
       throw error;
     }
     if (response.status === 204) return null;
-    try { return await response.json(); } catch (_) { return null; }
+    let result;
+    try { result = await response.json(); } catch (_) { result = null; }
+    assertOperation(auth);
+    return result;
   }
 
   function remotePath(userId) {
@@ -342,6 +419,7 @@
 
   async function writeBaseline(auth, row, localFingerprint) {
     const remote = await remoteInfo(row);
+    assertOperation(auth);
     const baseline = {
       version: 2,
       syncVersion: remoteWriteState(row).syncVersion,
@@ -365,11 +443,15 @@
     const store=window.KuSheERPStore;
     if(!store?.readCommittedSnapshot)throw new CloudSyncError('STORE_UNAVAILABLE');
     const committed=await store.readCommittedSnapshot();
-    return {...await snapshotInfo(committed.data),storeBaseline:committed.baseline};
+    const info = await snapshotInfo(committed.data);
+    assertOperation();
+    return {...info,storeBaseline:committed.baseline};
   }
 
   async function remoteInfo(row) {
-    return row ? snapshotInfo(row.data, row.updated_at) : null;
+    const info = row ? await snapshotInfo(row.data, row.updated_at) : null;
+    assertOperation();
+    return info;
   }
 
   function classified(code, auth, local, remote, row, canUpload = false, canRestore = false) {
@@ -459,12 +541,12 @@
     return { code, message: STATUS_TEXT[code] || STATUS_TEXT.ERROR, canUpload: false, canRestore: false };
   }
 
-  async function inspect() {
+  async function inspectOperation() {
     setBusy(true);
     try {
       currentStatus = await inspectCore();
     } catch (error) {
-      currentStatus = failure(error?.code || 'ERROR');
+      if (!activeOperation || activeOperation.generation === syncGeneration) currentStatus = failure(error?.code || 'ERROR');
     } finally {
       setBusy(false);
     }
@@ -592,7 +674,7 @@
     }
   }
 
-  async function uploadLocal() {
+  async function uploadOperation() {
     setBusy(true);
     try {
       const preflight = await inspectCore();
@@ -641,7 +723,7 @@
       await armAutoBackup(currentAuth, verifiedRow, preflight.local.fingerprint, 'ARMED');
       return publicStatus();
     } catch (error) {
-      currentStatus = failure(writeFailureCode(error));
+      if (!activeOperation || activeOperation.generation === syncGeneration) currentStatus = failure(writeFailureCode(error));
       return publicStatus();
     } finally {
       setBusy(false);
@@ -657,8 +739,10 @@
   }
 
   function setAutoState(code, options = {}) {
+    if (activeOperation && activeOperation.generation !== syncGeneration) return autoStatus();
     autoState = {
       code,
+      userId: principalId || '',
       message: options.message || AUTO_STATUS_TEXT[code] || AUTO_STATUS_TEXT.STOPPED,
       pending: Boolean(options.pending),
       armed: Boolean(options.armed ?? autoArmed)
@@ -689,11 +773,13 @@
   }
 
   function activeAutoRun(generation) {
+    observePrincipal();
     return autoStarted && generation === autoGeneration;
   }
 
   function scheduleAutoBackup(delay = AUTO_DEBOUNCE_MS) {
-    if (!autoStarted || !autoArmed) return false;
+    observePrincipal();
+    if (!autoStarted || !autoArmed || syncOrigin === 'REMOTE_APPLY') return false;
     clearAutoTimer();
     setAutoState('WAITING', { pending: true, armed: true });
     const generation = autoGeneration;
@@ -704,11 +790,19 @@
     return true;
   }
 
-  function handleDataUpdated() {
+  function handleDataUpdated(event) {
+    observePrincipal();
+    if (syncOrigin === 'REMOTE_APPLY' || event?.detail?.syncOrigin === 'REMOTE_APPLY') {
+      clearAutoTimer();
+      clearOnlineTimer();
+      return;
+    }
     if (autoStarted && autoArmed) scheduleAutoBackup();
   }
 
   function handleOnline() {
+    observePrincipal();
+    if (syncOrigin === 'REMOTE_APPLY') return;
     if (!autoStarted || autoState.code !== 'WAITING_NETWORK' || !autoState.pending) return;
     clearOnlineTimer();
     const generation = autoGeneration;
@@ -731,6 +825,7 @@
 
   async function armAutoBackup(auth, row, localFingerprint, code = 'ARMED') {
     const saved = await writeBaseline(auth, row, localFingerprint);
+    assertOperation(auth);
     if (!saved) {
       autoArmed = false;
       return setAutoState('MANUAL_REQUIRED', { pending: false, armed: false });
@@ -746,10 +841,14 @@
     return setAutoState(code, { pending: Boolean(autoTimer), armed: true });
   }
 
-  async function evaluateAutoStart(generation) {
+  async function evaluateAutoStartOperation(generation) {
     try {
       const checked = await inspectCore();
       if (!activeAutoRun(generation)) return autoStatus();
+      if (!readBaseline(checked.auth.user.id)) {
+        autoArmed = false;
+        return setAutoState('PRINCIPAL_UNBOUND', { pending: false, armed: false });
+      }
       if (checked.code === 'SYNCED') {
         await armAutoBackup(checked.auth, { data: checked.remote.data, updated_at: checked.remoteUpdatedAt, sync_version: checked.syncVersion }, checked.local.fingerprint, 'ARMED');
         return autoStatus();
@@ -783,7 +882,7 @@
     }
   }
 
-  async function verifyPendingAutoUpload(generation) {
+  async function verifyPendingAutoUploadOperation(generation) {
     const pending = autoPendingVerification;
     if (!pending || !activeAutoRun(generation)) return autoStatus();
     try {
@@ -810,8 +909,8 @@
     }
   }
 
-  async function autoBackupNow() {
-    if (!autoStarted || !autoArmed) return autoStatus();
+  async function autoBackupOperation() {
+    if (!autoStarted || !autoArmed || syncOrigin === 'REMOTE_APPLY') return autoStatus();
     if (autoRunning || busy) {
       scheduleAutoBackup();
       return autoStatus();
@@ -902,7 +1001,10 @@
   }
 
   async function startAutoBackup() {
-    stopAutoBackup();
+    observePrincipal();
+    if (autoStarted) return coordinate('start', () => autoStatus());
+    clearAutoTimer();
+    clearOnlineTimer();
     autoStarted = true;
     autoGeneration += 1;
     ensureAutoListeners();
@@ -911,6 +1013,10 @@
   }
 
   function stopAutoBackup() {
+    syncGeneration += 1;
+    if (principalId !== null) removeBaseline();
+    currentStatus = null;
+    syncOrigin = 'USER_LOCAL_EDIT';
     autoStarted = false;
     autoArmed = false;
     autoGeneration += 1;
@@ -922,7 +1028,9 @@
     autoPendingVerification = null;
     window.removeEventListener('kushe:data-updated', handleDataUpdated);
     window.removeEventListener('online', handleOnline);
-    return setAutoState('STOPPED', { pending: false, armed: false });
+    autoState = { code: 'STOPPED', message: AUTO_STATUS_TEXT.STOPPED, userId: principalId || '', pending: false, armed: false };
+    renderAutoState();
+    return autoStatus();
   }
 
   function ensureUi() {
@@ -959,6 +1067,6 @@
 
   window.KusheCloudSync = Object.freeze({
     inspect, uploadLocal, restoreRemote, status: publicStatus, open, close,
-    startAutoBackup, stopAutoBackup, autoStatus
+    startAutoBackup, stopAutoBackup, autoStatus, setSyncOrigin
   });
 }());
