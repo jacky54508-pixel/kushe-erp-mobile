@@ -14,7 +14,7 @@
   const billingSelections=new Set();
   const billingFilters={month:'',customer:'',project:'',receipt:'',invoice:'',query:''};
 
-  function sourceRef(detail){return {workItemId:detail.workItemId||'',sourceGroupKey:detail.sourceGroupKey||'',sourceItemIndex:detail.sourceItemIndex,dailyLogIds:detail.dailyLogIds||[],date:detail.date||'',pricingType:detail.pricingType||'actual',quotationId:detail.quotationId||'',quotationLineId:detail.quotationLineId||''}}
+  function sourceRef(detail){return {workItemId:detail.workItemId||'',sourceGroupKey:detail.sourceGroupKey||'',sourceItemIndex:detail.sourceItemIndex,dailyLogIds:[...(detail.dailyLogIds||[])],date:detail.date||'',pricingType:detail.pricingType||'actual',quotationId:detail.quotationId||'',quotationLineId:detail.quotationLineId||''}}
   function contractRef(detail){return {contractKey:detail.contractKey,quotationId:detail.quotationId,quotationLineId:detail.quotationLineId||'',quotationNo:detail.quotationNo||'',item:detail.item,contractAmount:detail.contractAmount,priorBilled:detail.billedAmount,billingAmount:Number(detail.billingAmount)||0,pricingType:'lump_sum'}}
   function selectedDetails(){return draft.details.filter((detail)=>draft.selected.has(detail.key))}
   function detailKey(detail,index){return detail.workItemId||`${detail.sourceGroupKey||'source'}:${detail.sourceItemIndex??index}`}

@@ -2420,16 +2420,49 @@
     const remainder = cents - base * parts;
     return (base + (partIndex < remainder ? 1 : 0)) / 100;
   }
-  async function saveDailyBatch(values, editingBatchId = '') {
+  function validateStrictDailyBatch(values, previous, options) {
+    const fail=(message,index,field)=>{const error=new Error(index===undefined?message:`第 ${index+1} 筆施工：${message}`);error.code='DAILY_BATCH_INPUT_INVALID';error.dailyRowIndex=index;error.dailyField=field;throw error};
+    const lines=values.lines;
+    if(!Array.isArray(lines)||!lines.length)fail('請至少填寫一筆施工項目');
+    const employees=values.employeeIds;
+    if(!Array.isArray(employees)||!employees.length||new Set(employees).size!==employees.length||employees.some(id=>!state.employees.some(row=>String(row.id)===String(id))))fail('請選擇有效且不重複的員工');
+    if(typeof values.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(values.date)||!Number.isFinite(Date.parse(values.date))||new Date(values.date).toISOString().slice(0,10)!==values.date)fail('請填寫有效施工日期');
+    const oldItems=new Map();previous.forEach(log=>(log.items||[]).forEach(item=>{if(item.workItemId)oldItems.set(String(item.workItemId),item)}));
+    const itemIds=new Set(),rowKeys=new Set();
+    if(options.draftRowKeys!==undefined&&(!Array.isArray(options.draftRowKeys)||options.draftRowKeys.length!==lines.length))fail('施工列識別與資料筆數不一致');
+    lines.forEach((line,index)=>{
+      if(!line||typeof line!=='object'||Array.isArray(line))fail('施工列格式無效',index,'item');
+      const project=state.projects.find(row=>String(row.id)===String(line.project||''));
+      if(!project)fail('請選擇有效案場',index,'project');
+      if(!project.customer||!state.customers.some(row=>String(row.id)===String(project.customer)))fail('案場缺少有效客戶關聯',index,'project');
+      const workItemId=String(line.workItemId||''),oldItem=oldItems.get(workItemId);
+      if(workItemId&&(itemIds.has(workItemId)||!oldItem))fail('施工來源識別重複或不屬於目前編輯批次',index,'item');
+      if(workItemId)itemIds.add(workItemId);
+      if(options.draftRowKeys){const key=options.draftRowKeys[index];if(typeof key!=='string'||!key||rowKeys.has(key))fail('同一施工列被重複提交',index,'item');rowKeys.add(key)}
+      // Historical rows without a house remain editable; new rows must name a house.
+      if(typeof line.house!=='string'||!line.house.trim()&&!(oldItem&&!String(oldItem.house||'').trim()))fail('請填寫戶別',index,'house');
+      if(typeof line.item!=='string'||!line.item.trim())fail('請填寫施工品項',index,'item');
+      const raw=line.qty,validType=typeof raw==='number'||typeof raw==='string'&&/^\d+(?:\.\d+)?$/.test(raw.trim());
+      if(!validType||!Number.isFinite(Number(raw))||Number(raw)<=0||Number(raw)>Number.MAX_SAFE_INTEGER)fail('數量必須是有限正數，不可空白',index,'qty');
+      const quotationId=line.quotationId||line.quoteId||'',quotationLineId=line.quotationLineId||line.quoteLineId||'';
+      if(line.quotationId&&line.quoteId&&String(line.quotationId)!==String(line.quoteId)||line.quotationLineId&&line.quoteLineId&&String(line.quotationLineId)!==String(line.quoteLineId))fail('報價來源識別不一致',index,'quotation');
+      if(line.sourceType==='quotation'||quotationId||quotationLineId){
+        if(!quotationId||!quotationLineId||!confirmedQuotationItems(project.id,project.customer).some(item=>String(item.quotationId)===String(quotationId)&&String(item.quotationLineId)===String(quotationLineId)))fail('報價項目已失效，請重新選擇正式報價來源',index,'quotation');
+      }else if(line.sourceType!=='manual')fail('請選擇報價品項或明確使用手動施工',index,'quotation');
+    });
+    return lines;
+  }
+  async function saveDailyBatch(values, editingBatchId = '', options = {}) {
     requireStoreTransactionDraft();
     const previous = editingBatchId ? batchRows(editingBatchId) : [];
+    const strictLines=options?.strictRows===true?validateStrictDailyBatch(values,previous,options):null;
     if (previous.some((log) => log.billingId || (log.billingStatus && log.billingStatus !== '未請款'))) throw new Error('已進入請款流程的施工紀錄不可直接修改');
     const date = values.date;
     const employeeIds = values.employeeIds || [];
     if ([...previous.map((log)=>[log.employee,log.date]),...employeeIds.map((employeeId)=>[employeeId,date])].some(([employeeId,workDate])=>payrollHistoryLock(employeeId,workDate).locked)) throw new Error(PAID_PAYROLL_SOURCE_ERROR);
     previous.forEach((log) => syncDailyLogLinks({...log,performance:0,workMode:'none'}, log));
     if (previous.length) state.dailyLogs = state.dailyLogs.filter((log) => (log.batchId || log.id) !== editingBatchId);
-    const lines = (values.lines || []).filter((line) => line.project && line.item && num(line.qty) > 0);
+    const lines = strictLines || (values.lines || []).filter((line) => line.project && line.item && num(line.qty) > 0);
     if (!employeeIds.length || !lines.length) throw new Error('請至少選擇一位員工並填寫一筆施工項目');
     const prepared = lines.map((line) => {
       const project=state.projects.find((row)=>String(row.id)===String(line.project))||{};
