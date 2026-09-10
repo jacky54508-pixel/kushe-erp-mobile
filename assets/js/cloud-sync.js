@@ -147,7 +147,71 @@
   function autoBackupNow() { return coordinate('auto', autoBackupOperation); }
 
 
-  // No lifecycle trigger calls safeApplyRemote. It is a controlled foundation.
+  const CLOUD_RESUME_DELAY_MS = 250;
+  const CLOUD_RESUME_THROTTLE_MS = 2000;
+  let cloudEventsEnabled = false, cloudHasStarted = false;
+  let cloudRequest = null, cloudTimer = null, cloudLastFinished = 0;
+
+  function cloudVisible() { return document.visibilityState === 'visible'; }
+  function reconcileFromCloud(reason) {
+    if (!['STARTUP','AUTH_READY','VISIBILITY','FOCUS','ONLINE'].includes(reason)) return Promise.resolve({code:'CANCELLED'});
+    if (!cloudEventsEnabled || !cloudVisible() || !observedPrincipal()) return Promise.resolve({code:'AUTH_REQUIRED',eligibleApply:false});
+    if (cloudRequest) return cloudRequest.promise;
+    if (Date.now() - cloudLastFinished < CLOUD_RESUME_THROTTLE_MS) return Promise.resolve({code:'THROTTLED'});
+    const generation = syncGeneration;
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    const request = {promise,resolve};
+    cloudRequest = request;
+    cloudTimer = window.setTimeout(async () => {
+      cloudTimer = null;
+      const valid = () => cloudEventsEnabled && cloudVisible() && generation === syncGeneration && Boolean(observedPrincipal());
+      try {
+        if (!valid()) return resolve({code:'CANCELLED'});
+        // Reuse the same operation kind and ownership guard as controlled apply.
+        const result = await coordinate('remote-apply', async () => {
+          if (!valid()) return {code:'CANCELLED'};
+          const ready = await window.KuSheERPStore?.remoteApplyReadiness?.();
+          if (!ready?.safe || !valid()) return {code:'STORE_BUSY'};
+          return safeApplyOperation(valid);
+        });
+        resolve(result);
+      } catch (_) { resolve({code:'NETWORK_ERROR',eligibleApply:false}); }
+      finally {
+        if (cloudRequest === request) {
+          cloudLastFinished = Date.now();
+          cloudRequest = null;
+        }
+      }
+    }, CLOUD_RESUME_DELAY_MS);
+    return promise;
+  }
+  function cloudFocus() { void reconcileFromCloud('FOCUS'); }
+  function cloudVisibility() { if (cloudVisible()) void reconcileFromCloud('VISIBILITY'); }
+  function cloudOnline() { void reconcileFromCloud('ONLINE'); }
+  function startCloudEvents() {
+    cloudEventsEnabled = true;
+    window.addEventListener('focus',cloudFocus);
+    document.addEventListener('visibilitychange',cloudVisibility);
+    window.addEventListener('online',cloudOnline);
+    const reason = cloudHasStarted ? 'AUTH_READY' : 'STARTUP';
+    cloudHasStarted = true;
+    void reconcileFromCloud(reason);
+  }
+  function stopCloudEvents() {
+    cloudEventsEnabled = false;
+    window.removeEventListener('focus',cloudFocus);
+    document.removeEventListener('visibilitychange',cloudVisibility);
+    window.removeEventListener('online',cloudOnline);
+    if (cloudTimer !== null) {
+      window.clearTimeout(cloudTimer);
+      cloudTimer = null;
+      cloudRequest?.resolve({code:'CANCELLED'});
+      cloudRequest = null;
+    }
+    cloudLastFinished = 0;
+  }
+
   let editorTouched = false, editorComposition = false, editorGeneration = 0;
   let editorLease = false;
   function passiveRoute() { return window.location?.hash === '#dashboard'; }
@@ -211,7 +275,7 @@
     if (window.localStorage.getItem(AUTO_BASELINE_KEY) !== null) throw new CloudSyncError('VERIFY_FAILED');
   }
   function safeApplyRemote() { return coordinate('remote-apply',safeApplyOperation); }
-  async function safeApplyOperation() {
+  async function safeApplyOperation(lifecycleGuard = () => true) {
     let invalidated=false,shell=null,priorInert=false;
     try {
       const auth=await authContext(),store=window.KuSheERPStore;
@@ -230,7 +294,7 @@
       const guard=()=>{
         assertOperation(auth);
         const current=editorReadiness();
-        return Boolean(activeOperation?.kind==='remote-apply'&&current.safe&&current.generation===editor.generation);
+        return Boolean(lifecycleGuard()&&activeOperation?.kind==='remote-apply'&&current.safe&&current.generation===editor.generation);
       };
       if (!guard()) throw new CloudSyncError('EDITOR_DIRTY');
       shell=document.getElementById('appShell');priorInert=shell.inert;shell.inert=true;editorLease=true;
@@ -1127,6 +1191,7 @@
 
   async function startAutoBackup() {
     observePrincipal();
+    startCloudEvents();
     if (autoStarted) return coordinate('start', () => autoStatus());
     clearAutoTimer();
     clearOnlineTimer();
@@ -1138,6 +1203,7 @@
   }
 
   function stopAutoBackup() {
+    stopCloudEvents();
     syncGeneration += 1;
     if (principalId !== null) removeBaseline();
     currentStatus = null;
@@ -1192,6 +1258,6 @@
 
   window.KusheCloudSync = Object.freeze({
     inspect, uploadLocal, restoreRemote, status: publicStatus, open, close,
-    startAutoBackup, stopAutoBackup, autoStatus, setSyncOrigin, editorReadiness, decideRemote, safeApplyRemote
+    startAutoBackup, stopAutoBackup, autoStatus, setSyncOrigin, editorReadiness, decideRemote, safeApplyRemote, reconcileFromCloud
   });
 }());
