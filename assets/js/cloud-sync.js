@@ -24,6 +24,7 @@
   const SECRET_KEYS = new Set(['password', 'secret', 'servicerole', 'accesstoken', 'refreshtoken', 'jwtsecret']);
   const STATUS_TEXT = {
     AUTH_REQUIRED: '登入狀態已失效，請重新登入。',
+    AUTH_CHANGED: '登入帳號已變更，請重新檢查並確認雲端操作。',
     REMOTE_EMPTY: '雲端尚無資料，可手動上傳本機備份。',
     SYNCED: '本機與雲端一致。',
     LOCAL_NEWER: '本機資料較新，可手動同步至雲端。',
@@ -107,6 +108,8 @@
     Object.keys(snapshot).forEach((key) => {
       if (TOP_LEVEL_AUTH_KEYS.has(normalizedKey(key))) delete snapshot[key];
     });
+    if(snapshot.meta){delete snapshot.meta.receiptCommitVersion;delete snapshot.meta.localCommitToken}
+    delete snapshot.localCommitToken;delete snapshot.recoveryMarker;delete snapshot.transactionJournal;
     return snapshot;
   }
 
@@ -203,6 +206,12 @@
     return { token: session.access_token, user: { id: String(user.id), email: String(user.email || '') } };
   }
 
+  async function revalidatePrincipal(expectedAuth) {
+    const current=await authContext();
+    if(!expectedAuth?.user?.id||current.user.id!==expectedAuth.user.id)throw new CloudSyncError('AUTH_CHANGED');
+    return current;
+  }
+
   async function request(path, auth, options = {}) {
     const { url, key } = cloudConfig();
     const headers = {
@@ -283,21 +292,11 @@
     }
   }
 
-  async function readPersistedLocalRaw() {
-    try {
-      const indexed = await readIndexedDbSnapshot();
-      if (businessScore(indexed) > 0) return indexed;
-    } catch (_) {}
-    try {
-      const emergency = readEmergencySnapshot();
-      if (businessScore(emergency) > 0) return emergency;
-    } catch (_) {}
-    return {};
-  }
-
   async function readLocal() {
-    const raw = await readPersistedLocalRaw();
-    return snapshotInfo(deepClone(raw));
+    const store=window.KuSheERPStore;
+    if(!store?.readCommittedSnapshot)throw new CloudSyncError('STORE_UNAVAILABLE');
+    const committed=await store.readCommittedSnapshot();
+    return {...await snapshotInfo(committed.data),storeBaseline:committed.baseline};
   }
 
   async function remoteInfo(row) {
@@ -458,89 +457,9 @@
     return link.download;
   }
 
-  function openRestoreDatabase() {
-    return new Promise((resolve, reject) => {
-      if (!window.indexedDB) {
-        reject(new CloudSyncError('RESTORE_VERIFY_FAILED'));
-        return;
-      }
-      const request = window.indexedDB.open(RESTORE_DB_NAME);
-      request.onupgradeneeded = () => {
-        try { request.transaction?.abort(); } catch (_) {}
-      };
-      request.onerror = () => reject(new CloudSyncError('RESTORE_VERIFY_FAILED'));
-      request.onsuccess = () => {
-        const db = request.result;
-        if (!db.objectStoreNames.contains(RESTORE_DB_STORE)) {
-          db.close();
-          reject(new CloudSyncError('RESTORE_VERIFY_FAILED'));
-          return;
-        }
-        resolve(db);
-      };
-    });
-  }
-
-  async function writeIndexedDbSnapshot(value) {
-    const db = await openRestoreDatabase();
-    try {
-      await new Promise((resolve, reject) => {
-        const transaction = db.transaction(RESTORE_DB_STORE, 'readwrite');
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(new CloudSyncError('RESTORE_VERIFY_FAILED'));
-        transaction.onabort = () => reject(new CloudSyncError('RESTORE_VERIFY_FAILED'));
-        transaction.objectStore(RESTORE_DB_STORE).put(deepClone(value), RESTORE_STATE_KEY);
-      });
-    } finally {
-      db.close();
-    }
-  }
-
-  async function readIndexedDbSnapshot() {
-    const db = await openRestoreDatabase();
-    try {
-      return await new Promise((resolve, reject) => {
-        const request = db.transaction(RESTORE_DB_STORE, 'readonly').objectStore(RESTORE_DB_STORE).get(RESTORE_STATE_KEY);
-        request.onerror = () => reject(new CloudSyncError('RESTORE_VERIFY_FAILED'));
-        request.onsuccess = () => resolve(deepClone(request.result));
-      });
-    } finally {
-      db.close();
-    }
-  }
-
-  function writeEmergencySnapshot(value) {
-    window.localStorage.setItem(RESTORE_EMERGENCY_KEY, JSON.stringify(value));
-  }
-
-  function readEmergencySnapshot() {
-    const raw = window.localStorage.getItem(RESTORE_EMERGENCY_KEY);
-    if (!raw) throw new CloudSyncError('RESTORE_VERIFY_FAILED');
-    try { return JSON.parse(raw); } catch (_) { throw new CloudSyncError('RESTORE_VERIFY_FAILED'); }
-  }
-
-  async function localRestoreFingerprints() {
-    const indexed = await snapshotInfo(await readIndexedDbSnapshot());
-    const emergency = await snapshotInfo(readEmergencySnapshot());
-    return { indexed: indexed.fingerprint, emergency: emergency.fingerprint };
-  }
-
-  async function rollbackLocalRestore(rawLocal, expectedFingerprint) {
-    try {
-      await writeIndexedDbSnapshot(rawLocal);
-      writeEmergencySnapshot(rawLocal);
-      const restored = await localRestoreFingerprints();
-      return restored.indexed === expectedFingerprint && restored.emergency === expectedFingerprint;
-    } catch (_) {
-      return false;
-    }
-  }
-
   async function restoreRemote() {
     setBusy(true);
-    let localWriteStarted = false;
-    let rawLocalBeforeRestore = null;
-    let originalLocalFingerprint = '';
+
     try {
       const { status: preflight, row } = await restorePreflight();
       currentStatus = preflight;
@@ -568,7 +487,7 @@
       }
 
       const expected = { updatedAt: String(row?.updated_at || ''), fingerprint: target.fingerprint };
-      const raceRow = await readRemote(preflight.auth);
+      const raceRow = await readRemote(await revalidatePrincipal(preflight.auth));
       const actual = await remoteObservation(raceRow);
       if (!sameObservation(expected, actual)) {
         currentStatus = failure('RESTORE_RACE_BLOCKED');
@@ -581,31 +500,21 @@
       }
 
       const store = window.KuSheERPStore;
-      if (!store?.load || !store?.getState) throw new CloudSyncError('RESTORE_BLOCKED');
-      await store.load();
-      rawLocalBeforeRestore = deepClone(store.getState());
-      originalLocalFingerprint = (await snapshotInfo(rawLocalBeforeRestore)).fingerprint;
-      const targetSnapshot = deepClone(raceTarget.data);
-      localWriteStarted = true;
-      await writeIndexedDbSnapshot(targetSnapshot);
-      writeEmergencySnapshot(targetSnapshot);
-      const written = await localRestoreFingerprints();
-      if (written.indexed !== raceTarget.fingerprint || written.emergency !== raceTarget.fingerprint) {
-        throw new CloudSyncError('RESTORE_VERIFY_FAILED');
-      }
+      if(!store?.replaceSnapshot)throw new CloudSyncError('RESTORE_BLOCKED');
+      const currentAuth=await revalidatePrincipal(preflight.auth);
+      const committed=await store.replaceSnapshot(raceTarget.data,{confirmed:true,baseline:preflight.local.storeBaseline});
 
-      currentStatus = classified('RESTORE_COMPLETE', preflight.auth, preflight.local, raceTarget, raceRow, false, false);
+      currentStatus = classified('RESTORE_COMPLETE', currentAuth, preflight.local, raceTarget, raceRow, false, false);
+      if(committed.status==='COMMITTED_WITH_NOTIFICATION_WARNING'){
+        currentStatus.message='資料已儲存，但畫面更新／通知失敗，請勿重複送出。請自行重新載入。';
+        render(currentStatus);return publicStatus();
+      }
       render(currentStatus);
       window.requestAnimationFrame(() => window.location.reload());
       return publicStatus();
     } catch (error) {
-      if (localWriteStarted && rawLocalBeforeRestore) {
-        const rolledBack = await rollbackLocalRestore(rawLocalBeforeRestore, originalLocalFingerprint);
-        currentStatus = failure(rolledBack ? 'RESTORE_VERIFY_FAILED' : 'RESTORE_CRITICAL_FAILURE');
-      } else {
-        const code = error?.code === 'SECRET_BLOCKED' ? 'RESTORE_BLOCKED' : (error?.code || 'RESTORE_BLOCKED');
-        currentStatus = failure(code);
-      }
+      const code=error?.transactionStatus==='RECOVERY_REQUIRED'?'RESTORE_CRITICAL_FAILURE':error?.transactionStatus==='ROLLED_BACK'?'RESTORE_VERIFY_FAILED':error?.code==='STALE_STORE_STATE'?'RESTORE_RACE_BLOCKED':error?.code==='SECRET_BLOCKED'?'RESTORE_BLOCKED':(error?.code||'RESTORE_BLOCKED');
+      currentStatus=failure(code);
       return publicStatus();
     } finally {
       setBusy(false);
@@ -633,28 +542,31 @@
       }
 
       const expected = await remoteObservation(preflight.remote ? { data: preflight.remote.data, updated_at: preflight.remoteUpdatedAt } : null);
-      const raceRow = await readRemote(preflight.auth);
+      const raceRow = await readRemote(await revalidatePrincipal(preflight.auth));
       const actual = await remoteObservation(raceRow);
       if (!sameObservation(expected, actual)) {
         currentStatus = failure('RACE_BLOCKED');
         return publicStatus();
       }
 
+      const currentLocal=await readLocal();
+      if(currentLocal.storeBaseline!==preflight.local.storeBaseline)throw new CloudSyncError('RACE_BLOCKED');
+      const currentAuth=await revalidatePrincipal(preflight.auth);
       const uploadedAt = new Date().toISOString();
-      await request('/rest/v1/erp_states?on_conflict=user_id', preflight.auth, {
+      await request('/rest/v1/erp_states?on_conflict=user_id', currentAuth, {
         method: 'POST',
         headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: { user_id: preflight.auth.user.id, data: preflight.local.data, updated_at: uploadedAt }
+        body: { user_id: currentAuth.user.id, data: preflight.local.data, updated_at: uploadedAt }
       });
 
-      const verifiedRow = await readRemote(preflight.auth);
+      const verifiedRow = await readRemote(currentAuth);
       const verified = await remoteInfo(verifiedRow);
       if (!verified || verified.fingerprint !== preflight.local.fingerprint) {
         currentStatus = failure('VERIFY_FAILED');
         return publicStatus();
       }
-      currentStatus = classified('UPLOAD_COMPLETE', preflight.auth, preflight.local, verified, verifiedRow, false);
-      await armAutoBackup(preflight.auth, verifiedRow, preflight.local.fingerprint, 'ARMED');
+      currentStatus = classified('UPLOAD_COMPLETE', currentAuth, preflight.local, verified, verifiedRow, false);
+      await armAutoBackup(currentAuth, verifiedRow, preflight.local.fingerprint, 'ARMED');
       return publicStatus();
     } catch (error) {
       currentStatus = failure(error?.code || 'ERROR');
@@ -870,6 +782,8 @@
         return setAutoState('RACE_BLOCKED', { pending: false, armed: false });
       }
 
+      const currentLocal=await readLocal();
+      if(currentLocal.storeBaseline!==local.storeBaseline)throw new CloudSyncError('RACE_BLOCKED');
       const uploadedAt = new Date().toISOString();
       await request('/rest/v1/erp_states?on_conflict=user_id', auth, {
         method: 'POST',

@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#061d3b">
   <title>酷舍 ERP｜首頁總覽</title>
-  <link rel="stylesheet" href="assets/css/app.css?v=20260908-p17-1-customer-deductions1">
+  <link rel="stylesheet" href="assets/css/app.css?v=20260909-p17-1b-2-integration1">
   <link rel="stylesheet" href="assets/css/projects-scoped.css?v=20260811-billing-settings1">
 </head>
 <body>
@@ -152,7 +152,7 @@
           <p>此頁已納入新版 ERP Shell；既有資料、自動儲存、計算公式與模組連動仍由舊正式版安全保留。</p>
           <div class="placeholder-actions">
             <button class="shell-primary" type="button" data-route="dashboard"><i data-icon="arrow-left"></i>返回首頁</button>
-            <button class="shell-secondary" id="openLegacyModule" type="button"><i data-icon="external-link"></i>暫時開啟舊版功能</button>
+            <button class="shell-secondary" id="openLegacyModule" type="button" title="此入口只顯示安全封存說明，不啟動舊 ERP。"><i data-icon="external-link"></i>舊版功能已封存</button>
           </div>
         </section>
       </main>
@@ -267,12 +267,25 @@
     </section>
   </div>
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
+  <aside id="storeSafetyBanner" class="store-safety-banner" role="alert" hidden>
+    <strong id="storeSafetyMessage"></strong><button id="recoveryOpen" type="button">診斷／安全恢復</button>
+  </aside>
+  <div id="recoveryModal" class="store-recovery-modal" role="dialog" aria-modal="true" aria-labelledby="recoveryTitle" hidden>
+    <section>
+      <header><h2 id="recoveryTitle">儲存狀態核對／安全恢復</h2><button id="recoveryClose" type="button">關閉</button><button id="recoveryLogout" type="button">登出</button></header>
+      <p id="recoveryMessage" role="status"></p><p id="recoveryCandidate"></p>
+      <pre id="recoveryEvidence"></pre>
+      <label>二次確認：輸入完整操作 ID<input id="recoveryConfirmation" autocomplete="off"></label>
+      <footer><button id="recoveryRefresh" type="button">重新唯讀預覽</button><button id="recoveryExport" type="button">匯出技術診斷（不含帳務快照）</button><button id="recoveryExecute" type="button" disabled>確認恢復所選候選</button><button id="recoveryReload" type="button" hidden>重新載入並恢復使用</button></footer>
+    </section>
+  </div>
   <script src="assets/js/lucide.min.js?v=20260809-commissions1"></script>
   <script src="assets/js/config.js?v=20260823-auth-p0-1"></script>
   <script src="assets/js/auth-gate.js?v=20260823-auth-p02-1"></script>
   <script src="assets/js/legacy-adapter.js?v=20260809-nav4"></script>
-  <script src="assets/js/erp-store.js?v=20260909-p17-1b-1-transaction-core1"></script>
-  <script src="assets/js/cloud-sync.js?v=20260824-cloud-p3-1"></script>
+  <script src="assets/js/erp-store.js?v=20260909-p17-1b-2-integration1"></script>
+  <script src="assets/js/cloud-sync.js?v=20260909-p17-1b-2-integration1"></script>
+  <script src="assets/js/recovery.js?v=20260909-p17-1b-2-integration1"></script>
   <script src="assets/js/dashboard.js?v=20260909-p17-1a-safety-fix1"></script>
   <script src="assets/js/commissions.js?v=20260908-p15-1-quick-project1"></script>
   <script src="assets/js/unbilled-work.js?v=20260908-p15-3-month-select1"></script>
@@ -289,6 +302,6 @@
   <script src="assets/js/billing-bundle-print.js?v=20260908-p15-2-combined-billing1"></script>
   <script src="assets/js/billing.js?v=20260909-p17-1a-safety-fix1"></script>
   <script src="assets/js/quotations.js?v=20260901-taipei-business-date1"></script>
-  <script src="assets/js/app.js?v=20260901-taipei-business-date-d1"></script>
+  <script src="assets/js/app.js?v=20260909-p17-1b-2-integration1"></script>
 </body>
 </html>

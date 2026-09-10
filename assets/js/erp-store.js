@@ -408,7 +408,7 @@
     catch (error) { state.settings.quotationPublicNotePresets = previous; throw error; }
     return true;
   }
-  async function loadState() {
+  async function loadState(recoveryVerification = null) {
     let persistentValue;
     try {
       db = await openDB();
@@ -432,6 +432,13 @@
       }catch(cause){state=null;throw storeError('無法核對交易復原狀態，已停止載入','STORE_RECOVERY_GATE_UNAVAILABLE',{cause})}
     }
     if(journal&&!storeJournalHasValidTerminalShape(journal))recoveryMarker=recoveryMarker||{operationId:journal.operationId||'unknown',time:journal.updatedAt||journal.startedAt||'',journalPhase:journal.phase||'unknown'};
+    if(recoveryVerification){
+      // Private, held-lock verification of a completed recovery. Public load()
+      // has no bypass argument; unknown or changed operations remain blocked.
+      const owner=String(recoveryVerification.operationId||'');
+      if(!owner||journal?.phase!=='COMMIT_VERIFIED'||journal.recoveryOf!==owner||loadedPersistentFingerprint!==recoveryVerification.persistentFingerprint||[recoveryMarker,receiptRecoveryMarker].some(marker=>marker&&String(marker.operationId||'')!==owner))throw storeError('恢復載入核對的版本或 marker 已改變','RECOVERY_VERIFY_FAILED');
+      recoveryMarker=null;receiptRecoveryMarker=null;
+    }
     if(recoveryMarker){storeRecoveryBlocked=recoveryMarker;state=null;const error=storeError(`資料交易復原待核對（操作 ${recoveryMarker.operationId||'unknown'}），已停止載入與資料寫入`,'STORE_WRITES_BLOCKED',{operationId:recoveryMarker.operationId||''});throw error}
     if(receiptRecoveryMarker){receiptWritesBlocked=receiptRecoveryMarker;state=null;const error=new Error(`收款資料復原待核對（操作 ${receiptRecoveryMarker.operationId||'unknown'}），已停止載入與資料寫入`);error.code='RECEIPT_WRITES_BLOCKED';error.operationId=receiptRecoveryMarker.operationId||'';throw error}
     if (!score(state)) {
@@ -608,6 +615,7 @@
     try{assertStoreEmergencyBound(loadedPersistentFingerprint,businessRevision,loadedEmergencyRaw)}catch(error){state=null;throw error}
     if(businessRevision.id&&!journal){storeRecoveryBlocked={operationId:businessRevision.operationId||'unknown',journalPhase:'missing',reason:'已版本化業務資料缺少提交 journal'};state=null;throw storeError('已版本化業務資料缺少提交 journal，已停止載入','STORE_JOURNAL_MISSING',{operationId:businessRevision.operationId||''})}
     if(journal)try{assertStoreTerminalJournalBound(journal,loadedPersistentFingerprint,businessRevision,storeToken,receiptCommitVersionSeen,state.meta.receiptCommitVersion)}catch(error){storeRecoveryBlocked={operationId:journal.operationId||'unknown',journalPhase:journal.phase||'invalid',reason:error.message};state=null;throw error}
+    if(recoveryVerification)return freezeStoreState(state);
     publishedState=freezeStoreState(state);
     state=publishedState;
     settledStateFingerprint=storeStateFingerprint(state);
@@ -616,6 +624,7 @@
   }
   function load() {
     if(activeStoreTransaction&&state)return Promise.resolve(state);
+    if(storeRecoveryBlocked||receiptWritesBlocked)return Promise.reject(storeError('資料復原尚未完成，已停止載入與寫入','STORE_WRITES_BLOCKED'));
     if(publishedState)return Promise.resolve(publishedState);
     if(!storeLoadPromise){const pending=loadState(),tracked=pending.finally(()=>{if(storeLoadPromise===tracked)storeLoadPromise=null});storeLoadPromise=tracked}
     return storeLoadPromise;
@@ -1104,6 +1113,7 @@
       const deductionAttributionMismatch=Boolean(deductionAttributionError),wrongBankDirection=Boolean(transaction&&cashAmount>0&&!(['in','income'].includes(financialAuditText(transaction.direction).toLowerCase())||financialAuditText(transaction.type)==='收入'));
       const orphanReceipt=receivableMatches.length===0,ambiguousReceipt=receivableMatches.length>1,missingBankTransaction=cashAmount>0&&bankMatches.length===0,unexpectedBankTransaction=cashAmount===0&&bankMatches.length>0,duplicateBankTransaction=bankMatches.length>1;
       const section=isRetention?'retention-receipt':'receipt';
+      if(!isRetention){try{receiptMutationPlan(receipt)}catch(error){addIssue(section,receipt.id,'RECEIPT_BANK_INTEGRITY','BLOCKING',repair.MANUAL,String(error.message||error))}}
       if(orphanReceipt)addIssue(section,receipt.id,'ORPHAN_RECEIPT','BLOCKING',repair.MANUAL,'收款找不到 Receivable。');
       if(ambiguousReceipt)addIssue(section,receipt.id,'AMBIGUOUS_RECEIPT','BLOCKING',repair.MANUAL,'收款對應多筆 Receivable。');
       if(isRetention&&billingMatches.length!==1)addIssue(section,receipt.id,billingMatches.length?'AMBIGUOUS_RETENTION_BILLING':'ORPHAN_RETENTION_BILLING','BLOCKING',repair.MANUAL,'保留款收回無法唯一反查 Billing。');
@@ -2081,6 +2091,8 @@
   function setStorageRaw(storage,key,raw) { if(raw===null||raw===undefined)storage.removeItem(key);else storage.setItem(key,raw); }
   function recordStoreTransaction(status,details={}) {
     lastStoreTransactionResult=freezeStoreState({status,time:new Date().toISOString(),...details});
+    // This is a result notification, never a business commit or a retry trigger.
+    try{window.dispatchEvent(new CustomEvent('kushe:transaction-result',{detail:lastStoreTransactionResult}))}catch(_){}
     return lastStoreTransactionResult;
   }
   function throwStoreTransaction(error,status,operationId,details={}) {
@@ -2152,7 +2164,7 @@
   }
   function makeStoreJournal(checkpoint,phase,extra={}) {
     const now=new Date().toISOString();
-    return {schema:STORE_JOURNAL_SCHEMA,operationId:checkpoint.operationId,operationType:checkpoint.operationType,phase,startedAt:checkpoint.startedAt||now,updatedAt:now,before:{businessSnapshotRevision:checkpoint.revision,persistentHadValue:checkpoint.persistentHadValue,persistentFingerprint:storeFingerprintDigest(checkpoint.persistentFingerprint),state:checkpoint.persistentHadValue?checkpoint.persistent:storeStateClone(checkpoint.published),emergencyRaw:checkpoint.emergencyRaw,localCommitTokenRaw:checkpoint.commitRaw,receiptCommitTokenRaw:checkpoint.receiptCommitRaw},...extra};
+    return {schema:STORE_JOURNAL_SCHEMA,operationId:checkpoint.operationId,operationType:checkpoint.operationType,phase,startedAt:checkpoint.startedAt||now,updatedAt:now,before:{businessSnapshotRevision:checkpoint.revision,persistentHadValue:checkpoint.persistentHadValue,persistentFingerprint:storeFingerprintDigest(checkpoint.persistentFingerprint),state:checkpoint.persistentHadValue?checkpoint.persistent:storeStateClone(checkpoint.published),emergencyRaw:checkpoint.emergencyRaw,localCommitTokenRaw:checkpoint.commitRaw,receiptCommitTokenRaw:checkpoint.receiptCommitRaw},...(checkpoint.recoveryEvidence?{recoveryEvidence:checkpoint.recoveryEvidence}:{}),...extra};
   }
   async function markStoreRecoveryRequired(checkpoint,primaryError,recoveryErrors,journal) {
     const marker={schema:STORE_JOURNAL_SCHEMA,status:'RECOVERY_REQUIRED',operationId:checkpoint.operationId,operationType:checkpoint.operationType,time:new Date().toISOString(),primaryError:String(primaryError?.message||primaryError),primaryCode:String(primaryError?.code||''),recoveryErrors:recoveryErrors.map((error)=>({message:String(error?.message||error),code:String(error?.code||'')})),beforeVersion:checkpoint.revision,afterVersion:journal?.after?.businessSnapshotRevision||null};
@@ -2223,13 +2235,15 @@
       if(localStorage.getItem(STORE_COMMIT_KEY)!==storeTokenRaw||localStorage.getItem(RECEIPT_COMMIT_KEY)!==revision.id)throw storeError('本機提交版本寫入後核對失敗','STORE_COMMIT_TOKEN_VERIFY_FAILED');
       const emergencyPhase=journal.phase;journal={...journal,phase:'TOKENS_WRITTEN',updatedAt:new Date().toISOString(),steps:{...journal.steps,versionWritten:true}};await dbAdvanceStoreJournal(afterFingerprint,checkpoint.operationId,emergencyPhase,journal);
       const compact={schema:STORE_JOURNAL_SCHEMA,operationId:checkpoint.operationId,operationType:checkpoint.operationType,phase:'COMMIT_VERIFIED',startedAt:transaction.startedAt,updatedAt:new Date().toISOString(),before:{businessSnapshotRevision:beforeRevision,stateFingerprint:storeFingerprintDigest(checkpoint.persistentFingerprint)},after:{businessSnapshotRevision:revision,stateFingerprint:afterDigest},steps:{journalPrepared:true,primaryWritten:true,emergencyWritten:true,versionWritten:true,verified:true}};
+      if(transaction.recoveryOf){compact.recoveryOf=transaction.recoveryOf;compact.recoveryEvidence=checkpoint.recoveryEvidence}
       await dbAdvanceStoreJournal(afterFingerprint,checkpoint.operationId,'TOKENS_WRITTEN',compact);
       const finalEmergencyRaw=localStorage.getItem(EMERGENCY_KEY),finalEmergency=parseStoreJson(finalEmergencyRaw,'Emergency backup'),finalStoreTokenRaw=localStorage.getItem(STORE_COMMIT_KEY),finalReceiptTokenRaw=localStorage.getItem(RECEIPT_COMMIT_KEY);
       if(finalEmergencyRaw!==emergencyRaw||storeStateFingerprint(finalEmergency)!==afterFingerprint||finalStoreTokenRaw!==storeTokenRaw||finalReceiptTokenRaw!==revision.id)throw storeError('提交完成時本機備份或版本已由其他操作變更','STORE_FINAL_MIRROR_CONFLICT');
       publishedState=freezeStoreState(durableSnapshot);state=publishedState;settledStateFingerprint=afterFingerprint;lastSettledMemoryFingerprint=receiptStateFingerprint(publishedState);
       loadedPersistentHadValue=true;loadedPersistentFingerprint=afterFingerprint;loadedEmergencyRaw=emergencyRaw;storeCommitTokenSeen=storeTokenRaw;receiptCommitVersionSeen=revision.id;
+      if(transaction.deferNotification)return {notificationWarnings:[],revision};
       const notificationWarnings=[];
-      try{window.KuSheLegacyData?.refresh()}catch(error){notificationWarnings.push(error)}
+      try{await window.KuSheLegacyData?.refresh()}catch(error){notificationWarnings.push(error)}
       try{dispatchStoreUpdated({action:transaction.action,operationId:checkpoint.operationId,revisionId:revision.id})}catch(error){notificationWarnings.push(error)}
       recordStoreTransaction(notificationWarnings.length?'COMMITTED_WITH_NOTIFICATION_WARNING':'COMMITTED',{operationId:checkpoint.operationId,operationType:checkpoint.operationType,revisionId:revision.id,notificationWarnings:notificationWarnings.map((error)=>String(error?.message||error))});
       return {notificationWarnings,revision};
@@ -2770,6 +2784,7 @@
     const receipts=state.receipts.filter((row)=>String(row.receivableId||'')===String(receivable.id)||String(row.billingId||'')===String(billing.id)),retentionReceipts=state.retentionReceipts.filter((row)=>String(row.receivableId||'')===String(receivable.id)||String(row.billingId||'')===String(billing.id));
     if(receipts.some((row)=>row.receivableId&&String(row.receivableId)!==String(receivable.id)||row.billingId&&String(row.billingId)!==String(billing.id))||retentionReceipts.some((row)=>row.receivableId&&String(row.receivableId)!==String(receivable.id)||row.billingId&&String(row.billingId)!==String(billing.id)))throw new Error('收款與請款關聯不一致，為避免帳務斷鏈已停止刪除。');
     if(num(receivable.legacyReceived)>0||num(receivable.legacyRetentionReceived)>0)throw new Error('存在無法逐筆解析的歷史收款，為避免帳務斷鏈已停止刪除。');
+    receipts.forEach(receiptMutationPlan);
     const dailyRefs=billingSourceRefs(billing),contractRefs=[...(billing.sourceContractRefs||[]),...(billing.lines||[]).flatMap((line)=>line.sourceContractRefs||[])],requiresDailySource=['daily-work','mixed-pricing'].includes(String(billing.sourceType||''));
     if((requiresDailySource&&!dailyRefs.length)||dailyRefs.some((ref)=>!availableSourceCopies(ref).length)||contractRefs.some((ref)=>!ref?.contractKey||!contractSourceByKey(ref.contractKey))||!dailyRefs.length&&!contractRefs.length)throw new Error('找不到完整施工來源，為避免帳務斷鏈已停止刪除。');
     const receiptTransactions=receipts.flatMap((receipt)=>{const matches=receiptBankTransactions(receipt),cashAmount=receiptCashAmount(receipt);if(cashAmount===0){if(matches.length)throw new Error('零現金客戶扣款不應有銀行交易，為避免帳務斷鏈已停止刪除。');return []}if(matches.length!==1)throw new Error('一般收款的銀行交易關係不完整，為避免帳務斷鏈已停止刪除。');return matches}),retentionTransactions=retentionReceipts.map((receipt)=>{const matches=retentionBankTransactions(receipt);if(matches.length!==1)throw new Error('保留款收回的銀行交易關係不完整，為避免帳務斷鏈已停止刪除。');return matches[0]}),transactions=[...receiptTransactions,...retentionTransactions],transactionIds=new Set(transactions.map((row)=>String(row.id)));
@@ -3052,8 +3067,12 @@
   }
   function receiptMutationPlan(receipt) {
     const stored=strictStoredReceiptPlan(receipt),cashAmount=stored.cashAmount,matches=linkedBankTransactionCandidates(receipt,['receipt','receivable_receipt']).candidates;
-    if(cashAmount===0){if(matches.length)throw new Error('零現金客戶扣款不應有銀行流水，已停止操作');return {transaction:null,bank:null,amount:0}}
+    const identityMatches=state.bankTransactions.filter((row)=>String(row.receiptId||'')===String(receipt.id||'')||String(row.sourceId||'')===String(receipt.id||''));
+    if(cashAmount===0){if(hasAccountingValue(receipt,'bankTransactionId')||matches.length||identityMatches.length)throw new Error('零現金客戶扣款不應有銀行流水指標或實體流水，已停止操作');return {transaction:null,bank:null,amount:0}}
     const transaction=strictExistingBankTransaction(receipt,['receipt','receivable_receipt'],'一般收款'),receiptBank=strictBankReference(receipt,'一般收款'),transactionBank=strictBankReference(transaction,'一般收款銀行流水');
+    if(identityMatches.some((row)=>row!==transaction))throw new Error('一般收款有多筆或錯誤來源的銀行流水，已停止操作');
+    if(state.bankTransactions.filter((row)=>String(row.id||'')===String(transaction.id||'')).length!==1)throw new Error('一般收款銀行流水編號不唯一，已停止操作');
+    if(hasAccountingValue(transaction,'sourceNo')&&String(transaction.sourceNo)!==String(state.receivables.find((row)=>String(row.id)===String(receipt.receivableId))?.sourceNo||''))throw new Error('一般收款銀行流水來源單號不一致，已停止操作');
     if(receiptBank.id!==transactionBank.id)throw new Error('一般收款與銀行流水的帳戶不一致，已停止操作');
     const incoming=['in','income'].includes(String(transaction.direction||'').toLowerCase())||String(transaction.type||'')==='收入';
     if(!incoming)throw new Error('一般收款連結的銀行流水不是收入，已停止操作');
@@ -4516,6 +4535,237 @@
     const recovery=storeRecoveryBlocked||sessionRecovery||localRecovery||sessionReceiptRecovery||localReceiptRecovery||durableRecovery||durableReceiptRecovery||null;
     return freezeStoreState({available:true,blocked:Boolean(recovery||validationError),validationError,journal:journal?{schema:journal.schema,operationId:journal.operationId,operationType:journal.operationType,phase:journal.phase,startedAt:journal.startedAt,updatedAt:journal.updatedAt,beforeVersion:journal.before?.businessSnapshotRevision||journal.beforeVersion||null,afterVersion:journal.after?.businessSnapshotRevision||null,steps:journal.steps||null}:null,recovery,commitToken,receiptCommitToken,lastTransaction:lastStoreTransactionResult});
   }
+  // Restore/recovery use the same commit kernel, not a second main/Emergency writer.
+  const recoveryPreviews=new Map();
+  async function requireRecoveryAuth(expectedPrincipal = '') {
+    if(!window.KusheAuthGate?.requireAuth||!await window.KusheAuthGate.requireAuth())throw storeError('請先登入再執行還原或恢復','AUTH_REQUIRED');
+    const principal=String(window.KusheAuthGate.user?.()?.id||'');
+    if(!principal)throw storeError('無法驗證登入帳號，請重新登入','AUTH_REQUIRED');
+    if(expectedPrincipal&&principal!==expectedPrincipal)throw storeError('登入帳號已變更，請重新預覽及確認','RECOVERY_PRINCIPAL_CHANGED');
+    return principal;
+  }
+  function coordinatedStorage(operation,work,{readOnly=false}={}) {
+    if(!navigator.locks?.request)return Promise.reject(storeError('目前瀏覽器不支援安全資料交易鎖','STORE_LOCK_UNAVAILABLE'));
+    if(readOnly)return navigator.locks.request(STORE_LOCK_NAME,{mode:'shared',ifAvailable:true},lock=>{
+      if(!lock)throw storeError('資料正在提交，請稍後再試','STORE_BUSY');return work();
+    });
+    const run=async()=>{
+      const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+      try{return await navigator.locks.request(STORE_LOCK_NAME,{mode:'exclusive',signal:controller.signal},()=>{clearTimeout(timer);return work()})}
+      finally{clearTimeout(timer)}
+    };
+    const pending=storeWriterQueue.then(run,run);storeWriterQueue=pending.catch(()=>{});return pending;
+  }
+  async function readStorageObservation({existingOnly=false}={}) {
+    // Do not create/upgrade a database from the recovery preview.
+    const connection=await new Promise((resolve,reject)=>{
+      const request=indexedDB.open(DB_NAME);request.onupgradeneeded=()=>{if(existingOnly)request.transaction.abort()};
+      request.onerror=()=>reject(request.error);request.onsuccess=()=>resolve(request.result);
+    });
+    let values;
+    try{values=await new Promise((resolve,reject)=>{
+      const tx=connection.transaction(DB_STORE,'readonly'),table=tx.objectStore(DB_STORE),out={};
+      for(const key of [STATE_KEY,STORE_JOURNAL_KEY,STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY]){const request=table.get(key);request.onsuccess=()=>{out[key]=request.result}}
+      tx.oncomplete=()=>resolve(out);tx.onabort=()=>reject(tx.error||new Error('診斷讀取中止'));tx.onerror=()=>{};
+    })}finally{connection.close()}
+    const local={},session={};
+    for(const key of [EMERGENCY_KEY,STORE_COMMIT_KEY,RECEIPT_COMMIT_KEY,STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY,RECEIPT_ACTIVE_KEY])local[key]=localStorage.getItem(key);
+    for(const key of [STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY])session[key]=sessionStorage.getItem(key);
+    return {values,local,session};
+  }
+  async function observationHash(value) {
+    const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(storeStateFingerprint(value)));
+    return Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
+  }
+  function assertObservationCommitted(observation) {
+    const {values,local,session}=observation,persistent=values[STATE_KEY],journal=values[STORE_JOURNAL_KEY];
+    for(const key of [STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY])if(values[key]||local[key]||session[key])throw storeError('資料復原尚未完成，禁止備份或還原','STORE_WRITES_BLOCKED');
+    if(local[RECEIPT_ACTIVE_KEY])throw storeError('尚有舊收款操作標記，請先核對','STORE_WRITES_BLOCKED');
+    const fp=storeStateFingerprint(persistent),revision=storeRevisionOf(persistent),token=parseStoreJson(local[STORE_COMMIT_KEY],'本機提交版本');
+    assertStoreCommitTokensBound(fp,revision,token,local[RECEIPT_COMMIT_KEY]||'',persistent?.meta?.receiptCommitVersion);
+    assertStoreEmergencyBound(fp,revision,local[EMERGENCY_KEY]);
+    if(local[EMERGENCY_KEY]!==null&&storeStateFingerprint(parseStoreJson(local[EMERGENCY_KEY],'Emergency'))!==fp)throw storeError('主資料與備份不同，不能選取一層上傳','STORE_LAYERS_DIVERGED');
+    if(revision.id&&!journal)throw storeError('缺少提交 journal','STORE_JOURNAL_MISSING');
+    if(journal)assertStoreTerminalJournalBound(journal,fp,revision,token,local[RECEIPT_COMMIT_KEY]||'',persistent?.meta?.receiptCommitVersion);
+  }
+  function portableStoreSnapshot(value) {
+    const result=storeStateClone(value||{});
+    if(result.meta){delete result.meta.receiptCommitVersion;delete result.meta.localCommitToken}
+    // businessSnapshotRevision is portable provenance. Local fencing is not.
+    delete result.localCommitToken;delete result.recoveryMarker;delete result.transactionJournal;
+    return result;
+  }
+  async function readCommittedSnapshot() {
+    if(!db)db=await openDB();
+    return coordinatedStorage('readCommittedSnapshot',async()=>{
+      const observation=await readStorageObservation();assertObservationCommitted(observation);
+      return freezeStoreState({data:portableStoreSnapshot(observation.values[STATE_KEY]),baseline:await observationHash(observation),revision:storeRevisionOf(observation.values[STATE_KEY])});
+    },{readOnly:true});
+  }
+  function validateReplacementSnapshot(value) {
+    if(!value||typeof value!=='object'||Array.isArray(value)||!value.settings||typeof value.settings!=='object'||Array.isArray(value.settings)||!value.meta||typeof value.meta!=='object'||Array.isArray(value.meta))throw storeError('還原快照格式不完整','SNAPSHOT_INVALID');
+    const collections=['customers','projects','vendors','materials','employees','banks','quotations','dailyLogs','attendance','commissions','billings','receivables','receipts','retentionReceipts','payables','payments','salaryPayments','bankTransactions','payroll','materialUsages','projectCosts','invoices','audit'];
+    collections.forEach(key=>{if(value[key]!==undefined&&!Array.isArray(value[key]))throw storeError(`還原快照 ${key} 格式錯誤`,'SNAPSHOT_INVALID')});
+    const cloned=JSON.parse(JSON.stringify(value));
+    if(storeStateFingerprint(cloned)!==storeStateFingerprint(value))throw storeError('還原快照不是可完整保存的 JSON','SNAPSHOT_INVALID');
+    return portableStoreSnapshot(cloned);
+  }
+  async function publishReplacementResult(operationId,operationType,revision) {
+    const warnings=[];
+    try{await window.KuSheLegacyData?.refresh()}catch(error){warnings.push(String(error?.message||error))}
+    try{dispatchStoreUpdated({action:operationType,operationId,revisionId:revision.id})}catch(error){warnings.push(String(error.message||error))}
+    return recordStoreTransaction(warnings.length?'COMMITTED_WITH_NOTIFICATION_WARNING':'COMMITTED',{operationId,operationType,revisionId:revision.id,notificationWarnings:warnings});
+  }
+  async function replaceSnapshot(value,confirmation={}) {
+    await requireRecoveryAuth();
+    const candidate=validateReplacementSnapshot(value);
+    if(!confirmation.baseline||confirmation.confirmed!==true)throw storeError('缺少還原預檢確認','SNAPSHOT_CONFIRMATION_REQUIRED');
+    await load();
+    return coordinatedStorage('snapshotReplacement',async()=>{
+      const operationId=`restore-${uid()}`;
+      let checkpoint=null,committed=null;
+      try{
+        const observation=await readStorageObservation();assertObservationCommitted(observation);
+        if(await observationHash(observation)!==confirmation.baseline)throw storeError('本機資料已在確認期間變更，保留表單並重新預檢','STALE_STORE_STATE');
+        checkpoint=await captureStoreCheckpoint(operationId,'snapshotReplacement');
+        committed=await commitStoreDraft(checkpoint,candidate,{startedAt:new Date().toISOString(),action:'使用者確認雲端快照還原',auditDetails:{sourceBusinessRevision:storeRevisionOf(value)},deferNotification:true});
+        const verified=await readStorageObservation();assertObservationCommitted(verified);
+        if(storeStateFingerprint(verified.values[STATE_KEY])!==loadedPersistentFingerprint)throw storeError('還原後獨立讀庫核對失敗','STORE_LAYERS_DIVERGED');
+        // Exercise the public load path before announcing completion.
+        publishedState=null;state=null;storeLoadPromise=null;await load();
+        return publishReplacementResult(operationId,'snapshotReplacement',committed.revision);
+      }catch(error){
+        if(committed&&checkpoint){
+          const afterFingerprint=storeStateFingerprint(candidate),journal=makeStoreJournal(checkpoint,'RESTORE_LOAD_VERIFY_FAILED',{after:{businessSnapshotRevision:committed.revision,stateFingerprint:storeFingerprintDigest(afterFingerprint)}});
+          const emergencyRaw=JSON.stringify(candidate),storeCommitRaw=JSON.stringify({schema:STORE_JOURNAL_SCHEMA,revisionId:committed.revision.id,sequence:committed.revision.sequence,stateFingerprint:storeFingerprintDigest(afterFingerprint),committedAt:committed.revision.committedAt});
+          await restoreStoreCheckpoint(checkpoint,afterFingerprint,error,journal,{emergencyRaw,storeCommitRaw,receiptCommitRaw:committed.revision.id});
+          publishedState=checkpoint.published;state=publishedState;settledStateFingerprint=checkpoint.publishedFingerprint;loadedPersistentHadValue=checkpoint.persistentHadValue;loadedPersistentFingerprint=checkpoint.persistentFingerprint;loadedEmergencyRaw=checkpoint.emergencyRaw;storeCommitTokenSeen=checkpoint.commitRaw;receiptCommitVersionSeen=checkpoint.receiptCommitRaw;lastSettledMemoryFingerprint=receiptStateFingerprint(publishedState);storeRecoveryBlocked=null;receiptWritesBlocked=null;storeLoadPromise=null;
+        }
+        if(error.transactionStatus)throw error;throwStoreTransaction(error,storeTransactionStatusForError(error),operationId);
+      }
+    });
+  }
+  function recoveryCandidate(observation) {
+    const {values,local,session}=observation,journal=values[STORE_JOURNAL_KEY];
+    if(!journal||journal.schema!==STORE_JOURNAL_SCHEMA||!journal.operationId)throw new Error('缺少可驗證的 journal；不能判定權威快照');
+    const owner=String(journal.recoveryOf||journal.operationId),markers=[];
+    for(const key of [STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY])for(const entry of [values[key],parseStoreJson(local[key],key),parseStoreJson(session[key],key)])if(entry)markers.push(entry);
+    if(markers.some(marker=>String(marker.operationId||'')!==owner&&String(marker.operationId||'')!==String(journal.operationId)))throw new Error('存在其他操作的 marker，禁止一併清除');
+    if(local[RECEIPT_ACTIVE_KEY])throw new Error('存在未解析的舊收款 active marker，需另行核對');
+    const current=values[STATE_KEY],currentDigest=storeFingerprintDigest(storeStateFingerprint(current));
+    if(journal.recoveryOf&&journal.phase==='COMMIT_VERIFIED'&&currentDigest===journal.after?.stateFingerprint){
+      assertStoreCommitTokensBound(storeStateFingerprint(current),storeRevisionOf(current),parseStoreJson(local[STORE_COMMIT_KEY],'本機版本'),local[RECEIPT_COMMIT_KEY]||'',current?.meta?.receiptCommitVersion);
+      assertStoreEmergencyBound(storeStateFingerprint(current),storeRevisionOf(current),local[EMERGENCY_KEY]);
+      return {owner,kind:'resume-verified-recovery',state:current,journal};
+    }
+    const before=journal.before;
+    if(!before?.persistentHadValue||!before.state||storeFingerprintDigest(storeStateFingerprint(before.state))!==before.persistentFingerprint)throw new Error('journal 沒有完整且可驗證的操作前快照；不可用空白資料復原');
+    if(!sameStoreRevision(storeRevisionOf(before.state),storeRevisionOf({meta:{businessSnapshotRevision:before.businessSnapshotRevision}})))throw new Error('checkpoint revision 與內容不一致');
+    if(currentDigest!==before.persistentFingerprint&&currentDigest!==journal.after?.stateFingerprint)throw new Error('主資料不屬於此操作前後版本，不能覆蓋');
+    const emergency=parseStoreJson(local[EMERGENCY_KEY],'Emergency'),emergencyDigest=storeFingerprintDigest(storeStateFingerprint(emergency));
+    if(local[EMERGENCY_KEY]!==before.emergencyRaw&&emergencyDigest!==journal.after?.stateFingerprint)throw new Error('Emergency 是未知版本，不能覆蓋');
+    for(const [key,original] of [[STORE_COMMIT_KEY,before.localCommitTokenRaw],[RECEIPT_COMMIT_KEY,before.receiptCommitTokenRaw]]){
+      if(local[key]!==original){
+        const token=key===STORE_COMMIT_KEY?parseStoreJson(local[key],'local token'):null,revision=journal.after?.businessSnapshotRevision,revisionId=token?token.revisionId:local[key];
+        if(!revision?.id||revisionId!==revision.id||token&&(token.schema!==STORE_JOURNAL_SCHEMA||token.sequence!==revision.sequence||token.stateFingerprint!==journal.after.stateFingerprint||token.committedAt!==revision.committedAt))throw new Error('本機 token 為未知版本，不能覆蓋');
+      }
+    }
+    // A failed recovery must retain the ORIGINAL trustworthy candidate, not
+    // promote the partially committed state captured by that recovery attempt.
+    let evidence=journal,depth=0;
+    while(evidence.recoveryEvidence){
+      const prior=evidence.recoveryEvidence;
+      if(++depth>8||prior.schema!==STORE_JOURNAL_SCHEMA||!prior.before?.persistentHadValue||!prior.before.state||storeFingerprintDigest(storeStateFingerprint(prior.before.state))!==prior.before.persistentFingerprint)throw new Error('多次恢復的 checkpoint 鏈不足或損壞，保持停止');
+      if(![prior.before.persistentFingerprint,prior.after?.stateFingerprint].includes(evidence.before?.persistentFingerprint))throw new Error('恢復 checkpoint 鏈有未核對的版本，保持停止');
+      evidence=prior;
+    }
+    return {owner,kind:'restore-before-checkpoint',state:evidence.before.state,journal};
+  }
+  async function recoveryPreview() {
+    const principal=await requireRecoveryAuth();
+    const inspect=async()=>{
+      try{
+        const observation=await readStorageObservation({existingOnly:true}),fingerprint=await observationHash(observation),journal=observation.values[STORE_JOURNAL_KEY];
+        let candidate=null,reason='';try{candidate=recoveryCandidate(observation)}catch(error){reason=String(error.message||error)}
+        if(!navigator.locks?.request){candidate=null;reason='此瀏覽器缺少 Web Locks，只能讀取诊斷，不可恢復或解除寫入保護'}
+        const token=crypto.randomUUID(),expiresAt=Date.now()+300000;
+        await requireRecoveryAuth(principal);
+        recoveryPreviews.clear();if(candidate)recoveryPreviews.set(token,{fingerprint,expiresAt,owner:candidate.owner,principal});
+        return freezeStoreState({allowed:Boolean(candidate),token:candidate?token:'',expiresAt,operationId:candidate?.owner||journal?.operationId||'',phase:journal?.phase||'missing',beforeRevision:journal?.before?.businessSnapshotRevision||null,afterRevision:journal?.after?.businessSnapshotRevision||null,candidate:candidate?.kind||null,checkpointAvailable:Boolean(journal?.before?.state),idbFingerprint:storeFingerprintDigest(storeStateFingerprint(observation.values[STATE_KEY])),emergencyFingerprint:storeFingerprintDigest(storeStateFingerprint(parseStoreJson(observation.local[EMERGENCY_KEY],'Emergency'))),observationFingerprint:fingerprint,reason});
+      }catch(error){return {allowed:false,reason:String(error.message||error),code:error.code||'RECOVERY_EVIDENCE_UNAVAILABLE'}}
+    };
+    return navigator.locks?.request?coordinatedStorage('recoveryPreview',inspect,{readOnly:true}):inspect();
+  }
+  async function retainRecoveryGate(observation,owner) {
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(DB_STORE,'readwrite'),table=tx.objectStore(DB_STORE),keys=[STATE_KEY,STORE_JOURNAL_KEY,STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY],values={};let remaining=keys.length,error;
+      keys.forEach(key=>{const request=table.get(key);request.onsuccess=()=>{values[key]=request.result;if(--remaining)return;
+        try{
+          if(keys.some(key=>storeStateFingerprint(values[key])!==storeStateFingerprint(observation.values[key])))throw storeError('恢復預覽後資料變更，請重新核對','RECOVERY_PREVIEW_STALE');
+          for(const key of [STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY])if(values[key]&&String(values[key].operationId)!==owner)throw storeError('未知 durable marker，保持停止','RECOVERY_MARKER_CONFLICT');
+          if(!values[STORE_RECOVERY_KEY]&&!values[RECEIPT_RECOVERY_KEY])table.put({operationId:owner,status:'RECOVERY_REQUIRED',phase:'RECOVERY_VERIFICATION_PENDING'},STORE_RECOVERY_KEY);
+        }catch(cause){error=cause;tx.abort()}
+      }});
+      tx.oncomplete=()=>resolve();tx.onabort=()=>reject(error||tx.error||new Error('恢復保護交易中止'));tx.onerror=()=>{};
+    });
+  }
+  async function clearRecoveryMarkers(observation,owner,committedFingerprint) {
+    // Web Storage first. Durable markers remain until the final IDB CAS completes.
+    for(const [storage,raws] of [[localStorage,observation.local],[sessionStorage,observation.session]])for(const key of [STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY]){
+      const raw=raws[key];if(!raw)continue;
+      if(storage.getItem(key)!==raw)throw storeError('恢復 marker 在確認後變更','RECOVERY_MARKER_CONFLICT');
+      const marker=parseStoreJson(raw,key);if(String(marker.operationId)!==owner)throw storeError('不能清除其他操作 marker','RECOVERY_MARKER_CONFLICT');
+      storage.removeItem(key);if(storage.getItem(key)!==null)throw storeError('marker 清除驗證失敗','RECOVERY_MARKER_CONFLICT');
+    }
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(DB_STORE,'readwrite'),table=tx.objectStore(DB_STORE),keys=[STATE_KEY,STORE_JOURNAL_KEY,STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY],values={};let remaining=keys.length,error;
+      keys.forEach(key=>{const request=table.get(key);request.onsuccess=()=>{values[key]=request.result;if(--remaining)return;
+        try{
+          if(storeStateFingerprint(values[STATE_KEY])!==committedFingerprint||values[STORE_JOURNAL_KEY]?.recoveryOf!==owner||values[STORE_JOURNAL_KEY]?.phase!=='COMMIT_VERIFIED')throw storeError('恢復提交已變更，禁止解除保護','RECOVERY_MARKER_CONFLICT');
+          for(const markerKey of [STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY]){if(values[markerKey]&&String(values[markerKey].operationId)!==owner)throw storeError('未知 durable marker','RECOVERY_MARKER_CONFLICT');if(values[markerKey])table.delete(markerKey)}
+        }catch(cause){error=cause;tx.abort()}
+      }});
+      tx.oncomplete=()=>resolve();tx.onabort=()=>reject(error||tx.error||new Error('恢復 marker 交易中止'));tx.onerror=()=>{};
+    });
+  }
+  async function recoverStore(confirmation={}) {
+    const principal=await requireRecoveryAuth();
+    const approved=recoveryPreviews.get(confirmation.token);
+    if(!approved||Date.now()>approved.expiresAt||confirmation.operationId!==approved.owner||confirmation.confirmed!==true)throw storeError('恢復預覽已過期或確認不符','RECOVERY_CONFIRMATION_REQUIRED');
+    if(!approved.principal||approved.principal!==principal)throw storeError('登入帳號與恢復確認不符，請重新預覽','RECOVERY_PRINCIPAL_CHANGED');
+    return coordinatedStorage('controlledRecovery',async()=>{
+      await requireRecoveryAuth(approved.principal);
+      const observation=await readStorageObservation({existingOnly:true});
+      if(await observationHash(observation)!==approved.fingerprint)throw storeError('恢復預覽後資料變更，請重新核對','RECOVERY_PREVIEW_STALE');
+      const candidate=recoveryCandidate(observation),operationId=`recovery-${uid()}`,current=observation.values[STATE_KEY];
+      if(!db)db=await openDB();
+      await requireRecoveryAuth(approved.principal);
+      // Refuse to start without a durable gate: a local/session-only marker
+      // must first be preserved in IDB, with the same observation CAS.
+      await retainRecoveryGate(observation,candidate.owner);
+      recoveryPreviews.delete(confirmation.token);
+      try{
+        let revision=storeRevisionOf(current);
+        if(candidate.kind!=='resume-verified-recovery'){
+          const checkpoint={operationId,operationType:'controlledRecovery',persistentHadValue:true,persistent:storeStateClone(current),persistentFingerprint:storeStateFingerprint(current),journal:observation.values[STORE_JOURNAL_KEY],journalFingerprint:storeStateFingerprint(observation.values[STORE_JOURNAL_KEY]),emergencyRaw:observation.local[EMERGENCY_KEY],commitRaw:observation.local[STORE_COMMIT_KEY],receiptCommitRaw:observation.local[RECEIPT_COMMIT_KEY],published:publishedState||current,revision:storeRevisionOf(current),recoveryEvidence:observation.values[STORE_JOURNAL_KEY]};
+          const result=await commitStoreDraft(checkpoint,storeStateClone(candidate.state),{startedAt:new Date().toISOString(),action:'使用者確認恢復操作前快照',auditDetails:{recoveredOperationId:candidate.owner},recoveryOf:candidate.owner,deferNotification:true});revision=result.revision;
+        }
+        const verified=await readStorageObservation({existingOnly:true});
+        const verifiedCandidate=recoveryCandidate(verified);if(verifiedCandidate.kind!=='resume-verified-recovery')throw storeError('恢復後資料未完整提交','RECOVERY_VERIFY_FAILED');
+        // All fallible storage/load verification runs while the durable gate
+        // is still present. There is no public bypass and no fallible load
+        // after the final marker CAS has opened normal access.
+        const verifiedState=await loadState({operationId:candidate.owner,persistentFingerprint:storeStateFingerprint(verified.values[STATE_KEY])});
+        await clearRecoveryMarkers(verified,candidate.owner,storeStateFingerprint(verified.values[STATE_KEY]));
+        storeRecoveryBlocked=null;receiptWritesBlocked=null;
+        publishedState=verifiedState;state=publishedState;settledStateFingerprint=storeStateFingerprint(state);lastSettledMemoryFingerprint=receiptStateFingerprint(state);
+        return publishReplacementResult(operationId,'controlledRecovery',revision);
+      }catch(error){
+        storeRecoveryBlocked={operationId:candidate.owner,status:'RECOVERY_REQUIRED'};
+        throwStoreTransaction(error,'RECOVERY_REQUIRED',operationId,{recoveryOf:candidate.owner});
+      }
+    });
+  }
   const STORE_WRITER_NAMES=new Set([
     'saveQuotationUnitPreset','saveQuotationPublicNotePreset','deleteQuotationPublicNotePreset',
     'saveCommission','deleteCommission','saveDailyBatch','deleteDailyBatch','saveInvoice','createBilling','updateBilling','deleteBilling',
@@ -4538,6 +4788,7 @@
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
+    readCommittedSnapshot,replaceSnapshot,recoveryPreview,recoverStore,
     getLastStoreTransactionResult:()=>lastStoreTransactionResult,
     persist:()=>Promise.reject(storeError('直接 persist 已停用；請使用正式 Store 寫入 API','DIRECT_PERSIST_FORBIDDEN'))
   };
