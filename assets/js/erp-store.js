@@ -24,6 +24,20 @@
   let storeRecoveryBlocked = null;
   let activeStoreTransaction = null;
   let storeWriterQueue = Promise.resolve();
+  let queuedStoreWriters = 0, activeStoreWriters = 0, storeWriterEpoch = 0;
+  function enqueueStoreWriter(work) {
+    queuedStoreWriters += 1;
+    storeWriterEpoch += 1;
+    const run = async () => {
+      queuedStoreWriters -= 1;
+      activeStoreWriters += 1;
+      try { return await work(); }
+      finally { activeStoreWriters -= 1; }
+    };
+    const pending = storeWriterQueue.then(run, run);
+    storeWriterQueue = pending.catch(() => {});
+    return pending;
+  }
   let storeLoadPromise = null;
   let lastStoreTransactionResult = null;
 
@@ -284,6 +298,7 @@
           currentFingerprint=storeStateFingerprint(stateRequest.result);currentJournalFingerprint=storeStateFingerprint(journalRequest.result);
           if(currentFingerprint!==expectedFingerprint){requestError=storeError('IndexedDB 基準已變更，拒絕覆蓋較新資料','STORE_CAS_MISMATCH');transaction.abort();return}
           if(Object.prototype.hasOwnProperty.call(options,'expectedJournalFingerprint')&&currentJournalFingerprint!==options.expectedJournalFingerprint){requestError=storeError('交易 journal 基準已變更，拒絕覆蓋其他操作','STORE_JOURNAL_CAS_MISMATCH');transaction.abort();return}
+          options.preCommitGuard?.();
           if(options.deleteState)store.delete(STATE_KEY);else store.put(nextState,STATE_KEY);
           if(journal===undefined)store.delete(STORE_JOURNAL_KEY);else store.put(journal,STORE_JOURNAL_KEY);
         }catch(error){requestError=error;try{transaction.abort()}catch(_){}}
@@ -2224,7 +2239,7 @@
     journal.checkpointBytes=await storeCheckpointCapacity(journal);
     try{
       journal={...journal,phase:'PRIMARY_WRITTEN',updatedAt:new Date().toISOString(),steps:{...journal.steps,primaryWritten:true}};
-      await dbReplaceStateCas(checkpoint.persistentFingerprint,durableSnapshot,journal,{expectedJournalFingerprint:checkpoint.journalFingerprint});
+      await dbReplaceStateCas(checkpoint.persistentFingerprint,durableSnapshot,journal,{expectedJournalFingerprint:checkpoint.journalFingerprint,preCommitGuard:transaction.preCommitGuard});
       if(localStorage.getItem(EMERGENCY_KEY)!==checkpoint.emergencyRaw)throw storeError('Emergency backup 已由其他操作更新，拒絕覆蓋','STORE_MIRROR_CAS_MISMATCH');
       localStorage.setItem(EMERGENCY_KEY,emergencyRaw);
       const storedEmergencyRaw=localStorage.getItem(EMERGENCY_KEY),storedEmergency=parseStoreJson(storedEmergencyRaw,'Emergency backup');
@@ -2248,7 +2263,7 @@
       recordStoreTransaction(notificationWarnings.length?'COMMITTED_WITH_NOTIFICATION_WARNING':'COMMITTED',{operationId:checkpoint.operationId,operationType:checkpoint.operationType,revisionId:revision.id,notificationWarnings:notificationWarnings.map((error)=>String(error?.message||error))});
       return {notificationWarnings,revision};
     }catch(primaryError){
-      if(['STORE_CAS_MISMATCH','STORE_JOURNAL_CAS_MISMATCH'].includes(primaryError?.code))throw primaryError;
+      if(['STORE_CAS_MISMATCH','STORE_JOURNAL_CAS_MISMATCH','REMOTE_APPLY_GUARD_REJECTED'].includes(primaryError?.code))throw primaryError;
       try{await restoreStoreCheckpoint(checkpoint,afterFingerprint,primaryError,journal,expectedMirrors)}catch(recoveryError){throw recoveryError}
       throw primaryError;
     }
@@ -2288,7 +2303,7 @@
         throwStoreTransaction(wrapped,'REJECTED',operationId);
       }finally{clearTimeout(timeout)}
     };
-    const run=storeWriterQueue.then(execute,execute);storeWriterQueue=run.catch(()=>{});return run;
+    return enqueueStoreWriter(execute);
   }
   function requireStoreTransactionDraft() {
     if(!activeStoreTransaction||state===publishedState)throw storeError('Store writer 未在受保護的交易 draft 中執行','STORE_TRANSACTION_CONTEXT_REQUIRED');
@@ -4587,7 +4602,7 @@
       try{return await navigator.locks.request(STORE_LOCK_NAME,{mode:'exclusive',signal:controller.signal},()=>{clearTimeout(timer);return work()})}
       finally{clearTimeout(timer)}
     };
-    const pending=storeWriterQueue.then(run,run);storeWriterQueue=pending.catch(()=>{});return pending;
+    return enqueueStoreWriter(run);
   }
   async function readStorageObservation({existingOnly=false}={}) {
     // Do not create/upgrade a database from the recovery preview.
@@ -4649,23 +4664,65 @@
     try{dispatchStoreUpdated({action:operationType,operationId,revisionId:revision.id})}catch(error){warnings.push(String(error.message||error))}
     return recordStoreTransaction(warnings.length?'COMMITTED_WITH_NOTIFICATION_WARNING':'COMMITTED',{operationId,operationType,revisionId:revision.id,notificationWarnings:warnings});
   }
+  async function remoteApplyReadiness(expectedBaseline = '') {
+    const epoch = storeWriterEpoch;
+    const busy = () => activeStoreWriters || queuedStoreWriters || activeStoreTransaction || persistenceInFlight || storeLoadPromise;
+    if (busy()) return freezeStoreState({safe:false,code:'STORE_BUSY'});
+    // Never initialize storage or run load/recovery from this read-only gate.
+    if (!db || !publishedState || storeRecoveryBlocked || receiptWritesBlocked) return freezeStoreState({safe:false,code:'STORE_NOT_READY'});
+    try {
+      const committed = await readCommittedSnapshot();
+      const observation = await coordinatedStorage('remoteApplyReadiness', async () => {
+        const value = await readStorageObservation({existingOnly:true});
+        assertObservationCommitted(value);
+        if (!storeJournalHasValidTerminalShape(value.values[STORE_JOURNAL_KEY])) throw storeError('遠端套用需要完整提交 journal','STORE_JOURNAL_MISSING');
+        return observationHash(value);
+      }, {readOnly:true});
+      if (busy() || epoch !== storeWriterEpoch) return freezeStoreState({safe:false,code:'STORE_BUSY'});
+      if (observation !== committed.baseline || expectedBaseline && expectedBaseline !== observation) return freezeStoreState({safe:false,code:'STALE_STORE_STATE'});
+      return freezeStoreState({safe:true,code:'STORE_READY',...committed});
+    } catch (error) { return freezeStoreState({safe:false,code:error.code || 'STORE_UNVERIFIED'}); }
+  }
+  async function applyRemoteSnapshot(value, options = {}) {
+    if (!options.userId || typeof options.guard !== 'function' || !options.baseline) throw storeError('缺少遠端套用安全條件','REMOTE_APPLY_GUARD_REJECTED');
+    const ready = await remoteApplyReadiness(options.baseline);
+    if (!ready.safe) throw storeError('本機尚不能安全套用遠端資料',ready.code);
+    const guard = () => {
+      try {
+        const gate = window.KusheAuthGate;
+        if (!gate?.session?.()?.access_token || String(gate.user?.()?.id || '') !== options.userId
+          || activeStoreWriters !== 1 || queuedStoreWriters || storeRecoveryBlocked || receiptWritesBlocked
+          || options.guard() !== true) throw new Error('guard rejected');
+      } catch (_) { throw storeError('遠端套用條件已失效','REMOTE_APPLY_GUARD_REJECTED'); }
+    };
+    return replaceSnapshotInternal(value, {baseline:options.baseline}, guard);
+  }
   async function replaceSnapshot(value,confirmation={}) {
+    return replaceSnapshotInternal(value,confirmation);
+  }
+  async function replaceSnapshotInternal(value,confirmation={},remoteGuard=null) {
     await requireRecoveryAuth();
     const candidate=validateReplacementSnapshot(value);
-    if(!confirmation.baseline||confirmation.confirmed!==true)throw storeError('缺少還原預檢確認','SNAPSHOT_CONFIRMATION_REQUIRED');
+    if(!confirmation.baseline||!remoteGuard&&confirmation.confirmed!==true)throw storeError('缺少還原預檢確認','SNAPSHOT_CONFIRMATION_REQUIRED');
     await load();
     return coordinatedStorage('snapshotReplacement',async()=>{
       const operationId=`restore-${uid()}`;
       let checkpoint=null,committed=null;
       try{
         const observation=await readStorageObservation();assertObservationCommitted(observation);
+        if(remoteGuard){remoteGuard();if(!storeJournalHasValidTerminalShape(observation.values[STORE_JOURNAL_KEY]))throw storeError('遠端套用需要完整提交 journal','STORE_JOURNAL_MISSING')}
         if(await observationHash(observation)!==confirmation.baseline)throw storeError('本機資料已在確認期間變更，保留表單並重新預檢','STALE_STORE_STATE');
         checkpoint=await captureStoreCheckpoint(operationId,'snapshotReplacement');
-        committed=await commitStoreDraft(checkpoint,candidate,{startedAt:new Date().toISOString(),action:'使用者確認雲端快照還原',auditDetails:{sourceBusinessRevision:storeRevisionOf(value)},deferNotification:true});
+        committed=await commitStoreDraft(checkpoint,candidate,{startedAt:new Date().toISOString(),action:remoteGuard?'受控遠端快照套用':'使用者確認雲端快照還原',auditDetails:{sourceBusinessRevision:storeRevisionOf(value)},deferNotification:true,preCommitGuard:remoteGuard});
         const verified=await readStorageObservation();assertObservationCommitted(verified);
         if(storeStateFingerprint(verified.values[STATE_KEY])!==loadedPersistentFingerprint)throw storeError('還原後獨立讀庫核對失敗','STORE_LAYERS_DIVERGED');
         // Exercise the public load path before announcing completion.
         publishedState=null;state=null;storeLoadPromise=null;await load();
+        if(remoteGuard){
+          if(storeStateFingerprint(publishedState)!==storeStateFingerprint(candidate))throw storeError('套用後載入內容不同','STORE_LAYERS_DIVERGED');
+          const result=await publishReplacementResult(operationId,'snapshotReplacement',committed.revision);
+          return freezeStoreState({...result,verifiedSnapshot:portableStoreSnapshot(candidate)});
+        }
         return publishReplacementResult(operationId,'snapshotReplacement',committed.revision);
       }catch(error){
         if(committed&&checkpoint){
@@ -4821,7 +4878,7 @@
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
-    readCommittedSnapshot,replaceSnapshot,recoveryPreview,recoverStore,
+    readCommittedSnapshot,remoteApplyReadiness,applyRemoteSnapshot,replaceSnapshot,recoveryPreview,recoverStore,
     getLastStoreTransactionResult:()=>lastStoreTransactionResult,
     persist:()=>Promise.reject(storeError('直接 persist 已停用；請使用正式 Store 寫入 API','DIRECT_PERSIST_FORBIDDEN'))
   };

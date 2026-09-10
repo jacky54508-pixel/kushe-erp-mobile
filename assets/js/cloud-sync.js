@@ -13,6 +13,7 @@
   const RESTORE_EMERGENCY_KEY = 'KuSheERP25_EMERGENCY';
   const RESTORE_MAX_BYTES = 20 * 1024 * 1024;
   const AUTO_BASELINE_KEY = 'kushe_erp_cloud_auto_v1';
+  const AUTO_APPLY_PENDING_KEY = 'kushe_erp_cloud_apply_pending_v1';
   const AUTO_DEBOUNCE_MS = 8000;
   const AUTO_ONLINE_RETRY_MS = 3000;
   const SETTINGS_CREDENTIAL_KEYS = new Set([
@@ -145,6 +146,124 @@
   function verifyPendingAutoUpload(generation) { return coordinate('verify', () => verifyPendingAutoUploadOperation(generation)); }
   function autoBackupNow() { return coordinate('auto', autoBackupOperation); }
 
+
+  // No lifecycle trigger calls safeApplyRemote. It is a controlled foundation.
+  let editorTouched = false, editorComposition = false, editorGeneration = 0;
+  let editorLease = false;
+  function passiveRoute() { return window.location?.hash === '#dashboard'; }
+  function noteEditorEvent(event) {
+    if (editorLease) { event.preventDefault?.(); event.stopImmediatePropagation?.(); }
+    if (event.type === 'compositionend') editorComposition = false;
+    if (event.type === 'compositionstart') editorComposition = true;
+    editorTouched = true;
+    editorGeneration += 1;
+  }
+  function noteEditorRoute() {
+    if (!passiveRoute()) { editorTouched = true; editorGeneration += 1; }
+  }
+  ['beforeinput','input','change','compositionstart','compositionend','paste','drop','submit'].forEach(type => document.addEventListener(type,noteEditorEvent,true));
+  // Capture business navigation before its handler can create a private draft.
+  document.addEventListener('click', event => {
+    if (editorLease) { event.preventDefault?.(); event.stopImmediatePropagation?.(); return; }
+    const target = event.target?.closest?.('[data-module],[data-route],button,a');
+    if (target) { editorTouched = true; editorGeneration += 1; }
+  },true);
+  window.addEventListener('hashchange',noteEditorRoute);
+  window.addEventListener('popstate',noteEditorRoute);
+  function editorReadiness() {
+    noteEditorRoute();
+    const unsafe = {safe:false,code:'EDITOR_DIRTY',generation:editorGeneration};
+    if (editorTouched || editorComposition || !passiveRoute() || typeof document.querySelectorAll !== 'function') return unsafe;
+    if (document.activeElement?.matches?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) return unsafe;
+    const nodes = document.querySelectorAll('form,[role="dialog"],dialog,.erp-detail-overlay,.commission-drawer-layer,.commission-drawer,[contenteditable]:not([contenteditable="false"])');
+    for (const node of nodes) {
+      if (typeof node.getClientRects !== 'function') return unsafe;
+      if (!node.hidden && node.getClientRects().length) return unsafe;
+    }
+    const shell = document.getElementById('appShell');
+    if (!shell || shell.hidden || !('inert' in shell)) return unsafe;
+    return {safe:true,code:'EDITOR_READY',generation:editorGeneration};
+  }
+  function decideRemote(input = {}) {
+    const result = (code,eligibleApply=false,eligibleUpload=false) => ({code,eligibleApply,eligibleUpload});
+    if (!input.userId) return result('AUTH_REQUIRED');
+    const base = input.baseline;
+    if (base && base.userId !== input.userId) return result('PRINCIPAL_MISMATCH');
+    if (input.networkError) return result('NETWORK_ERROR');
+    if (!input.remoteExists) return result('REMOTE_MISSING');
+    if (!base || !input.metadataValid) return result('VERSION_UNKNOWN');
+    let accepted,remote;
+    try { accepted=BigInt(serverSyncVersion(base.syncVersion)); remote=BigInt(serverSyncVersion(input.remoteVersion)); }
+    catch (_) { return result('VERSION_UNKNOWN'); }
+    if (!input.storeSafe) return result('STORE_BUSY');
+    if (!input.editorSafe) return result('EDITOR_DIRTY');
+    if (![base.remoteFingerprint,base.localFingerprint,input.remoteFingerprint,input.localFingerprint].every(value=>typeof value==='string'&&/^[a-f0-9]{64}$/i.test(value))) return result('VERSION_UNKNOWN');
+    const clean = input.localFingerprint === base.localFingerprint;
+    if (remote < accepted || remote === accepted && input.remoteFingerprint !== base.remoteFingerprint) return result('CONFLICT');
+    if (remote > accepted) return clean ? result('REMOTE_NEWER_SAFE',true) : result('CONFLICT');
+    return clean ? result('SYNCED') : result('LOCAL_DIRTY',false,true);
+  }
+  function invalidateApplyBaseline() {
+    // Durable intent is a baseline-validity fence, not a persisted UI suppression flag.
+    window.localStorage.setItem(AUTO_APPLY_PENDING_KEY,'1');
+    if (window.localStorage.getItem(AUTO_APPLY_PENDING_KEY) !== '1') throw new CloudSyncError('VERIFY_FAILED');
+    window.localStorage.removeItem(AUTO_BASELINE_KEY);
+    if (window.localStorage.getItem(AUTO_BASELINE_KEY) !== null) throw new CloudSyncError('VERIFY_FAILED');
+  }
+  function safeApplyRemote() { return coordinate('remote-apply',safeApplyOperation); }
+  async function safeApplyOperation() {
+    let invalidated=false,shell=null,priorInert=false;
+    try {
+      const auth=await authContext(),store=window.KuSheERPStore;
+      if (!store?.remoteApplyReadiness || !store?.applyRemoteSnapshot) throw new CloudSyncError('STORE_BUSY');
+      const baseline=readBaseline(auth.user.id),row=await readRemote(auth);
+      const ready=await store.remoteApplyReadiness(),editor=editorReadiness();
+      assertOperation(auth);
+      const local=ready.safe?await snapshotInfo(ready.data):null;
+      const remote=row?await validateRemoteSnapshot(row.data,row.updated_at):null;
+      const decision=decideRemote({userId:auth.user.id,baseline,remoteExists:Boolean(row),remoteVersion:row?.sync_version,
+        metadataValid:typeof row?.updated_at==='string'&&Number.isFinite(Date.parse(row.updated_at)),
+        remoteFingerprint:remote?.fingerprint,localFingerprint:local?.fingerprint,storeSafe:ready.safe,editorSafe:editor.safe});
+      if (!decision.eligibleApply) return decision;
+      // Baseline and editor may have changed during digest/validation awaits.
+      if (JSON.stringify(readBaseline(auth.user.id))!==JSON.stringify(baseline)) throw new CloudSyncError('RACE_BLOCKED');
+      const guard=()=>{
+        assertOperation(auth);
+        const current=editorReadiness();
+        return Boolean(activeOperation?.kind==='remote-apply'&&current.safe&&current.generation===editor.generation);
+      };
+      if (!guard()) throw new CloudSyncError('EDITOR_DIRTY');
+      shell=document.getElementById('appShell');priorInert=shell.inert;shell.inert=true;editorLease=true;
+      autoArmed=false;autoGeneration+=1;clearAutoTimer();clearOnlineTimer();autoRetryMode='';autoPendingVerification=null;
+      invalidated=true;invalidateApplyBaseline();setSyncOrigin('REMOTE_APPLY');
+      const result=await store.applyRemoteSnapshot(remote.data,{userId:auth.user.id,baseline:ready.baseline,guard});
+      if (result.status!=='COMMITTED' || !guard()) throw new CloudSyncError('VERIFY_FAILED');
+      const after=await store.remoteApplyReadiness();
+      if (!after.safe || !guard()) throw new CloudSyncError('VERIFY_FAILED');
+      const committed=await snapshotInfo(after.data),expected=await snapshotInfo(result.verifiedSnapshot);
+      if (committed.fingerprint!==expected.fingerprint || !guard()) throw new CloudSyncError('VERIFY_FAILED');
+      // Store stamps provenance/audit; keep the accepted remote and actual local hashes separately.
+      const unchanged=await store.remoteApplyReadiness(after.baseline);
+      if (!unchanged.safe || !guard()) throw new CloudSyncError('VERIFY_FAILED');
+      if (!await writeBaseline(auth,row,committed.fingerprint)) throw new CloudSyncError('VERIFY_FAILED');
+      if (!guard()) throw new CloudSyncError('VERIFY_FAILED');
+      autoArmed=true;
+      if(!autoStarted){autoStarted=true;autoGeneration+=1;ensureAutoListeners();}
+      setAutoState('ARMED',{pending:false,armed:true});
+      currentStatus=classified('SYNCED',auth,committed,remote,row,false,false);
+      return {code:'REMOTE_APPLIED',syncVersion:serverSyncVersion(row.sync_version),remoteFingerprint:remote.fingerprint,localFingerprint:committed.fingerprint,storeBaseline:after.baseline};
+    } catch (error) {
+      if(invalidated){
+        autoArmed=false;
+        try{invalidateApplyBaseline();}catch(_){}
+        setAutoState('MANUAL_REQUIRED',{pending:false,armed:false});
+      }
+      return {code:writeFailureCode(error),eligibleApply:false,eligibleUpload:false};
+    } finally {
+      if(invalidated)setSyncOrigin('USER_LOCAL_EDIT');
+      editorLease=false;if(shell)shell.inert=priorInert;
+    }
+  }
 
   class CloudSyncError extends Error {
     constructor(code = 'ERROR') {
@@ -390,6 +509,7 @@
 
   function readBaseline(userId) {
     try {
+      if (window.localStorage.getItem(AUTO_APPLY_PENDING_KEY)) return null;
       const raw = window.localStorage.getItem(AUTO_BASELINE_KEY);
       if (!raw) return null;
       const value = JSON.parse(raw);
@@ -432,8 +552,11 @@
       || !/^[a-f0-9]{64}$/i.test(baseline.remoteFingerprint)
       || !/^[a-f0-9]{64}$/i.test(baseline.localFingerprint)) return false;
     try {
-      window.localStorage.setItem(AUTO_BASELINE_KEY, JSON.stringify(baseline));
-      return true;
+      const encoded=JSON.stringify(baseline);
+      window.localStorage.setItem(AUTO_BASELINE_KEY, encoded);
+      if(window.localStorage.getItem(AUTO_BASELINE_KEY)!==encoded)return false;
+      window.localStorage.removeItem(AUTO_APPLY_PENDING_KEY);
+      return window.localStorage.getItem(AUTO_APPLY_PENDING_KEY)===null;
     } catch (_) {
       return false;
     }
@@ -459,6 +582,8 @@
   }
 
   function classify(auth, local, remote, row) {
+    const baseline=readBaseline(auth.user.id);
+    if(row&&baseline&&local.fingerprint===baseline.localFingerprint&&baselineMatchesRemote(baseline,row,remote))return classified('SYNCED',auth,local,remote,row,false,false);
     if (!row) return classified('REMOTE_EMPTY', auth, local, null, null, local.score > 0);
     if (local.fingerprint === remote.fingerprint) return classified('SYNCED', auth, local, remote, row, false);
     if (local.score === 0 && remote.score > 0) return classified('LOCAL_EMPTY_REMOTE_EXISTS', auth, local, remote, row, false, true);
@@ -1067,6 +1192,6 @@
 
   window.KusheCloudSync = Object.freeze({
     inspect, uploadLocal, restoreRemote, status: publicStatus, open, close,
-    startAutoBackup, stopAutoBackup, autoStatus, setSyncOrigin
+    startAutoBackup, stopAutoBackup, autoStatus, setSyncOrigin, editorReadiness, decideRemote, safeApplyRemote
   });
 }());
