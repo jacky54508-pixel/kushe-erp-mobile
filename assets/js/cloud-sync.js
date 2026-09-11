@@ -665,41 +665,38 @@
     return setAutoState('CONFLICT', { pending: false, armed: false });
   }
 
-  function removeBaseline() {
-    try { window.localStorage.removeItem(AUTO_BASELINE_KEY); } catch (_) {}
-  }
-
-  function readBaseline(userId) {
+  // Ordinary reads never delete persisted bookkeeping, including during auth transitions.
+  function parsePersistedBaseline() {
     try {
-      if (window.localStorage.getItem(AUTO_APPLY_PENDING_KEY)) return null;
       const raw = window.localStorage.getItem(AUTO_BASELINE_KEY);
       if (!raw) return null;
       const value = JSON.parse(raw);
       const baseline = {
-        version: Number(value?.version),
+        version: value?.version,
         syncVersion: serverSyncVersion(value?.syncVersion),
-        userId: String(value?.userId || ''),
-        remoteUpdatedAt: String(value?.remoteUpdatedAt || ''),
-        remoteFingerprint: String(value?.remoteFingerprint || ''),
-        localFingerprint: String(value?.localFingerprint || '')
+        userId: value?.userId,
+        remoteUpdatedAt: value?.remoteUpdatedAt,
+        remoteFingerprint: value?.remoteFingerprint,
+        localFingerprint: value?.localFingerprint
       };
-      const valid = baseline.version === 2
-        && baseline.userId === String(userId || '')
-        && Boolean(baseline.remoteUpdatedAt)
-        && /^[a-f0-9]{64}$/i.test(baseline.remoteFingerprint)
-        && /^[a-f0-9]{64}$/i.test(baseline.localFingerprint);
-      if (!valid) {
-        removeBaseline();
-        return null;
-      }
-      return baseline;
-    } catch (_) {
-      removeBaseline();
-      return null;
-    }
+      return baseline.version === 2 && typeof baseline.userId === 'string' && baseline.userId
+        && baseline.syncVersion !== null
+        && typeof baseline.remoteUpdatedAt === 'string' && Number.isFinite(Date.parse(baseline.remoteUpdatedAt))
+        && typeof baseline.remoteFingerprint === 'string' && /^[a-f0-9]{64}$/i.test(baseline.remoteFingerprint)
+        && typeof baseline.localFingerprint === 'string' && /^[a-f0-9]{64}$/i.test(baseline.localFingerprint)
+        ? baseline : null;
+    } catch (_) { return null; }
   }
 
-  async function writeBaseline(auth, row, localFingerprint) {
+  function readBaseline(userId) {
+    try {
+      if (!userId || window.localStorage.getItem(AUTO_APPLY_PENDING_KEY)) return null;
+      const baseline = parsePersistedBaseline();
+      return baseline?.userId === userId ? baseline : null;
+    } catch (_) { return null; }
+  }
+
+  async function writeBaseline(auth, row, localFingerprint, readinessGuard = null) {
     const remote = await remoteInfo(row);
     assertOperation(auth);
     const baseline = {
@@ -714,6 +711,8 @@
       || !/^[a-f0-9]{64}$/i.test(baseline.remoteFingerprint)
       || !/^[a-f0-9]{64}$/i.test(baseline.localFingerprint)) return false;
     try {
+      if (readinessGuard && !await readinessGuard()) return false;
+      assertOperation(auth);
       const encoded=JSON.stringify(baseline);
       window.localStorage.setItem(AUTO_BASELINE_KEY, encoded);
       if(window.localStorage.getItem(AUTO_BASELINE_KEY)!==encoded)return false;
@@ -1128,11 +1127,42 @@
     return setAutoState(code, { pending: Boolean(autoTimer), armed: true });
   }
 
+  async function recoverSameStateBaseline(checked, generation) {
+    const { auth, local, remote } = checked, store = window.KuSheERPStore;
+    const editor = editorReadiness();
+    const allowed = () => activeAutoRun(generation) && syncOrigin !== 'REMOTE_APPLY'
+      && observedPrincipal() === auth.user.id && editorReadiness().safe
+      && editorReadiness().generation === editor.generation
+      && window.localStorage.getItem(AUTO_BASELINE_KEY) === null
+      && window.localStorage.getItem(AUTO_APPLY_PENDING_KEY) === null;
+    if (!editor.safe || !allowed() || !checked.remoteExists || !local?.score || !remote?.score
+      || local.fingerprint !== remote.fingerprint || serverSyncVersion(checked.syncVersion) === null
+      || !Number.isFinite(Date.parse(checked.remoteUpdatedAt))) return false;
+    const ready = await store?.remoteApplyReadiness?.(local.storeBaseline);
+    if (!ready?.safe || !allowed()) return false;
+    const committed = await snapshotInfo(ready.data);
+    if (committed.fingerprint !== local.fingerprint) return false;
+    const row = await readRemote(auth);
+    if (!row || !sameSyncVersion(row.sync_version, checked.syncVersion) || row.updated_at !== checked.remoteUpdatedAt) return false;
+    const accepted = await validateRemoteSnapshot(row.data, row.updated_at);
+    if (accepted.fingerprint !== committed.fingerprint || !allowed()) return false;
+    const saved = await writeBaseline(auth, row, committed.fingerprint, async () => {
+      const final = await store.remoteApplyReadiness(ready.baseline);
+      return Boolean(final.safe && allowed());
+    });
+    if (!saved) return false;
+    autoArmed = true;
+    autoRetryMode = ''; autoPendingVerification = null;
+    setAutoState('ARMED', { pending: false, armed: true });
+    return true;
+  }
+
   async function evaluateAutoStartOperation(generation) {
     try {
       const checked = await inspectCore();
       if (!activeAutoRun(generation)) return autoStatus();
       if (!readBaseline(checked.auth.user.id)) {
+        if (await recoverSameStateBaseline(checked, generation)) return autoStatus();
         autoArmed = false;
         return setAutoState('PRINCIPAL_UNBOUND', { pending: false, armed: false });
       }
