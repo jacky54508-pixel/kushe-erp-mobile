@@ -132,8 +132,69 @@
       return !query||`${batch.employees.join(' ')} ${batch.projects.join(' ')} ${batch.items.join(' ')} ${batch.note}`.toLocaleLowerCase('zh-Hant').includes(query);
     }).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
   }
+  const houseCollator = new Intl.Collator('zh-Hant', {numeric:true, sensitivity:'base'});
+  function compareDailyHouse(a, b) {
+    const left=String(a??'').trim(),right=String(b??'').trim(),x=/^(\d+)(.*)$/.exec(left),y=/^(\d+)(.*)$/.exec(right);
+    if(x&&y){
+      const xn=x[1].replace(/^0+(?=\d)/,''),yn=y[1].replace(/^0+(?=\d)/,'');
+      if(xn.length!==yn.length)return xn.length-yn.length;
+      if(xn!==yn)return xn<yn?-1:1;
+      const xs=x[2].toUpperCase(),ys=y[2].toUpperCase();
+      if(/^[A-Z]*$/.test(xs)&&/^[A-Z]*$/.test(ys))return xs<ys?-1:xs>ys?1:0;
+      return houseCollator.compare(xs,ys);
+    }
+    if(x||y)return x?-1:1;
+    return houseCollator.compare(left,right);
+  }
+  function dailyPrintProjects(state, batches) {
+    const projects=new Map();
+    batches.forEach(batch=>{
+      const groups=new Map();
+      batch.logs.filter(log=>(!filters.employee||employeeIdOf(log)===filters.employee)&&(!filters.project||projectIdOf(log)===filters.project)&&(!filters.month||String(log.date||'').startsWith(filters.month))).forEach(log=>{
+        const key=JSON.stringify([projectIdOf(log),log.groupId||log.id]);
+        if(!groups.has(key))groups.set(key,[]);groups.get(key).push(log);
+      });
+      groups.forEach(logs=>{
+        const first=logs[0],projectId=projectIdOf(first),key=projectId||`missing:${first.id}`;
+        if(!projects.has(key))projects.set(key,{name:label(state,'projects',projectId,first.projectName||'未指定案場'),houses:new Map()});
+        const project=projects.get(key),employees=[...new Set(logs.map(log=>label(state,'employees',employeeIdOf(log),log.employeeName||'—')))];
+        // Shared employee records describe one work group, just as dailyBatches does.
+        const seen=new Set();
+        (first.items||[]).forEach((item,index)=>{
+          const source=item.workItemId||index;if(seen.has(source))return;seen.add(source);
+          const house=String(item.house??'').trim(),name=String(item.itemName||item.item||'—'),unit=String(item.unit||'—'),price=number(item.inputPrice??item.unitPrice??item.price);
+          if(!project.houses.has(house))project.houses.set(house,{house,rows:new Map()});
+          const rows=project.houses.get(house).rows;
+          const identity=JSON.stringify([name,unit,price,item.taxMode||'未稅',item.pricingType||'actual']);
+          if(!rows.has(identity))rows.set(identity,{item:name,unit,price,qty:0,amount:0,employees:[]});
+          const row=rows.get(identity),qty=number(item.qty);
+          row.qty+=qty;
+          row.amount+=item.untaxedSubtotal!==undefined&&item.untaxedSubtotal!==null&&item.untaxedSubtotal!==''?number(item.untaxedSubtotal):qty*number(item.price??price);
+          employees.forEach(name=>{if(!row.employees.includes(name))row.employees.push(name)});
+        });
+      });
+    });
+    return [...projects.values()].map(project=>({name:project.name,houses:[...project.houses.values()].sort((a,b)=>compareDailyHouse(a.house,b.house)).map(house=>({house:house.house,rows:[...house.rows.values()]}))}));
+  }
+  function dailyPrintHtml(state, projects) {
+    const fmt=value=>new Intl.NumberFormat('zh-TW',{maximumFractionDigits:10}).format(value);
+    let qty=0,amount=0;
+    const sections=projects.map(project=>`<section><h2>${esc(project.name)}</h2><table><thead><tr><th>戶別</th><th>施工項目</th><th>員工</th><th>單位</th><th class="num">單價</th><th class="num">數量</th><th class="num">未稅小計</th></tr></thead><tbody>${project.houses.map(group=>group.rows.map((row,index)=>{qty+=row.qty;amount+=row.amount;return `<tr><td>${index===0?esc(group.house||'—'):''}</td><td>${esc(row.item)}</td><td>${esc(row.employees.join('、'))}</td><td>${esc(row.unit)}</td><td class="num">${esc(fmt(row.price))}</td><td class="num">${esc(fmt(row.qty))}</td><td class="num">${esc(fmt(row.amount))}</td></tr>`}).join('')).join('')}</tbody></table></section>`).join('');
+    return `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>每日業績施工統計</title><style>
+      @page{size:A4 landscape;margin:14mm}*{box-sizing:border-box}body{font-family:"Microsoft JhengHei","PingFang TC",sans-serif;color:#172234;margin:24px;font-size:12px}h1{font-size:24px;margin:0 0 12px}h2{font-size:17px;margin:22px 0 8px;break-after:avoid}p{line-height:1.8;color:#465265}table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{border:1px solid #cbd2dc;padding:8px;text-align:left;overflow-wrap:anywhere;vertical-align:top}th{background:#eef2f6}th:first-child{width:8%}th:nth-child(2){width:24%}th:nth-child(3){width:24%}th:nth-child(4){width:7%}.num{text-align:right;font-variant-numeric:tabular-nums}thead{display:table-header-group}tr{break-inside:avoid}.total{text-align:right;font-weight:bold;margin-top:20px}.toolbar{margin-bottom:24px}.toolbar button{padding:10px 18px;margin-right:12px}@media print{body{margin:0}.toolbar{display:none}}
+      </style></head><body><div class="toolbar"><button onclick="window.print()">列印／另存為 PDF</button><button onclick="window.close()">關閉</button></div><h1>每日業績施工統計</h1><p>篩選期間：${esc(filters.month||'全部')}　員工：${esc(filters.employee?label(state,'employees',filters.employee):'全部')}<br>案場：${esc(filters.project?label(state,'projects',filters.project):'全部')}　關鍵字：${esc(filters.query||'無')}<br>同一篩選期間內依案場、戶別及施工計價整合；金額為來源未稅小計。</p>${sections||'<p>目前篩選條件下沒有施工明細。</p>'}<p class="total">數量合計：${esc(fmt(qty))}　未稅金額合計：${esc(fmt(amount))}</p></body></html>`;
+  }
+  function exportDailyPerformance() {
+    const state=store.getState(),html=dailyPrintHtml(state,dailyPrintProjects(state,dailyBatches(state)));
+    const popup=window.open('','_blank');
+    if(!popup){window.KushePhase1?.toast('請允許彈出視窗以開啟每日業績 PDF 預覽');return}
+    popup.opener=null;popup.document.open();popup.document.write(html);popup.document.close();
+    const print=()=>{if(!popup.closed){popup.focus();popup.print()}};
+    if(popup.document.fonts?.ready)popup.document.fonts.ready.then(()=>popup.requestAnimationFrame(print));
+    else popup.setTimeout(print,100);
+  }
   function dailySection(state,batches) {
-    return `<section class="commission-panel daily-work-panel"><header><div><h2>每日作業</h2><p>沿用既有每日施工流程；抽成、點工與待請款仍由同一筆來源串聯。</p></div></header><div class="commission-table-wrap"><table class="commission-table daily-work-table"><thead><tr><th>日期</th><th>員工</th><th>客戶／案場</th><th>施工項目</th><th class="num">未稅施工額</th><th class="num">抽成</th><th class="num">點工薪資</th><th>請款狀態</th><th>操作</th></tr></thead><tbody>${batches.map((batch)=>{const monthPaidLocked=batch.logs.some((log)=>store.payrollHistoryLock(log.employee,log.date).locked),paidDeleteLocked=batch.logs.some((log)=>store.dailyLogPayrollDeleteLock(log).locked),billingLocked=batch.logs.some((log)=>log.billingId||(log.billingStatus&&log.billingStatus!=='未請款')),actions=paidDeleteLocked?'<span class="commission-status is-settled" title="此紀錄已納入已付款薪資，為保留歷史帳務不可修改或刪除。">已付款鎖定</span>':billingLocked?'<span class="commission-status billing-done" title="此紀錄已進入請款流程，不可修改或刪除。">已請款鎖定</span>':monthPaidLocked?`<div class="commission-row-actions"><span class="commission-status is-settled" title="同月份已有薪資付款，為避免新增薪資來源不可編輯。">編輯鎖定</span><button type="button" data-daily-delete="${esc(batch.batchId)}">刪除</button></div>`:`<div class="commission-row-actions"><button type="button" data-daily-edit="${esc(batch.batchId)}">編輯</button><button type="button" data-daily-delete="${esc(batch.batchId)}">刪除</button></div>`;return `<tr data-daily-batch="${esc(batch.batchId)}"><td>${esc(batch.date)}</td><td><b>${esc(batch.employees.join('、'))}</b></td><td><span class="daily-project-list">${batch.projects.map(esc).join('<br>')}</span></td><td><span class="commission-source">${esc(batch.items.filter(Boolean).slice(0,3).join('、')||'純點工')}${batch.itemCount>3?` 等 ${batch.itemCount} 項`:''}</span></td><td class="num"><b>${money(batch.untaxed)}</b><small>${batch.itemCount} 筆</small></td><td class="num">${money(batch.commission)}</td><td class="num">${money(batch.work)}</td><td><span class="commission-status billing-${batch.billingStatus==='未請款'?'open':batch.billingStatus==='草稿中'?'draft':batch.billingStatus==='已請款'?'done':'none'}">${esc(batch.billingStatus)}</span>${batch.billingAmount>0?`<small>${money(batch.billingAmount)}</small>`:''}</td><td>${actions}</td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="9">此篩選條件下沒有每日作業紀錄。</td></tr>'}</tbody></table></div></section>`;
+    return `<section class="commission-panel daily-work-panel"><header><div><h2>每日作業</h2><p>沿用既有每日施工流程；抽成、點工與待請款仍由同一筆來源串聯。</p></div><button class="commission-secondary" id="exportDailyPerformance" type="button">匯出每日業績 PDF</button></header><div class="commission-table-wrap"><table class="commission-table daily-work-table"><thead><tr><th>日期</th><th>員工</th><th>客戶／案場</th><th>施工項目</th><th class="num">未稅施工額</th><th class="num">抽成</th><th class="num">點工薪資</th><th>請款狀態</th><th>操作</th></tr></thead><tbody>${batches.map((batch)=>{const monthPaidLocked=batch.logs.some((log)=>store.payrollHistoryLock(log.employee,log.date).locked),paidDeleteLocked=batch.logs.some((log)=>store.dailyLogPayrollDeleteLock(log).locked),billingLocked=batch.logs.some((log)=>log.billingId||(log.billingStatus&&log.billingStatus!=='未請款')),actions=paidDeleteLocked?'<span class="commission-status is-settled" title="此紀錄已納入已付款薪資，為保留歷史帳務不可修改或刪除。">已付款鎖定</span>':billingLocked?'<span class="commission-status billing-done" title="此紀錄已進入請款流程，不可修改或刪除。">已請款鎖定</span>':monthPaidLocked?`<div class="commission-row-actions"><span class="commission-status is-settled" title="同月份已有薪資付款，為避免新增薪資來源不可編輯。">編輯鎖定</span><button type="button" data-daily-delete="${esc(batch.batchId)}">刪除</button></div>`:`<div class="commission-row-actions"><button type="button" data-daily-edit="${esc(batch.batchId)}">編輯</button><button type="button" data-daily-delete="${esc(batch.batchId)}">刪除</button></div>`;return `<tr data-daily-batch="${esc(batch.batchId)}"><td>${esc(batch.date)}</td><td><b>${esc(batch.employees.join('、'))}</b></td><td><span class="daily-project-list">${batch.projects.map(esc).join('<br>')}</span></td><td><span class="commission-source">${esc(batch.items.filter(Boolean).slice(0,3).join('、')||'純點工')}${batch.itemCount>3?` 等 ${batch.itemCount} 項`:''}</span></td><td class="num"><b>${money(batch.untaxed)}</b><small>${batch.itemCount} 筆</small></td><td class="num">${money(batch.commission)}</td><td class="num">${money(batch.work)}</td><td><span class="commission-status billing-${batch.billingStatus==='未請款'?'open':batch.billingStatus==='草稿中'?'draft':batch.billingStatus==='已請款'?'done':'none'}">${esc(batch.billingStatus)}</span>${batch.billingAmount>0?`<small>${money(batch.billingAmount)}</small>`:''}</td><td>${actions}</td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="9">此篩選條件下沒有每日作業紀錄。</td></tr>'}</tbody></table></div></section>`;
   }
   function todayProjectsSection(state) {
     const query = filters.query.trim().toLocaleLowerCase('zh-Hant'), groups = new Map();
@@ -219,6 +280,7 @@
     window.KusheIcons?.render($('#commissionsView'));
   }
   function bind() {
+    $('#exportDailyPerformance')?.addEventListener('click', exportDailyPerformance);
     $('#addCommission')?.addEventListener('click', () => openDailyDrawer());
     $('#manualCommission')?.addEventListener('click', () => openDrawer());
     $('#commissionMonthFilter').addEventListener('change', (event) => { filters.month = event.target.value; render(); });
