@@ -46,6 +46,7 @@
     RESTORE_VERIFY_FAILED: '還原驗證失敗，已嘗試恢復原本本機資料。請停止操作。',
     RESTORE_CRITICAL_FAILURE: 'RESTORE CRITICAL FAILURE：原本本機資料也無法完整恢復，請立即停止操作。',
     RESTORE_COMPLETE: '雲端資料已安全還原，即將重新載入 ERP。',
+    RESTORE_HANDOFF_BLOCKED: '資料已完成還原，但同步基準交接未完成。請勿重複還原；需重新核對雲端同步。',
     ERROR: '雲端檢查失敗，請稍後再試。'
   };
   const AUTO_STATUS_TEXT = {
@@ -896,7 +897,10 @@
     return link.download;
   }
 
-  async function restoreRemote() {
+  function restoreRemote() { return coordinate('restore', restoreOperation); }
+
+  async function restoreOperation() {
+    let restoreCommitted = false, restoreSource = false;
     setBusy(true);
 
     try {
@@ -941,9 +945,34 @@
       const store = window.KuSheERPStore;
       if(!store?.replaceSnapshot)throw new CloudSyncError('RESTORE_BLOCKED');
       const currentAuth=await revalidatePrincipal(preflight.auth);
+      // Suspend echo/polling and fence the old baseline before replacing local state.
+      stopCloudEvents(); pauseAutoForConflict(); invalidateApplyBaseline();
+      setSyncOrigin('REMOTE_APPLY'); restoreSource = true;
       const committed=await store.replaceSnapshot(raceTarget.data,{confirmed:true,baseline:preflight.local.storeBaseline});
+      restoreCommitted = ['COMMITTED','COMMITTED_WITH_NOTIFICATION_WARNING'].includes(committed.status);
+      if (!restoreCommitted) throw new CloudSyncError('RESTORE_BLOCKED');
+      const durable = await store.remoteApplyReadiness();
+      if (!durable.safe) throw new CloudSyncError('VERIFY_FAILED');
+      const local = await snapshotInfo(durable.data);
+      const handoffAuth = await revalidatePrincipal(currentAuth);
+      assertOperation(currentAuth);
+      const latestRow = await readRemote(handoffAuth);
+      const latest = await remoteObservation(latestRow);
+      if (!latestRow || !sameSyncVersion(latestRow.sync_version, raceRow.sync_version)
+        || !sameObservation(await remoteObservation(raceRow), latest)) throw new CloudSyncError('RESTORE_RACE_BLOCKED');
+      const saved = await writeBaseline(currentAuth, raceRow, local.fingerprint, async () => {
+        const verified = await store.remoteApplyReadiness(durable.baseline);
+        assertOperation(currentAuth);
+        return Boolean(verified.safe);
+      });
+      if (!saved) throw new CloudSyncError('VERIFY_FAILED');
+      autoArmed = true;
+      if (!autoStarted) { autoStarted = true; autoGeneration += 1; ensureAutoListeners(); }
+      setAutoState('ARMED', { pending: false, armed: true });
+      setSyncOrigin('USER_LOCAL_EDIT'); restoreSource = false;
+      startCloudEvents();
 
-      currentStatus = classified('RESTORE_COMPLETE', currentAuth, preflight.local, raceTarget, raceRow, false, false);
+      currentStatus = classified('RESTORE_COMPLETE', currentAuth, local, raceTarget, raceRow, false, false);
       if(committed.status==='COMMITTED_WITH_NOTIFICATION_WARNING'){
         currentStatus.message='資料已儲存，但畫面更新／通知失敗，請勿重複送出。請自行重新載入。';
         render(currentStatus);return publicStatus();
@@ -952,10 +981,18 @@
       window.requestAnimationFrame(() => window.location.reload());
       return publicStatus();
     } catch (error) {
+      if (restoreCommitted) {
+        autoArmed = false;
+        try { invalidateApplyBaseline(); } catch (_) {}
+        setAutoState('MANUAL_REQUIRED', { pending: false, armed: false });
+        currentStatus = failure('RESTORE_HANDOFF_BLOCKED');
+        return publicStatus();
+      }
       const code=error?.transactionStatus==='RECOVERY_REQUIRED'?'RESTORE_CRITICAL_FAILURE':error?.transactionStatus==='ROLLED_BACK'?'RESTORE_VERIFY_FAILED':error?.code==='STALE_STORE_STATE'?'RESTORE_RACE_BLOCKED':error?.code==='SECRET_BLOCKED'?'RESTORE_BLOCKED':(error?.code||'RESTORE_BLOCKED');
       currentStatus=failure(code);
       return publicStatus();
     } finally {
+      if (restoreSource) setSyncOrigin('USER_LOCAL_EDIT');
       setBusy(false);
     }
   }
