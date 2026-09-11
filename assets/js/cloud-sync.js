@@ -1194,12 +1194,64 @@
     return true;
   }
 
+  function legacyRestoreEquivalent(local, remote) {
+    const audit = local?.audit?.[0], revision = audit?.sourceBusinessRevision;
+    if (!isPlainObject(local?.meta) || !isPlainObject(remote?.meta)
+      || !Array.isArray(local.audit) || !Array.isArray(remote.audit)
+      || audit?.action !== '使用者確認雲端快照還原' || !isPlainObject(revision)
+      || !Number.isSafeInteger(revision.sequence) || revision.sequence <= 0
+      || !['id', 'operationId', 'committedAt'].every(key => typeof revision[key] === 'string' && revision[key])
+      || typeof revision.parentId !== 'string' || !Number.isFinite(Date.parse(revision.committedAt))
+      || JSON.stringify(canonicalize(revision)) !== JSON.stringify(canonicalize(remote.meta.businessSnapshotRevision))) return false;
+    // Compare every field; only the proven restore commit's provenance is excluded.
+    const left = deepClone(local), right = deepClone(remote);
+    left.audit.shift();
+    for (const value of [left, right]) {
+      delete value.meta.updatedAt;
+      delete value.meta.businessSnapshotRevision;
+      delete value.meta.receiptCommitVersion;
+    }
+    return JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right));
+  }
+
+  async function recoverLegacyRestoreBaseline(checked, generation) {
+    const { auth, local, remote } = checked, store = window.KuSheERPStore;
+    const editor = editorReadiness();
+    const allowed = () => activeAutoRun(generation) && syncOrigin !== 'REMOTE_APPLY'
+      && observedPrincipal() === auth.user.id && editorReadiness().safe
+      && editorReadiness().generation === editor.generation
+      && window.localStorage.getItem(AUTO_BASELINE_KEY) === null
+      && window.localStorage.getItem(AUTO_APPLY_PENDING_KEY) === null;
+    if (!editor.safe || !allowed() || !checked.remoteExists || !local?.score || !remote?.score
+      || serverSyncVersion(checked.syncVersion) === null
+      || !Number.isFinite(Date.parse(checked.remoteUpdatedAt))) return false;
+    const ready = await store?.remoteApplyReadiness?.(local.storeBaseline);
+    if (!ready?.safe || !allowed() || !legacyRestoreEquivalent(ready.data, remote.data)) return false;
+    const committed = await snapshotInfo(ready.data);
+    if (committed.fingerprint !== local.fingerprint) return false;
+    const row = await readRemote(await revalidatePrincipal(auth));
+    if (!row || !sameSyncVersion(row.sync_version, checked.syncVersion) || row.updated_at !== checked.remoteUpdatedAt) return false;
+    const accepted = await validateRemoteSnapshot(row.data, row.updated_at);
+    if (accepted.fingerprint !== remote.fingerprint || !legacyRestoreEquivalent(ready.data, row.data) || !allowed()) return false;
+    const saved = await writeBaseline(auth, row, committed.fingerprint, async () => {
+      const final = await store.remoteApplyReadiness(ready.baseline);
+      return Boolean(final.safe && allowed());
+    });
+    if (!saved) return false;
+    autoArmed = true;
+    autoRetryMode = ''; autoPendingVerification = null;
+    currentStatus = classified('SYNCED', auth, committed, accepted, row, false, false);
+    setAutoState('ARMED', { pending: false, armed: true });
+    return true;
+  }
+
   async function evaluateAutoStartOperation(generation) {
     try {
       const checked = await inspectCore();
       if (!activeAutoRun(generation)) return autoStatus();
       if (!readBaseline(checked.auth.user.id)) {
         if (await recoverSameStateBaseline(checked, generation)) return autoStatus();
+        if (await recoverLegacyRestoreBaseline(checked, generation)) return autoStatus();
         autoArmed = false;
         return setAutoState('PRINCIPAL_UNBOUND', { pending: false, armed: false });
       }
