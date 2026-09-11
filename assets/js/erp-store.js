@@ -4,12 +4,123 @@
   const DB_STORE = 'erp';
   const STATE_KEY = 'main';
   const EMERGENCY_KEY = 'KuSheERP25_EMERGENCY';
+  const RECEIPT_RECOVERY_KEY = 'KuSheERP25_RECEIPT_RECOVERY_REQUIRED';
+  const RECEIPT_ACTIVE_KEY = 'KuSheERP25_RECEIPT_TRANSACTION_ACTIVE';
+  const RECEIPT_COMMIT_KEY = 'KuSheERP25_RECEIPT_COMMIT_VERSION';
+  const STORE_RECOVERY_KEY = 'KuSheERP25_STORE_RECOVERY_REQUIRED';
+  const STORE_COMMIT_KEY = 'KuSheERP25_LOCAL_COMMIT_TOKEN';
+  const STORE_JOURNAL_KEY = 'store:transaction:journal:v1';
+  const STORE_JOURNAL_SCHEMA = 'kushe-store-transaction-v1';
+  const STORE_JOURNAL_MAX_BYTES = 32 * 1024 * 1024;
+  const STORE_LOCK_NAME = `${DB_NAME}:business-persist`;
   let state = null;
+  let publishedState = null;
   let db = null;
+  let loadedPersistentHadValue = false;
+  let loadedPersistentFingerprint = '';
+  let loadedEmergencyRaw = null;
+  let settledStateFingerprint = '';
+  let storeCommitTokenSeen = null;
+  let storeRecoveryBlocked = null;
+  let activeStoreTransaction = null;
+  let storeWriterQueue = Promise.resolve();
+  let queuedStoreWriters = 0, activeStoreWriters = 0, storeWriterEpoch = 0;
+  function enqueueStoreWriter(work) {
+    queuedStoreWriters += 1;
+    storeWriterEpoch += 1;
+    const run = async () => {
+      queuedStoreWriters -= 1;
+      activeStoreWriters += 1;
+      try { return await work(); }
+      finally { activeStoreWriters -= 1; }
+    };
+    const pending = storeWriterQueue.then(run, run);
+    storeWriterQueue = pending.catch(() => {});
+    return pending;
+  }
+  let storeLoadPromise = null;
+  let lastStoreTransactionResult = null;
 
   const num = (value) => Number(value) || 0;
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const monthOf = (value) => String(value || '').slice(0, 7);
+  const CUSTOMER_DEDUCTION_CATEGORIES = Object.freeze(['垃圾清運費','清潔費','修繕／缺失扣款','管理費／水電','工安／罰款','代墊／代扣','其他扣款']);
+  const RECEIPT_MONEY_PATTERN = /^-?\d+(?:\.\d+)?$/;
+  const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
+  function strictReceiptMoney(value, label, options = {}) {
+    const minimum=options.minimum??0,raw=typeof value==='string'?value.trim():value;
+    if((typeof raw!=='string'&&typeof raw!=='number')||(typeof raw==='string'&&(!raw||!RECEIPT_MONEY_PATTERN.test(raw))))throw new Error(`${label}必須是有效數值`);
+    const numeric=Number(raw);
+    if(!Number.isFinite(numeric))throw new Error(`${label}必須是有限數值`);
+    if(numeric<minimum)throw new Error(`${label}${minimum>0?'必須大於 0':'不可為負數'}`);
+    const rounded=Math.round(numeric);
+    if(!Number.isSafeInteger(rounded))throw new Error(`${label}超出可支援金額範圍`);
+    if(minimum>0&&rounded<=0)throw new Error(`${label}必須大於 0`);
+    return Object.is(rounded,-0)?0:rounded;
+  }
+  function strictReceiptSignedMoney(value, label) {
+    const raw=typeof value==='string'?value.trim():value;
+    if((typeof raw!=='string'&&typeof raw!=='number')||(typeof raw==='string'&&(!raw||!RECEIPT_MONEY_PATTERN.test(raw))))throw new Error(`${label}必須是有效數值`);
+    const numeric=Number(raw);
+    if(!Number.isFinite(numeric))throw new Error(`${label}必須是有限數值`);
+    const rounded=Math.round(numeric);
+    if(!Number.isSafeInteger(rounded))throw new Error(`${label}超出可支援金額範圍`);
+    return Object.is(rounded,-0)?0:rounded;
+  }
+  function safeReceiptMoneySum(values, label) {
+    let total=0;
+    values.forEach((value)=>{total+=value;if(!Number.isSafeInteger(total))throw new Error(`${label}超出可支援金額範圍`)});
+    return total;
+  }
+  const receiptCashAmount = (receipt) => Math.max(0,Math.round(num(receipt?.cashAmount ?? receipt?.amount)));
+  function receiptDeductions(receipt) {
+    const rows=Array.isArray(receipt?.deductions)?receipt.deductions.filter((row)=>row&&num(row.amount)>0).map((row)=>({id:String(row.id||''),category:CUSTOMER_DEDUCTION_CATEGORIES.includes(row.category)?row.category:'其他扣款',amount:Math.max(0,Math.round(num(row.amount))),note:String(row.note||'')})):[];
+    if(rows.length)return rows;
+    const legacyAggregate=Math.max(0,Math.round(num(receipt?.deductionAmount)));
+    return legacyAggregate?[{id:'',category:'其他扣款',amount:legacyAggregate,note:''}]:[];
+  }
+  const receiptDeductionAmount = (receipt) => receiptDeductions(receipt).reduce((sum,row)=>sum+num(row.amount),0);
+  function resolveReceiptProjectRelation(ar, receipt = null, sourceState = state) {
+    const data=sourceState&&typeof sourceState==='object'?sourceState:{},receivables=Array.isArray(data.receivables)?data.receivables:[],billings=Array.isArray(data.billings)?data.billings:[],projects=Array.isArray(data.projects)?data.projects:[];
+    if(!ar||typeof ar!=='object'||Array.isArray(ar))throw new Error('收款找不到唯一應收帳款');
+    const arId=String(ar.id||''),billingId=String(ar.billingId||''),sourceNo=String(ar.sourceNo||''),billingMatches=billings.filter((row)=>(billingId&&String(row.id||'')===billingId)||(sourceNo&&String(row.number||'')===sourceNo));
+    if(billingMatches.length!==1)throw new Error(billingMatches.length?'應收帳款對應到多筆請款單':'應收帳款找不到唯一請款單');
+    const billing=billingMatches[0],linkedReceivables=receivables.filter((row)=>(String(billing.id||'')&&String(row.billingId||'')===String(billing.id||''))||(String(billing.number||'')&&String(row.sourceNo||'')===String(billing.number||'')));
+    if(linkedReceivables.length!==1||String(linkedReceivables[0].id||'')!==arId||billing.receivableId&&String(billing.receivableId)!==arId)throw new Error('請款單與應收帳款不是唯一一對一關聯');
+    if(receipt?.receivableId&&String(receipt.receivableId)!==arId)throw new Error('收款與應收帳款關聯不一致');
+    if(receipt?.billingId&&String(receipt.billingId)!==String(billing.id||''))throw new Error('收款與請款單關聯不一致');
+    const identity=(row,keys)=>[...new Set(keys.map((key)=>String(row?.[key]||'')).filter(Boolean))],arProjects=identity(ar,['project','projectId']),billingProjects=identity(billing,['project','projectId']);
+    if(arProjects.length!==1||billingProjects.length!==1||arProjects[0]!==billingProjects[0])throw new Error('應收帳款與請款單的案場歸屬不一致');
+    const projectMatches=projects.filter((row)=>String(row.id||'')===arProjects[0]);
+    if(projectMatches.length!==1)throw new Error('客戶扣款找不到唯一正式案場主檔');
+    const project=projectMatches[0],arCustomers=identity(ar,['customer','customerId']),billingCustomers=identity(billing,['customer','customerId']),projectCustomers=identity(project,['customer','customerId']);
+    if(arCustomers.length!==1||billingCustomers.length!==1||projectCustomers.length!==1||arCustomers[0]!==billingCustomers[0]||arCustomers[0]!==projectCustomers[0])throw new Error('應收、請款與案場的客戶歸屬不一致');
+    return {ar,billing,project,projectId:arProjects[0],customerId:arCustomers[0]};
+  }
+  function projectCustomerDeductions(projectId, sourceState = state) {
+    const data=sourceState&&typeof sourceState==='object'?sourceState:{},target=String(projectId||'');
+    if(!target)return [];
+    const receivables=Array.isArray(data.receivables)?data.receivables:[],receipts=Array.isArray(data.receipts)?data.receipts:[];
+    return receipts.flatMap((receipt)=>{
+      const arMatches=receivables.filter((row)=>String(row.id||'')===String(receipt?.receivableId||''));
+      if(arMatches.length!==1)return [];
+      const ar=arMatches[0];let relation;try{relation=resolveReceiptProjectRelation(ar,receipt,data)}catch(_){return []}
+      if(relation.projectId!==target)return [];
+      return receiptDeductions(receipt).map((deduction)=>({receiptId:String(receipt.id||''),receivableId:String(ar.id||''),billingId:String(relation.billing.id||''),billingNo:String(relation.billing.number||ar.sourceNo||''),date:String(receipt.date||''),category:deduction.category,amount:deduction.amount,note:deduction.note||''}));
+    });
+  }
+  const projectCustomerDeductionCost = (projectId, sourceState = state) => projectCustomerDeductions(projectId,sourceState).reduce((sum,row)=>sum+num(row.amount),0);
+  const receiptSettlementAmount = (receipt) => receipt?.settlementAmount===undefined?receiptCashAmount(receipt)+receiptDeductionAmount(receipt):Math.max(0,Math.round(num(receipt.settlementAmount)));
+  function normalizeCustomerDeductions(values) {
+    if(values===undefined)return [];
+    if(!Array.isArray(values))throw new Error('客戶扣款明細格式不正確');
+    return values.map((row)=>{
+      if(!row||typeof row!=='object'||Array.isArray(row))throw new Error('客戶扣款明細格式不正確');
+      const category=String(row.category||'').trim(),amount=strictReceiptMoney(row.amount,'每筆客戶扣款金額',{minimum:Number.EPSILON}),note=String(row.note||'').trim();
+      if(!CUSTOMER_DEDUCTION_CATEGORIES.includes(category))throw new Error('請選擇有效的客戶扣款類別');
+      return {id:String(row?.id||uid()),category,amount,note};
+    });
+  }
   const businessDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Taipei', year:'numeric', month:'2-digit', day:'2-digit' });
   const businessDate = (date = new Date()) => {
     const parts = Object.fromEntries(businessDateFormatter.formatToParts(date).map((part) => [part.type, part.value]));
@@ -107,6 +218,159 @@
       request.onerror = () => reject(request.error);
     });
   }
+  function dbGetCommitted(key) {
+    return new Promise((resolve, reject) => {
+      let transaction,request,result,requestError;
+      try { transaction=db.transaction(DB_STORE,'readonly');request=transaction.objectStore(DB_STORE).get(key); }
+      catch(error){reject(error);return}
+      request.onsuccess=()=>{result=request.result};
+      request.onerror=()=>{requestError=request.error};
+      transaction.oncomplete=()=>resolve(result);
+      transaction.onabort=()=>reject(transaction.error||requestError||new Error('IndexedDB 讀取交易已中止'));
+      transaction.onerror=()=>{};
+    });
+  }
+  function dbSetCommitted(key, value) {
+    return new Promise((resolve, reject) => {
+      let transaction,request,requestError;
+      try { transaction=db.transaction(DB_STORE,'readwrite');request=transaction.objectStore(DB_STORE).put(value,key); }
+      catch(error){reject(error);return}
+      request.onerror=()=>{requestError=request.error};
+      transaction.oncomplete=()=>resolve(true);
+      transaction.onabort=()=>reject(transaction.error||requestError||new Error('IndexedDB 寫入交易已中止'));
+      transaction.onerror=()=>{};
+    });
+  }
+  function dbDeleteCommitted(key) {
+    return new Promise((resolve, reject) => {
+      let transaction,request,requestError;
+      try { transaction=db.transaction(DB_STORE,'readwrite');request=transaction.objectStore(DB_STORE).delete(key); }
+      catch(error){reject(error);return}
+      request.onerror=()=>{requestError=request.error};
+      transaction.oncomplete=()=>resolve(true);
+      transaction.onabort=()=>reject(transaction.error||requestError||new Error('IndexedDB 復原交易已中止'));
+      transaction.onerror=()=>{};
+    });
+  }
+  const storeStateClone = (value) => structuredClone(value);
+  function storeStateFingerprint(value) {
+    const seen=new Map();let nextId=1;
+    const encode=(current)=>{
+      if(current===undefined)return ['undefined'];
+      if(current===null)return ['null'];
+      if(typeof current==='number')return Number.isNaN(current)?['number','NaN']:current===Infinity?['number','Infinity']:current===-Infinity?['number','-Infinity']:Object.is(current,-0)?['number','-0']:['number',String(current)];
+      if(typeof current==='string'||typeof current==='boolean'||typeof current==='bigint')return [typeof current,String(current)];
+      if(typeof current!=='object')return [typeof current,String(current)];
+      if(seen.has(current))return ['reference',seen.get(current)];
+      const id=nextId++;seen.set(current,id);
+      if(current instanceof Date)return ['date',id,current.toISOString()];
+      if(Array.isArray(current))return ['array',id,current.map(encode)];
+      return ['object',id,Object.keys(current).sort().map((key)=>[key,encode(current[key])])];
+    };
+    return JSON.stringify(encode(value));
+  }
+  function freezeStoreState(value, seen = new Set()) {
+    if(!value||typeof value!=='object'||seen.has(value))return value;
+    seen.add(value);Object.keys(value).forEach((key)=>freezeStoreState(value[key],seen));return Object.freeze(value);
+  }
+  const storeError=(message,code,details={})=>Object.assign(new Error(message),{code,...details});
+  function parseStoreJson(raw,label) {
+    if(raw===null||raw===undefined||raw==='')return null;
+    try{return JSON.parse(raw)}catch(cause){throw storeError(`${label}格式損毀，已停止資料寫入`,'STORE_METADATA_INVALID',{cause})}
+  }
+  function storeRevisionOf(value) {
+    const revision=value?.meta?.businessSnapshotRevision;
+    if(!revision||typeof revision!=='object'||Array.isArray(revision))return {sequence:0,id:'',parentId:'',operationId:'',committedAt:''};
+    const sequence=Number(revision.sequence);
+    if(!Number.isSafeInteger(sequence)||sequence<0||typeof revision.id!=='string'||(sequence===0&&revision.id)||(sequence>0&&!revision.id))throw storeError('業務快照版本格式不正確，已停止資料寫入','STORE_REVISION_INVALID');
+    return {sequence,id:revision.id,parentId:String(revision.parentId||''),operationId:String(revision.operationId||''),committedAt:String(revision.committedAt||'')};
+  }
+  function dbReplaceStateCas(expectedFingerprint,nextState,journal,options={}) {
+    return new Promise((resolve,reject)=>{
+      let transaction,store,stateRequest,journalRequest,requestError,currentFingerprint='',currentJournalFingerprint='',stateReady=false,journalReady=false,written=false;
+      try{
+        transaction=db.transaction(DB_STORE,'readwrite');store=transaction.objectStore(DB_STORE);stateRequest=store.get(STATE_KEY);journalRequest=store.get(STORE_JOURNAL_KEY);
+      }catch(error){reject(error);return}
+      const write=()=>{
+        if(written||!stateReady||!journalReady)return;
+        written=true;
+        try{
+          currentFingerprint=storeStateFingerprint(stateRequest.result);currentJournalFingerprint=storeStateFingerprint(journalRequest.result);
+          if(currentFingerprint!==expectedFingerprint){requestError=storeError('IndexedDB 基準已變更，拒絕覆蓋較新資料','STORE_CAS_MISMATCH');transaction.abort();return}
+          if(Object.prototype.hasOwnProperty.call(options,'expectedJournalFingerprint')&&currentJournalFingerprint!==options.expectedJournalFingerprint){requestError=storeError('交易 journal 基準已變更，拒絕覆蓋其他操作','STORE_JOURNAL_CAS_MISMATCH');transaction.abort();return}
+          options.preCommitGuard?.();
+          if(options.deleteState)store.delete(STATE_KEY);else store.put(nextState,STATE_KEY);
+          if(journal===undefined)store.delete(STORE_JOURNAL_KEY);else store.put(journal,STORE_JOURNAL_KEY);
+        }catch(error){requestError=error;try{transaction.abort()}catch(_){}}
+      };
+      stateRequest.onsuccess=()=>{stateReady=true;write()};journalRequest.onsuccess=()=>{journalReady=true;write()};
+      stateRequest.onerror=()=>{requestError=stateRequest.error};journalRequest.onerror=()=>{requestError=journalRequest.error};
+      transaction.oncomplete=()=>resolve({previousFingerprint:currentFingerprint,previousJournalFingerprint:currentJournalFingerprint});
+      transaction.onabort=()=>reject(requestError||transaction.error||storeError('IndexedDB 交易已中止','STORE_IDB_ABORTED'));
+      transaction.onerror=()=>{};
+    });
+  }
+  function dbAdvanceStoreJournal(expectedFingerprint,operationId,expectedPhase,journal) {
+    return new Promise((resolve,reject)=>{
+      let transaction,store,stateRequest,journalRequest,requestError,currentFingerprint='',stateReady=false,journalReady=false,written=false;
+      try{transaction=db.transaction(DB_STORE,'readwrite');store=transaction.objectStore(DB_STORE);stateRequest=store.get(STATE_KEY);journalRequest=store.get(STORE_JOURNAL_KEY)}
+      catch(error){reject(error);return}
+      const write=()=>{
+        if(written||!stateReady||!journalReady)return;
+        written=true;
+        try{
+          currentFingerprint=storeStateFingerprint(stateRequest.result);
+          if(currentFingerprint!==expectedFingerprint){requestError=storeError('提交完成前資料版本已變更','STORE_FINALIZE_CONFLICT');transaction.abort();return}
+          const currentJournal=journalRequest.result;
+          if(currentJournal?.schema!==STORE_JOURNAL_SCHEMA||String(currentJournal?.operationId||'')!==String(operationId||'')||String(currentJournal?.phase||'')!==String(expectedPhase||'')){requestError=storeError('交易 journal 已由其他操作變更，拒絕覆蓋','STORE_JOURNAL_OWNERSHIP_CONFLICT');transaction.abort();return}
+          store.put(journal,STORE_JOURNAL_KEY);
+        }catch(error){requestError=error;try{transaction.abort()}catch(_){}}
+      };
+      stateRequest.onsuccess=()=>{stateReady=true;write()};journalRequest.onsuccess=()=>{journalReady=true;write()};
+      stateRequest.onerror=()=>{requestError=stateRequest.error};journalRequest.onerror=()=>{requestError=journalRequest.error};
+      transaction.oncomplete=()=>resolve(true);
+      transaction.onabort=()=>reject(requestError||transaction.error||storeError('IndexedDB 提交完成交易已中止','STORE_IDB_ABORTED'));
+      transaction.onerror=()=>{};
+    });
+  }
+  function dbRestoreStoreCheckpointCas(checkpoint,afterFingerprint,rollbackJournal) {
+    return new Promise((resolve,reject)=>{
+      let transaction,store,stateRequest,journalRequest,requestError,stateReady=false,journalReady=false,written=false;
+      try{transaction=db.transaction(DB_STORE,'readwrite');store=transaction.objectStore(DB_STORE);stateRequest=store.get(STATE_KEY);journalRequest=store.get(STORE_JOURNAL_KEY)}
+      catch(error){reject(error);return}
+      const write=()=>{
+        if(written||!stateReady||!journalReady)return;
+        written=true;
+        try{
+          const currentFingerprint=storeStateFingerprint(stateRequest.result),currentJournal=journalRequest.result,currentJournalFingerprint=storeStateFingerprint(currentJournal);
+          const ownsAfter=currentFingerprint===afterFingerprint&&currentJournal?.schema===STORE_JOURNAL_SCHEMA&&String(currentJournal?.operationId||'')===checkpoint.operationId&&['PRIMARY_WRITTEN','EMERGENCY_WRITTEN','TOKENS_WRITTEN','COMMIT_VERIFIED'].includes(String(currentJournal?.phase||''));
+          const ownsBefore=currentFingerprint===checkpoint.persistentFingerprint&&(currentJournalFingerprint===checkpoint.journalFingerprint||currentJournal?.schema===STORE_JOURNAL_SCHEMA&&String(currentJournal?.operationId||'')===checkpoint.operationId&&String(currentJournal?.phase||'')==='ROLLBACK_PRIMARY_RESTORED');
+          if(!ownsAfter&&!ownsBefore){requestError=storeError('IndexedDB 或交易 journal 已不是本操作可安全復原的狀態','STORE_RECOVERY_CONFLICT');transaction.abort();return}
+          if(checkpoint.persistentHadValue)store.put(checkpoint.persistent,STATE_KEY);else store.delete(STATE_KEY);
+          store.put(rollbackJournal,STORE_JOURNAL_KEY);
+        }catch(error){requestError=error;try{transaction.abort()}catch(_){}}
+      };
+      stateRequest.onsuccess=()=>{stateReady=true;write()};journalRequest.onsuccess=()=>{journalReady=true;write()};
+      stateRequest.onerror=()=>{requestError=stateRequest.error};journalRequest.onerror=()=>{requestError=journalRequest.error};
+      transaction.oncomplete=()=>resolve(true);
+      transaction.onabort=()=>reject(requestError||transaction.error||storeError('IndexedDB 復原交易已中止','STORE_IDB_ABORTED'));
+      transaction.onerror=()=>{};
+    });
+  }
+  function dbWriteRecoveryJournalIfOwned(operationId,baselineJournalFingerprint,journal) {
+    return new Promise((resolve,reject)=>{
+      let transaction,store,request,requestError;
+      try{transaction=db.transaction(DB_STORE,'readwrite');store=transaction.objectStore(DB_STORE);request=store.get(STORE_JOURNAL_KEY)}catch(error){reject(error);return}
+      request.onsuccess=()=>{
+        try{
+          const current=request.result,owned=current?.schema===STORE_JOURNAL_SCHEMA&&String(current?.operationId||'')===String(operationId||''),baseline=storeStateFingerprint(current)===baselineJournalFingerprint;
+          if(!owned&&!baseline){requestError=storeError('其他操作已更新交易 journal，保留其診斷資料','STORE_JOURNAL_OWNERSHIP_CONFLICT');transaction.abort();return}
+          store.put(journal,STORE_JOURNAL_KEY);
+        }catch(error){requestError=error;try{transaction.abort()}catch(_){}}
+      };
+      request.onerror=()=>{requestError=request.error};transaction.oncomplete=()=>resolve(true);transaction.onabort=()=>reject(requestError||transaction.error||storeError('交易復原 journal 寫入中止','STORE_IDB_ABORTED'));transaction.onerror=()=>{};
+    });
+  }
   function mergeQuotationUnitPresets(...sources) {
     if (!state.settings || typeof state.settings !== 'object' || Array.isArray(state.settings)) state.settings = {};
     const existing = Array.isArray(state.settings.quotationUnitPresets) ? state.settings.quotationUnitPresets : [];
@@ -120,14 +384,14 @@
     return merged;
   }
   async function saveQuotationUnitPreset(value) {
-    await load();
+    requireStoreTransactionDraft();
     const unit = clean(value);
     if (!unit) return false;
     const presets = Array.isArray(state.settings.quotationUnitPresets) ? state.settings.quotationUnitPresets : [], key = unit.toLocaleLowerCase('zh-Hant');
     if (presets.some((item) => clean(item).toLocaleLowerCase('zh-Hant') === key)) return false;
     const previous = [...presets];
     mergeQuotationUnitPresets(unit);
-    try { await persist(`新增報價單位 ${unit}`); }
+    try { persist(`新增報價單位 ${unit}`); }
     catch (error) { state.settings.quotationUnitPresets = previous; throw error; }
     return true;
   }
@@ -137,7 +401,7 @@
     return presets.filter((row) => row && clean(row.id) && String(row.customerId) === target && clean(row.text)).map((row) => ({...row,text:clean(row.text)})).sort((a,b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
   }
   async function saveQuotationPublicNotePreset(customerId, value) {
-    await load();
+    requireStoreTransactionDraft();
     const target = clean(customerId), text = clean(value), customer = state.customers.find((row) => String(row.id) === target);
     if (!customer || !text) throw new Error('請先選擇客戶並輸入對外備註');
     const previous = Array.isArray(state.settings.quotationPublicNotePresets) ? state.settings.quotationPublicNotePresets : undefined;
@@ -145,30 +409,138 @@
     const row = index >= 0 ? {...presets[index],text,updatedAt:now} : {id:uid(),customerId:target,text,createdAt:now,updatedAt:now};
     if (index >= 0) presets.splice(index,1);
     presets.unshift(row); state.settings.quotationPublicNotePresets = presets;
-    try { await persist(`儲存 ${customer.name} 常用對外備註`); }
+    try { persist(`儲存 ${customer.name} 常用對外備註`); }
     catch (error) { if (previous === undefined) delete state.settings.quotationPublicNotePresets; else state.settings.quotationPublicNotePresets = previous; throw error; }
     return row;
   }
   async function deleteQuotationPublicNotePreset(customerId, presetId) {
-    await load();
+    requireStoreTransactionDraft();
     const target = clean(customerId), id = clean(presetId), previous = Array.isArray(state.settings.quotationPublicNotePresets) ? state.settings.quotationPublicNotePresets : undefined;
     const presets = previous || [], row = presets.find((item) => clean(item?.id) === id && String(item?.customerId) === target);
     if (!row) throw new Error('找不到此客戶的常用備註範本');
     state.settings.quotationPublicNotePresets = presets.filter((item) => item !== row);
-    try { await persist('刪除客戶常用對外備註'); }
+    try { persist('刪除客戶常用對外備註'); }
     catch (error) { state.settings.quotationPublicNotePresets = previous; throw error; }
     return true;
   }
-  async function load() {
-    if (state) return state;
+  // P16 selected a positive-score primary before consulting Emergency. Bootstrap
+  // that exact snapshot before applying versioned mirror/journal requirements.
+  // The primary and its recoverable bootstrap journal are one IDB transaction.
+  async function bootstrapLegacyStore() {
+    // Replacement verifies a versioned reload while already owning this lock.
+    // Do not reacquire it for states handled by ordinary versioned validation.
+    const initial=await readStorageObservation(),initialJournal=initial.values[STORE_JOURNAL_KEY];
+    if(initialJournal&&!(initialJournal.operationType==='legacyBootstrap'&&initialJournal.phase!=='COMMIT_VERIFIED'))return;
+    if(!initialJournal&&(storeRevisionOf(initial.values[STATE_KEY]).id||storeRevisionOf(parseStoreJson(initial.local[EMERGENCY_KEY],'Emergency')).id))return;
+    if(!navigator.locks?.request)throw storeError('缺少安全交易鎖，無法升級舊資料','STORE_LOCK_UNAVAILABLE');
+    return navigator.locks.request(STORE_LOCK_NAME,{mode:'exclusive'},async()=>{
+      let observation=await readStorageObservation(),journal=observation.values[STORE_JOURNAL_KEY];
+      const blocked=()=>storeError('舊資料升級證據已變更，保持停止','LEGACY_BOOTSTRAP_CONFLICT');
+      const assertNoMarkers=(value)=>{
+        for(const key of [STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY])if(value.values[key]||value.local[key]||value.session[key])throw blocked();
+        if(value.local[RECEIPT_ACTIVE_KEY])throw blocked();
+      };
+      // Normal versioned/recovery states retain their existing verification path.
+      if(journal?.operationType!=='legacyBootstrap'||journal.phase==='COMMIT_VERIFIED'){
+        if(journal)return;
+        const primary=observation.values[STATE_KEY],emergency=parseStoreJson(observation.local[EMERGENCY_KEY],'Emergency');
+        if(storeRevisionOf(primary).id||storeRevisionOf(emergency).id)return;
+        const authority=score(primary)>0?primary:score(emergency)>0?emergency:null;
+        if(!authority)return;
+        assertNoMarkers(observation);
+        if(observation.local[STORE_COMMIT_KEY]!==null)throw blocked();
+        if(String(authority?.meta?.receiptCommitVersion||'')!==String(observation.local[RECEIPT_COMMIT_KEY]||''))throw storeError('舊收款版本與快照不一致，停止升級','STALE_AFTER_RECEIPT_COMMIT');
+        if(!authority||typeof authority!=='object'||Array.isArray(authority)||authority.meta!=null&&(typeof authority.meta!=='object'||Array.isArray(authority.meta)))throw blocked();
+        const after=JSON.parse(JSON.stringify(authority)),now=new Date().toISOString(),operationId=`bootstrap-${uid()}`;
+        const revision={sequence:1,id:`store-${uid()}`,parentId:'',operationId,committedAt:now};
+        if(!after.meta)after.meta={};
+        after.meta.businessSnapshotRevision=revision;after.meta.receiptCommitVersion=revision.id;
+        const fingerprint=storeStateFingerprint(after),digest=storeFingerprintDigest(fingerprint);
+        journal={schema:STORE_JOURNAL_SCHEMA,operationType:'legacyBootstrap',operationId,phase:'PRIMARY_WRITTEN',startedAt:now,updatedAt:now,
+          before:{persistentHadValue:primary!==undefined,state:primary===undefined?null:primary,emergencyRaw:observation.local[EMERGENCY_KEY],localCommitTokenRaw:observation.local[STORE_COMMIT_KEY],receiptCommitTokenRaw:observation.local[RECEIPT_COMMIT_KEY],journal:null,authority:score(primary)>0?'IndexedDB':'Emergency',authoritativeState:authority},
+          after:{businessSnapshotRevision:revision,stateFingerprint:digest},
+          bootstrapSnapshot:after,
+          bootstrapToken:JSON.stringify({schema:STORE_JOURNAL_SCHEMA,revisionId:revision.id,sequence:1,stateFingerprint:digest,committedAt:now})};
+        await storeCheckpointCapacity(journal);
+        const captured=storeStateFingerprint(observation);
+        if(storeStateFingerprint(await readStorageObservation())!==captured)throw blocked();
+        await dbReplaceStateCas(storeStateFingerprint(primary),after,journal,{expectedJournalFingerprint:storeStateFingerprint(undefined)});
+        observation=await readStorageObservation();
+      }
+      if(!['PRIMARY_WRITTEN','EMERGENCY_WRITTEN','TOKENS_WRITTEN'].includes(journal.phase))throw blocked();
+      assertNoMarkers(observation);
+      const before=journal.before,after=journal.bootstrapSnapshot,revision=storeRevisionOf(after);
+      if(journal.schema!==STORE_JOURNAL_SCHEMA||!before||!after||revision.sequence!==1||revision.parentId!==''||!revision.id||revision.operationId!==journal.operationId||before.journal!==null)throw blocked();
+      const selected=before.authority==='IndexedDB'&&before.persistentHadValue&&score(before.state)>0?before.state:before.authority==='Emergency'&&score(before.state)<=0?parseStoreJson(before.emergencyRaw,'Legacy Emergency'):null;
+      if(!selected||score(selected)<=0||storeRevisionOf(selected).id||storeStateFingerprint(selected)!==storeStateFingerprint(before.authoritativeState))throw blocked();
+      const reconstructed=JSON.parse(JSON.stringify(selected));if(!reconstructed.meta)reconstructed.meta={};
+      reconstructed.meta.businessSnapshotRevision=revision;reconstructed.meta.receiptCommitVersion=revision.id;
+      const fingerprint=storeStateFingerprint(after),digest=storeFingerprintDigest(fingerprint),emergencyRaw=JSON.stringify(after);
+      const expectedToken=JSON.stringify({schema:STORE_JOURNAL_SCHEMA,revisionId:revision.id,sequence:1,stateFingerprint:digest,committedAt:revision.committedAt});
+      if(storeStateFingerprint(reconstructed)!==fingerprint||!sameStoreRevision(revision,journal.after?.businessSnapshotRevision)||journal.after?.stateFingerprint!==digest||journal.bootstrapToken!==expectedToken||before.localCommitTokenRaw!==null||String(selected.meta?.receiptCommitVersion||'')!==String(before.receiptCommitTokenRaw||''))throw blocked();
+      const verifyOwned=async()=>{
+        const current=await readStorageObservation();assertNoMarkers(current);
+        if(storeStateFingerprint(current.values[STATE_KEY])!==fingerprint||storeStateFingerprint(current.values[STORE_JOURNAL_KEY])!==storeStateFingerprint(journal))throw blocked();
+        for(const [key,oldValue,newValue] of [[EMERGENCY_KEY,before.emergencyRaw,emergencyRaw],[STORE_COMMIT_KEY,before.localCommitTokenRaw,expectedToken],[RECEIPT_COMMIT_KEY,before.receiptCommitTokenRaw,revision.id]])if(current.local[key]!==oldValue&&current.local[key]!==newValue)throw blocked();
+        return current;
+      };
+      await verifyOwned();
+      localStorage.setItem(EMERGENCY_KEY,emergencyRaw);
+      if(localStorage.getItem(EMERGENCY_KEY)!==emergencyRaw)throw blocked();
+      const advance=async phase=>{const previous=journal.phase,next={...journal,phase,updatedAt:new Date().toISOString()};await dbAdvanceStoreJournal(fingerprint,journal.operationId,previous,next);journal=next;};
+      if(journal.phase==='PRIMARY_WRITTEN')await advance('EMERGENCY_WRITTEN');
+      await verifyOwned();
+      localStorage.setItem(STORE_COMMIT_KEY,expectedToken);localStorage.setItem(RECEIPT_COMMIT_KEY,revision.id);
+      if(localStorage.getItem(STORE_COMMIT_KEY)!==expectedToken||localStorage.getItem(RECEIPT_COMMIT_KEY)!==revision.id)throw blocked();
+      if(journal.phase==='EMERGENCY_WRITTEN')await advance('TOKENS_WRITTEN');
+      await verifyOwned();
+      assertStoreCommitTokensBound(fingerprint,revision,JSON.parse(expectedToken),revision.id,revision.id);
+      assertStoreEmergencyBound(fingerprint,revision,localStorage.getItem(EMERGENCY_KEY));
+      await advance('COMMIT_VERIFIED');
+      // No business normalization, audit event, updatedAt change or notification.
+    });
+  }
+  async function loadState(recoveryVerification = null) {
+    let persistentValue;
     try {
       db = await openDB();
-      state = await dbGet(STATE_KEY);
+      persistentValue = await dbGetCommitted(STATE_KEY);
+      state = persistentValue;
     } catch (_) { db = null; }
+    if(db&&!recoveryVerification){
+      await bootstrapLegacyStore();
+      persistentValue=await dbGetCommitted(STATE_KEY);state=persistentValue;
+    }
+    loadedPersistentHadValue=persistentValue!==undefined;
+    loadedPersistentFingerprint=storeStateFingerprint(persistentValue);
+    try{loadedEmergencyRaw=localStorage.getItem(EMERGENCY_KEY)}catch(cause){state=null;throw storeError('無法讀取 Emergency backup，已停止載入','STORE_EMERGENCY_READ_FAILED',{cause})}
+    let recoveryMarker=null,receiptRecoveryMarker=null,journal=null;
+    try{
+      const sessionStoreMarker=parseStoreJson(sessionStorage.getItem(STORE_RECOVERY_KEY),'Store session recovery marker'),localStoreMarker=parseStoreJson(localStorage.getItem(STORE_RECOVERY_KEY),'Store local recovery marker');
+      const sessionReceiptMarker=parseStoreJson(sessionStorage.getItem(RECEIPT_RECOVERY_KEY),'Receipt session recovery marker'),localReceiptMarker=parseStoreJson(localStorage.getItem(RECEIPT_RECOVERY_KEY),'Receipt local recovery marker');
+      recoveryMarker=sessionStoreMarker||localStoreMarker;receiptRecoveryMarker=sessionReceiptMarker||localReceiptMarker;
+    }catch(error){state=null;throw error}
+    if(db){
+      try{
+        recoveryMarker=recoveryMarker||await dbGetCommitted(STORE_RECOVERY_KEY);
+        receiptRecoveryMarker=receiptRecoveryMarker||await dbGetCommitted(RECEIPT_RECOVERY_KEY);
+        journal=await dbGetCommitted(STORE_JOURNAL_KEY);
+      }catch(cause){state=null;throw storeError('無法核對交易復原狀態，已停止載入','STORE_RECOVERY_GATE_UNAVAILABLE',{cause})}
+    }
+    if(journal&&!storeJournalHasValidTerminalShape(journal))recoveryMarker=recoveryMarker||{operationId:journal.operationId||'unknown',time:journal.updatedAt||journal.startedAt||'',journalPhase:journal.phase||'unknown'};
+    if(recoveryVerification){
+      // Private, held-lock verification of a completed recovery. Public load()
+      // has no bypass argument; unknown or changed operations remain blocked.
+      const owner=String(recoveryVerification.operationId||'');
+      if(!owner||journal?.phase!=='COMMIT_VERIFIED'||journal.recoveryOf!==owner||loadedPersistentFingerprint!==recoveryVerification.persistentFingerprint||[recoveryMarker,receiptRecoveryMarker].some(marker=>marker&&String(marker.operationId||'')!==owner))throw storeError('恢復載入核對的版本或 marker 已改變','RECOVERY_VERIFY_FAILED');
+      recoveryMarker=null;receiptRecoveryMarker=null;
+    }
+    if(recoveryMarker){storeRecoveryBlocked=recoveryMarker;state=null;const error=storeError(`資料交易復原待核對（操作 ${recoveryMarker.operationId||'unknown'}），已停止載入與資料寫入`,'STORE_WRITES_BLOCKED',{operationId:recoveryMarker.operationId||''});throw error}
+    if(receiptRecoveryMarker){receiptWritesBlocked=receiptRecoveryMarker;state=null;const error=new Error(`收款資料復原待核對（操作 ${receiptRecoveryMarker.operationId||'unknown'}），已停止載入與資料寫入`);error.code='RECEIPT_WRITES_BLOCKED';error.operationId=receiptRecoveryMarker.operationId||'';throw error}
     if (!score(state)) {
       try { const emergency = JSON.parse(localStorage.getItem(EMERGENCY_KEY) || 'null'); if (score(emergency)) state = emergency; } catch (_) {}
     }
-    if (!score(state)) state = window.KuSheLegacyData?.getState() || {};
+    if (!score(state)) state = storeStateClone(window.KuSheLegacyData?.getState() || {});
     ['commissions','employees','customers','projects','vendors','materials','materialUsages','projectCosts','billings','receivables','payables','invoices','receipts','retentionReceipts','payments','salaryPayments','banks','bankTransactions','payroll','attendance','dailyLogs','dailyItemPresets','quotations','quotationPrices','quotationTemplates','audit'].forEach((key) => { if (!Array.isArray(state[key])) state[key] = []; });
     if (!state.settings) state.settings = {};
     if (!state.meta) state.meta = {};
@@ -238,7 +610,7 @@
         const totals = calculateBilling({lines:billing.lines,taxMode:billing.taxMode,invoiceStatus:'no_invoice',retentionMode:billing.retentionMode,retentionRate:billing.retentionRate,retentionCustom:billing.retentionMode==='custom'?billing.retention:undefined});
         if (!receivable || num(receivable.received) <= totals.receivable) {
           Object.assign(billing,{amount:totals.untaxed,tax:0,grossTotal:totals.grossTotal,retention:totals.retention,total:totals.receivable});
-          if (receivable) Object.assign(receivable,{taxMode:billing.taxMode,untaxedAmount:totals.untaxed,tax:0,grossTotal:totals.grossTotal,retention:totals.retention,amount:totals.receivable,status:num(receivable.received)>=totals.receivable&&totals.receivable>0?'已收':num(receivable.received)>0?'部分收款':'未收'});
+          if (receivable) Object.assign(receivable,{taxMode:billing.taxMode||'未稅',untaxedAmount:totals.untaxed,tax:0,grossTotal:totals.grossTotal,retention:totals.retention,amount:totals.receivable,status:num(receivable.received)>=totals.receivable&&totals.receivable>0?'已收':num(receivable.received)>0?'部分收款':'未收'});
         }
       }
     });
@@ -273,7 +645,7 @@
     });
     state.receivables.forEach((receivable) => {
       if (receivable.legacyReceived === undefined) {
-        const recordedReceipts=state.receipts.filter((row)=>row.receivableId===receivable.id).reduce((sum,row)=>sum+num(row.amount),0);
+        const recordedReceipts=state.receipts.filter((row)=>row.receivableId===receivable.id).reduce((sum,row)=>sum+receiptSettlementAmount(row),0);
         receivable.legacyReceived=Math.max(0,num(receivable.received)-recordedReceipts);
       }
       const billing=state.billings.find((row)=>row.id===receivable.billingId||String(row.number||'')===String(receivable.sourceNo||''));
@@ -325,9 +697,33 @@
       });
     });
     state.billings.filter((billing)=>['daily-work','mixed-pricing'].includes(billing.sourceType)).forEach((billing)=>{
-      (billing.sourceItemRefs||[]).filter((ref)=>ref.sourceGroupKey).forEach((ref)=>availableSourceCopies(ref).forEach(({log,item})=>{item.billingStatus='已請款';item.billingId=billing.id;item.billingNo=billing.number||'';syncLogBillingState(log)}));
+      (billing.sourceItemRefs||[]).filter((ref)=>ref.sourceGroupKey).forEach((ref)=>availableSourceCopies(ref).forEach(({log,item})=>{item.billingStatus='已請款';item.billingId=billing.id;item.billingNo=billing.number||'';syncLogBillingState(log,false)}));
     });
-    return state;
+    const businessRevision=storeRevisionOf(state);
+    let storeCommitRaw=null,storeToken=null;
+    try{storeCommitRaw=localStorage.getItem(STORE_COMMIT_KEY);receiptCommitVersionSeen=localStorage.getItem(RECEIPT_COMMIT_KEY)||''}catch(cause){state=null;throw storeError('無法讀取本機提交版本，已停止載入','STORE_COMMIT_TOKEN_READ_FAILED',{cause})}
+    if(businessRevision.id){
+      const token=parseStoreJson(storeCommitRaw,'本機提交版本');storeToken=token;
+      if(!db||!loadedPersistentHadValue){state=null;throw storeError('業務快照與本機提交版本不一致，請停止操作並核對','STALE_STORE_STATE')}
+      try{assertStoreCommitTokensBound(loadedPersistentFingerprint,businessRevision,token,receiptCommitVersionSeen,state.meta.receiptCommitVersion)}catch(error){state=null;throw error}
+      storeCommitTokenSeen=storeCommitRaw;
+    }else try{assertStoreCommitTokensBound(loadedPersistentFingerprint,businessRevision,parseStoreJson(storeCommitRaw,'本機提交版本'),receiptCommitVersionSeen,state.meta.receiptCommitVersion)}catch(error){state=null;throw error}
+    try{assertStoreEmergencyBound(loadedPersistentFingerprint,businessRevision,loadedEmergencyRaw)}catch(error){state=null;throw error}
+    if(businessRevision.id&&!journal){storeRecoveryBlocked={operationId:businessRevision.operationId||'unknown',journalPhase:'missing',reason:'已版本化業務資料缺少提交 journal'};state=null;throw storeError('已版本化業務資料缺少提交 journal，已停止載入','STORE_JOURNAL_MISSING',{operationId:businessRevision.operationId||''})}
+    if(journal)try{assertStoreTerminalJournalBound(journal,loadedPersistentFingerprint,businessRevision,storeToken,receiptCommitVersionSeen,state.meta.receiptCommitVersion)}catch(error){storeRecoveryBlocked={operationId:journal.operationId||'unknown',journalPhase:journal.phase||'invalid',reason:error.message};state=null;throw error}
+    if(recoveryVerification)return freezeStoreState(state);
+    publishedState=freezeStoreState(state);
+    state=publishedState;
+    settledStateFingerprint=storeStateFingerprint(state);
+    lastSettledMemoryFingerprint=receiptStateFingerprint(state);
+    return publishedState;
+  }
+  function load() {
+    if(activeStoreTransaction&&state)return Promise.resolve(state);
+    if(storeRecoveryBlocked||receiptWritesBlocked)return Promise.reject(storeError('資料復原尚未完成，已停止載入與寫入','STORE_WRITES_BLOCKED'));
+    if(publishedState)return Promise.resolve(publishedState);
+    if(!storeLoadPromise){const pending=loadState(),tracked=pending.finally(()=>{if(storeLoadPromise===tracked)storeLoadPromise=null});storeLoadPromise=tracked}
+    return storeLoadPromise;
   }
   function payrollNet(p) {
     return num(p.baseSalary)+num(p.commission)+num(p.fuel)+num(p.meal)+num(p.other)+num(p.overtime)+num(p.bonus)+num(p.allowance)-num(p.advance)-num(p.laborInsurance)-num(p.incomeTax)-num(p.deduction);
@@ -728,16 +1124,18 @@
       return {legacyBankCandidateCount:candidates.length,legacyBankVerified:verified,legacyBankTransactionIds:candidates.map((row)=>financialAuditText(row.id)),candidateAmounts:candidates.map((row)=>({id:financialAuditText(row.id),amount:num(row.amount),netAmount:num(row.netAmount),actualCredit:num(row.actualCredit),fee:num(row.fee),amountMatches:amountMatches(row)}))};
     };
     const receiptTruthFor=(receivable,billing=null)=>{
-      const explicitRows=receivableReceiptRows(receivable),explicitReceiptTotal=explicitRows.reduce((sum,row)=>sum+num(row.amount),0),legacyReceived=num(receivable.legacyReceived),storedReceived=num(receivable.received),expectedReceived=Math.min(num(receivable.amount),legacyReceived+explicitReceiptTotal),legacyEvidence=legacyReceived>0?legacyBankEvidence(receivable,billing):{legacyBankCandidateCount:0,legacyBankVerified:false,legacyBankTransactionIds:[],candidateAmounts:[]};
+      const explicitRows=receivableReceiptRows(receivable),explicitReceiptTotal=explicitRows.reduce((sum,row)=>sum+receiptSettlementAmount(row),0),legacyReceived=num(receivable.legacyReceived),storedReceived=num(receivable.received),expectedReceived=legacyReceived+explicitReceiptTotal,overSettled=expectedReceived>num(receivable.amount),legacyEvidence=legacyReceived>0?legacyBankEvidence(receivable,billing):{legacyBankCandidateCount:0,legacyBankVerified:false,legacyBankTransactionIds:[],candidateAmounts:[]};
       const classification=explicitReceiptTotal>0?'MODERN_RECEIPT':legacyReceived>0?(legacyEvidence.legacyBankVerified?'LEGACY_RECEIVED_VERIFIED':'LEGACY_RECEIVED_UNVERIFIED'):'NO_RECEIPT';
-      return {classification,explicitReceiptCount:explicitRows.length,explicitReceiptTotal,legacyReceived,storedReceived,expectedReceived,storedReceivedMatch:financialAuditMoneyEqual(storedReceived,expectedReceived),...legacyEvidence};
+      return {classification,explicitReceiptCount:explicitRows.length,explicitReceiptTotal,legacyReceived,storedReceived,expectedReceived,overSettled,storedReceivedMatch:financialAuditMoneyEqual(storedReceived,expectedReceived),...legacyEvidence};
     };
     const explicitReceiptBankTruthFor=(receivable)=>receivableReceiptRows(receivable).every((receipt)=>{
       const receiptId=financialAuditText(receipt.id),bankMatches=financialAuditUnique(bankTransactions.filter((transaction)=>
         financialAuditText(receipt.bankTransactionId)&&financialAuditText(transaction.id)===financialAuditText(receipt.bankTransactionId)||
         ['receipt','receivable_receipt'].includes(financialAuditText(transaction.sourceType))&&receiptId&&(financialAuditText(transaction.sourceId)===receiptId||financialAuditText(transaction.receiptId)===receiptId)
-      )),transaction=bankMatches.length===1?bankMatches[0]:null,expectedNet=num(financialAuditFirst(receipt,['netAmount'],num(receipt.amount)-(receipt.feePayer==='recipient'?num(receipt.fee):0)));
-      return Boolean(transaction&&financialAuditMoneyEqual(financialAuditFirst(transaction,['receiptAmount'],transaction.amount),receipt.amount)&&financialAuditMoneyEqual(financialAuditFirst(transaction,['actualCredit','netAmount','amount'],0),expectedNet));
+      )),transaction=bankMatches.length===1?bankMatches[0]:null,cashAmount=receiptCashAmount(receipt),expectedNet=num(financialAuditFirst(receipt,['netAmount'],cashAmount-(receipt.feePayer==='company'?num(receipt.fee):0)));
+      if(cashAmount===0)return bankMatches.length===0&&expectedNet===0;
+      const receiptBankIds=financialAuditUnique([receipt.bankAccountId,receipt.bankId].map(financialAuditText).filter(Boolean)),transactionBankIds=financialAuditUnique([transaction?.bankAccountId,transaction?.bankId].map(financialAuditText).filter(Boolean)),incoming=Boolean(transaction&&(['in','income'].includes(financialAuditText(transaction.direction).toLowerCase())||financialAuditText(transaction.type)==='收入'));
+      return Boolean(transaction&&['receipt','receivable_receipt'].includes(financialAuditText(transaction.sourceType))&&financialAuditText(transaction.sourceId)===receiptId&&(!financialAuditText(transaction.receiptId)||financialAuditText(transaction.receiptId)===receiptId)&&receiptBankIds.length===1&&transactionBankIds.length===1&&receiptBankIds[0]===transactionBankIds[0]&&financialAuditText(transaction.date)===financialAuditText(receipt.date)&&incoming&&financialAuditMoneyEqual(financialAuditFirst(transaction,['receiptAmount'],transaction.amount),cashAmount)&&financialAuditMoneyEqual(financialAuditFirst(transaction,['actualCredit','netAmount','amount'],0),expectedNet));
     });
     const billingReceivablePairs=billings.map((billing)=>{
       const matches=receivableMatchesForBilling(billing),relation=matches.length===1?'EXACT':matches.length===0?'ORPHAN':'AMBIGUOUS',values=billingValues(billing),receivable=matches.length===1?matches[0]:null;
@@ -782,6 +1180,7 @@
       if(verifiedLegacySettled)addIssue('receivable',receivable.id,'VERIFIED_LEGACY_SETTLED','INFO',repair.LEGACY,'已驗證歷史應收；舊版資料未保存 Billing parent，收款與金額已驗證，保留為 Legacy record。');
       else if(orphanClassification)addIssue('receivable',receivable.id,orphanClassification,orphanClassification==='ORPHAN_EMPTY'?'WARNING':'BLOCKING',repairClassification,'Receivable 找不到直接 Billing 關聯。');
       if(!truth.storedReceivedMatch)addIssue('receivable',receivable.id,'STORED_RECEIVED_MISMATCH','BLOCKING',repair.SEMANTIC,'stored received 與 receipt truth 加總不一致。');
+      if(truth.overSettled)addIssue('receivable',receivable.id,'RECEIPT_OVER_SETTLEMENT','BLOCKING',repair.MANUAL,'Receipt truth 已超過應收金額，必須人工核對。');
       if(truth.classification==='LEGACY_RECEIVED_UNVERIFIED')addIssue('receivable',receivable.id,'UNVERIFIED_LEGACY_RECEIVED','BLOCKING',repair.MANUAL,'legacyReceived 找不到唯一可信銀行收款證據。');
       return {id:receivable.id,date:receivable.date||'',project:receivable.project||'',projectName:receivable.projectName||'',customer:receivable.customer||'',customerName:receivable.customerName||'',sourceNo:receivable.sourceNo||'',amount:num(receivable.amount),grossTotal:num(receivable.grossTotal),received:num(receivable.received),legacyReceived:num(receivable.legacyReceived),billingMatchCount:billingMatches.length,billingIds:billingMatches.map((row)=>row.id),receiptCount:receiptRows.length,retentionReceiptCount:retentionRows.length,bankTransactionCount:bankRows.length,invoiceCount:invoiceRowsFor.length,receiptTruth:truth,semanticBillingCandidates:candidates,orphanClassification,verifiedLegacySettled,repairClassification};
     });
@@ -795,17 +1194,40 @@
     });
     const auditReceipt=(receipt,isRetention=false)=>{
       const collection=isRetention?retentionReceipts:receipts,receivableMatches=receivables.filter((receivable)=>financialAuditText(receipt.receivableId)===financialAuditText(receivable.id)),billingMatches=financialAuditUnique(billings.filter((billing)=>financialAuditText(receipt.billingId)&&financialAuditText(receipt.billingId)===financialAuditText(billing.id)||receivableMatches.some((receivable)=>billingMatchesForReceivable(receivable).includes(billing)))),bankMatches=financialAuditUnique(bankMatchesForReceipt(receipt,isRetention)),transaction=bankMatches.length===1?bankMatches[0]:null;
-      const amountMismatch=Boolean(transaction&&!financialAuditMoneyEqual(financialAuditFirst(transaction,['receiptAmount'],transaction.amount),receipt.amount));
-      const expectedNet=num(financialAuditFirst(receipt,['netAmount'],num(receipt.amount)-(receipt.feePayer==='recipient'?num(receipt.fee):0))),netAmountMismatch=Boolean(transaction&&!financialAuditMoneyEqual(financialAuditFirst(transaction,['actualCredit','netAmount','amount'],0),expectedNet));
-      const orphanReceipt=receivableMatches.length===0,ambiguousReceipt=receivableMatches.length>1,missingBankTransaction=bankMatches.length===0,duplicateBankTransaction=bankMatches.length>1;
+      let invalidMoneyError=null;
+      if(!isRetention){try{strictStoredReceiptPlan(receipt)}catch(error){invalidMoneyError=financialAuditText(error?.message||error)}}
+      const cashAmount=isRetention?Math.max(0,num(receipt.amount)):receiptCashAmount(receipt),deductionAmount=isRetention?0:receiptDeductionAmount(receipt),settlementAmount=isRetention?cashAmount:receiptSettlementAmount(receipt),calculatedSettlement=cashAmount+deductionAmount,settlementMismatch=!isRetention&&(!financialAuditMoneyEqual(settlementAmount,calculatedSettlement)||receipt.deductionAmount!==undefined&&!financialAuditMoneyEqual(receipt.deductionAmount,deductionAmount));
+      const sourceTypes=isRetention?['retention_receipt','retention-receipt']:['receipt','receivable_receipt'],directId=financialAuditText(receipt.id),retentionId=financialAuditText(receipt.retentionReceiptId),expectedSourceIds=new Set([directId,isRetention?retentionId:''].filter(Boolean)),transactionSourceId=financialAuditText(transaction?.sourceId),transactionReceiptId=financialAuditText(transaction?.receiptId),transactionRetentionId=financialAuditText(transaction?.retentionReceiptId);
+      const bankLinkMismatch=Boolean(transaction&&(!sourceTypes.includes(financialAuditText(transaction.sourceType))||!expectedSourceIds.has(transactionSourceId)||!isRetention&&transactionReceiptId&&transactionReceiptId!==directId||isRetention&&transactionRetentionId&&!expectedSourceIds.has(transactionRetentionId)));
+      const receiptBankIds=financialAuditUnique([receipt.bankAccountId,receipt.bankId].map(financialAuditText).filter(Boolean)),transactionBankIds=financialAuditUnique([transaction?.bankAccountId,transaction?.bankId].map(financialAuditText).filter(Boolean)),bankAccountMismatch=Boolean(transaction&&(receiptBankIds.length!==1||transactionBankIds.length!==1||receiptBankIds[0]!==transactionBankIds[0])),bankDateMismatch=Boolean(transaction&&financialAuditText(transaction.date)!==financialAuditText(receipt.date));
+      const transactionFinancialLinkMismatch=Boolean(transaction&&(hasAccountingValue(transaction,'receivableId')&&(receivableMatches.length!==1||financialAuditText(transaction.receivableId)!==financialAuditText(receivableMatches[0]?.id))||hasAccountingValue(transaction,'billingId')&&(billingMatches.length!==1||financialAuditText(transaction.billingId)!==financialAuditText(billingMatches[0]?.id))||hasAccountingValue(transaction,'sourceNo')&&receivableMatches.length===1&&financialAuditText(transaction.sourceNo)!==financialAuditText(receivableMatches[0].sourceNo)));
+      const amountMismatch=Boolean(transaction&&!financialAuditMoneyEqual(financialAuditFirst(transaction,['receiptAmount'],transaction.amount),cashAmount));
+      const expectedNet=num(financialAuditFirst(receipt,['netAmount'],cashAmount-(receipt.feePayer==='company'?num(receipt.fee):0))),netAmountMismatch=Boolean(transaction&&!financialAuditMoneyEqual(financialAuditFirst(transaction,['actualCredit','netAmount','amount'],0),expectedNet));
+      const bankFeeMismatch=Boolean(transaction&&(hasAccountingValue(transaction,'fee')&&!financialAuditMoneyEqual(transaction.fee,receipt.fee??0)||hasAccountingValue(transaction,'feePayer')&&financialAuditText(transaction.feePayer)!==financialAuditText(receipt.feePayer||'company')));
+      const receiptBillingMismatch=!isRetention&&Boolean(financialAuditText(receipt.billingId))&&(billingMatches.length!==1||financialAuditText(billingMatches[0]?.id)!==financialAuditText(receipt.billingId));let deductionAttributionError=null;
+      if(!isRetention&&deductionAmount>0){try{if(receivableMatches.length!==1)throw new Error('收款找不到唯一應收帳款');resolveReceiptProjectRelation(receivableMatches[0],receipt,state)}catch(error){deductionAttributionError=financialAuditText(error?.message||error)}}
+      const deductionAttributionMismatch=Boolean(deductionAttributionError),wrongBankDirection=Boolean(transaction&&cashAmount>0&&!(['in','income'].includes(financialAuditText(transaction.direction).toLowerCase())||financialAuditText(transaction.type)==='收入'));
+      const orphanReceipt=receivableMatches.length===0,ambiguousReceipt=receivableMatches.length>1,missingBankTransaction=cashAmount>0&&bankMatches.length===0,unexpectedBankTransaction=cashAmount===0&&bankMatches.length>0,duplicateBankTransaction=bankMatches.length>1;
       const section=isRetention?'retention-receipt':'receipt';
+      if(!isRetention){try{receiptMutationPlan(receipt)}catch(error){addIssue(section,receipt.id,'RECEIPT_BANK_INTEGRITY','BLOCKING',repair.MANUAL,String(error.message||error))}}
       if(orphanReceipt)addIssue(section,receipt.id,'ORPHAN_RECEIPT','BLOCKING',repair.MANUAL,'收款找不到 Receivable。');
       if(ambiguousReceipt)addIssue(section,receipt.id,'AMBIGUOUS_RECEIPT','BLOCKING',repair.MANUAL,'收款對應多筆 Receivable。');
       if(isRetention&&billingMatches.length!==1)addIssue(section,receipt.id,billingMatches.length?'AMBIGUOUS_RETENTION_BILLING':'ORPHAN_RETENTION_BILLING','BLOCKING',repair.MANUAL,'保留款收回無法唯一反查 Billing。');
       if(missingBankTransaction)addIssue(section,receipt.id,'MISSING_BANK_TRANSACTION','BLOCKING',repair.SEMANTIC,'收款缺少銀行流水。');
+      if(unexpectedBankTransaction)addIssue(section,receipt.id,'UNEXPECTED_BANK_TRANSACTION','BLOCKING',repair.SEMANTIC,'零現金客戶扣款不應建立銀行流水。');
       if(duplicateBankTransaction)addIssue(section,receipt.id,'DUPLICATE_BANK_TRANSACTION','BLOCKING',repair.MANUAL,'收款對應多筆銀行流水。');
+      if(receiptBillingMismatch)addIssue(section,receipt.id,'RECEIPT_BILLING_LINK_MISMATCH','BLOCKING',repair.MANUAL,'收款與請款單關聯不一致。');
+      if(deductionAttributionMismatch)addIssue(section,receipt.id,'CUSTOMER_DEDUCTION_PROJECT_UNRESOLVED','BLOCKING',repair.MANUAL,`客戶扣款無法唯一歸屬案場，已停止納入毛利：${deductionAttributionError}`);
+      if(bankLinkMismatch)addIssue(section,receipt.id,'RECEIPT_BANK_LINK_MISMATCH','BLOCKING',repair.MANUAL,'收款與銀行流水的來源識別不一致。');
+      if(bankAccountMismatch)addIssue(section,receipt.id,'RECEIPT_BANK_ACCOUNT_MISMATCH','BLOCKING',repair.MANUAL,'收款與銀行流水的帳戶不一致。');
+      if(bankDateMismatch)addIssue(section,receipt.id,'RECEIPT_BANK_DATE_MISMATCH','BLOCKING',repair.MANUAL,'收款與銀行流水的日期不一致。');
+      if(transactionFinancialLinkMismatch)addIssue(section,receipt.id,'RECEIPT_BANK_FINANCIAL_LINK_MISMATCH','BLOCKING',repair.MANUAL,'收款與銀行流水的應收、請款或來源單號不一致。');
+      if(bankFeeMismatch)addIssue(section,receipt.id,'RECEIPT_BANK_FEE_MISMATCH','BLOCKING',repair.SEMANTIC,'收款與銀行流水的手續費資料不一致。');
+      if(wrongBankDirection)addIssue(section,receipt.id,'RECEIPT_BANK_DIRECTION_MISMATCH','BLOCKING',repair.MANUAL,'收款連結的銀行流水不是收入。');
+      if(invalidMoneyError)addIssue(section,receipt.id,'RECEIPT_INVALID_MONEY','BLOCKING',repair.MANUAL,`收款金額格式不合法：${invalidMoneyError}`);
       if(amountMismatch||netAmountMismatch)addIssue(section,receipt.id,'RECEIPT_BANK_AMOUNT_MISMATCH','BLOCKING',repair.SEMANTIC,'收款與銀行流水金額不一致。');
-      return {id:receipt.id,retentionReceiptId:receipt.retentionReceiptId||'',receivableId:receipt.receivableId||'',billingId:receipt.billingId||'',amount:num(receipt.amount),netAmount:expectedNet,duplicateIdentityCount:collection.filter((row)=>financialAuditText(row.id)===financialAuditText(receipt.id)).length,receivableMatchCount:receivableMatches.length,billingMatchCount:billingMatches.length,billingIds:billingMatches.map((row)=>row.id),bankTransactionIds:bankMatches.map((row)=>row.id),orphanReceipt,ambiguousReceipt,missingBankTransaction,duplicateBankTransaction,amountMismatch,netAmountMismatch,repairClassification:orphanReceipt||ambiguousReceipt||duplicateBankTransaction||isRetention&&billingMatches.length!==1?repair.MANUAL:missingBankTransaction||amountMismatch||netAmountMismatch?repair.SEMANTIC:null};
+      if(settlementMismatch)addIssue(section,receipt.id,'RECEIPT_SETTLEMENT_MISMATCH','BLOCKING',repair.SEMANTIC,'客戶扣款與本次沖銷應收加總不一致。');
+      return {id:receipt.id,retentionReceiptId:receipt.retentionReceiptId||'',receivableId:receipt.receivableId||'',billingId:receipt.billingId||'',amount:num(receipt.amount),cashAmount,deductionAmount,settlementAmount,netAmount:expectedNet,duplicateIdentityCount:collection.filter((row)=>financialAuditText(row.id)===financialAuditText(receipt.id)).length,receivableMatchCount:receivableMatches.length,billingMatchCount:billingMatches.length,billingIds:billingMatches.map((row)=>row.id),bankTransactionIds:bankMatches.map((row)=>row.id),orphanReceipt,ambiguousReceipt,missingBankTransaction,unexpectedBankTransaction,duplicateBankTransaction,receiptBillingMismatch,deductionAttributionMismatch,deductionAttributionError,bankLinkMismatch,bankAccountMismatch,bankDateMismatch,transactionFinancialLinkMismatch,bankFeeMismatch,wrongBankDirection,invalidMoneyError,amountMismatch,netAmountMismatch,settlementMismatch,repairClassification:orphanReceipt||ambiguousReceipt||duplicateBankTransaction||receiptBillingMismatch||deductionAttributionMismatch||bankLinkMismatch||bankAccountMismatch||bankDateMismatch||transactionFinancialLinkMismatch||wrongBankDirection||invalidMoneyError||isRetention&&billingMatches.length!==1?repair.MANUAL:missingBankTransaction||unexpectedBankTransaction||amountMismatch||netAmountMismatch||bankFeeMismatch||settlementMismatch?repair.SEMANTIC:null};
     };
     const receiptAudit=receipts.map((row)=>auditReceipt(row,false)),retentionReceiptAudit=retentionReceipts.map((row)=>auditReceipt(row,true));
     const outputInvoices=invoices.filter((row)=>row.invoiceType!=='input'&&!/進項/u.test(financialAuditText(row.type)));
@@ -925,7 +1347,7 @@
     const b643Pair=billingReceivablePairs.find((row)=>financialAuditText(row.number)==='B643124'),b643Billing=b643Pair?billings.find((row)=>financialAuditText(row.id)===financialAuditText(b643Pair.id)):null,b643Receivable=b643Billing&&receivableMatchesForBilling(b643Billing).length===1?receivableMatchesForBilling(b643Billing)[0]:null,b643Truth=b643Receivable?receiptTruthFor(b643Receivable,b643Billing):null;
     const b643124={billing:b643Billing?{id:b643Billing.id,number:b643Billing.number,sourceType:b643Billing.sourceType||''}:null,receivable:b643Receivable?{id:b643Receivable.id,sourceNo:b643Receivable.sourceNo||''}:null,billingTotal:b643Billing?billingValues(b643Billing).total:0,receivableAmount:num(b643Receivable?.amount),storedReceived:num(b643Receivable?.received),explicitReceiptTotal:b643Truth?.explicitReceiptTotal||0,legacyReceived:b643Truth?.legacyReceived||0,legacyBankCandidateCount:b643Truth?.legacyBankCandidateCount||0,legacyBankVerified:Boolean(b643Truth?.legacyBankVerified),legacyBankTransactionIds:b643Truth?.legacyBankTransactionIds||[],receiptTruthClassification:b643Truth?.classification||'NOT_FOUND',correctExpectedReceived:b643Truth?.classification==='LEGACY_RECEIVED_UNVERIFIED'?null:b643Truth?.expectedReceived??null,integrityResult:!b643Billing||!b643Receivable?'MISSING_TARGET':b643Truth.classification==='LEGACY_RECEIVED_VERIFIED'?'VERIFIED_LEGACY_RECEIPT':b643Truth.classification==='LEGACY_RECEIVED_UNVERIFIED'?'BLOCK_MANUAL_REVIEW_UNVERIFIED_LEGACY_RECEIVED':b643Truth.storedReceivedMatch?'PASS':'RECEIVED_MISMATCH',repairClassification:b643Truth?.classification==='LEGACY_RECEIVED_VERIFIED'?repair.LEGACY:b643Truth?.classification==='LEGACY_RECEIVED_UNVERIFIED'?repair.MANUAL:null};
     const specialPayroll=payrollAudit.find((row)=>financialAuditText(row.id)==='msdfc59cbvc6p7')||null;
-    const duplicateIdentityCount=Object.values(duplicates).reduce((sum,groups)=>sum+groups.length,0),billingAmountMismatchCount=billingReceivablePairs.filter((row)=>row.amountChecks&&!row.amountMatch).length,orphanReceiptCount=[...receiptAudit,...retentionReceiptAudit].filter((row)=>row.orphanReceipt).length,receiptBankMismatchCount=[...receiptAudit,...retentionReceiptAudit].filter((row)=>row.missingBankTransaction||row.duplicateBankTransaction||row.amountMismatch||row.netAmountMismatch).length,paymentIntegrityIssueCount=paymentAudit.filter((row)=>row.orphanPayment||row.ambiguousPayment||row.missingBank||row.duplicateBank||row.duplicatePayment||row.amountMismatch||row.netAmountMismatch).length;
+    const duplicateIdentityCount=Object.values(duplicates).reduce((sum,groups)=>sum+groups.length,0),billingAmountMismatchCount=billingReceivablePairs.filter((row)=>row.amountChecks&&!row.amountMatch).length,orphanReceiptCount=[...receiptAudit,...retentionReceiptAudit].filter((row)=>row.orphanReceipt).length,receiptBankMismatchCount=[...receiptAudit,...retentionReceiptAudit].filter((row)=>row.missingBankTransaction||row.unexpectedBankTransaction||row.duplicateBankTransaction||row.amountMismatch||row.netAmountMismatch||row.settlementMismatch).length,paymentIntegrityIssueCount=paymentAudit.filter((row)=>row.orphanPayment||row.ambiguousPayment||row.missingBank||row.duplicateBank||row.duplicatePayment||row.amountMismatch||row.netAmountMismatch).length;
     const summary={billingCount:billings.length,receivableCount:receivables.length,exactBillingReceivablePairs:billingReceivablePairs.filter((row)=>row.relation==='EXACT').length,orphanBillingCount:billingReceivablePairs.filter((row)=>row.relation==='ORPHAN').length,ambiguousBillingCount:billingReceivablePairs.filter((row)=>row.relation==='AMBIGUOUS').length,orphanReceivableCount:receivableAudit.filter((row)=>row.orphanClassification).length,legacyReceivableCount:receivableAudit.filter((row)=>/^LEGACY_/u.test(row.orphanClassification)||/^LEGACY_/u.test(row.receiptTruth.classification)).length,likelyDuplicateReceivableCount:receivableAudit.filter((row)=>row.orphanClassification==='LIKELY_DUPLICATE').length,billingAmountMismatchCount,unverifiedLegacyReceivedCount:receivableAudit.filter((row)=>row.receiptTruth.classification==='LEGACY_RECEIVED_UNVERIFIED').length,orphanReceiptCount,receiptBankMismatchCount,orphanInvoiceCount:invoiceAudit.filter((row)=>row.orphanInvoice).length,dailyBillingOrphanCount:dailyBillingLinks.filter((row)=>row.dailyOrphanBilling).length,orphanPayrollCount:payrollAudit.filter((row)=>row.classification==='ORPHAN_PAYROLL').length,stalePayrollCount:payrollAudit.filter((row)=>row.classification==='STALE_PAYROLL_STATUS').length,orphanPayableCount:payableAudit.filter((row)=>row.orphanPayable).length,paymentIntegrityIssueCount,orphanBankTransactionCount:bankAudit.filter((row)=>row.orphanBankTransaction).length,duplicateIdentityCount,blockingIssueCount:issues.filter((row)=>row.severity==='BLOCKING').length,warningIssueCount:issues.filter((row)=>row.severity==='WARNING').length,informationalIssueCount:issues.filter((row)=>row.severity==='INFO').length};
     return {readOnly:true,auditVersion:'global-financial-integrity-v1',generatedAt:new Date().toISOString(),repairClassifications:Object.values(repair),billingReceivablePairs,receivables:receivableAudit,receipts:receiptAudit,retentionReceipts:retentionReceiptAudit,invoices:invoiceAudit,billingSources,dailyBillingLinks,payroll:payrollAudit,payables:payableAudit,payments:paymentAudit,materialPayableLinks,bankTransactions:bankAudit,duplicates,special:{B643124:b643124,linZiYue202608PaidPayroll:specialPayroll},issues,summary};
   }
@@ -1718,19 +2140,260 @@
       throw error;
     }
   }
-  async function persist(action, auditDetails = null) {
-    state.meta.updatedAt = new Date().toISOString();
-    if (action) {
-      const entry={ id: uid(), time: new Date().toISOString(), action };
-      if(auditDetails&&typeof auditDetails==='object'&&!Array.isArray(auditDetails))Object.assign(entry,auditDetails);
-      state.audit.unshift(entry);
-      state.audit = state.audit.slice(0, 300);
+  function storeFingerprintDigest(value) {
+    const text=typeof value==='string'?value:storeStateFingerprint(value);let a=2166136261,b=0x9e3779b9;
+    for(let i=0;i<text.length;i+=1){const code=text.charCodeAt(i);a=Math.imul(a^code,16777619)>>>0;b=Math.imul((b+code+i)>>>0,2246822519)>>>0}
+    return `${a.toString(16).padStart(8,'0')}${b.toString(16).padStart(8,'0')}:${text.length}`;
+  }
+  function storeJournalHasValidTerminalShape(journal) {
+    if(!journal||journal.schema!==STORE_JOURNAL_SCHEMA||!String(journal.operationId||''))return false;
+    if(journal.phase==='COMMIT_VERIFIED')return Boolean(journal.after?.businessSnapshotRevision?.id&&Number.isSafeInteger(Number(journal.after.businessSnapshotRevision.sequence))&&String(journal.after?.stateFingerprint||''));
+    if(journal.phase==='ROLLED_BACK')return Boolean(String(journal.beforeFingerprint||'')&&journal.beforeVersion&&Number.isSafeInteger(Number(journal.beforeVersion.sequence)));
+    return false;
+  }
+  function assertStoreCommitTokensBound(persistentFingerprint,revision,token,receiptToken,legacyReceiptVersion='') {
+    if(!revision.id){
+      if(token)throw storeError('本機提交版本存在，但業務快照缺少版本資訊，請停止操作並核對','STALE_STORE_STATE');
+      if(String(legacyReceiptVersion||'')!==String(receiptToken||''))throw storeError('收款交易版本與儲存資料不一致，請重新載入並核對','STALE_AFTER_RECEIPT_COMMIT');
+      return true;
     }
-    if (!db) { try { db = await openDB(); } catch (_) { db = null; } }
-    if (db) await dbSet(STATE_KEY, state);
-    localStorage.setItem(EMERGENCY_KEY, JSON.stringify(state));
-    window.KuSheLegacyData?.refresh();
-    window.dispatchEvent(new CustomEvent('kushe:data-updated', { detail: { action } }));
+    const digest=storeFingerprintDigest(persistentFingerprint);
+    if(!token||token.schema!==STORE_JOURNAL_SCHEMA||String(token.revisionId||'')!==revision.id||Number(token.sequence)!==revision.sequence||String(token.stateFingerprint||'')!==digest||String(receiptToken||'')!==revision.id)throw storeError('業務快照與本機提交版本不一致，請停止操作並核對','STALE_STORE_STATE');
+    return true;
+  }
+  function assertStoreEmergencyBound(persistentFingerprint,revision,emergencyRaw) {
+    if(!revision.id)return true;
+    if(emergencyRaw===null||emergencyRaw===undefined)throw storeError('已版本化業務資料缺少 Emergency backup，已停止操作','STORE_EMERGENCY_MISSING');
+    const emergency=parseStoreJson(emergencyRaw,'Emergency backup');
+    if(storeStateFingerprint(emergency)!==persistentFingerprint)throw storeError('IndexedDB 與 Emergency backup 不一致，已停止操作','STORE_LAYERS_DIVERGED');
+    return true;
+  }
+  function sameStoreRevision(left,right) {
+    return left.id===right.id&&left.sequence===right.sequence&&left.parentId===right.parentId&&left.operationId===right.operationId&&left.committedAt===right.committedAt;
+  }
+  function assertStoreTerminalJournalBound(journal,persistentFingerprint,revision,token,receiptToken,legacyReceiptVersion='') {
+    if(!storeJournalHasValidTerminalShape(journal))throw storeError('交易 journal 格式或階段不完整，已停止載入','STORE_JOURNAL_INVALID');
+    const digest=storeFingerprintDigest(persistentFingerprint);
+    assertStoreCommitTokensBound(persistentFingerprint,revision,token,receiptToken,legacyReceiptVersion);
+    if(journal.phase==='COMMIT_VERIFIED'){
+      const journalRevision=storeRevisionOf({meta:{businessSnapshotRevision:journal.after.businessSnapshotRevision}});
+      if(!revision.id||!sameStoreRevision(journalRevision,revision)||String(journal.operationId||'')!==revision.operationId||String(journal.after.stateFingerprint)!==digest)throw storeError('交易 journal 與已提交業務資料不一致，已停止載入','STORE_JOURNAL_MISMATCH');
+    }else{
+      const journalRevision=storeRevisionOf({meta:{businessSnapshotRevision:journal.beforeVersion}});
+      if(!sameStoreRevision(journalRevision,revision)||String(journal.beforeFingerprint)!==digest)throw storeError('復原 journal 與目前業務資料不一致，已停止載入','STORE_JOURNAL_MISMATCH');
+    }
+    return true;
+  }
+  function setStorageRaw(storage,key,raw) { if(raw===null||raw===undefined)storage.removeItem(key);else storage.setItem(key,raw); }
+  function recordStoreTransaction(status,details={}) {
+    lastStoreTransactionResult=freezeStoreState({status,time:new Date().toISOString(),...details});
+    // This is a result notification, never a business commit or a retry trigger.
+    try{window.dispatchEvent(new CustomEvent('kushe:transaction-result',{detail:lastStoreTransactionResult}))}catch(_){}
+    return lastStoreTransactionResult;
+  }
+  function throwStoreTransaction(error,status,operationId,details={}) {
+    const current=error instanceof Error?error:new Error(String(error));
+    current.transactionStatus=status;current.operationId=operationId||current.operationId||'';Object.assign(current,details);
+    recordStoreTransaction(status,{operationId:current.operationId,code:current.code||'',message:current.message});
+    throw current;
+  }
+  const STORE_RECOVERY_STATUS_CODES=new Set(['STORE_WRITES_BLOCKED','RECEIPT_WRITES_BLOCKED','STORE_JOURNAL_INVALID','STORE_JOURNAL_MISMATCH','STORE_JOURNAL_MISSING','STORE_REVISION_INVALID','STORE_METADATA_INVALID','STORE_EMERGENCY_MISSING','STORE_LAYERS_DIVERGED','RECOVERY_FAILED']);
+  function storeTransactionStatusForError(error,duringLoad=false) {
+    if(STORE_RECOVERY_STATUS_CODES.has(error?.code)||duringLoad&&['STALE_STORE_STATE','STALE_AFTER_RECEIPT_COMMIT'].includes(error?.code))return 'RECOVERY_REQUIRED';
+    return 'REJECTED';
+  }
+  function dispatchStoreUpdated(detail) {
+    let listenerError=null;
+    const capture=(event)=>{if(!listenerError)listenerError=event?.error||storeError(event?.message||'資料更新 listener 執行失敗','STORE_NOTIFICATION_LISTENER_FAILED')};
+    try{
+      window.addEventListener('error',capture,true);
+      window.dispatchEvent(new CustomEvent('kushe:data-updated',{detail}));
+    }finally{window.removeEventListener('error',capture,true)}
+    if(listenerError)throw listenerError;
+  }
+  async function assertStoreWritesAvailableDurable() {
+    if(storeRecoveryBlocked)throw storeError(`資料交易復原待核對（操作 ${storeRecoveryBlocked.operationId||'unknown'}），已停止資料寫入`,'STORE_WRITES_BLOCKED',{operationId:storeRecoveryBlocked.operationId||''});
+    let localMarker=null,receiptLocalMarker=null;
+    try{
+      const sessionStoreMarker=parseStoreJson(sessionStorage.getItem(STORE_RECOVERY_KEY),'Store session recovery marker'),localStoreMarker=parseStoreJson(localStorage.getItem(STORE_RECOVERY_KEY),'Store local recovery marker');
+      const sessionReceiptMarker=parseStoreJson(sessionStorage.getItem(RECEIPT_RECOVERY_KEY),'Receipt session recovery marker'),localReceiptMarker=parseStoreJson(localStorage.getItem(RECEIPT_RECOVERY_KEY),'Receipt local recovery marker');
+      localMarker=sessionStoreMarker||localStoreMarker;receiptLocalMarker=sessionReceiptMarker||localReceiptMarker;
+    }catch(error){throw error}
+    if(!db){try{db=await openDB()}catch(cause){throw storeError('無法取得 IndexedDB，已停止資料寫入','STORE_IDB_UNAVAILABLE',{cause})}}
+    let durableMarker,durableReceiptMarker,journal,persistent,unresolved=null;
+    try{durableMarker=await dbGetCommitted(STORE_RECOVERY_KEY);durableReceiptMarker=await dbGetCommitted(RECEIPT_RECOVERY_KEY);journal=await dbGetCommitted(STORE_JOURNAL_KEY);persistent=await dbGetCommitted(STATE_KEY)}catch(cause){throw storeError('無法核對交易復原狀態，已停止資料寫入','STORE_RECOVERY_GATE_UNAVAILABLE',{cause})}
+    try{
+      const revision=storeRevisionOf(persistent),token=parseStoreJson(localStorage.getItem(STORE_COMMIT_KEY),'本機提交版本'),receiptToken=localStorage.getItem(RECEIPT_COMMIT_KEY)||'',emergencyRaw=localStorage.getItem(EMERGENCY_KEY),persistentFingerprint=storeStateFingerprint(persistent);
+      assertStoreCommitTokensBound(persistentFingerprint,revision,token,receiptToken,persistent?.meta?.receiptCommitVersion);
+      assertStoreEmergencyBound(persistentFingerprint,revision,emergencyRaw);
+      if(revision.id&&!journal)throw storeError('已版本化業務資料缺少提交 journal','STORE_JOURNAL_MISSING',{operationId:revision.operationId||''});
+      if(journal)assertStoreTerminalJournalBound(journal,persistentFingerprint,revision,token,receiptToken,persistent?.meta?.receiptCommitVersion);
+    }catch(error){let revisionOperationId='';try{revisionOperationId=storeRevisionOf(persistent).operationId}catch(_){}unresolved={...(journal||{}),operationId:journal?.operationId||revisionOperationId||'unknown',phase:journal?.phase||'missing',validationError:error.message,validationCode:error.code||''}}
+    if(localMarker||receiptLocalMarker||durableMarker||durableReceiptMarker||unresolved){storeRecoveryBlocked=localMarker||receiptLocalMarker||durableMarker||durableReceiptMarker||{operationId:unresolved.operationId||'unknown',journalPhase:unresolved.phase||'unknown'};throw storeError(`資料交易復原待核對（操作 ${storeRecoveryBlocked.operationId||'unknown'}），已停止資料寫入`,'STORE_WRITES_BLOCKED',{operationId:storeRecoveryBlocked.operationId||''})}
+  }
+  async function storeCheckpointCapacity(journal) {
+    let bytes;
+    try{bytes=new Blob([JSON.stringify(journal)]).size}catch(cause){throw storeError('無法序列化交易復原快照，已停止資料寫入','STORE_CHECKPOINT_INVALID',{cause})}
+    if(bytes>STORE_JOURNAL_MAX_BYTES)throw storeError(`交易復原快照 ${bytes} bytes 超過安全上限`,'STORE_CHECKPOINT_TOO_LARGE',{checkpointBytes:bytes,maxBytes:STORE_JOURNAL_MAX_BYTES});
+    if(!navigator.storage?.estimate)throw storeError('瀏覽器無法估算交易復原快照容量，已停止資料寫入','STORE_CHECKPOINT_CAPACITY_UNAVAILABLE');
+    let estimate;
+    try{estimate=await navigator.storage.estimate()}catch(cause){throw storeError('無法核對交易復原快照容量，已停止資料寫入','STORE_CHECKPOINT_CAPACITY_UNAVAILABLE',{cause})}
+    const remaining=Number(estimate?.quota)-Number(estimate?.usage);
+    if(!Number.isFinite(remaining)||remaining<bytes*3)throw storeError('儲存空間不足以安全保存交易快照與補償資料','STORE_CHECKPOINT_CAPACITY_INSUFFICIENT',{checkpointBytes:bytes,remainingBytes:remaining});
+    return bytes;
+  }
+  async function captureStoreCheckpoint(operationId,operationType) {
+    await assertStoreWritesAvailableDurable();
+    const persistent=await dbGetCommitted(STATE_KEY),journal=await dbGetCommitted(STORE_JOURNAL_KEY),persistentHadValue=persistent!==undefined,persistentFingerprint=storeStateFingerprint(persistent),journalFingerprint=storeStateFingerprint(journal);
+    let emergencyRaw,commitRaw,receiptCommitRaw;
+    try{emergencyRaw=localStorage.getItem(EMERGENCY_KEY);commitRaw=localStorage.getItem(STORE_COMMIT_KEY);receiptCommitRaw=localStorage.getItem(RECEIPT_COMMIT_KEY)}catch(cause){throw storeError('無法取得交易前本機版本與備份，已停止資料寫入','STORE_CHECKPOINT_READ_FAILED',{cause})}
+    if(persistentFingerprint!==loadedPersistentFingerprint)throw storeError('持久化資料已由其他頁面更新，請保留表單並重新載入後再操作','STALE_STORE_STATE');
+    if(emergencyRaw!==loadedEmergencyRaw)throw storeError('Emergency backup 已由其他頁面更新，已停止舊頁寫入','STALE_STORE_STATE');
+    if(commitRaw!==storeCommitTokenSeen)throw storeError('本機提交版本已變更，已停止舊頁寫入','STALE_STORE_STATE');
+    if((receiptCommitRaw??'')!==(receiptCommitVersionSeen??''))throw storeError('收款提交版本已變更，已停止舊頁寫入','STALE_STORE_STATE');
+    if(persistentHadValue&&emergencyRaw!==null){
+      const emergency=parseStoreJson(emergencyRaw,'Emergency backup');
+      if(storeStateFingerprint(emergency)!==persistentFingerprint)throw storeError('IndexedDB 與 Emergency backup 基準不一致，已停止資料寫入','STORE_LAYERS_DIVERGED');
+    }
+    if(storeStateFingerprint(publishedState)!==settledStateFingerprint)throw storeError('已提交記憶體狀態遭到修改，已停止資料寫入','DIRTY_PUBLISHED_STATE');
+    return {operationId,operationType,persistentHadValue,persistent:persistentHadValue?storeStateClone(persistent):undefined,persistentFingerprint,journal:journal===undefined?undefined:storeStateClone(journal),journalFingerprint,emergencyRaw,commitRaw,receiptCommitRaw,published:publishedState,publishedFingerprint:settledStateFingerprint,revision:storeRevisionOf(publishedState)};
+  }
+  function makeStoreJournal(checkpoint,phase,extra={}) {
+    const now=new Date().toISOString();
+    return {schema:STORE_JOURNAL_SCHEMA,operationId:checkpoint.operationId,operationType:checkpoint.operationType,phase,startedAt:checkpoint.startedAt||now,updatedAt:now,before:{businessSnapshotRevision:checkpoint.revision,persistentHadValue:checkpoint.persistentHadValue,persistentFingerprint:storeFingerprintDigest(checkpoint.persistentFingerprint),state:checkpoint.persistentHadValue?checkpoint.persistent:storeStateClone(checkpoint.published),emergencyRaw:checkpoint.emergencyRaw,localCommitTokenRaw:checkpoint.commitRaw,receiptCommitTokenRaw:checkpoint.receiptCommitRaw},...(checkpoint.recoveryEvidence?{recoveryEvidence:checkpoint.recoveryEvidence}:{}),...extra};
+  }
+  async function markStoreRecoveryRequired(checkpoint,primaryError,recoveryErrors,journal) {
+    const marker={schema:STORE_JOURNAL_SCHEMA,status:'RECOVERY_REQUIRED',operationId:checkpoint.operationId,operationType:checkpoint.operationType,time:new Date().toISOString(),primaryError:String(primaryError?.message||primaryError),primaryCode:String(primaryError?.code||''),recoveryErrors:recoveryErrors.map((error)=>({message:String(error?.message||error),code:String(error?.code||'')})),beforeVersion:checkpoint.revision,afterVersion:journal?.after?.businessSnapshotRevision||null};
+    storeRecoveryBlocked=marker;const markerErrors=[];
+    try{sessionStorage.setItem(STORE_RECOVERY_KEY,JSON.stringify(marker))}catch(error){markerErrors.push(error)}
+    try{localStorage.setItem(STORE_RECOVERY_KEY,JSON.stringify(marker))}catch(error){markerErrors.push(error)}
+    try{sessionStorage.setItem(RECEIPT_RECOVERY_KEY,JSON.stringify(marker))}catch(error){markerErrors.push(error)}
+    try{localStorage.setItem(RECEIPT_RECOVERY_KEY,JSON.stringify(marker))}catch(error){markerErrors.push(error)}
+    if(db){
+      try{await dbSetCommitted(STORE_RECOVERY_KEY,marker)}catch(error){markerErrors.push(error)}
+      try{await dbSetCommitted(RECEIPT_RECOVERY_KEY,marker)}catch(error){markerErrors.push(error)}
+      try{await dbWriteRecoveryJournalIfOwned(checkpoint.operationId,checkpoint.journalFingerprint,{...(journal||makeStoreJournal(checkpoint,'RECOVERY_REQUIRED')),phase:'RECOVERY_REQUIRED',updatedAt:new Date().toISOString(),recoveryMarker:marker})}catch(error){markerErrors.push(error)}
+    }
+    marker.markerErrors=markerErrors.map((error)=>String(error?.message||error));
+    return marker;
+  }
+  async function restoreStoreCheckpoint(checkpoint,afterFingerprint,primaryError,journal,expectedMirrors) {
+    const errors=[];let primaryLayerRestorable=false;
+    try{
+      const restoring=makeStoreJournal(checkpoint,'ROLLBACK_PRIMARY_RESTORED');
+      await dbRestoreStoreCheckpointCas(checkpoint,afterFingerprint,restoring);
+      const restored=await dbGetCommitted(STATE_KEY);
+      if(storeStateFingerprint(restored)!==checkpoint.persistentFingerprint)throw storeError('IndexedDB 復原驗證失敗','STORE_RECOVERY_VERIFY_FAILED');
+      primaryLayerRestorable=true;
+    }catch(error){errors.push(error)}
+    if(primaryLayerRestorable){
+      const mirrors=[
+        {key:EMERGENCY_KEY,before:checkpoint.emergencyRaw,after:expectedMirrors.emergencyRaw,label:'Emergency backup'},
+        {key:STORE_COMMIT_KEY,before:checkpoint.commitRaw,after:expectedMirrors.storeCommitRaw,label:'本機提交版本'},
+        {key:RECEIPT_COMMIT_KEY,before:checkpoint.receiptCommitRaw,after:expectedMirrors.receiptCommitRaw,label:'收款提交版本'}
+      ];
+      try{
+        const current=mirrors.map((entry)=>localStorage.getItem(entry.key));
+        current.forEach((raw,index)=>{const entry=mirrors[index];if(raw!==entry.before&&raw!==entry.after)throw storeError(`${entry.label} 已由其他操作更新，拒絕以舊快照覆蓋`,'STORE_RECOVERY_CONFLICT')});
+        mirrors.forEach((entry)=>setStorageRaw(localStorage,entry.key,entry.before));
+        mirrors.forEach((entry)=>{if(localStorage.getItem(entry.key)!==entry.before)throw storeError(`${entry.label} 復原驗證失敗`,'STORE_RECOVERY_VERIFY_FAILED')});
+      }catch(error){errors.push(error)}
+    }
+    const rolledBack={schema:STORE_JOURNAL_SCHEMA,operationId:checkpoint.operationId,operationType:checkpoint.operationType,phase:'ROLLED_BACK',startedAt:journal.startedAt,updatedAt:new Date().toISOString(),beforeVersion:storeRevisionOf(checkpoint.persistent),beforeFingerprint:storeFingerprintDigest(checkpoint.persistentFingerprint),primaryError:{message:String(primaryError?.message||primaryError),code:String(primaryError?.code||'')}};
+    if(!errors.length)try{await dbAdvanceStoreJournal(checkpoint.persistentFingerprint,checkpoint.operationId,'ROLLBACK_PRIMARY_RESTORED',rolledBack)}catch(error){errors.push(error)}
+    if(errors.length){const marker=await markStoreRecoveryRequired(checkpoint,primaryError,errors,journal);recordStoreTransaction('RECOVERY_REQUIRED',{operationId:checkpoint.operationId,operationType:checkpoint.operationType,code:'RECOVERY_FAILED',message:'無法證明已完整復原'});const failure=storeError(`RECOVERY_FAILED：操作 ${checkpoint.operationId} 無法證明已完整復原`,'RECOVERY_FAILED',{operationId:checkpoint.operationId,cause:primaryError,recoveryErrors:errors,recoveryMarker:marker,rollbackVerified:false,transactionStatus:'RECOVERY_REQUIRED'});throw failure}
+    state=publishedState;recordStoreTransaction('ROLLED_BACK',{operationId:checkpoint.operationId,code:primaryError?.code||'',message:String(primaryError?.message||primaryError)});
+    primaryError.transactionStatus='ROLLED_BACK';primaryError.operationId=checkpoint.operationId;primaryError.rollbackVerified=true;
+  }
+  async function commitStoreDraft(checkpoint,draft,transaction) {
+    const now=new Date().toISOString(),beforeRevision=checkpoint.revision,revision={sequence:beforeRevision.sequence+1,id:`store-${uid()}`,parentId:beforeRevision.id,operationId:checkpoint.operationId,committedAt:now};
+    if(!draft.meta||typeof draft.meta!=='object'||Array.isArray(draft.meta))draft.meta={};
+    if(!Array.isArray(draft.audit))draft.audit=[];
+    draft.meta.updatedAt=now;draft.meta.businessSnapshotRevision=revision;draft.meta.receiptCommitVersion=revision.id;
+    if(transaction.action){const entry={id:uid(),time:now,action:transaction.action};if(transaction.auditDetails&&typeof transaction.auditDetails==='object'&&!Array.isArray(transaction.auditDetails))Object.assign(entry,transaction.auditDetails);draft.audit.unshift(entry);draft.audit=draft.audit.slice(0,300)}
+    const afterFingerprint=storeStateFingerprint(draft),afterDigest=storeFingerprintDigest(afterFingerprint);let emergencyRaw,durableSnapshot;
+    try{emergencyRaw=JSON.stringify(draft);durableSnapshot=JSON.parse(emergencyRaw)}catch(cause){throw storeError('業務快照無法安全序列化，已停止提交','STORE_SNAPSHOT_NOT_JSON_SAFE',{cause})}
+    if(storeStateFingerprint(durableSnapshot)!==afterFingerprint)throw storeError('業務快照含有跨儲存層無法一致保存的資料，已停止提交','STORE_SNAPSHOT_NOT_JSON_SAFE');
+    const storeTokenRaw=JSON.stringify({schema:STORE_JOURNAL_SCHEMA,revisionId:revision.id,sequence:revision.sequence,stateFingerprint:afterDigest,committedAt:now}),expectedMirrors={emergencyRaw,storeCommitRaw:storeTokenRaw,receiptCommitRaw:revision.id};
+    const checkpointWithTime={...checkpoint,startedAt:transaction.startedAt};
+    let journal=makeStoreJournal(checkpointWithTime,'PREPARED',{after:{businessSnapshotRevision:revision,stateFingerprint:afterDigest},steps:{journalPrepared:true,primaryWritten:false,emergencyWritten:false,versionWritten:false,verified:false}});
+    journal.checkpointBytes=await storeCheckpointCapacity(journal);
+    try{
+      journal={...journal,phase:'PRIMARY_WRITTEN',updatedAt:new Date().toISOString(),steps:{...journal.steps,primaryWritten:true}};
+      await dbReplaceStateCas(checkpoint.persistentFingerprint,durableSnapshot,journal,{expectedJournalFingerprint:checkpoint.journalFingerprint,preCommitGuard:transaction.preCommitGuard});
+      if(localStorage.getItem(EMERGENCY_KEY)!==checkpoint.emergencyRaw)throw storeError('Emergency backup 已由其他操作更新，拒絕覆蓋','STORE_MIRROR_CAS_MISMATCH');
+      localStorage.setItem(EMERGENCY_KEY,emergencyRaw);
+      const storedEmergencyRaw=localStorage.getItem(EMERGENCY_KEY),storedEmergency=parseStoreJson(storedEmergencyRaw,'Emergency backup');
+      if(storedEmergencyRaw!==emergencyRaw||storeStateFingerprint(storedEmergency)!==afterFingerprint)throw storeError('Emergency backup 寫入後核對失敗','STORE_EMERGENCY_VERIFY_FAILED');
+      const previousPhase=journal.phase;journal={...journal,phase:'EMERGENCY_WRITTEN',updatedAt:new Date().toISOString(),steps:{...journal.steps,emergencyWritten:true}};await dbAdvanceStoreJournal(afterFingerprint,checkpoint.operationId,previousPhase,journal);
+      if(localStorage.getItem(STORE_COMMIT_KEY)!==checkpoint.commitRaw||localStorage.getItem(RECEIPT_COMMIT_KEY)!==checkpoint.receiptCommitRaw)throw storeError('本機提交版本已由其他操作更新，拒絕覆蓋','STORE_MIRROR_CAS_MISMATCH');
+      localStorage.setItem(STORE_COMMIT_KEY,storeTokenRaw);localStorage.setItem(RECEIPT_COMMIT_KEY,revision.id);
+      if(localStorage.getItem(STORE_COMMIT_KEY)!==storeTokenRaw||localStorage.getItem(RECEIPT_COMMIT_KEY)!==revision.id)throw storeError('本機提交版本寫入後核對失敗','STORE_COMMIT_TOKEN_VERIFY_FAILED');
+      const emergencyPhase=journal.phase;journal={...journal,phase:'TOKENS_WRITTEN',updatedAt:new Date().toISOString(),steps:{...journal.steps,versionWritten:true}};await dbAdvanceStoreJournal(afterFingerprint,checkpoint.operationId,emergencyPhase,journal);
+      const compact={schema:STORE_JOURNAL_SCHEMA,operationId:checkpoint.operationId,operationType:checkpoint.operationType,phase:'COMMIT_VERIFIED',startedAt:transaction.startedAt,updatedAt:new Date().toISOString(),before:{businessSnapshotRevision:beforeRevision,stateFingerprint:storeFingerprintDigest(checkpoint.persistentFingerprint)},after:{businessSnapshotRevision:revision,stateFingerprint:afterDigest},steps:{journalPrepared:true,primaryWritten:true,emergencyWritten:true,versionWritten:true,verified:true}};
+      if(transaction.recoveryOf){compact.recoveryOf=transaction.recoveryOf;compact.recoveryEvidence=checkpoint.recoveryEvidence}
+      await dbAdvanceStoreJournal(afterFingerprint,checkpoint.operationId,'TOKENS_WRITTEN',compact);
+      const finalEmergencyRaw=localStorage.getItem(EMERGENCY_KEY),finalEmergency=parseStoreJson(finalEmergencyRaw,'Emergency backup'),finalStoreTokenRaw=localStorage.getItem(STORE_COMMIT_KEY),finalReceiptTokenRaw=localStorage.getItem(RECEIPT_COMMIT_KEY);
+      if(finalEmergencyRaw!==emergencyRaw||storeStateFingerprint(finalEmergency)!==afterFingerprint||finalStoreTokenRaw!==storeTokenRaw||finalReceiptTokenRaw!==revision.id)throw storeError('提交完成時本機備份或版本已由其他操作變更','STORE_FINAL_MIRROR_CONFLICT');
+      publishedState=freezeStoreState(durableSnapshot);state=publishedState;settledStateFingerprint=afterFingerprint;lastSettledMemoryFingerprint=receiptStateFingerprint(publishedState);
+      loadedPersistentHadValue=true;loadedPersistentFingerprint=afterFingerprint;loadedEmergencyRaw=emergencyRaw;storeCommitTokenSeen=storeTokenRaw;receiptCommitVersionSeen=revision.id;
+      if(transaction.deferNotification)return {notificationWarnings:[],revision};
+      const notificationWarnings=[];
+      try{await window.KuSheLegacyData?.refresh()}catch(error){notificationWarnings.push(error)}
+      try{dispatchStoreUpdated({action:transaction.action,operationId:checkpoint.operationId,revisionId:revision.id})}catch(error){notificationWarnings.push(error)}
+      recordStoreTransaction(notificationWarnings.length?'COMMITTED_WITH_NOTIFICATION_WARNING':'COMMITTED',{operationId:checkpoint.operationId,operationType:checkpoint.operationType,revisionId:revision.id,notificationWarnings:notificationWarnings.map((error)=>String(error?.message||error))});
+      return {notificationWarnings,revision};
+    }catch(primaryError){
+      if(['STORE_CAS_MISMATCH','STORE_JOURNAL_CAS_MISMATCH','REMOTE_APPLY_GUARD_REJECTED'].includes(primaryError?.code))throw primaryError;
+      try{await restoreStoreCheckpoint(checkpoint,afterFingerprint,primaryError,journal,expectedMirrors)}catch(recoveryError){throw recoveryError}
+      throw primaryError;
+    }
+  }
+  async function executeStoreTransaction(operationType,writer,args,operationId=`store-${uid()}`) {
+    const startedAt=new Date().toISOString();let checkpoint=null,draft=null,writerResult,writerPending,transaction={operationId,operationType,startedAt,action:'',auditDetails:null,persistenceRequested:false};
+    try{
+      checkpoint=await captureStoreCheckpoint(operationId,operationType);
+      draft=storeStateClone(publishedState);activeStoreTransaction=transaction;state=draft;
+      try{writerPending=writer(...args)}finally{state=publishedState;activeStoreTransaction=null}
+      writerResult=await writerPending;
+      const changed=storeStateFingerprint(draft)!==checkpoint.publishedFingerprint;
+      if(changed&&!transaction.persistenceRequested)throw storeError(`${operationType} 修改資料但未宣告提交，已停止操作`,'STORE_UNDECLARED_MUTATION');
+      if(!changed&&!transaction.persistenceRequested){recordStoreTransaction('COMMITTED',{operationId,operationType,code:'STORE_NO_CHANGE',message:'資料未變更，無需寫入',noChange:true,revisionId:checkpoint.revision.id});return writerResult}
+      if(!changed&&transaction.persistenceRequested&&transaction.action===''){recordStoreTransaction('COMMITTED',{operationId,operationType,code:'STORE_NO_CHANGE',message:'資料未變更，無需寫入',noChange:true,revisionId:checkpoint.revision.id});return writerResult}
+      await commitStoreDraft(checkpoint,draft,transaction);return writerResult;
+    }catch(error){
+      state=publishedState;activeStoreTransaction=null;
+      if(error?.transactionStatus)throw error;
+      throwStoreTransaction(error,storeTransactionStatusForError(error),operationId);
+    }
+  }
+  function runStoreWriter(operationType,writer,args) {
+    const execute=async()=>{
+      const operationId=`store-${uid()}`;
+      try{await load()}catch(error){
+        throwStoreTransaction(error,storeTransactionStatusForError(error,true),operationId);
+      }
+      if(!navigator.locks?.request)throwStoreTransaction(storeError('目前瀏覽器不支援安全資料交易鎖，已停止寫入','STORE_LOCK_UNAVAILABLE'),'REJECTED',operationId);
+      if(typeof AbortController!=='function')throwStoreTransaction(storeError('目前瀏覽器無法限制資料交易鎖等待時間，已停止寫入','STORE_LOCK_ABORT_UNAVAILABLE'),'REJECTED',operationId);
+      const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),30000);let acquired=false;
+      try{
+        return await navigator.locks.request(STORE_LOCK_NAME,{mode:'exclusive',signal:controller.signal},()=>{acquired=true;clearTimeout(timeout);return executeStoreTransaction(operationType,writer,args,operationId)});
+      }catch(error){
+        if(error?.transactionStatus)throw error;
+        const timedOut=!acquired&&controller.signal.aborted,wrapped=storeError(timedOut?'取得安全資料交易鎖逾時，未寫入資料':'無法取得安全資料交易鎖，未寫入資料',timedOut?'STORE_LOCK_TIMEOUT':'STORE_LOCK_FAILED',{cause:error});
+        throwStoreTransaction(wrapped,'REJECTED',operationId);
+      }finally{clearTimeout(timeout)}
+    };
+    return enqueueStoreWriter(execute);
+  }
+  function requireStoreTransactionDraft() {
+    if(!activeStoreTransaction||state===publishedState)throw storeError('Store writer 未在受保護的交易 draft 中執行','STORE_TRANSACTION_CONTEXT_REQUIRED');
+    return state;
+  }
+  function persist(action, auditDetails = null) {
+    if(!activeStoreTransaction)throw storeError('直接 persist 已停用；請由受保護的 Store writer 提交','DIRECT_PERSIST_FORBIDDEN');
+    if(activeStoreTransaction.persistenceRequested)throw storeError('同一外層操作不可重複提交','MULTIPLE_STORE_PERSIST');
+    activeStoreTransaction.persistenceRequested=true;activeStoreTransaction.action=String(action||'');activeStoreTransaction.auditDetails=auditDetails;
   }
   function taxValues(gross) {
     const rate = num(state.settings.defaultTax) || 5;
@@ -1853,16 +2516,49 @@
     const remainder = cents - base * parts;
     return (base + (partIndex < remainder ? 1 : 0)) / 100;
   }
-  async function saveDailyBatch(values, editingBatchId = '') {
-    await load();
+  function validateStrictDailyBatch(values, previous, options) {
+    const fail=(message,index,field)=>{const error=new Error(index===undefined?message:`第 ${index+1} 筆施工：${message}`);error.code='DAILY_BATCH_INPUT_INVALID';error.dailyRowIndex=index;error.dailyField=field;throw error};
+    const lines=values.lines;
+    if(!Array.isArray(lines)||!lines.length)fail('請至少填寫一筆施工項目');
+    const employees=values.employeeIds;
+    if(!Array.isArray(employees)||!employees.length||new Set(employees).size!==employees.length||employees.some(id=>!state.employees.some(row=>String(row.id)===String(id))))fail('請選擇有效且不重複的員工');
+    if(typeof values.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(values.date)||!Number.isFinite(Date.parse(values.date))||new Date(values.date).toISOString().slice(0,10)!==values.date)fail('請填寫有效施工日期');
+    const oldItems=new Map();previous.forEach(log=>(log.items||[]).forEach(item=>{if(item.workItemId)oldItems.set(String(item.workItemId),item)}));
+    const itemIds=new Set(),rowKeys=new Set();
+    if(options.draftRowKeys!==undefined&&(!Array.isArray(options.draftRowKeys)||options.draftRowKeys.length!==lines.length))fail('施工列識別與資料筆數不一致');
+    lines.forEach((line,index)=>{
+      if(!line||typeof line!=='object'||Array.isArray(line))fail('施工列格式無效',index,'item');
+      const project=state.projects.find(row=>String(row.id)===String(line.project||''));
+      if(!project)fail('請選擇有效案場',index,'project');
+      if(!project.customer||!state.customers.some(row=>String(row.id)===String(project.customer)))fail('案場缺少有效客戶關聯',index,'project');
+      const workItemId=String(line.workItemId||''),oldItem=oldItems.get(workItemId);
+      if(workItemId&&(itemIds.has(workItemId)||!oldItem))fail('施工來源識別重複或不屬於目前編輯批次',index,'item');
+      if(workItemId)itemIds.add(workItemId);
+      if(options.draftRowKeys){const key=options.draftRowKeys[index];if(typeof key!=='string'||!key||rowKeys.has(key))fail('同一施工列被重複提交',index,'item');rowKeys.add(key)}
+      // Historical rows without a house remain editable; new rows must name a house.
+      if(typeof line.house!=='string'||!line.house.trim()&&!(oldItem&&!String(oldItem.house||'').trim()))fail('請填寫戶別',index,'house');
+      if(typeof line.item!=='string'||!line.item.trim())fail('請填寫施工品項',index,'item');
+      const raw=line.qty,validType=typeof raw==='number'||typeof raw==='string'&&/^\d+(?:\.\d+)?$/.test(raw.trim());
+      if(!validType||!Number.isFinite(Number(raw))||Number(raw)<=0||Number(raw)>Number.MAX_SAFE_INTEGER)fail('數量必須是有限正數，不可空白',index,'qty');
+      const quotationId=line.quotationId||line.quoteId||'',quotationLineId=line.quotationLineId||line.quoteLineId||'';
+      if(line.quotationId&&line.quoteId&&String(line.quotationId)!==String(line.quoteId)||line.quotationLineId&&line.quoteLineId&&String(line.quotationLineId)!==String(line.quoteLineId))fail('報價來源識別不一致',index,'quotation');
+      if(line.sourceType==='quotation'||quotationId||quotationLineId){
+        if(!quotationId||!quotationLineId||!confirmedQuotationItems(project.id,project.customer).some(item=>String(item.quotationId)===String(quotationId)&&String(item.quotationLineId)===String(quotationLineId)))fail('報價項目已失效，請重新選擇正式報價來源',index,'quotation');
+      }else if(line.sourceType!=='manual')fail('請選擇報價品項或明確使用手動施工',index,'quotation');
+    });
+    return lines;
+  }
+  async function saveDailyBatch(values, editingBatchId = '', options = {}) {
+    requireStoreTransactionDraft();
     const previous = editingBatchId ? batchRows(editingBatchId) : [];
+    const strictLines=options?.strictRows===true?validateStrictDailyBatch(values,previous,options):null;
     if (previous.some((log) => log.billingId || (log.billingStatus && log.billingStatus !== '未請款'))) throw new Error('已進入請款流程的施工紀錄不可直接修改');
     const date = values.date;
     const employeeIds = values.employeeIds || [];
     if ([...previous.map((log)=>[log.employee,log.date]),...employeeIds.map((employeeId)=>[employeeId,date])].some(([employeeId,workDate])=>payrollHistoryLock(employeeId,workDate).locked)) throw new Error(PAID_PAYROLL_SOURCE_ERROR);
     previous.forEach((log) => syncDailyLogLinks({...log,performance:0,workMode:'none'}, log));
     if (previous.length) state.dailyLogs = state.dailyLogs.filter((log) => (log.batchId || log.id) !== editingBatchId);
-    const lines = (values.lines || []).filter((line) => line.project && line.item && num(line.qty) > 0);
+    const lines = strictLines || (values.lines || []).filter((line) => line.project && line.item && num(line.qty) > 0);
     if (!employeeIds.length || !lines.length) throw new Error('請至少選擇一位員工並填寫一筆施工項目');
     const prepared = lines.map((line) => {
       const project=state.projects.find((row)=>String(row.id)===String(line.project))||{};
@@ -1904,11 +2600,11 @@
     });
     state.dailyItemPresets = state.dailyItemPresets || [];
     prepared.filter((line)=>line.sourceType==='manual').forEach((line) => { const existing = state.dailyItemPresets.find((row) => String(row.projectId||'') === String(line.project||'') && String(row.item||'').trim() === String(line.item||'').trim()); const preset={projectId:line.project,item:line.item,unit:line.unit||'式',qty:line.qty,inputPrice:line.inputPrice,price:line.inputPrice,taxMode:line.taxMode||'未稅',pricingType:line.pricingType||'actual',updatedAt:now}; if(existing)Object.assign(existing,preset);else state.dailyItemPresets.push({id:uid(),...preset}); });
-    await persist(`${previous.length?'修改':'新增'}多案場每日施工紀錄`);
+    persist(`${previous.length?'修改':'新增'}多案場每日施工紀錄`);
     return batchId;
   }
   async function deleteDailyBatch(batchId) {
-    await load(); const rows = batchRows(batchId); if (!rows.length) return false;
+    requireStoreTransactionDraft(); const rows = batchRows(batchId); if (!rows.length) return false;
     if (rows.some((log) => log.billingId || (log.billingStatus && log.billingStatus !== '未請款'))) throw new Error('已進入請款流程的施工紀錄不可刪除');
     if (rows.some((log)=>dailyLogPayrollDeleteLock(log).locked)) throw new Error(PAID_PAYROLL_SOURCE_ERROR);
     rows.forEach((log) => {
@@ -1918,7 +2614,7 @@
       state.attendance=state.attendance.filter((row)=>!(row.sourceType==='daily-log'&&String(row.sourceId||'')===sourceId));
     });
     state.dailyLogs = state.dailyLogs.filter((log) => (log.batchId || log.id) !== batchId);
-    await persist('刪除多案場每日施工紀錄'); return true;
+    persist('刪除多案場每日施工紀錄'); return true;
   }
   function dailyManualItems(projectId) {
     if(!projectId)return [];
@@ -1951,7 +2647,7 @@
     return {kind:'manual',billing:null,evidence:sourceType==='manual'?'source-type':'no-billing-evidence'};
   }
   async function saveCommission(values, id) {
-    await load();
+    requireStoreTransactionDraft();
     const existing = id ? state.commissions.find((x) => x.id === id) : null;
     if (existing?.sourceType === 'daily-log') {
       if (payrollHistoryLock(existing.employee,existing.date).locked) throw new Error(PAID_COMMISSION_SOURCE_ERROR);
@@ -1978,11 +2674,11 @@
     if (!existing) state.commissions.unshift(row);
     if (before?.employee) rebuildPayrollFor(monthOf(before.date), before.employee);
     rebuildPayrollFor(monthOf(row.date), row.employee);
-    await persist(`${existing ? '修改' : '新增'}員工業績抽成`);
+    persist(`${existing ? '修改' : '新增'}員工業績抽成`);
     return row;
   }
-  async function deleteCommission(id, token) {
-    await load();
+  function deleteCommission(id, token) {
+    requireStoreTransactionDraft();
     const row = state.commissions.find((x) => x.id === id);
     if (!row) return false;
     const source=commissionBillingLink(row);
@@ -1990,7 +2686,7 @@
     if (row.sourceType === 'daily-log') throw new Error(DAILY_LOG_COMMISSION_ERROR);
     state.commissions = state.commissions.filter((x) => x.id !== id);
     rebuildPayrollFor(monthOf(row.date), row.employee);
-    if(token!==accountingDeleteToken)await persist('刪除員工業績抽成');
+    if(token!==accountingDeleteToken)persist('刪除員工業績抽成');
     return true;
   }
   function nextBillingNumber(date) {
@@ -2032,7 +2728,7 @@
     }));
     return rows;
   }
-  function syncLogBillingState(log) {
+  function syncLogBillingState(log, touchUpdatedAt = true) {
     const billable = (log.items || []).filter((item) => item.billable !== false);
     const billed = billable.filter((item) => item.billingStatus === '已請款' && item.billingId);
     const ids = [...new Set(billed.map((item) => item.billingId).filter(Boolean))];
@@ -2040,7 +2736,7 @@
     log.billingId = ids[0] || '';
     log.billingNo = ids.length ? (state.billings.find((row) => row.id === ids[0])?.number || '') : '';
     log.billingStatus = billable.length && billed.length === billable.length ? '已請款' : '未請款';
-    log.updatedAt = new Date().toISOString();
+    if(touchUpdatedAt)log.updatedAt = new Date().toISOString();
   }
   function billingInvoiceStatus(billing) {
     if (['no_invoice','invoice_pending','invoiced'].includes(billing?.invoiceStatus)) return billing.invoiceStatus;
@@ -2102,23 +2798,23 @@
     return rows;
   }
   async function saveInvoice(values,id='') {
-    await load();const now=new Date().toISOString(),type=values.invoiceType==='input'?'input':'output',status=invoiceStatus(values.status,values.invoiceNumber),number=String(values.invoiceNumber||'').trim();
+    requireStoreTransactionDraft();const now=new Date().toISOString(),type=values.invoiceType==='input'?'input':'output',status=invoiceStatus(values.status,values.invoiceNumber),number=String(values.invoiceNumber||'').trim();
     if(status==='issued'&&!number)throw new Error('已開票狀態必須輸入發票號碼');
     if(type==='output'){
       const billing=state.billings.find((row)=>String(row.id)===String(values.sourceId||values.billingId));if(!billing)throw new Error('找不到來源請款單');
       billing.invoiceStatus=status==='issued'?'invoiced':'invoice_pending';billing.hasInvoice=true;billing.invoiceNo=status==='issued'?number:'';billing.invoiceDate=values.invoiceDate||billing.date;billing.updatedAt=now;
       const receivable=state.receivables.find((row)=>row.id===billing.receivableId||row.billingId===billing.id);if(receivable){receivable.invoiceNo=billing.invoiceNo;receivable.invoiceStatus=billing.invoiceStatus;receivable.updatedAt=now}
-      const invoice=syncBillingInvoiceRecord(billing,now,{invoiceNumber:number,invoiceDate:values.invoiceDate||billing.date,status,note:values.note});if(status==='void')invoice.status='void';await persist(`更新銷項發票 ${billing.number}`);return invoice;
+      const invoice=syncBillingInvoiceRecord(billing,now,{invoiceNumber:number,invoiceDate:values.invoiceDate||billing.date,status,note:values.note});if(status==='void')invoice.status='void';persist(`更新銷項發票 ${billing.number}`);return invoice;
     }
     const payable=state.payables.find((row)=>String(row.id)===String(values.sourceId||values.payableId));if(!payable)throw new Error('找不到來源應付帳款');
     const existing=state.invoices.find((row)=>String(row.id)===String(id))||state.invoices.find((row)=>String(row.sourceType||'')==='payable'&&String(row.sourceId||row.payableId||'')===String(payable.id));
     const row=existing||{id:uid(),invoiceId:'',createdAt:now},amounts=invoiceAmounts(values.taxMode,values.amount);
     if(!existing)state.invoices.unshift(row);
     Object.assign(row,{invoiceId:row.invoiceId||row.id,invoiceType:'input',type:'進項',invoiceNumber:number,number,invoiceDate:values.invoiceDate||payable.date||businessDate(new Date(now)),date:values.invoiceDate||payable.date||businessDate(new Date(now)),customerId:'',vendorId:payable.vendor||'',vendor:payable.vendor||'',projectId:payable.project||'',project:payable.project||'',party:payable.vendorName||'',projectName:payable.projectName||'',sourceType:'payable',sourceId:payable.id,payableId:payable.id,sourceNo:payable.payableNo||payable.sourceNo||'',...amounts,amount:amounts.netAmount,tax:amounts.taxAmount,total:amounts.grossAmount,status,note:String(values.note||''),updatedAt:now});
-    await persist(`${existing?'更新':'新增'}進項發票 ${row.sourceNo}`);return row;
+    persist(`${existing?'更新':'新增'}進項發票 ${row.sourceNo}`);return row;
   }
   async function createBilling(values) {
-    await load();
+    requireStoreTransactionDraft();
     const sourceRefs = (values.sourceItemRefs || []).filter(Boolean);
     const sourceContractRefs=(values.sourceContractRefs||[]).filter((ref)=>ref&&ref.contractKey&&num(ref.billingAmount)>0);
     if (!sourceRefs.length&&!sourceContractRefs.length) throw new Error('請至少選擇一筆施工紀錄或總價進度款');
@@ -2151,7 +2847,7 @@
     if(values.saveProjectRetentionDefault){const project=state.projects.find((row)=>row.id===billing.project);if(project){project.defaultRetentionMode=totals.retention>0?(values.retentionMode||'none'):'none';project.defaultRetentionRate=totals.retention>0?totals.retentionRate:0;project.defaultRetentionAmount=values.retentionMode==='custom'?num(values.retentionCustom):0;project.defaultRetentionBase=totals.retentionBase;project.updatedAt=now}}
     if (billing.invoiceStatus !== 'no_invoice') syncBillingInvoiceRecord(billing,now);
     canonical.forEach(({copies}) => copies.forEach(({log,item}) => { item.billingStatus='已請款'; item.billingId=id; item.billingNo=number; syncLogBillingState(log); }));
-    await persist(`建立新版請款單 ${number}`);
+    persist(`建立新版請款單 ${number}`);
     return billing;
   }
   function billingReceivable(billing) {
@@ -2217,9 +2913,10 @@
     const receipts=state.receipts.filter((row)=>String(row.receivableId||'')===String(receivable.id)||String(row.billingId||'')===String(billing.id)),retentionReceipts=state.retentionReceipts.filter((row)=>String(row.receivableId||'')===String(receivable.id)||String(row.billingId||'')===String(billing.id));
     if(receipts.some((row)=>row.receivableId&&String(row.receivableId)!==String(receivable.id)||row.billingId&&String(row.billingId)!==String(billing.id))||retentionReceipts.some((row)=>row.receivableId&&String(row.receivableId)!==String(receivable.id)||row.billingId&&String(row.billingId)!==String(billing.id)))throw new Error('收款與請款關聯不一致，為避免帳務斷鏈已停止刪除。');
     if(num(receivable.legacyReceived)>0||num(receivable.legacyRetentionReceived)>0)throw new Error('存在無法逐筆解析的歷史收款，為避免帳務斷鏈已停止刪除。');
+    receipts.forEach(receiptMutationPlan);
     const dailyRefs=billingSourceRefs(billing),contractRefs=[...(billing.sourceContractRefs||[]),...(billing.lines||[]).flatMap((line)=>line.sourceContractRefs||[])],requiresDailySource=['daily-work','mixed-pricing'].includes(String(billing.sourceType||''));
     if((requiresDailySource&&!dailyRefs.length)||dailyRefs.some((ref)=>!availableSourceCopies(ref).length)||contractRefs.some((ref)=>!ref?.contractKey||!contractSourceByKey(ref.contractKey))||!dailyRefs.length&&!contractRefs.length)throw new Error('找不到完整施工來源，為避免帳務斷鏈已停止刪除。');
-    const receiptTransactions=receipts.map((receipt)=>{const matches=receiptBankTransactions(receipt);if(matches.length!==1)throw new Error('一般收款的銀行交易關係不完整，為避免帳務斷鏈已停止刪除。');return matches[0]}),retentionTransactions=retentionReceipts.map((receipt)=>{const matches=retentionBankTransactions(receipt);if(matches.length!==1)throw new Error('保留款收回的銀行交易關係不完整，為避免帳務斷鏈已停止刪除。');return matches[0]}),transactions=[...receiptTransactions,...retentionTransactions],transactionIds=new Set(transactions.map((row)=>String(row.id)));
+    const receiptTransactions=receipts.flatMap((receipt)=>{const matches=receiptBankTransactions(receipt),cashAmount=receiptCashAmount(receipt);if(cashAmount===0){if(matches.length)throw new Error('零現金客戶扣款不應有銀行交易，為避免帳務斷鏈已停止刪除。');return []}if(matches.length!==1)throw new Error('一般收款的銀行交易關係不完整，為避免帳務斷鏈已停止刪除。');return matches}),retentionTransactions=retentionReceipts.map((receipt)=>{const matches=retentionBankTransactions(receipt);if(matches.length!==1)throw new Error('保留款收回的銀行交易關係不完整，為避免帳務斷鏈已停止刪除。');return matches[0]}),transactions=[...receiptTransactions,...retentionTransactions],transactionIds=new Set(transactions.map((row)=>String(row.id)));
     if(transactionIds.size!==transactions.length)throw new Error('銀行交易重複關聯多筆收款，為避免帳務斷鏈已停止刪除。');
     if(transactions.some((row)=>!state.banks.some((bank)=>String(bank.id)===String(row.bankAccountId||row.bankId||''))))throw new Error('找不到收款對應銀行帳戶，為避免帳務斷鏈已停止刪除。');
     const receiptIds=new Set([...receipts,...retentionReceipts].flatMap((row)=>[row.id,row.retentionReceiptId]).filter(Boolean).map(String)),linkedTransactions=state.bankTransactions.filter((row)=>String(row.billingId||'')===String(billing.id)||String(row.receivableId||'')===String(receivable.id)||[String(billing.id),String(receivable.id)].includes(String(row.sourceId||''))||receiptIds.has(String(row.sourceId||''))||receiptIds.has(String(row.receiptId||''))||receiptIds.has(String(row.retentionReceiptId||''))||(String(row.sourceNo||'')===String(billing.number||'')&&/receipt|receivable|retention|收款|應收|保留/i.test(`${row.sourceType||''} ${row.category||''}`)));
@@ -2237,7 +2934,7 @@
     return number;
   }
   async function updateBilling(id, values={}) {
-    await load();
+    requireStoreTransactionDraft();
     const safety=billingSafety(id);if(!safety.billing)throw new Error('找不到請款單');if(!safety.editable)throw new Error(`此請款已鎖定：${safety.reason}`);
     const billing=safety.billing,receivable=safety.receivable,number=String(values.number??billing.number??'').trim();
     if(!number)throw new Error('請輸入請款單號');
@@ -2271,10 +2968,10 @@
     Object.assign(billing,billingChanges);Object.assign(receivable,receivableChanges);
     syncBillingInvoiceRecord(billing,now);
     billingSourceRefs(billing).forEach((ref)=>availableSourceCopies(ref).forEach(({log,item})=>{if(item.billingId===billing.id){item.billingNo=number;syncLogBillingState(log)}}));
-    await persist(`修改請款單 ${number}`);return billing;
+    persist(`修改請款單 ${number}`);return billing;
   }
-  async function deleteBilling(id, token) {
-    await load();
+  function deleteBilling(id, token) {
+    requireStoreTransactionDraft();
     const safety=billingSafety(id);if(!safety.billing)throw new Error('找不到請款單');if(!safety.receivable)throw new Error(`此請款已鎖定：${safety.reason}`);if(token!==accountingDeleteToken&&!safety.deletable)throw new Error(`此請款已鎖定：${safety.reason}`);if(!billingSourcesResolvable(safety.billing))throw new Error('找不到完整施工來源，為避免誤刪已停止刪除');
     const billing=safety.billing,receivable=safety.receivable,refs=billingSourceRefs(billing),seen=new Set(),affected=[];
     refs.forEach((ref)=>{const copies=availableSourceCopies(ref);if(!copies.length)throw new Error('找不到原施工來源，為避免帳務斷鏈已停止刪除');copies.forEach((copy)=>{const key=`${copy.log.id}:${copy.index}`;if(!seen.has(key)){seen.add(key);affected.push(copy)}})});
@@ -2283,7 +2980,7 @@
     state.receivables=state.receivables.filter((row)=>row!==receivable);
     if(linkedInvoices.length){const linked=new Set(linkedInvoices);state.invoices=state.invoices.filter((row)=>!linked.has(row));}
     affected.forEach(({log,item,index})=>{const replacement=otherFor({log,item,index});if(replacement){item.billingStatus='已請款';item.billingId=replacement.id;item.billingNo=replacement.number||''}else if(String(item.billingId||'')===String(billing.id)){item.billingStatus='未請款';item.billingId='';item.billingNo=''}syncLogBillingState(log)});
-    if(token!==accountingDeleteToken)await persist(`刪除請款單 ${billing.number}`);return true;
+    if(token!==accountingDeleteToken)persist(`刪除請款單 ${billing.number}`);return true;
   }
   function billingReceiptState(billing) {
     const ar = state.receivables.find((row) => row.id === billing.receivableId || row.billingId === billing.id || String(row.sourceNo||'') === String(billing.number||''));
@@ -2318,8 +3015,179 @@
     if(transactionId&&String(transaction.id||'')!==transactionId)throw new Error(`${label}與指定銀行流水不一致，已停止操作`);
     return transaction;
   }
+  let receiptMutationQueue=Promise.resolve(),receiptWritesBlocked=null,receiptMutationOperationId='',persistenceInFlight=0,persistenceVersion=0,lastSettledMemoryFingerprint='',receiptCommitVersionSeen=null;
+  function assertReceiptCommitCurrent(receiptOperationId = '') {
+    const current=localStorage.getItem(RECEIPT_COMMIT_KEY)||'';
+    if(receiptCommitVersionSeen===null){receiptCommitVersionSeen=current;return}
+    const expectedStateVersion=String(receiptOperationId||current),stateVersion=String(state?.meta?.receiptCommitVersion||'');
+    if(current===receiptCommitVersionSeen&&stateVersion===expectedStateVersion)return;
+    state=null;lastSettledMemoryFingerprint='';
+    const error=new Error('另一個頁面已完成收款，為避免舊畫面覆寫新帳務，請重新載入後再操作');error.code='STALE_AFTER_RECEIPT_COMMIT';throw error;
+  }
+  function assertReceiptPersistenceLock(receiptOperationId = '') {
+    let externalReceiptLock=null;try{externalReceiptLock=JSON.parse(localStorage.getItem(RECEIPT_ACTIVE_KEY)||'null')}catch(_){externalReceiptLock={operationId:'unknown',expiresAt:Number.MAX_SAFE_INTEGER}}
+    if(externalReceiptLock&&Number(externalReceiptLock.expiresAt)>Date.now()&&String(externalReceiptLock.operationId||'')!==String(receiptOperationId||'')){state=null;lastSettledMemoryFingerprint='';const error=new Error('另一個頁面正在完成收款交易，已捨棄本頁尚未提交的變更，請重新載入');error.code='RECEIPT_TRANSACTION_IN_PROGRESS';throw error}
+  }
+  const receiptStateClone=(value)=>structuredClone(value);
+  function receiptStateFingerprint(value) {
+    const seen=new Map();let nextId=1;
+    const encode=(current)=>{
+      if(current===undefined)return ['undefined'];
+      if(current===null)return ['null'];
+      if(typeof current==='number')return Number.isNaN(current)?['number','NaN']:current===Infinity?['number','Infinity']:current===-Infinity?['number','-Infinity']:Object.is(current,-0)?['number','-0']:['number',String(current)];
+      if(typeof current==='string'||typeof current==='boolean'||typeof current==='bigint')return [typeof current,String(current)];
+      if(typeof current!=='object')return [typeof current,String(current)];
+      if(seen.has(current))return ['reference',seen.get(current)];
+      const id=nextId++;seen.set(current,id);
+      if(current instanceof Date)return ['date',id,current.toISOString()];
+      if(Array.isArray(current))return ['array',id,current.map(encode)];
+      return ['object',id,Object.keys(current).map((key)=>[key,encode(current[key])])];
+    };
+    return JSON.stringify(encode(value));
+  }
+  function freezeReceiptState(value, seen = new Set()) {
+    if(!value||typeof value!=='object'||seen.has(value))return value;
+    seen.add(value);Object.keys(value).forEach((key)=>freezeReceiptState(value[key],seen));return Object.freeze(value);
+  }
+  function readReceiptRecoveryMarkerSync() {
+    if(receiptWritesBlocked)return receiptWritesBlocked;
+    try {
+      const raw=sessionStorage.getItem(RECEIPT_RECOVERY_KEY)||localStorage.getItem(RECEIPT_RECOVERY_KEY);
+      if(!raw)return null;
+      receiptWritesBlocked=JSON.parse(raw)||{operationId:'unknown',time:'unknown'};
+    } catch (_) { receiptWritesBlocked={operationId:'unknown',time:'unknown',markerReadFailed:true}; }
+    return receiptWritesBlocked;
+  }
+  function assertReceiptWritesAvailable() {
+    readReceiptRecoveryMarkerSync();
+    if(!receiptWritesBlocked)return;
+    state=null;lastSettledMemoryFingerprint='';
+    const error=new Error(`收款資料先前復原失敗（操作 ${receiptWritesBlocked.operationId}），請停止操作並重新載入核對`);
+    error.code='RECEIPT_WRITES_BLOCKED';error.operationId=receiptWritesBlocked.operationId;throw error;
+  }
+  async function assertReceiptWritesAvailableDurable() {
+    assertReceiptWritesAvailable();
+    if(!db){
+      try{db=await openDB()}catch(cause){state=null;lastSettledMemoryFingerprint='';const error=new Error('無法核對收款復原狀態，已停止資料寫入');error.code='RECEIPT_RECOVERY_GATE_UNAVAILABLE';error.cause=cause;throw error}
+    }
+    let marker;
+    try{marker=await dbGetCommitted(RECEIPT_RECOVERY_KEY)}catch(cause){state=null;lastSettledMemoryFingerprint='';const error=new Error('無法核對收款復原狀態，已停止資料寫入');error.code='RECEIPT_RECOVERY_GATE_UNAVAILABLE';error.cause=cause;throw error}
+    if(!marker)return;
+    receiptWritesBlocked=marker;state=null;lastSettledMemoryFingerprint='';assertReceiptWritesAvailable();
+  }
+  function queueReceiptMutation(task) {
+    if(activeStoreTransaction)return task();
+    const execute=()=>{assertReceiptWritesAvailable();if(!navigator.locks?.request){const error=new Error('目前瀏覽器不支援安全收款交易鎖，已停止操作');error.code='RECEIPT_LOCK_UNAVAILABLE';throw error}return navigator.locks.request(`${DB_NAME}:receipt-write`,{mode:'exclusive'},()=>navigator.locks.request(`${DB_NAME}:business-persist`,{mode:'exclusive'},async()=>{await assertReceiptWritesAvailableDurable();return task()}))};
+    const run=receiptMutationQueue.then(execute,execute);
+    receiptMutationQueue=run.catch(()=>{});return run;
+  }
+  function receiptStateRevision(value) {
+    return JSON.stringify({updatedAt:value?.meta?.updatedAt||'',audit:(value?.audit||[]).slice(0,2).map((row)=>[row?.id||'',row?.time||'',row?.action||'']),counts:['receipts','receivables','banks','bankTransactions','billings'].map((key)=>Array.isArray(value?.[key])?value[key].length:-1)});
+  }
+  async function captureReceiptMutationCheckpoint() {
+    const memory=receiptStateClone(state),memoryFingerprint=receiptStateFingerprint(memory);
+    let dbAvailable=Boolean(db),dbValue,dbHadValue=false;
+    if(!db){try{db=await openDB();dbAvailable=true}catch(error){db=null;const unavailable=new Error('無法取得 IndexedDB，為避免收款只寫入備份層已停止操作');unavailable.code='RECEIPT_IDB_UNAVAILABLE';unavailable.cause=error;throw unavailable}}
+    if(dbAvailable){dbValue=await dbGetCommitted(STATE_KEY);dbHadValue=dbValue!==undefined}
+    const emergencyRaw=localStorage.getItem(EMERGENCY_KEY),emergencyHadValue=emergencyRaw!==null,emergencyValue=emergencyHadValue?JSON.parse(emergencyRaw):undefined;
+    const commitRaw=localStorage.getItem(RECEIPT_COMMIT_KEY),commitHadValue=commitRaw!==null;
+    return {memory,memoryFingerprint,memoryRevision:receiptStateRevision(memory),dbAvailable,dbHadValue,dbValue:dbHadValue?receiptStateClone(dbValue):undefined,dbRevision:dbHadValue?receiptStateRevision(dbValue):'',emergencyHadValue,emergencyRaw,emergencyRevision:emergencyHadValue?receiptStateRevision(emergencyValue):'',commitHadValue,commitRaw};
+  }
+  function assertReceiptCheckpointLayers(checkpoint) {
+    if(checkpoint.dbHadValue&&checkpoint.dbRevision!==checkpoint.memoryRevision)throw Object.assign(new Error('IndexedDB 與目前頁面版本不同，請重新載入後再收款'),{code:'STALE_RECEIPT_STATE'});
+    if(checkpoint.emergencyHadValue&&checkpoint.emergencyRevision!==checkpoint.memoryRevision)throw Object.assign(new Error('Emergency backup 與目前頁面版本不同，請先核對資料'),{code:'STALE_RECEIPT_STATE'});
+  }
+  async function assertReceiptPersistentBaseline(checkpoint) {
+    if(checkpoint.dbAvailable){const current=await dbGetCommitted(STATE_KEY);if(Boolean(current!==undefined)!==checkpoint.dbHadValue||checkpoint.dbHadValue&&receiptStateRevision(current)!==checkpoint.dbRevision)throw Object.assign(new Error('收款提交前 IndexedDB 已被其他頁面更新，已停止操作'),{code:'CONCURRENT_PERSISTED_STATE'});}
+    const raw=localStorage.getItem(EMERGENCY_KEY);if(Boolean(raw!==null)!==checkpoint.emergencyHadValue||checkpoint.emergencyHadValue&&receiptStateRevision(JSON.parse(raw))!==checkpoint.emergencyRevision)throw Object.assign(new Error('收款提交前 Emergency backup 已被其他頁面更新，已停止操作'),{code:'CONCURRENT_PERSISTED_STATE'});
+  }
+  async function verifyReceiptPersistedState(checkpoint) {
+    const expected=receiptStateFingerprint(state),errors=[];
+    if(checkpoint.dbAvailable){
+      try{const stored=await dbGetCommitted(STATE_KEY);if(receiptStateFingerprint(stored)!==expected)errors.push(new Error('IndexedDB 與收款提交狀態不一致'))}
+      catch(error){errors.push(error)}
+    }
+    try{const raw=localStorage.getItem(EMERGENCY_KEY),stored=raw===null?undefined:JSON.parse(raw);if(receiptStateFingerprint(stored)!==expected)errors.push(new Error('Emergency storage 與收款提交狀態不一致'))}
+    catch(error){errors.push(error)}
+    if(receiptStateFingerprint(state)!==expected)errors.push(new Error('收款提交驗證期間偵測到記憶體狀態變動'));
+    if(errors.length){const error=new Error('收款提交後儲存層驗證失敗');error.code='RECEIPT_POST_CONDITION_FAILED';error.storageErrors=errors;throw error}
+  }
+  async function restoreReceiptMutation(checkpoint, primaryError, operationId) {
+    state=receiptStateClone(checkpoint.memory);const recoveryErrors=[];
+    if(checkpoint.dbAvailable){
+      try{if(checkpoint.dbHadValue)await dbSetCommitted(STATE_KEY,checkpoint.dbValue);else await dbDeleteCommitted(STATE_KEY)}catch(error){recoveryErrors.push(error)}
+    }
+    try{if(checkpoint.emergencyHadValue)localStorage.setItem(EMERGENCY_KEY,checkpoint.emergencyRaw);else localStorage.removeItem(EMERGENCY_KEY)}catch(error){recoveryErrors.push(error)}
+    try{if(checkpoint.commitHadValue)localStorage.setItem(RECEIPT_COMMIT_KEY,checkpoint.commitRaw);else localStorage.removeItem(RECEIPT_COMMIT_KEY);receiptCommitVersionSeen=checkpoint.commitRaw||''}catch(error){recoveryErrors.push(error)}
+    if(receiptStateFingerprint(state)!==checkpoint.memoryFingerprint)recoveryErrors.push(new Error('記憶體狀態未恢復'));
+    if(checkpoint.dbAvailable){
+      try{const restored=await dbGetCommitted(STATE_KEY),expected=checkpoint.dbHadValue?receiptStateFingerprint(checkpoint.dbValue):undefined;if(checkpoint.dbHadValue?receiptStateFingerprint(restored)!==expected:restored!==undefined)recoveryErrors.push(new Error('IndexedDB 狀態未恢復'))}
+      catch(error){recoveryErrors.push(error)}
+    }
+    try{const restored=localStorage.getItem(EMERGENCY_KEY);if(checkpoint.emergencyHadValue?restored!==checkpoint.emergencyRaw:restored!==null)recoveryErrors.push(new Error('Emergency storage 狀態未恢復'))}
+    catch(error){recoveryErrors.push(error)}
+    if(receiptStateFingerprint(state)!==checkpoint.memoryFingerprint)recoveryErrors.push(new Error('復原驗證期間記憶體狀態再次變動'));
+    if(recoveryErrors.length){
+      receiptWritesBlocked={operationId,time:new Date().toISOString(),primaryError:String(primaryError?.message||primaryError)};const markerErrors=[];
+      try{sessionStorage.setItem(RECEIPT_RECOVERY_KEY,JSON.stringify(receiptWritesBlocked))}catch(error){markerErrors.push(error)}
+      try{localStorage.setItem(RECEIPT_RECOVERY_KEY,JSON.stringify(receiptWritesBlocked))}catch(error){markerErrors.push(error)}
+      if(db)try{await dbSetCommitted(RECEIPT_RECOVERY_KEY,receiptWritesBlocked)}catch(error){markerErrors.push(error)}
+      recoveryErrors.push(...markerErrors);state=receiptStateClone(checkpoint.memory);lastSettledMemoryFingerprint=checkpoint.memoryFingerprint;freezeReceiptState(state);
+      const error=new Error(`RECOVERY_FAILED：收款操作 ${operationId} 復原未完成，已停止本次工作階段的收款寫入`);
+      error.code='RECOVERY_FAILED';error.operationId=operationId;error.cause=primaryError;error.recoveryErrors=recoveryErrors;error.rollbackVerified=false;throw error;
+    }
+    lastSettledMemoryFingerprint=checkpoint.memoryFingerprint;primaryError.operationId=operationId;primaryError.rollbackVerified=true;
+    try{window.KuSheLegacyData?.refresh()}catch(_){}
+  }
+  function publishReceiptCommit(action, operationId) {
+    const errors=[];
+    try{window.KuSheLegacyData?.refresh()}catch(error){errors.push(error)}
+    try{window.dispatchEvent(new CustomEvent('kushe:data-updated',{detail:{action,operationId}}))}catch(error){errors.push(error)}
+    if(errors.length&&window.console?.error)console.error('收款已提交，但完成通知發生錯誤',...errors);
+  }
+  async function commitReceiptMutation(checkpoint, action, operationId, verify) {
+    verify();
+    state.meta.receiptCommitVersion=operationId;
+    await persist(action,{operationId,scope:'receipt'},{waitForTransactionComplete:true,deferNotifications:true,skipDbOpen:!checkpoint.dbAvailable,receiptOperationId:operationId,persistenceLockHeld:true,freezeBeforeWrite:true});
+    verify();await verifyReceiptPersistedState(checkpoint);
+    localStorage.setItem(RECEIPT_COMMIT_KEY,operationId);receiptCommitVersionSeen=operationId;state=receiptStateClone(state);lastSettledMemoryFingerprint=receiptStateFingerprint(state);
+    publishReceiptCommit(action,operationId);
+  }
+  function executeReceiptMutationDraft(action, mutate, verify) {
+    requireStoreTransactionDraft();
+    const result=mutate();verify(result);persist(action,{operationId:activeStoreTransaction.operationId,scope:'receipt'});verify(result);return result;
+  }
+  async function executeReceiptMutation(action, mutate, verify) {
+    if(activeStoreTransaction)return executeReceiptMutationDraft(action,mutate,verify);
+    const operationId=`receipt-${uid()}`;
+    assertReceiptCommitCurrent();
+    if(lastSettledMemoryFingerprint&&receiptStateFingerprint(state)!==lastSettledMemoryFingerprint){state=null;lastSettledMemoryFingerprint='';const error=new Error('目前頁面存在尚未完成的資料異動，為避免混入收款交易，請重新載入後再操作');error.code='DIRTY_STATE_BEFORE_RECEIPT';throw error}
+    if(persistenceInFlight){const error=new Error('另有資料儲存正在完成，請稍後再試');error.code='CONCURRENT_PERSIST_IN_PROGRESS';throw error}
+    const entryMemory=receiptStateClone(state),entryFingerprint=receiptStateFingerprint(entryMemory);
+    const activeLock={operationId,expiresAt:Date.now()+300000};let activeLockHeld=false;
+    localStorage.setItem(RECEIPT_ACTIVE_KEY,JSON.stringify(activeLock));
+    const confirmedLock=JSON.parse(localStorage.getItem(RECEIPT_ACTIVE_KEY)||'null');
+    if(String(confirmedLock?.operationId||'')!==operationId)throw Object.assign(new Error('無法取得跨頁收款交易鎖，已停止操作'),{code:'RECEIPT_LOCK_UNAVAILABLE'});
+    activeLockHeld=true;state=freezeReceiptState(receiptStateClone(entryMemory));receiptMutationOperationId=operationId;const startVersion=persistenceVersion;let checkpoint=null,mutated=false;
+    try{
+      checkpoint=await captureReceiptMutationCheckpoint();
+      assertReceiptCheckpointLayers(checkpoint);
+      await assertReceiptPersistentBaseline(checkpoint);
+      if(persistenceInFlight||persistenceVersion!==startVersion||receiptStateFingerprint(state)!==checkpoint.memoryFingerprint){const error=new Error('收款前偵測到其他資料異動，已停止本次操作');error.code='CONCURRENT_STATE_MUTATION';throw error}
+      state=receiptStateClone(checkpoint.memory);const result=mutate();mutated=true;await commitReceiptMutation(checkpoint,action,operationId,()=>verify(result));return result;
+    } catch(error) {
+      if(checkpoint&&(mutated||receiptStateFingerprint(state)!==checkpoint.memoryFingerprint))await restoreReceiptMutation(checkpoint,error,operationId);
+      else if(checkpoint){if(['STALE_RECEIPT_STATE','CONCURRENT_PERSISTED_STATE','CONCURRENT_STATE_MUTATION'].includes(error?.code)){state=null;lastSettledMemoryFingerprint=''}else{state=receiptStateClone(checkpoint.memory);lastSettledMemoryFingerprint=checkpoint.memoryFingerprint}}
+      else if(!checkpoint){state=entryMemory;lastSettledMemoryFingerprint=entryFingerprint}
+      throw error;
+    } finally {
+      if(receiptMutationOperationId===operationId)receiptMutationOperationId='';
+      if(activeLockHeld)try{const current=JSON.parse(localStorage.getItem(RECEIPT_ACTIVE_KEY)||'null');if(String(current?.operationId||'')===operationId)localStorage.removeItem(RECEIPT_ACTIVE_KEY)}catch(_){}
+    }
+  }
   async function restoreBankLinkedMutation(snapshot, error) {
     state=snapshot;
+    if(activeStoreTransaction)return;
     let rollbackError=null;
     try{if(!db){try{db=await openDB()}catch(_){db=null}}if(db)await dbSet(STATE_KEY,state)}catch(current){rollbackError=current}
     try{localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state))}catch(current){rollbackError=rollbackError||current}
@@ -2327,24 +3195,46 @@
     if(rollbackError)error.rollbackError=rollbackError;
   }
   function receiptMutationPlan(receipt) {
+    const stored=strictStoredReceiptPlan(receipt),cashAmount=stored.cashAmount,matches=linkedBankTransactionCandidates(receipt,['receipt','receivable_receipt']).candidates;
+    const identityMatches=state.bankTransactions.filter((row)=>String(row.receiptId||'')===String(receipt.id||'')||String(row.sourceId||'')===String(receipt.id||''));
+    if(cashAmount===0){if(hasAccountingValue(receipt,'bankTransactionId')||matches.length||identityMatches.length)throw new Error('零現金客戶扣款不應有銀行流水指標或實體流水，已停止操作');return {transaction:null,bank:null,amount:0}}
     const transaction=strictExistingBankTransaction(receipt,['receipt','receivable_receipt'],'一般收款'),receiptBank=strictBankReference(receipt,'一般收款'),transactionBank=strictBankReference(transaction,'一般收款銀行流水');
+    if(identityMatches.some((row)=>row!==transaction))throw new Error('一般收款有多筆或錯誤來源的銀行流水，已停止操作');
+    if(state.bankTransactions.filter((row)=>String(row.id||'')===String(transaction.id||'')).length!==1)throw new Error('一般收款銀行流水編號不唯一，已停止操作');
+    if(hasAccountingValue(transaction,'sourceNo')&&String(transaction.sourceNo)!==String(state.receivables.find((row)=>String(row.id)===String(receipt.receivableId))?.sourceNo||''))throw new Error('一般收款銀行流水來源單號不一致，已停止操作');
     if(receiptBank.id!==transactionBank.id)throw new Error('一般收款與銀行流水的帳戶不一致，已停止操作');
-    if(!hasAccountingValue(receipt,'netAmount'))throw new Error('一般收款缺少可驗證的實際入帳金額，已停止操作');
-    const netAmount=num(receipt.netAmount);
-    if(num(transaction.amount)!==netAmount||hasAccountingValue(transaction,'actualCredit')&&num(transaction.actualCredit)!==netAmount)throw new Error('一般收款與銀行流水的入帳金額不一致，已停止操作');
+    const incoming=['in','income'].includes(String(transaction.direction||'').toLowerCase())||String(transaction.type||'')==='收入';
+    if(!incoming)throw new Error('一般收款連結的銀行流水不是收入，已停止操作');
+    const netAmount=stored.netAmount,transactionAmount=strictReceiptMoney(transaction.amount,'銀行流水入帳金額');
+    if(transactionAmount!==netAmount||hasAccountingValue(transaction,'actualCredit')&&strictReceiptMoney(transaction.actualCredit,'銀行流水實際入帳')!==netAmount||hasAccountingValue(transaction,'netAmount')&&strictReceiptMoney(transaction.netAmount,'銀行流水淨入帳')!==netAmount)throw new Error('一般收款與銀行流水的入帳金額不一致，已停止操作');
+    if(hasAccountingValue(transaction,'receiptAmount')?strictReceiptMoney(transaction.receiptAmount,'銀行流水收款本金')!==cashAmount:stored.feePayer==='company'&&stored.fee>0||transactionAmount!==cashAmount)throw new Error('一般收款與銀行流水的實際匯款金額不一致，已停止操作');
+    if(hasAccountingValue(transaction,'fee')&&strictReceiptMoney(transaction.fee,'銀行流水手續費')!==stored.fee||hasAccountingValue(transaction,'feePayer')&&String(transaction.feePayer)!==stored.feePayer)throw new Error('一般收款與銀行流水的手續費資料不一致，已停止操作');
     if(String(transaction.date||'')!==String(receipt.date||''))throw new Error('一般收款與銀行流水的日期不一致，已停止操作');
     if(hasAccountingValue(transaction,'receiptId')&&String(transaction.receiptId)!==String(receipt.id))throw new Error('一般收款與銀行流水的收款編號不一致，已停止操作');
     if(hasAccountingValue(transaction,'receivableId')&&String(transaction.receivableId)!==String(receipt.receivableId||''))throw new Error('一般收款與銀行流水的應收關聯不一致，已停止操作');
     if(hasAccountingValue(transaction,'billingId')&&String(transaction.billingId)!==String(receipt.billingId||''))throw new Error('一般收款與銀行流水的請款關聯不一致，已停止操作');
-    return {transaction,bank:transactionBank.bank,amount:num(transaction.amount)};
+    const bank=transactionBank.bank,opening=strictReceiptMoney(bank.openingBalance??0,'銀行期初餘額'),income=strictReceiptMoney(bank.income??0,'銀行累計收入'),expense=strictReceiptMoney(bank.expense??0,'銀行累計支出'),expectedBalance=opening+income-expense;
+    const ledgerIncome=safeReceiptMoneySum(state.bankTransactions.filter((row)=>String(row.bankAccountId||row.bankId||'')===transactionBank.id&&(['in','income'].includes(String(row.direction||'').toLowerCase())||String(row.type||'')==='收入')).map((row)=>strictReceiptMoney(row.amount,'銀行收入流水金額')),'銀行收入流水合計');
+    if(income!==ledgerIncome||income<transactionAmount||!Number.isSafeInteger(expectedBalance)||strictReceiptSignedMoney(bank.balance??0,'銀行餘額')!==expectedBalance)throw new Error('銀行收入流水或餘額無法驗證此收款，已停止操作');
+    return {transaction,bank,amount:transactionAmount};
+  }
+  function strictBankIncomeBaseline(bankId) {
+    const reference=strictBankReference({bankId},'收款銀行帳戶'),bank=reference.bank,income=strictReceiptMoney(bank.income??0,'銀行累計收入'),ledgerIncome=safeReceiptMoneySum(state.bankTransactions.filter((row)=>String(row.bankAccountId||row.bankId||'')===reference.id&&(['in','income'].includes(String(row.direction||'').toLowerCase())||String(row.type||'')==='收入')).map((row)=>strictReceiptMoney(row.amount,'銀行收入流水金額')),'銀行收入流水合計'),opening=strictReceiptMoney(bank.openingBalance??0,'銀行期初餘額'),expense=strictReceiptMoney(bank.expense??0,'銀行累計支出'),expectedBalance=opening+income-expense;
+    if(income!==ledgerIncome||!Number.isSafeInteger(expectedBalance)||strictReceiptSignedMoney(bank.balance??0,'銀行餘額')!==expectedBalance)throw new Error('銀行收入流水或餘額不一致，已停止收款');
+    return reference;
   }
   function receiptBankTransaction(receipt) {
     return linkedBankTransaction(receipt,['receipt','receivable_receipt'],'一般收款');
   }
   function adjustBankIncome(bank, delta, now) {
     if (!bank || !delta) return;
-    bank.income = Math.max(0,num(bank.income)+delta);
-    bank.balance = num(bank.openingBalance)+num(bank.income)-num(bank.expense);
+    const current=strictReceiptMoney(bank.income??0,'銀行累計收入'),change=strictReceiptMoney(Math.abs(delta),'銀行收入異動'),next=delta<0?current-change:current+change;
+    if(next<0)throw new Error('銀行累計收入不足以沖回此收款，已停止操作');
+    if(!Number.isSafeInteger(next))throw new Error('銀行累計收入超出可支援金額範圍');
+    const opening=strictReceiptMoney(bank.openingBalance??0,'銀行期初餘額'),expense=strictReceiptMoney(bank.expense??0,'銀行累計支出'),balance=opening+next-expense;
+    if(!Number.isSafeInteger(balance))throw new Error('銀行餘額超出可支援金額範圍');
+    bank.income = next;
+    bank.balance = balance;
     bank.updatedAt = now;
   }
   function incomeSettlement(amountValue, feeValue, payerValue) {
@@ -2352,19 +3242,105 @@
     if(feePayer==='company'&&fee>amount)throw new Error('公司負擔的手續費不可高於本次收款');
     return {amount,fee,feePayer,netAmount:feePayer==='company'?amount-fee:amount};
   }
+  const hasDefinedReceiptInput=(values,key)=>hasOwn(values,key)&&values[key]!==undefined;
+  function receiptCashInput(values, fallback) {
+    const hasCash=hasDefinedReceiptInput(values,'cashAmount'),hasAmount=hasDefinedReceiptInput(values,'amount');
+    const cash=hasCash?strictReceiptMoney(values.cashAmount,'本次實際匯款'):undefined,amount=hasAmount?strictReceiptMoney(values.amount,'本次收款金額'):undefined;
+    if(hasCash&&hasAmount&&cash!==amount)throw new Error('cashAmount 與 amount 不一致，已停止收款');
+    if(hasCash)return cash;if(hasAmount)return amount;
+    if(fallback!==undefined)return strictReceiptMoney(fallback,'原收款金額');
+    throw new Error('請輸入本次實際匯款');
+  }
+  function receiptFeeInput(values, fallback) {
+    return hasDefinedReceiptInput(values,'fee')?strictReceiptMoney(values.fee,'銀行手續費'):strictReceiptMoney(fallback??0,'銀行手續費');
+  }
+  function receiptBankInput(values, fallback = '') {
+    const hasAccount=hasDefinedReceiptInput(values,'bankAccountId'),hasBank=hasDefinedReceiptInput(values,'bankId'),account=hasAccount?String(values.bankAccountId??'').trim():'',bank=hasBank?String(values.bankId??'').trim():'';
+    if(hasAccount&&hasBank&&account!==bank)throw new Error('bankAccountId 與 bankId 不一致，已停止收款');
+    return hasAccount?account:hasBank?bank:String(fallback||'').trim();
+  }
+  function strictStoredReceiptPlan(receipt) {
+    if(!receipt||typeof receipt!=='object'||Array.isArray(receipt))throw new Error('既有收款資料格式不正確');
+    const cashAmount=receiptCashInput(receipt),fee=receiptFeeInput(receipt,0),feePayer=receipt.feePayer===undefined?'company':String(receipt.feePayer);
+    if(!['company','counterparty'].includes(feePayer))throw new Error('既有收款手續費負擔方式不正確');
+    let deductions;
+    if(hasOwn(receipt,'deductions'))deductions=normalizeCustomerDeductions(receipt.deductions);
+    else if(hasOwn(receipt,'deductionAmount')){const amount=strictReceiptMoney(receipt.deductionAmount,'既有客戶扣款合計');deductions=amount?[{id:'',category:'其他扣款',amount,note:''}]:[]}
+    else deductions=[];
+    const deductionAmount=safeReceiptMoneySum(deductions.map((row)=>row.amount),'既有客戶扣款合計'),settlementAmount=safeReceiptMoneySum([cashAmount,deductionAmount],'既有沖銷應收');
+    if(hasOwn(receipt,'deductionAmount')&&strictReceiptMoney(receipt.deductionAmount,'既有客戶扣款合計')!==deductionAmount)throw new Error('既有客戶扣款合計與明細不一致');
+    if(hasOwn(receipt,'settlementAmount')&&strictReceiptMoney(receipt.settlementAmount,'既有沖銷應收')!==settlementAmount)throw new Error('既有沖銷應收與現金、扣款明細不一致');
+    if(settlementAmount<=0)throw new Error('既有收款沖銷金額必須大於 0');
+    if(cashAmount===0&&fee>0)throw new Error('既有零匯款收款不可有銀行手續費');
+    if(feePayer==='company'&&fee>cashAmount)throw new Error('既有公司負擔手續費高於實際匯款');
+    const netAmount=feePayer==='company'?cashAmount-fee:cashAmount;
+    if(hasOwn(receipt,'netAmount')&&strictReceiptMoney(receipt.netAmount,'既有銀行實際入帳')!==netAmount)throw new Error('既有銀行實際入帳與現金、手續費不一致');
+    const bankId=receiptBankInput(receipt);
+    if(cashAmount===0&&bankId)throw new Error('既有零現金扣款不應保留銀行帳戶');
+    return {cashAmount,fee,feePayer,netAmount,deductions,deductionAmount,settlementAmount,bankId,date:String(receipt.date||'').trim(),paymentMethod:String(receipt.paymentMethod||'銀行轉帳'),note:String(receipt.note||'')};
+  }
+  function receiptInputPlan(values, existingReceipt) {
+    if(!values||typeof values!=='object'||Array.isArray(values))throw new Error('收款資料格式不正確');
+    const existingPlan=existingReceipt?strictStoredReceiptPlan(existingReceipt):null,cashAmount=receiptCashInput(values,existingPlan?.cashAmount),fee=receiptFeeInput(values,existingPlan?.fee),payerProvided=hasDefinedReceiptInput(values,'feePayer'),feePayer=payerProvided?String(values.feePayer):existingPlan?.feePayer||'company';
+    if(!['company','counterparty'].includes(feePayer))throw new Error('手續費負擔方式不正確');
+    const deductions=values.deductions===undefined&&existingPlan?normalizeCustomerDeductions(existingPlan.deductions):normalizeCustomerDeductions(values.deductions),deductionAmount=safeReceiptMoneySum(deductions.map((row)=>row.amount),'客戶扣款合計'),settlementAmount=safeReceiptMoneySum([cashAmount,deductionAmount],'本次沖銷應收');
+    if(hasDefinedReceiptInput(values,'deductionAmount')&&strictReceiptMoney(values.deductionAmount,'客戶扣款合計')!==deductionAmount)throw new Error('客戶扣款合計必須由扣款明細計算');
+    if(hasDefinedReceiptInput(values,'settlementAmount')&&strictReceiptMoney(values.settlementAmount,'本次沖銷應收')!==settlementAmount)throw new Error('本次沖銷應收必須等於實際匯款加客戶扣款');
+    if(settlementAmount<=0)throw new Error('本次實際匯款與客戶扣款合計必須大於 0');
+    if(cashAmount===0&&fee>0)throw new Error('零匯款收款不可填寫銀行手續費');
+    if(feePayer==='company'&&fee>cashAmount)throw new Error('公司負擔的手續費不可高於本次實際匯款');
+    const bankId=cashAmount>0?receiptBankInput(values,existingPlan?.bankId):'',date=String(values.date||existingPlan?.date||businessDate()).trim(),paymentMethod=String(values.paymentMethod||existingPlan?.paymentMethod||'銀行轉帳'),note=values.note===undefined?String(existingPlan?.note||''):String(values.note||''),netAmount=feePayer==='company'?cashAmount-fee:cashAmount;
+    if(hasDefinedReceiptInput(values,'netAmount')&&strictReceiptMoney(values.netAmount,'銀行實際入帳')!==netAmount)throw new Error('銀行實際入帳必須由實際匯款與手續費計算');
+    return {cashAmount,fee,feePayer,netAmount,deductions,deductionAmount,settlementAmount,bankId,date,paymentMethod,note};
+  }
+  function receiptIntentFingerprint(receivableId, plan) {
+    return JSON.stringify({receivableId:String(receivableId||''),date:plan.date,cashAmount:plan.cashAmount,fee:plan.fee,feePayer:plan.feePayer,netAmount:plan.netAmount,bankId:plan.bankId,paymentMethod:plan.paymentMethod,note:plan.note,deductions:plan.deductions.map((row)=>({category:row.category,amount:row.amount,note:row.note}))});
+  }
+  function storedReceiptIntentFingerprint(receipt) {
+    return receiptIntentFingerprint(receipt.receivableId,strictStoredReceiptPlan(receipt));
+  }
+  function receivableSettlementTruth(ar, excludedReceipt = null) {
+    return safeReceiptMoneySum([strictReceiptMoney(ar.legacyReceived??0,'既有歷史沖銷'),...state.receipts.filter((row)=>row!==excludedReceipt&&String(row.receivableId||'')===String(ar.id||'')).map((row)=>strictStoredReceiptPlan(row).settlementAmount)],'應收沖銷合計');
+  }
+  function assertReceivableSettlementBaseline(ar) {
+    const amount=strictReceiptMoney(ar.amount,'應收金額'),received=strictReceiptMoney(ar.received??0,'已沖銷應收'),truth=receivableSettlementTruth(ar);
+    if(truth>amount)throw new Error('既有收款沖銷合計已超過應收金額，已停止操作');
+    if(received!==truth)throw new Error('應收已沖銷金額與收款明細不一致，已停止操作');
+    return {amount,received,truth,outstanding:amount-truth};
+  }
+  function strictReceivableBillingRelation(ar, receipt = null) {
+    try{return resolveReceiptProjectRelation(ar,receipt,state).billing}catch(error){throw new Error(`${error.message}，已停止收款`)}
+  }
+  function assertReceiptPostCondition(receipt, ar) {
+    if(state.receipts.filter((row)=>String(row.id||'')===String(receipt.id||'')).length!==1)throw new Error('收款 post-condition：收款 ID 不唯一');
+    if(receipt.idempotencyKey&&state.receipts.filter((row)=>String(row.idempotencyKey||'')===String(receipt.idempotencyKey)).length!==1)throw new Error('收款 post-condition：idempotencyKey 不唯一');
+    const plan=strictStoredReceiptPlan(receipt),baseline=assertReceivableSettlementBaseline(ar);
+    if(strictReceiptMoney(receipt.amount,'收款現金金額')!==plan.cashAmount||hasOwn(receipt,'deductionAmount')&&strictReceiptMoney(receipt.deductionAmount,'客戶扣款合計')!==plan.deductionAmount)throw new Error('收款 post-condition：現金、扣款或沖銷金額不一致');
+    if(baseline.received!==baseline.truth)throw new Error('收款 post-condition：應收沖銷金額不一致');
+    receiptMutationPlan(receipt);
+  }
+  function assertReceiptDeletePostCondition(receipt, ar, plan) {
+    if(state.receipts.some((row)=>String(row.id||'')===String(receipt.id||'')))throw new Error('刪除收款 post-condition：收款仍存在');
+    if(linkedBankTransactionCandidates(receipt,['receipt','receivable_receipt']).candidates.length)throw new Error('刪除收款 post-condition：銀行流水仍存在');
+    assertReceivableSettlementBaseline(ar);
+    if(plan.bank&&num(plan.bank.balance)!==num(plan.bank.openingBalance)+num(plan.bank.income)-num(plan.bank.expense))throw new Error('刪除收款 post-condition：銀行餘額不一致');
+  }
   function syncReceivableSummary(ar, now) {
-    const history=state.receipts.filter((row)=>row.receivableId===ar.id),received=num(ar.legacyReceived)+history.reduce((sum,row)=>sum+num(row.amount),0),latest=[...history].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];
-    ar.received=Math.min(num(ar.amount),received);ar.bankId=latest?.bankAccountId||latest?.bankId||'';ar.receiptDate=latest?.date||'';ar.status=ar.received>=num(ar.amount)&&num(ar.amount)>0?'已收':ar.received>0?'部分收款':'未收';ar.updatedAt=now;
+    const history=state.receipts.filter((row)=>String(row.receivableId||'')===String(ar.id||'')),received=receivableSettlementTruth(ar),amount=strictReceiptMoney(ar.amount,'應收金額'),latest=[...history].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];
+    if(received>amount)throw new Error('收款沖銷合計超過應收金額，已停止更新');
+    ar.received=received;ar.bankId=latest?.bankAccountId||latest?.bankId||'';ar.receiptDate=latest?.date||'';ar.status=ar.received>=amount&&amount>0?'已收':ar.received>0?'部分收款':'未收';ar.updatedAt=now;
     const billing=state.billings.find((row)=>row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||''));
     if(billing){billing.status=ar.status==='已收'?'已收款':ar.status==='部分收款'?'部分收款':'未收款';billing.updatedAt=now}
   }
   function syncReceiptBankTransaction(receipt, ar, now, existingTransaction) {
-    const bankId=String(receipt.bankAccountId||receipt.bankId||''),bank=state.banks.find((row)=>row.id===bankId);
-    if(!bank)throw new Error('請選擇收款銀行帳戶');
-    const amount=Math.max(0,num(receipt.netAmount)),existing=existingTransaction===undefined?receiptBankTransaction(receipt):existingTransaction;
+    const bankId=String(receipt.bankAccountId||receipt.bankId||''),cashAmount=receiptCashAmount(receipt),existing=existingTransaction===undefined?receiptBankTransaction(receipt):existingTransaction;
     if(existing){const previousBank=state.banks.find((row)=>row.id===(existing.bankAccountId||existing.bankId));adjustBankIncome(previousBank,-num(existing.amount),now)}
+    if(cashAmount===0){if(existing)state.bankTransactions=state.bankTransactions.filter((row)=>row!==existing);receipt.bankId='';receipt.bankAccountId='';receipt.bankTransactionId='';receipt.netAmount=0;return null}
+    const bank=state.banks.find((row)=>row.id===bankId);
+    if(!bank)throw new Error('請選擇收款銀行帳戶');
+    const amount=Math.max(0,num(receipt.netAmount));
     const transaction=existing||{id:uid(),createdAt:now};
-    Object.assign(transaction,{date:receipt.date,bankId:bank.id,bankAccountId:bank.id,type:'收入',direction:'in',category:'應收收款',amount,receiptAmount:num(receipt.amount),fee:num(receipt.fee),feePayer:receipt.feePayer,netAmount:amount,actualCredit:amount,paymentMethod:receipt.paymentMethod||'銀行轉帳',sourceType:'receivable_receipt',sourceId:receipt.id,receivableId:ar.id,billingId:ar.billingId||'',customer:ar.customer,customerName:ar.customerName||'',project:ar.project,projectName:ar.projectName||'',sourceNo:ar.sourceNo||'',description:`${ar.projectName||ar.sourceNo||'應收帳款'} 收款`,note:receipt.note||`${ar.sourceNo||''} 收款`,updatedAt:now});
+    Object.assign(transaction,{date:receipt.date,bankId:bank.id,bankAccountId:bank.id,type:'收入',direction:'in',category:'應收收款',amount,receiptAmount:cashAmount,fee:num(receipt.fee),feePayer:receipt.feePayer,netAmount:amount,actualCredit:amount,paymentMethod:receipt.paymentMethod||'銀行轉帳',sourceType:'receivable_receipt',sourceId:receipt.id,receivableId:ar.id,billingId:ar.billingId||'',customer:ar.customer,customerName:ar.customerName||'',project:ar.project,projectName:ar.projectName||'',sourceNo:ar.sourceNo||'',description:`${ar.projectName||ar.sourceNo||'應收帳款'} 收款`,note:receipt.note||`${ar.sourceNo||''} 收款`,updatedAt:now});
     if(!existing)state.bankTransactions.unshift(transaction);
     receipt.bankId=bank.id;receipt.bankAccountId=bank.id;receipt.bankTransactionId=transaction.id;
     adjustBankIncome(bank,amount,now);
@@ -2402,49 +3378,59 @@
     adjustBankIncome(bank,num(receipt.netAmount),now);
     return transaction;
   }
-  async function addReceipt(values) {
-    await load();
-    const idempotencyKey = String(values.idempotencyKey || '').trim();
-    if (idempotencyKey) {
-      const existing = state.receipts.find((row) => row.idempotencyKey === idempotencyKey);
-      if (existing) {
-        const ar=state.receivables.find((row)=>row.id===existing.receivableId);
-        if(ar&&!receiptBankTransaction(existing)){const now=new Date().toISOString();syncReceiptBankTransaction(existing,ar,now);syncReceivableSummary(ar,now);await persist(`補齊一般收款銀行交易 ${ar.sourceNo||''}`)}
-        return existing;
+  function addReceipt(values = {}) { return queueReceiptMutation(()=>addReceiptUnlocked(values)); }
+  function addReceiptUnlocked(values) {
+    requireStoreTransactionDraft();
+    const idempotencyKey=String(values.idempotencyKey||'').trim(),existingMatches=idempotencyKey?state.receipts.filter((row)=>String(row.idempotencyKey||'')===idempotencyKey):[];
+    if(existingMatches.length>1)throw new Error('收款 idempotencyKey 不唯一，已停止重送');
+    if(existingMatches.length===1){
+      const existing=existingMatches[0],arMatches=state.receivables.filter((row)=>String(row.id||'')===String(existing.receivableId||''));
+      if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止重送':'找不到對應應收帳款');
+      const ar=arMatches[0];assertReceivableSettlementBaseline(ar);
+      const existingPlan=strictStoredReceiptPlan(existing),incoming=receiptInputPlan(values),incomingFingerprint=receiptIntentFingerprint(values.receivableId,incoming);
+      if(existingPlan.deductionAmount>0||incoming.deductionAmount>0)strictReceivableBillingRelation(ar,existing);
+      if(incomingFingerprint!==storedReceiptIntentFingerprint(existing)){
+        const error=new Error('相同 idempotencyKey 的收款內容不同，已停止重送');error.code='IDEMPOTENCY_CONFLICT';throw error;
       }
+      const candidates=linkedBankTransactionCandidates(existing,['receipt','receivable_receipt']).candidates;
+      if(receiptCashAmount(existing)>0&&candidates.length===0){
+        strictBankIncomeBaseline(existing.bankAccountId||existing.bankId);
+        const now=new Date().toISOString();
+        return executeReceiptMutationDraft(`補齊一般收款銀行交易 ${ar.sourceNo||''}`,()=>{const currentReceipt=state.receipts.find((row)=>String(row.id||'')===String(existing.id||'')),currentAr=state.receivables.find((row)=>String(row.id||'')===String(ar.id||''));syncReceiptBankTransaction(currentReceipt,currentAr,now);syncReceivableSummary(currentAr,now);return currentReceipt},(row)=>assertReceiptPostCondition(row,state.receivables.find((item)=>String(item.id||'')===String(ar.id||''))));
+      }
+      assertReceiptPostCondition(existing,ar);return existing;
     }
-    const ar = state.receivables.find((row) => row.id === values.receivableId);
-    if (!ar) throw new Error('找不到對應應收帳款');
-    const settlement=incomeSettlement(values.amount,values.fee,values.feePayer),{amount,fee,feePayer,netAmount}=settlement,outstanding = Math.max(0,num(ar.amount)-num(ar.received));
-    if (amount <= 0 || amount > outstanding) throw new Error('本次收款金額不可超過未收餘額');
-    const bank = state.banks.find((row) => row.id === values.bankId);
-    if (!bank) throw new Error('請選擇收款銀行帳戶');
-    const now = new Date().toISOString(), receipt = {id:uid(),idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:ar.billingId||'',date:values.date||businessDate(new Date(now)),amount,fee,feePayer,netAmount,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:values.note||'',createdAt:now,updatedAt:now};
-    state.receipts.unshift(receipt);syncReceiptBankTransaction(receipt,ar,now);syncReceivableSummary(ar,now);
-    await persist(`新增分次收款 ${ar.sourceNo}`); return receipt;
+    const arMatches=state.receivables.filter((row)=>String(row.id||'')===String(values.receivableId||''));
+    if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止新增':'找不到對應應收帳款');
+    const ar=arMatches[0],baseline=assertReceivableSettlementBaseline(ar),input=receiptInputPlan(values),outstanding=baseline.outstanding;
+    if(input.deductionAmount>0)strictReceivableBillingRelation(ar);
+    if(input.settlementAmount>outstanding)throw new Error('本次沖銷應收不可超過未收餘額');
+    if(input.cashAmount>0)strictBankReference({bankId:input.bankId},'新的收款銀行帳戶');
+    const now=new Date().toISOString(),receipt={id:uid(),idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:ar.billingId||'',date:input.date,amount:input.cashAmount,cashAmount:input.cashAmount,deductionAmount:input.deductionAmount,settlementAmount:input.settlementAmount,deductions:input.deductions,fee:input.fee,feePayer:input.feePayer,netAmount:input.netAmount,bankId:input.bankId,bankAccountId:input.bankId,paymentMethod:input.paymentMethod,note:input.note,requestFingerprint:receiptIntentFingerprint(ar.id,input),createdAt:now,updatedAt:now};
+    return executeReceiptMutationDraft(`新增分次收款 ${ar.sourceNo}`,()=>{const currentAr=state.receivables.find((row)=>String(row.id||'')===String(ar.id||''));state.receipts.unshift(receipt);syncReceiptBankTransaction(receipt,currentAr,now);syncReceivableSummary(currentAr,now);return receipt},(row)=>assertReceiptPostCondition(row,state.receivables.find((item)=>String(item.id||'')===String(ar.id||''))));
   }
-  async function updateReceipt(id, values = {}) {
-    await load();
+  function updateReceipt(id, values = {}) { return queueReceiptMutation(()=>updateReceiptUnlocked(id,values)); }
+  function updateReceiptUnlocked(id, values) {
+    requireStoreTransactionDraft();
     const receiptMatches=state.receipts.filter((row)=>String(row.id||'')===String(id||''));if(receiptMatches.length!==1)throw new Error(receiptMatches.length?'收款紀錄編號不唯一，已停止修改':'找不到收款紀錄');const receipt=receiptMatches[0];
-    const arMatches=state.receivables.filter((row)=>String(row.id||'')===String(receipt.receivableId||''));if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止修改':'找不到對應應收帳款');const ar=arMatches[0];
-    const otherReceived=num(ar.legacyReceived)+state.receipts.filter((row)=>row!==receipt&&row.receivableId===ar.id).reduce((sum,row)=>sum+num(row.amount),0),settlement=incomeSettlement(values.amount,values.fee===undefined?receipt.fee:values.fee,values.feePayer===undefined?receipt.feePayer:values.feePayer),{amount,fee,feePayer,netAmount}=settlement,bankId=String(values.bankAccountId||values.bankId||'');
-    if(amount<=0||otherReceived+amount>num(ar.amount))throw new Error('本次收款金額不可超過本期剩餘應收');
-    strictBankReference({bankId},'新的收款銀行帳戶');const plan=receiptMutationPlan(receipt),snapshot=JSON.parse(JSON.stringify(state)),now=new Date().toISOString();
-    try {
-      Object.assign(receipt,{date:values.date||receipt.date||businessDate(new Date(now)),amount,fee,feePayer,netAmount,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||receipt.paymentMethod||'銀行轉帳',note:values.note===undefined?receipt.note:String(values.note||''),updatedAt:now});
-      syncReceiptBankTransaction(receipt,ar,now,plan.transaction);syncReceivableSummary(ar,now);await persist(`修改應收收款 ${ar.sourceNo||''}`);return receipt;
-    } catch(error) { await restoreBankLinkedMutation(snapshot,error);throw error; }
+    const arMatches=state.receivables.filter((row)=>String(row.id||'')===String(receipt.receivableId||''));if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止修改':'找不到對應應收帳款');const ar=arMatches[0],storedPlan=strictStoredReceiptPlan(receipt),baseline=assertReceivableSettlementBaseline(ar),input=receiptInputPlan(values,receipt);
+    if(storedPlan.deductionAmount>0||input.deductionAmount>0)strictReceivableBillingRelation(ar,receipt);
+    const otherReceived=receivableSettlementTruth(ar,receipt);
+    if(otherReceived+input.settlementAmount>baseline.amount)throw new Error('本次沖銷應收不可超過本期剩餘應收');
+    if(input.cashAmount>0)strictBankReference({bankId:input.bankId},'新的收款銀行帳戶');receiptMutationPlan(receipt);const now=new Date().toISOString();
+    return executeReceiptMutationDraft(`修改應收收款 ${ar.sourceNo||''}`,()=>{const currentReceipt=state.receipts.find((row)=>String(row.id||'')===String(receipt.id||'')),currentAr=state.receivables.find((row)=>String(row.id||'')===String(ar.id||'')),currentPlan=receiptMutationPlan(currentReceipt);Object.assign(currentReceipt,{date:input.date,amount:input.cashAmount,cashAmount:input.cashAmount,deductionAmount:input.deductionAmount,settlementAmount:input.settlementAmount,deductions:input.deductions,fee:input.fee,feePayer:input.feePayer,netAmount:input.netAmount,bankId:input.bankId,bankAccountId:input.bankId,paymentMethod:input.paymentMethod,note:input.note,requestFingerprint:receiptIntentFingerprint(ar.id,input),updatedAt:now});syncReceiptBankTransaction(currentReceipt,currentAr,now,currentPlan.transaction);syncReceivableSummary(currentAr,now);return currentReceipt},(row)=>assertReceiptPostCondition(row,state.receivables.find((item)=>String(item.id||'')===String(ar.id||''))));
   }
-  async function deleteReceipt(id, token) {
-    await load();
+  function deleteReceipt(id, token) { return queueReceiptMutation(()=>deleteReceiptUnlocked(id,token)); }
+  function deleteReceiptUnlocked(id, token) {
+    requireStoreTransactionDraft();
     const receiptMatches=state.receipts.filter((row)=>String(row.id||'')===String(id||''));if(receiptMatches.length!==1)throw new Error(receiptMatches.length?'收款紀錄編號不唯一，已停止刪除':'找不到收款紀錄');const receipt=receiptMatches[0];
-    const arMatches=state.receivables.filter((row)=>String(row.id||'')===String(receipt.receivableId||''));if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止刪除':'找不到對應應收帳款');const ar=arMatches[0],plan=receiptMutationPlan(receipt),snapshot=token===accountingDeleteToken?null:JSON.parse(JSON.stringify(state)),now=new Date().toISOString();
-    try {
-      adjustBankIncome(plan.bank,-plan.amount,now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==plan.transaction);state.receipts=state.receipts.filter((row)=>row!==receipt);syncReceivableSummary(ar,now);if(token!==accountingDeleteToken)await persist(`刪除應收收款 ${ar.sourceNo||''}`);return true;
-    } catch(error) { if(snapshot)await restoreBankLinkedMutation(snapshot,error);throw error; }
+    const arMatches=state.receivables.filter((row)=>String(row.id||'')===String(receipt.receivableId||''));if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止刪除':'找不到對應應收帳款');const ar=arMatches[0],storedPlan=strictStoredReceiptPlan(receipt);if(storedPlan.deductionAmount>0)strictReceivableBillingRelation(ar,receipt);assertReceivableSettlementBaseline(ar);receiptMutationPlan(receipt);const now=new Date().toISOString();let mutationReceipt=null,mutationAr=null,mutationPlan=null;
+    const mutate=()=>{mutationReceipt=state.receipts.find((row)=>String(row.id||'')===String(receipt.id||''));mutationAr=state.receivables.find((row)=>String(row.id||'')===String(ar.id||''));mutationPlan=receiptMutationPlan(mutationReceipt);if(mutationPlan.transaction){adjustBankIncome(mutationPlan.bank,-mutationPlan.amount,now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==mutationPlan.transaction)}state.receipts=state.receipts.filter((row)=>row!==mutationReceipt);syncReceivableSummary(mutationAr,now);assertReceiptDeletePostCondition(mutationReceipt,mutationAr,mutationPlan);return true};
+    if(token===accountingDeleteToken)return mutate();
+    return executeReceiptMutationDraft(`刪除應收收款 ${ar.sourceNo||''}`,mutate,()=>assertReceiptDeletePostCondition(mutationReceipt,mutationAr,mutationPlan));
   }
-  async function addRetentionReceipt(values) {
-    await load();
+  function addRetentionReceipt(values) {
+    requireStoreTransactionDraft();
     const idempotencyKey=String(values.idempotencyKey||'').trim();
     if(idempotencyKey){const existing=state.retentionReceipts.find((row)=>row.idempotencyKey===idempotencyKey);if(existing)return existing}
     const ar=state.receivables.find((row)=>row.id===values.receivableId);if(!ar)throw new Error('找不到對應應收帳款');
@@ -2459,10 +3445,10 @@
     const receipt={id,retentionReceiptId:id,idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:billing?.id||ar.billingId||'',projectId:ar.project||billing?.project||'',customerId:ar.customer||billing?.customer||'',date:values.date||businessDate(new Date(now)),amount,paymentMethod:values.paymentMethod||'銀行轉帳',bankAccountId,bankId:bankAccountId,fee,feePayer,netAmount,note:String(values.note||''),createdAt:now,updatedAt:now};
     state.retentionReceipts.unshift(receipt);
     syncRetentionBankTransaction(receipt,ar,billing,now);syncRetentionSummary(ar,billing,now);
-    await persist(`收回保留款 ${ar.sourceNo}`);return receipt;
+    persist(`收回保留款 ${ar.sourceNo}`);return receipt;
   }
-  async function updateRetentionReceipt(id, values = {}) {
-    await load();
+  function updateRetentionReceipt(id, values = {}) {
+    requireStoreTransactionDraft();
     const receiptMatches=state.retentionReceipts.filter((row)=>String(row.id||'')===String(id||'')||String(row.retentionReceiptId||'')===String(id||''));if(receiptMatches.length!==1)throw new Error(receiptMatches.length?'保留款收回紀錄編號不唯一，已停止修改':'找不到保留款收回紀錄');const receipt=receiptMatches[0];
     const arMatches=state.receivables.filter((row)=>String(row.id||'')===String(receipt.receivableId||''));if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止修改':'找不到對應應收帳款');const ar=arMatches[0];
     const billing=state.billings.find((row)=>row.id===receipt.billingId||row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||''));
@@ -2475,31 +3461,30 @@
     strictBankReference({bankId:bankAccountId},'新的保留款入帳銀行帳戶');const plan=retentionMutationPlan(receipt),snapshot=JSON.parse(JSON.stringify(state));
     try {
       Object.assign(receipt,{date:values.date||receipt.date||businessDate(new Date(now)),amount,bankAccountId,bankId:bankAccountId,paymentMethod:values.paymentMethod||'銀行轉帳',fee,feePayer,netAmount,note:String(values.note||''),updatedAt:now});
-      syncRetentionBankTransaction(receipt,ar,billing,now,plan.transaction);syncRetentionSummary(ar,billing,now);await persist(`修改保留款收回紀錄 ${ar.sourceNo}`);return receipt;
-    } catch(error) { await restoreBankLinkedMutation(snapshot,error);throw error; }
+      syncRetentionBankTransaction(receipt,ar,billing,now,plan.transaction);syncRetentionSummary(ar,billing,now);persist(`修改保留款收回紀錄 ${ar.sourceNo}`);return receipt;
+    } catch(error) { state=snapshot;throw error; }
   }
-  async function deleteRetentionReceipt(id, token) {
-    await load();
+  function deleteRetentionReceipt(id, token) {
+    requireStoreTransactionDraft();
     const receiptMatches=state.retentionReceipts.filter((row)=>String(row.id||'')===String(id||'')||String(row.retentionReceiptId||'')===String(id||''));if(receiptMatches.length!==1)throw new Error(receiptMatches.length?'保留款收回紀錄編號不唯一，已停止刪除':'找不到保留款收回紀錄');const receipt=receiptMatches[0];
     const arMatches=state.receivables.filter((row)=>String(row.id||'')===String(receipt.receivableId||''));if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止刪除':'找不到對應應收帳款');const ar=arMatches[0],billing=state.billings.find((row)=>row.id===receipt.billingId||row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||'')),plan=retentionMutationPlan(receipt),snapshot=token===accountingDeleteToken?null:JSON.parse(JSON.stringify(state)),now=new Date().toISOString();
     try {
-      adjustBankIncome(plan.bank,-plan.amount,now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==plan.transaction);state.retentionReceipts=state.retentionReceipts.filter((row)=>row!==receipt);syncRetentionSummary(ar,billing,now);if(token!==accountingDeleteToken)await persist(`刪除保留款收回紀錄 ${ar.sourceNo||''}`);return true;
-    } catch(error) { if(snapshot)await restoreBankLinkedMutation(snapshot,error);throw error; }
+      adjustBankIncome(plan.bank,-plan.amount,now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==plan.transaction);state.retentionReceipts=state.retentionReceipts.filter((row)=>row!==receipt);syncRetentionSummary(ar,billing,now);if(token!==accountingDeleteToken)persist(`刪除保留款收回紀錄 ${ar.sourceNo||''}`);return true;
+    } catch(error) { if(snapshot)state=snapshot;throw error; }
   }
-  async function deleteReceivableAccounting(receivableId) {
-    await load();
+  function deleteReceivableAccounting(receivableId) {
+    requireStoreTransactionDraft();
     const plan=accountingDeletionPreflight(receivableId),summary=accountingDeletionSummary(plan),snapshot=JSON.parse(JSON.stringify(state));
     try {
-      for(const receipt of plan.receipts)await deleteReceipt(receipt.id,accountingDeleteToken);
-      for(const receipt of plan.retentionReceipts)await deleteRetentionReceipt(receipt.retentionReceiptId||receipt.id,accountingDeleteToken);
-      for(const commission of plan.linkedCommissions)await deleteCommission(commission.id,accountingDeleteToken);
-      await deleteBilling(plan.billing.id,accountingDeleteToken);
+      for(const receipt of plan.receipts)deleteReceipt(receipt.id,accountingDeleteToken);
+      for(const receipt of plan.retentionReceipts)deleteRetentionReceipt(receipt.retentionReceiptId||receipt.id,accountingDeleteToken);
+      for(const commission of plan.linkedCommissions)deleteCommission(commission.id,accountingDeleteToken);
+      deleteBilling(plan.billing.id,accountingDeleteToken);
       if(plan.invoiceRecords.length){const linked=new Set(plan.invoiceRecords);state.invoices=state.invoices.filter((row)=>!linked.has(row))}
-      await persist(`安全刪除整筆測試帳務 ${summary.billingNo}`);
+      persist(`安全刪除整筆測試帳務 ${summary.billingNo}`);
       return summary;
     } catch(error) {
       state=snapshot;
-      try{await persist()}catch(_){/* 保留原始錯誤；記憶體已還原，持久層回復採最大努力 */}
       throw error;
     }
   }
@@ -2513,7 +3498,7 @@
     return `${prefix}${String(max + 1).padStart(3,'0')}`;
   }
   async function savePayable(values) {
-    await load();
+    requireStoreTransactionDraft();
     const amount = Math.max(0,Math.round(num(values.amount)));
     if (!amount) throw new Error('應付金額必須大於 0');
     let vendor = state.vendors.find((row) => row.id === values.vendorId);
@@ -2525,7 +3510,7 @@
     if (!vendor && !payeeName) throw new Error('請選擇或輸入廠商／收款人');
     const project = state.projects.find((row) => row.id === values.projectId), now = new Date().toISOString(), date = values.date || businessDate(new Date(now)), id=uid();
     const row = {id,payableNo:nextPayableNumber(date),date,vendor:vendor?.id||'',vendorName:vendor?.name||payeeName,project:project?.id||'',projectName:project?.name||'',category:values.category||'其他',item:String(values.item||'').trim(),amount,paid:0,dueDate:values.dueDate||'',status:'未付款',note:values.note||'',sourceType:'manual-payable',sourceId:values.sourceId||id,createdAt:now,updatedAt:now};
-    state.payables.unshift(row); await persist(`新增應付 ${row.payableNo}`); return row;
+    state.payables.unshift(row); persist(`新增應付 ${row.payableNo}`); return row;
   }
   function payableDeletePreview(payableId) {
     const id=clean(payableId),payable=state?.payables?.find((row)=>String(row.id)===id),empty={payableId:id,allowed:false,blockers:[],sourceType:'',amount:0,paid:0,paymentCount:0,bankTransactionCount:0,invoiceNo:'',invoiceRecordCount:0,materialUsageCount:0,inventoryReceiptCount:0,projectCostCount:0,unknownRelationCount:0,payableNo:'',vendorName:'',projectName:'',invoiceStatus:'無正式發票'};
@@ -2564,17 +3549,17 @@
     return {payableId:id,allowed:blockers.length===0,blockers,sourceType,amount:num(payable.amount),paid,paymentCount:payments.length,bankTransactionCount:bankTransactions.length,invoiceNo,invoiceRecordCount:invoiceRecords.length,materialUsageCount:materialUsageIds.size,inventoryReceiptCount:inventoryReceipts.length,projectCostCount:projectCosts.length,unknownRelationCount,payableNo:payable.payableNo||payable.number||payable.sourceNo||'',vendorName:payable.vendorName||state.vendors?.find((row)=>String(row.id)===String(payable.vendor||''))?.name||'',projectName:payable.projectName||state.projects?.find((row)=>String(row.id)===String(payable.project||''))?.name||'',invoiceStatus:invoiceRecords.length?(issuedInvoice?'已有正式進項發票':'已有進項發票紀錄'):invoiceNo?'已填發票號碼':'無正式發票'};
   }
   async function deletePayable(payableId) {
-    await load();
+    requireStoreTransactionDraft();
     const id=clean(payableId),payable=state.payables.find((row)=>String(row.id)===id);
     if(!payable)throw new Error('找不到應付帳款資料');
     const preview=payableDeletePreview(id);
     if(preview.allowed!==true)throw new Error(`此筆應付帳款不能刪除：${preview.blockers.map((row)=>row.message).join(' ')}`);
     const previousPayables=state.payables,previousMeta={...state.meta},previousAudit=[...state.audit];
     state.payables=state.payables.filter((row)=>row!==payable);
-    try{await persist(`刪除未付款手動應付帳款｜${payable.payableNo||payable.sourceNo||payable.id}｜${payable.vendorName||''}｜${num(payable.amount)}`)}
+    try{persist(`刪除未付款手動應付帳款｜${payable.payableNo||payable.sourceNo||payable.id}｜${payable.vendorName||''}｜${num(payable.amount)}`)}
     catch(error){
       state.payables=previousPayables;state.meta=previousMeta;state.audit=previousAudit;
-      try{if(!db)db=await openDB();if(db)await dbSet(STATE_KEY,state);localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state))}catch(_){/* 原始錯誤優先；記憶體狀態已完整還原 */}
+      if(!activeStoreTransaction)try{if(!db)db=await openDB();if(db)await dbSet(STATE_KEY,state);localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state))}catch(_){/* 原始錯誤優先；記憶體狀態已完整還原 */}
       throw error;
     }
     return preview;
@@ -2636,7 +3621,7 @@
     return {payableId:id,allowed:blockers.length===0,blockers,sourceType,payableNo:payable.payableNo||payable.number||payable.sourceNo||'',vendorName:payable.vendorName||state.vendors?.find((row)=>clean(row.id)===clean(payable.vendor))?.name||'',projectName:payable.projectName||state.projects?.find((row)=>clean(row.id)===clean(payable.project))?.name||'',amount:num(payable.amount),paid,paymentCount:payments.length,bankTransactionCount:bankTransactions.length,invoiceRecordCount:inputInvoices.length,materialUsageCount:materialUsages.length,inventoryReceiptCount:inventoryReceipts.length,projectCostCount:projectCosts.length,sharedMaterialUsageCount:sharedMaterialUsages.length,sharedMaterialUsageDetails,unknownRelationCount,invoices:inputInvoices.map((row)=>({id:clean(row.id),invoiceNo:String(row.invoiceNumber||row.invoiceNo||row.number||''),date:row.invoiceDate||row.date||'',status:invoiceStatus(row.status,row.invoiceNumber||row.invoiceNo||row.number),amount:num(row.grossAmount??row.total??row.netAmount??row.amount),sourceNo:row.sourceNo||''})),materialUsages:materialUsages.map((row)=>({id:clean(row.id),date:row.date||'',projectId:row.project||row.projectId||'',projectName:row.projectName||state.projects?.find((project)=>clean(project.id)===clean(row.project||row.projectId))?.name||'',materialId:row.material||row.materialId||'',materialName:row.materialName||state.materials?.find((material)=>clean(material.id)===clean(row.material||row.materialId))?.name||'',amount:num(row.amount??num(row.quantity)*num(row.unitPrice))}))};
   }
   async function cleanupMaterialPayableTestData(payableId, confirmation={}) {
-    await load();
+    requireStoreTransactionDraft();
     const id=clean(payableId),preview=materialPayableTestCleanupPreview(id),reason=clean(confirmation?.reason);
     if(confirmation?.confirmed!==true)throw new Error('必須明確確認整組資料為測試資料。');
     if(!reason)throw new Error('請輸入測試資料清理原因。');
@@ -2664,13 +3649,15 @@
       if(state.payables.some((row)=>Array.isArray(row.usageIds)&&row.usageIds.some((usageId)=>usageIds.has(clean(usageId)))))throw new Error('刪除後仍有應付引用目標材料使用。');
       if((state.inventoryReceipts||[]).some((row)=>clean(row.payableId)===id))throw new Error('刪除後留下入庫孤兒關聯。');
       if((state.projectCosts||[]).some((row)=>clean(row.payableId)===id))throw new Error('刪除後留下案場成本孤兒關聯。');
-      await persist(`測試資料安全清理｜材料→應付→進項發票｜${preview.payableNo||id}｜原因：${reason}`);
+      persist(`測試資料安全清理｜材料→應付→進項發票｜${preview.payableNo||id}｜原因：${reason}`);
       assertUnchanged();
       return {...preview,reason,deletedInvoiceCount:invoiceIds.size,deletedMaterialUsageCount:usageIds.size,deletedPayableCount:1};
     } catch(error) {
       state=snapshot;
-      try{if(!db)db=await openDB();if(db)await dbSet(STATE_KEY,state)}catch(_){/* 持久層採最大努力還原，原始錯誤優先 */}
-      try{localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state))}catch(_){/* 緊急備份採最大努力還原，原始錯誤優先 */}
+      if(!activeStoreTransaction){
+        try{if(!db)db=await openDB();if(db)await dbSet(STATE_KEY,state)}catch(_){/* 原始錯誤優先 */}
+        try{localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state))}catch(_){/* 原始錯誤優先 */}
+      }
       throw error;
     }
   }
@@ -2757,13 +3744,13 @@
     return {duplicatePayableId:id,allowed:blockers.length===0,blockers,duplicatePayable:{id,payableNo:duplicate.payableNo||duplicate.number||duplicate.sourceNo||'',vendorName:vendorName(duplicate),projectName:duplicate.projectName||state.projects?.find((row)=>clean(row.id)===clean(duplicate.project))?.name||'',sourceType:String(duplicate.sourceType||''),sourceId:clean(duplicate.sourceId),usageIds:[...duplicateUsageIds],amount:num(duplicate.amount),paid:num(duplicate.paid),createdAt:duplicate.createdAt||'',updatedAt:duplicate.updatedAt||''},mergedPayable:merged?{id:clean(merged.id),payableNo:merged.payableNo||merged.number||merged.sourceNo||'',vendorName:vendorName(merged),projectName:merged.projectName||state.projects?.find((row)=>clean(row.id)===clean(merged.project))?.name||'',sourceType:String(merged.sourceType||''),sourceId:clean(merged.sourceId),usageIds:mergedUsageIds,amount:num(merged.amount),paid:num(merged.paid),fee:num(merged.fee),createdAt:merged.createdAt||'',updatedAt:merged.updatedAt||''}:null,materialUsages:materialUsages.map((row)=>({id:clean(row.id),materialName:row.materialName||state.materials?.find((material)=>clean(material.id)===clean(row.material||row.materialId))?.name||'',projectName:row.projectName||state.projects?.find((project)=>clean(project.id)===clean(row.project||row.projectId))?.name||'',amount:num(row.amount??num(row.quantity)*num(row.unitPrice)),currentPayableId:clean(row.payableId)})),truePayments:mappedPayments,legacySummary:legacySummary?{id:clean(legacySummary.id),amount:num(legacySummary.amount),fee:num(legacySummary.fee),actualDebit:num(legacySummary.actualDebit??legacySummary.amount),bankTransactionId:clean(legacySummary.bankTransactionId),legacy:legacySummary.legacy===true}:null,testInvoice:testInvoice?{id:clean(testInvoice.id),invoiceNo:String(testInvoice.invoiceNumber||testInvoice.invoiceNo||testInvoice.number||''),date:testInvoice.invoiceDate||testInvoice.date||'',status:invoiceStatus(testInvoice.status,testInvoice.invoiceNumber||testInvoice.invoiceNo||testInvoice.number),amount:num(testInvoice.grossAmount??testInvoice.total??testInvoice.netAmount??testInvoice.amount)}:null,materialTotal,truePaymentTotal,trueFeeTotal,bankActualDebitTotal,bankTransactionCount:matchedTransactionIds.size,orphanPayableIds,unknownRelationCount:unknownRelations.length};
   }
   async function repairMergedPayableHistory(duplicatePayableId, confirmation={}) {
-    await load();
+    requireStoreTransactionDraft();
     const id=clean(duplicatePayableId),reason=clean(confirmation?.reason),preview=mergedPayableRepairPreview(id);
     if(confirmation?.confirmed!==true)throw new Error('必須明確確認舊帳與進項發票為測試／歷史殘留資料。');
     if(!reason)throw new Error('請輸入歷史帳務修復原因。');
     if(preview.allowed!==true)throw new Error(`此筆歷史帳務不可安全修復：${preview.blockers.map((row)=>row.message).join(' ')}`);
     const snapshot=JSON.parse(JSON.stringify(state)),fingerprint=(value)=>JSON.stringify(value),omit=(row,keys)=>Object.fromEntries(Object.entries(row||{}).filter(([key])=>!keys.includes(key))),mergedId=preview.mergedPayable.id,legacyId=preview.legacySummary.id,invoiceId=preview.testInvoice.id,truePaymentIds=new Set(preview.truePayments.map((row)=>row.id)),transactionIds=new Set(preview.truePayments.map((row)=>row.bankTransaction?.id).filter(Boolean)),usageIds=new Set(preview.materialUsages.map((row)=>row.id)),oldOwnerIds=new Set(preview.orphanPayableIds),bankFingerprint=fingerprint(state.banks),beforeCounts={payments:state.payments.length,bankTransactions:state.bankTransactions.length,materialUsages:state.materialUsages.length,invoices:state.invoices.length,payables:state.payables.length},otherFingerprints={payments:fingerprint(state.payments.filter((row)=>!truePaymentIds.has(clean(row.id))&&clean(row.id)!==legacyId)),bankTransactions:fingerprint(state.bankTransactions.filter((row)=>!transactionIds.has(clean(row.id)))),materialUsages:fingerprint(state.materialUsages.filter((row)=>!usageIds.has(clean(row.id)))),invoices:fingerprint(state.invoices.filter((row)=>clean(row.id)!==invoiceId)),payables:fingerprint(state.payables.filter((row)=>![id,mergedId].includes(clean(row.id))))},paymentBefore=new Map(state.payments.filter((row)=>truePaymentIds.has(clean(row.id))).map((row)=>[clean(row.id),fingerprint(omit(row,['payableId']))])),transactionBefore=new Map(state.bankTransactions.filter((row)=>transactionIds.has(clean(row.id))).map((row)=>[clean(row.id),fingerprint(omit(row,['payableId','sourceNo']))])),usageBefore=new Map(state.materialUsages.filter((row)=>usageIds.has(clean(row.id))).map((row)=>[clean(row.id),fingerprint(omit(row,['payableId']))]));
-    const restore=async()=>{state=snapshot;try{if(!db)db=await openDB();if(db)await dbSet(STATE_KEY,state)}catch(_){/* 持久層採最大努力還原，原始錯誤優先 */}try{localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state))}catch(_){/* 緊急備份採最大努力還原，原始錯誤優先 */}};
+    const restore=async()=>{state=snapshot;if(activeStoreTransaction)return;try{if(!db)db=await openDB();if(db)await dbSet(STATE_KEY,state)}catch(_){/* 持久層採最大努力還原，原始錯誤優先 */}try{localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state))}catch(_){/* 緊急備份採最大努力還原，原始錯誤優先 */}};
     try {
       state.payments.forEach((row)=>{if(truePaymentIds.has(clean(row.id)))row.payableId=mergedId});
       state.bankTransactions.forEach((row)=>{if(transactionIds.has(clean(row.id))){row.payableId=mergedId;row.sourceNo=preview.mergedPayable.payableNo}});
@@ -2795,7 +3782,7 @@
       if(repairedPayments.length!==truePaymentIds.size||repairedTotal!==preview.truePaymentTotal||repairedFee!==preview.trueFeeTotal)throw new Error('合併應付的真正付款彙總不正確。');
       if(repairedBankTotal!==preview.bankActualDebitTotal)throw new Error('銀行實際支出合計發生非預期變動。');
       if(repairedMaterialTotal!==preview.materialTotal)throw new Error('材料金額合計發生非預期變動。');
-      await persist(`歷史合併帳務修復｜付款、材料與應付關聯整理｜原因：${reason}`);
+      persist(`歷史合併帳務修復｜付款、材料與應付關聯整理｜原因：${reason}`);
       if(fingerprint(state.banks)!==bankFingerprint)throw new Error('儲存後銀行帳戶金額發生非預期變動。');
       return {...preview,reason,repairedPayableId:mergedId,removedLegacyPaymentCount:1,removedDuplicatePayableCount:1,removedTestInvoiceCount:1,remainingAmount:Math.max(0,preview.mergedPayable.amount-preview.truePaymentTotal)};
     } catch(error) {
@@ -2804,7 +3791,7 @@
     }
   }
   async function addPayablePayment(values) {
-    await load();
+    requireStoreTransactionDraft();
     const idempotencyKey = String(values.idempotencyKey || '').trim();
     if (idempotencyKey) { const existing=state.payments.find((row)=>row.idempotencyKey===idempotencyKey); if(existing)return existing; }
     const payable = state.payables.find((row) => row.id === values.payableId);
@@ -2820,7 +3807,7 @@
     payable.paid=num(payable.paid)+amount;payable.bankId=bank.id;payable.payDate=payment.date;payable.fee=num(payable.fee)+fee;payable.feeParty=feePayer==='company'?'公司負擔':'收款人負擔';payable.status=payable.paid>=num(payable.amount)?'已付清':'部分付款';payable.updatedAt=now;
     bank.expense=num(bank.expense)+actualDebit;bank.balance=num(bank.openingBalance)+num(bank.income)-num(bank.expense);bank.updatedAt=now;
     state.bankTransactions.unshift({id:transactionId,date:payment.date,bankId:bank.id,bankAccountId:bank.id,type:'支出',direction:'out',category:'應付帳款付款',amount:actualDebit,payableAmount:amount,fee,actualDebit,feePayer,paymentMethod:payment.paymentMethod,sourceType:'payable_payment',sourceId:payment.id,payableId:payable.id,vendor:payable.vendor,vendorName:payable.vendorName||'',project:payable.project,projectName:payable.projectName||'',sourceNo:payable.payableNo||payable.sourceNo||'',description:`${payable.vendorName||payable.payableNo||'應付帳款'} 付款`,note:payment.note||`${payable.payableNo||''} 付款`,createdAt:now,updatedAt:now});
-    await persist(`新增應付付款 ${payable.payableNo||payable.sourceNo||''}`); return payment;
+    persist(`新增應付付款 ${payable.payableNo||payable.sourceNo||''}`); return payment;
   }
   function payablePaymentTransaction(payment) {
     return linkedBankTransaction(payment,['payable-payment','payable_payment'],'應付付款');
@@ -2853,21 +3840,21 @@
     if(!existing)state.bankTransactions.unshift(transaction);payment.bankId=bank.id;payment.bankAccountId=bank.id;payment.bankTransactionId=transaction.id;adjustBankExpense(bank,num(payment.actualDebit),now);return transaction;
   }
   async function updatePayablePayment(id, values={}) {
-    await load();const paymentMatches=state.payments.filter((row)=>String(row.id||'')===String(id||''));if(paymentMatches.length!==1)throw new Error(paymentMatches.length?'付款紀錄編號不唯一，已停止修改':'找不到付款紀錄');const payment=paymentMatches[0];if(payment.legacy)throw new Error('歷史付款紀錄不可直接修改');
+    requireStoreTransactionDraft();const paymentMatches=state.payments.filter((row)=>String(row.id||'')===String(id||''));if(paymentMatches.length!==1)throw new Error(paymentMatches.length?'付款紀錄編號不唯一，已停止修改':'找不到付款紀錄');const payment=paymentMatches[0];if(payment.legacy)throw new Error('歷史付款紀錄不可直接修改');
     const payableMatches=state.payables.filter((row)=>String(row.id||'')===String(payment.payableId||''));if(payableMatches.length!==1)throw new Error(payableMatches.length?'對應應付帳款不唯一，已停止修改':'找不到這筆應付帳款');const payable=payableMatches[0];
     const otherPaid=state.payments.filter((row)=>row!==payment&&row.payableId===payable.id).reduce((sum,row)=>sum+num(row.amount),0),amount=Math.round(num(values.amount)),fee=values.fee===undefined?num(payment.fee):Math.max(0,Math.round(num(values.fee))),feePayer=values.feePayer==='recipient'?'recipient':'company',bankId=String(values.bankAccountId||values.bankId||'');
     if(amount<=0||otherPaid+amount>num(payable.amount))throw new Error('本次付款不可超過未付金額');if(feePayer==='recipient'&&fee>amount)throw new Error('收款人負擔的手續費不可高於本次付款');strictBankReference({bankId},'新的付款銀行帳戶');
     const plan=payablePaymentMutationPlan(payment),snapshot=JSON.parse(JSON.stringify(state)),now=new Date().toISOString(),actualDebit=feePayer==='company'?amount+fee:amount;
     try {
       Object.assign(payment,{date:values.date||payment.date||businessDate(new Date(now)),amount,fee,actualDebit,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||payment.paymentMethod||'銀行轉帳',feePayer,note:values.note===undefined?payment.note:String(values.note||''),updatedAt:now});
-      syncPayableBankTransaction(payment,payable,now,plan.transaction);syncPayableSummary(payable,now);await persist(`修改應付付款 ${payable.payableNo||''}`);return payment;
+      syncPayableBankTransaction(payment,payable,now,plan.transaction);syncPayableSummary(payable,now);persist(`修改應付付款 ${payable.payableNo||''}`);return payment;
     } catch(error) { await restoreBankLinkedMutation(snapshot,error);throw error; }
   }
   async function deletePayablePayment(id) {
-    await load();const paymentMatches=state.payments.filter((row)=>String(row.id||'')===String(id||''));if(paymentMatches.length!==1)throw new Error(paymentMatches.length?'付款紀錄編號不唯一，已停止刪除':'找不到付款紀錄');const payment=paymentMatches[0];if(payment.legacy)throw new Error('歷史付款紀錄不可直接刪除');
+    requireStoreTransactionDraft();const paymentMatches=state.payments.filter((row)=>String(row.id||'')===String(id||''));if(paymentMatches.length!==1)throw new Error(paymentMatches.length?'付款紀錄編號不唯一，已停止刪除':'找不到付款紀錄');const payment=paymentMatches[0];if(payment.legacy)throw new Error('歷史付款紀錄不可直接刪除');
     const payableMatches=state.payables.filter((row)=>String(row.id||'')===String(payment.payableId||''));if(payableMatches.length!==1)throw new Error(payableMatches.length?'對應應付帳款不唯一，已停止刪除':'找不到這筆應付帳款');const payable=payableMatches[0],plan=payablePaymentMutationPlan(payment),snapshot=JSON.parse(JSON.stringify(state)),now=new Date().toISOString();
     try {
-      adjustBankExpense(plan.bank,-plan.amount,now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==plan.transaction);state.payments=state.payments.filter((row)=>row!==payment);syncPayableSummary(payable,now);await persist(`刪除應付付款 ${payable.payableNo||''}`);return true;
+      adjustBankExpense(plan.bank,-plan.amount,now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==plan.transaction);state.payments=state.payments.filter((row)=>row!==payment);syncPayableSummary(payable,now);persist(`刪除應付付款 ${payable.payableNo||''}`);return true;
     } catch(error) { await restoreBankLinkedMutation(snapshot,error);throw error; }
   }
   const salaryAdjustmentFields = [
@@ -2950,7 +3937,7 @@
     return Math.round(amount);
   }
   async function updatePayrollAdjustments(groupKey, values={}) {
-    await load();
+    requireStoreTransactionDraft();
     const reference=String(groupKey||''),group=monthlyPayrollGroups().find((row)=>row.key===reference||row.recordIds.some((id)=>String(id)===reference));
     let employeeId=group?.employeeId||'',month=group?.month||'';
     if(!group){const divider=reference.lastIndexOf('__');if(divider>0){employeeId=reference.slice(0,divider);month=reference.slice(divider+2)}}
@@ -2965,7 +3952,7 @@
     if(payroll.status==='已付款'){Object.assign(payroll,{status:'未付款',paidAmount:0,payDate:'',paidAt:'',paymentTransactionId:'',bankId:''})}
     records.filter((row)=>row!==payroll).forEach((row)=>{salaryAdjustmentFields.forEach(([field])=>{row[field]=0});row.payrollAdjustmentNote='';row.otherNote='';row.deductionNote=''});
     Object.assign(payroll,normalized,{payrollAdjustmentNote,otherNote,deductionNote});rebuildPayrollFor(month,employeeValue);
-    await persist(`更新薪資調整 ${month}`);
+    persist(`更新薪資調整 ${month}`);
     return monthlyPayrollGroups().find((row)=>row.employeeId===employeeId&&row.month===month)||null;
   }
   function salaryPaymentTransaction(payment) {
@@ -3008,22 +3995,22 @@
     if(!existing)state.bankTransactions.unshift(transaction);payment.bankId=bank.id;payment.bankAccountId=bank.id;payment.bankTransactionId=transaction.id;adjustBankExpense(bank,num(payment.actualDebit),now);return transaction;
   }
   async function addSalaryPayment(values) {
-    await load();const idempotencyKey=String(values.idempotencyKey||'').trim();if(idempotencyKey){const existing=state.salaryPayments.find((row)=>row.idempotencyKey===idempotencyKey);if(existing)return existing}
+    requireStoreTransactionDraft();const idempotencyKey=String(values.idempotencyKey||'').trim();if(idempotencyKey){const existing=state.salaryPayments.find((row)=>row.idempotencyKey===idempotencyKey);if(existing)return existing}
     const payroll=state.payroll.find((row)=>row.id===values.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const summary=salaryPaymentSummary(payroll),amount=Math.round(num(values.amount)),fee=Math.max(0,Math.round(num(values.fee))),feePayer=values.feePayer==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount;if(amount<=0||amount>summary.outstanding)throw new Error('本次付款不可超過未付薪資');if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次付款');
     const bank=state.banks.find((row)=>row.id===String(values.bankAccountId||values.bankId||''));if(!bank)throw new Error('請選擇薪資付款銀行帳戶');const now=new Date().toISOString(),payment={id:uid(),idempotencyKey:idempotencyKey||uid(),payrollId:payroll.id,date:values.date||businessDate(new Date(now)),amount,fee,feePayer,actualDebit,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:String(values.note||''),createdAt:now,updatedAt:now};
-    state.salaryPayments.unshift(payment);syncSalaryBankTransaction(payment,payroll,now);syncSalarySummary(payroll,now);await persist(`新增薪資付款 ${payroll.month||''}`);return payment;
+    state.salaryPayments.unshift(payment);syncSalaryBankTransaction(payment,payroll,now);syncSalarySummary(payroll,now);persist(`新增薪資付款 ${payroll.month||''}`);return payment;
   }
   async function updateSalaryPayment(id, values={}) {
-    await load();const payment=state.salaryPayments.find((row)=>row.id===id);if(!payment)throw new Error('找不到薪資付款紀錄');const payroll=state.payroll.find((row)=>row.id===payment.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const summary=salaryPaymentSummary(payroll),otherPaid=summary.history.filter((row)=>row!==payment).reduce((sum,row)=>sum+num(row.amount),0),amount=Math.round(num(values.amount)),fee=values.fee===undefined?num(payment.fee):Math.max(0,Math.round(num(values.fee))),feePayer=(values.feePayer===undefined?payment.feePayer:values.feePayer)==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount,bankId=String(values.bankAccountId||values.bankId||'');if(amount<=0||otherPaid+amount>summary.total)throw new Error('本次付款不可超過未付薪資');if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次付款');if(!state.banks.some((row)=>row.id===bankId))throw new Error('請選擇薪資付款銀行帳戶');
-    const now=new Date().toISOString();Object.assign(payment,{date:values.date||payment.date||businessDate(new Date(now)),amount,fee,feePayer,actualDebit,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||payment.paymentMethod||'銀行轉帳',note:values.note===undefined?payment.note:String(values.note||''),updatedAt:now});syncSalaryBankTransaction(payment,payroll,now);syncSalarySummary(payroll,now);await persist(`修改薪資付款 ${payroll.month||''}`);return payment;
+    requireStoreTransactionDraft();const payment=state.salaryPayments.find((row)=>row.id===id);if(!payment)throw new Error('找不到薪資付款紀錄');const payroll=state.payroll.find((row)=>row.id===payment.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const summary=salaryPaymentSummary(payroll),otherPaid=summary.history.filter((row)=>row!==payment).reduce((sum,row)=>sum+num(row.amount),0),amount=Math.round(num(values.amount)),fee=values.fee===undefined?num(payment.fee):Math.max(0,Math.round(num(values.fee))),feePayer=(values.feePayer===undefined?payment.feePayer:values.feePayer)==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount,bankId=String(values.bankAccountId||values.bankId||'');if(amount<=0||otherPaid+amount>summary.total)throw new Error('本次付款不可超過未付薪資');if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次付款');if(!state.banks.some((row)=>row.id===bankId))throw new Error('請選擇薪資付款銀行帳戶');
+    const now=new Date().toISOString();Object.assign(payment,{date:values.date||payment.date||businessDate(new Date(now)),amount,fee,feePayer,actualDebit,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||payment.paymentMethod||'銀行轉帳',note:values.note===undefined?payment.note:String(values.note||''),updatedAt:now});syncSalaryBankTransaction(payment,payroll,now);syncSalarySummary(payroll,now);persist(`修改薪資付款 ${payroll.month||''}`);return payment;
   }
   async function deleteSalaryPayment(id) {
-    await load();const payment=state.salaryPayments.find((row)=>row.id===id);if(!payment)throw new Error('找不到薪資付款紀錄');const payroll=state.payroll.find((row)=>row.id===payment.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const plan=salaryPaymentDeletionPlan(payment),snapshot=JSON.parse(JSON.stringify(state)),now=new Date().toISOString();
+    requireStoreTransactionDraft();const payment=state.salaryPayments.find((row)=>row.id===id);if(!payment)throw new Error('找不到薪資付款紀錄');const payroll=state.payroll.find((row)=>row.id===payment.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const plan=salaryPaymentDeletionPlan(payment),snapshot=JSON.parse(JSON.stringify(state)),now=new Date().toISOString();
     try {
-      adjustBankExpense(plan.bank,-plan.actualDebit,now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==plan.transaction);state.salaryPayments=state.salaryPayments.filter((row)=>row!==payment);syncSalarySummary(payroll,now);await persist(`刪除薪資付款 ${payroll.month||''}`);return true;
+      adjustBankExpense(plan.bank,-plan.actualDebit,now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==plan.transaction);state.salaryPayments=state.salaryPayments.filter((row)=>row!==payment);syncSalarySummary(payroll,now);persist(`刪除薪資付款 ${payroll.month||''}`);return true;
     } catch (error) {
       state=snapshot;
-      try {
+      if(!activeStoreTransaction)try {
         if(!db){try{db=await openDB()}catch(_){db=null}}
         if(db)await dbSet(STATE_KEY,state);
         localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state));
@@ -3033,7 +4020,7 @@
     }
   }
   async function updateBillingInvoice(id, values = {}) {
-    await load(); const billing=state.billings.find((row)=>row.id===id);if(!billing)throw new Error('找不到請款單');
+    requireStoreTransactionDraft(); const billing=state.billings.find((row)=>row.id===id);if(!billing)throw new Error('找不到請款單');
     const now=new Date().toISOString(),choice=values.invoiceChoice==='invoice_required'?'invoice_required':'no_invoice',number=choice==='no_invoice'?'':String(values.invoiceNo||'').trim(),date=choice==='no_invoice'?'':values.invoiceDate||billing.date||businessDate(new Date(now));
     const nextInvoiceStatus=choice==='no_invoice'?'no_invoice':number?'invoiced':'invoice_pending';
     const totals=calculateBilling({lines:billing.lines||[],taxMode:billing.taxMode,invoiceStatus:nextInvoiceStatus,retentionMode:billing.retentionMode,retentionRate:billing.retentionRate,retentionBase:billing.retentionBase||'taxIncluded',retentionCustom:!billing.retentionBase&&billing.retentionMode==='custom'?billing.retention:undefined});
@@ -3042,7 +4029,7 @@
     Object.assign(billing,{invoiceStatus:nextInvoiceStatus,hasInvoice:nextInvoiceStatus!=='no_invoice',invoiceNo:number,invoiceDate:date,amount:totals.untaxed,tax:totals.tax,grossTotal:totals.grossTotal,preTaxAmount:totals.untaxed,taxAmount:totals.tax,taxIncludedAmount:totals.grossTotal,retention:totals.retention,retentionAmount:totals.retention,retentionBase:totals.retentionBase,retentionStatus:retentionState(totals.retention,billing.retentionReceived,billing.retentionStatus),remainingRetention:Math.max(0,totals.retention-num(billing.retentionReceived)),total:totals.receivable,updatedAt:now});
     if(ar){Object.assign(ar,{invoiceNo:number,invoiceStatus:nextInvoiceStatus,taxMode:billing.taxMode,untaxedAmount:totals.untaxed,tax:totals.tax,grossTotal:totals.grossTotal,preTaxAmount:totals.untaxed,taxAmount:totals.tax,taxIncludedAmount:totals.grossTotal,retention:totals.retention,retentionAmount:totals.retention,retentionBase:totals.retentionBase,retentionStatus:retentionState(totals.retention,ar.retentionReceived,ar.retentionStatus),remainingRetention:Math.max(0,totals.retention-num(ar.retentionReceived)),amount:totals.receivable,status:num(ar.received)>=totals.receivable&&totals.receivable>0?'已收':num(ar.received)>0?'部分收款':'未收',updatedAt:now})}
     syncBillingInvoiceRecord(billing,now);
-    await persist(`更新請款單發票 ${billing.number}`);return billing;
+    persist(`更新請款單發票 ${billing.number}`);return billing;
   }
   const clean = (value) => String(value ?? '').trim();
   const sameName = (left, right) => clean(left).replace(/\s+/g,' ').toLocaleLowerCase('zh-Hant') === clean(right).replace(/\s+/g,' ').toLocaleLowerCase('zh-Hant');
@@ -3089,7 +4076,7 @@
     return payable;
   }
   async function saveCustomer(values, id = '') {
-    await load();
+    requireStoreTransactionDraft();
     const name = clean(values.name); if (!name) throw new Error('請輸入客戶／建設公司名稱');
     const duplicate = state.customers.find((row) => row.id !== id && sameName(row.name,name));
     if (duplicate) throw new Error('客戶名稱已存在，請直接編輯既有客戶');
@@ -3098,7 +4085,7 @@
     Object.assign(row,{name,taxId:clean(values.taxId),contact:clean(values.contact),phone:clean(values.phone),email:clean(values.email),address:clean(values.address),note:clean(values.note),updatedAt:now});
     if (!id) state.customers.unshift(row);
     state.projects.filter((project) => project.customer === row.id).forEach((project) => { project.customerName=row.name; });
-    await persist(`${id?'修改':'新增'}客戶 ${row.name}`); return row;
+    persist(`${id?'修改':'新增'}客戶 ${row.name}`); return row;
   }
   const CUSTOMER_DELETE_BLOCKERS = [
     ['projects','案場'],
@@ -3137,14 +4124,14 @@
   }
   const customerDeleteBlockedMessage = (preview) => `此客戶仍有關聯資料，不能刪除：${preview.blockers.map((row)=>`${row.label} ${row.count} 筆`).join('、')}`;
   async function deleteCustomer(customerId) {
-    await load();
+    requireStoreTransactionDraft();
     const id=clean(customerId),customer=state.customers.find((row)=>String(row.id)===id);
     if(!customer)throw new Error('找不到客戶資料');
     const preview=customerDeletePreview(id);
     if(preview.deletable!==true)throw new Error(customerDeleteBlockedMessage(preview));
     const previousCustomers=state.customers,previousMeta={...state.meta},previousAudit=[...state.audit];
     state.customers=state.customers.filter((row)=>row!==customer);
-    try{await persist(`刪除客戶 ${customer.name}`)}
+    try{persist(`刪除客戶 ${customer.name}`)}
     catch(error){state.customers=previousCustomers;state.meta=previousMeta;state.audit=previousAudit;throw error}
     return true;
   }
@@ -3398,6 +4385,7 @@
   }
   async function projectMergeRestore(snapshot){
     state=snapshot;
+    if(activeStoreTransaction)return;
     if(!db){try{db=await openDB()}catch(_){db=null}}
     if(db)await dbSet(STATE_KEY,state);
     localStorage.setItem(EMERGENCY_KEY,JSON.stringify(state));
@@ -3405,7 +4393,7 @@
     window.dispatchEvent(new CustomEvent('kushe:data-updated',{detail:{action:'project-merge-rollback'}}));
   }
   async function mergeProject(sourceProjectId,targetProjectId,confirmation){
-    await load();
+    requireStoreTransactionDraft();
     const preview=projectMergePreview(sourceProjectId,targetProjectId),confirmationName=typeof confirmation==='string'?confirmation:confirmation?.targetName;
     if(preview.allowed!==true){const reasons=[...preview.blockers,...preview.conflicts,...preview.unknownRelations].map((row)=>row.message||`${row.key} 有未知案場關聯`);throw new Error(reasons.join('；')||'此案場合併目前不可執行')}
     if(String(confirmationName??'')!==String(preview.target.name))throw new Error('請輸入目標案場完整名稱以確認永久合併');
@@ -3443,7 +4431,7 @@
       const collectionCounts=Object.fromEntries(Object.entries(sourceCounts).filter(([,count])=>count>0));
       if(preview.legacyProjectItemPrices.length)collectionCounts.legacyProjectItemPrices=preview.legacyProjectItemPrices.length;
       persistStarted=true;
-      await persist(`合併案場 ${preview.source.name} → ${preview.target.name}`,{sourceProjectId:preview.source.id,targetProjectId:preview.target.id,collectionCounts,mergeTimestamp:new Date().toISOString()});
+      persist(`合併案場 ${preview.source.name} → ${preview.target.name}`,{sourceProjectId:preview.source.id,targetProjectId:preview.target.id,collectionCounts,mergeTimestamp:new Date().toISOString()});
       return {merged:true,singlePersist:true,source:preview.source,target:preview.target,collectionCounts,sourceDeletePreviewBeforeRemoval:deletePreview,financialTotalsBefore:financialBefore,financialTotalsAfter:projectMergeGlobalFinancialTotals(),sourceProjectRemoved:true,targetProjectPreserved:true};
     }catch(error){
       state=snapshot;
@@ -3475,19 +4463,19 @@
   }
   const projectDeleteBlockedMessage = (preview) => `此案場仍有關聯資料，不能刪除：${preview.blockers.map((row)=>`${row.label} ${row.count} 筆`).join('、')}`;
   async function deleteProject(projectId) {
-    await load();
+    requireStoreTransactionDraft();
     const id=clean(projectId),project=state.projects.find((row)=>String(row.id)===id);
     if(!project)throw new Error('找不到案場資料');
     const preview=projectDeletePreview(id);
     if(preview.deletable!==true)throw new Error(projectDeleteBlockedMessage(preview));
     const previousProjects=state.projects,previousMeta={...state.meta},previousAudit=[...state.audit];
     state.projects=state.projects.filter((row)=>row!==project);
-    try{await persist(`刪除案場 ${project.name}`)}
+    try{persist(`刪除案場 ${project.name}`)}
     catch(error){state.projects=previousProjects;state.meta=previousMeta;state.audit=previousAudit;throw error}
     return true;
   }
   async function saveProject(values, id = '') {
-    await load();
+    requireStoreTransactionDraft();
     const name=clean(values.name),customer=state.customers.find((row)=>row.id===values.customer);
     if(!name)throw new Error('請輸入案場名稱'); if(!customer)throw new Error('請選擇所屬客戶');
     const duplicate=state.projects.find((row)=>row.id!==id&&sameName(row.name,name)&&row.customer===customer.id);
@@ -3495,7 +4483,7 @@
     const now=new Date().toISOString(),row=state.projects.find((item)=>item.id===id)||{id:uid(),createdAt:now};
     const retentionMode=['5','10','custom'].includes(values.defaultRetentionMode)?values.defaultRetentionMode:'none';
     Object.assign(row,{name,customer:customer.id,customerName:customer.name,address:clean(values.address),startDate:values.startDate||'',expectedEndDate:values.expectedEndDate||'',actualEndDate:values.actualEndDate||'',status:['進行中','已完工','暫停'].includes(values.status)?values.status:'進行中',contractAmount:Math.max(0,num(values.contractAmount)),note:clean(values.note),defaultRetentionMode:retentionMode,defaultRetentionRate:retentionMode==='5'?5:retentionMode==='10'?10:retentionMode==='custom'?Math.max(0,num(values.defaultRetentionRate)):0,defaultRetentionAmount:0,defaultRetentionBase:values.defaultRetentionBase==='preTax'?'preTax':'taxIncluded',defaultInvoiceChoice:values.defaultInvoiceChoice==='invoice_required'?'invoice_required':'no_invoice',defaultTaxMode:values.defaultTaxMode==='含稅'?'含稅':'未稅',defaultPricingMode:pricingMode(values.defaultPricingMode)||row.defaultPricingMode||'',updatedAt:now});
-    if(!id)state.projects.unshift(row); await persist(`${id?'修改':'新增'}案場 ${row.name}`); return row;
+    if(!id)state.projects.unshift(row); persist(`${id?'修改':'新增'}案場 ${row.name}`); return row;
   }
   function employeeUsage(id) {
     const employeeId=String(id||''),sameEmployee=(row)=>String(row?.employee||row?.employeeId||'')===employeeId;
@@ -3504,7 +4492,7 @@
     return {...counts,used:Object.values(counts).some((count)=>count>0)};
   }
   async function saveEmployee(values, id = '') {
-    await load();
+    requireStoreTransactionDraft();
     const name=clean(values.name),dailyRate=values.dailyRate===''||values.dailyRate===undefined?0:Number(values.dailyRate),commissionRate=values.commissionRate===''||values.commissionRate===undefined?0:Number(values.commissionRate);
     if(!name)throw new Error('請輸入員工姓名');
     if(!Number.isFinite(dailyRate)||dailyRate<0)throw new Error('日薪不可小於 0');
@@ -3514,15 +4502,15 @@
     const now=new Date().toISOString(),row=state.employees.find((item)=>String(item.id)===String(id))||{id:uid(),createdAt:now};
     Object.assign(row,{name,phone:clean(values.phone),role:clean(values.role),dailyRate,commissionRate,startDate:values.startDate||'',status:clean(values.status)||row.status||'在職',note:clean(values.note),updatedAt:now});
     if(!id)state.employees.unshift(row);
-    await persist(`${id?'修改':'新增'}員工 ${row.name}`); return row;
+    persist(`${id?'修改':'新增'}員工 ${row.name}`); return row;
   }
   async function deleteEmployee(id) {
-    await load(); const row=state.employees.find((item)=>String(item.id)===String(id)); if(!row)return false;
+    requireStoreTransactionDraft(); const row=state.employees.find((item)=>String(item.id)===String(id)); if(!row)return false;
     if(employeeUsage(id).used)throw new Error('此員工已有出勤、抽成、薪資或銀行歷史，請改為離職／停用，不可直接刪除');
-    state.employees=state.employees.filter((item)=>item!==row); await persist(`刪除員工 ${row.name||''}`); return true;
+    state.employees=state.employees.filter((item)=>item!==row); persist(`刪除員工 ${row.name||''}`); return true;
   }
   async function saveMaterial(values, id = '') {
-    await load();
+    requireStoreTransactionDraft();
     const name=clean(values.name),code=clean(values.code),unit=clean(values.unit),vendor=state.vendors.find((row)=>row.id===values.vendor),unitPrice=Math.max(0,num(values.unitPrice));
     if(!name)throw new Error('請輸入材料名稱'); if(!unit)throw new Error('請輸入材料單位'); if(!vendor)throw new Error('請選擇材料廠商');
     const duplicate=state.materials.find((row)=>row.id!==id&&sameName(row.name,name)&&String(row.vendor||'')===String(vendor.id));
@@ -3531,15 +4519,15 @@
     const now=new Date().toISOString(),row=state.materials.find((item)=>item.id===id)||{id:uid(),stock:0,safeStock:0,createdAt:now};
     Object.assign(row,{name,code,vendor:vendor.id,vendorName:vendor.name||'',unit,unitPrice,model:clean(values.model),note:clean(values.note),updatedAt:now});
     if(!id)state.materials.unshift(row);
-    await persist(`${id?'修改':'新增'}材料 ${row.name}`); return row;
+    persist(`${id?'修改':'新增'}材料 ${row.name}`); return row;
   }
   async function deleteMaterial(id) {
-    await load(); const row=state.materials.find((item)=>item.id===id); if(!row)return false;
+    requireStoreTransactionDraft(); const row=state.materials.find((item)=>item.id===id); if(!row)return false;
     if(state.materialUsages.some((usage)=>String(usage.material)===String(id)))throw new Error('此材料已有使用紀錄，為保留案場成本與應付來源不能刪除');
-    state.materials=state.materials.filter((item)=>item!==row); await persist(`刪除材料 ${row.name||''}`); return true;
+    state.materials=state.materials.filter((item)=>item!==row); persist(`刪除材料 ${row.name||''}`); return true;
   }
   async function saveMaterialUsage(values, id = '') {
-    await load();
+    requireStoreTransactionDraft();
     const project=state.projects.find((row)=>row.id===values.project),material=state.materials.find((row)=>row.id===values.material),vendor=state.vendors.find((row)=>row.id===(values.vendor||material?.vendor));
     const quantity=num(values.quantity),unitPrice=num(values.unitPrice);
     if(!project)throw new Error('找不到案場'); if(!material)throw new Error('請選擇既有材料'); if(!vendor)throw new Error('請選擇材料廠商'); if(quantity<=0)throw new Error('數量必須大於 0'); if(unitPrice<0)throw new Error('單價不可小於 0');
@@ -3550,17 +4538,17 @@
     Object.assign(row,{date:values.date||businessDate(new Date(now)),project:project.id,projectName:project.name,material:material.id,materialName:material.name||'',vendor:vendor.id,vendorName:vendor.name||'',quantity,unitPrice,amount:Math.round(quantity*unitPrice),unit:material.unit||'',model:material.model||'',note:clean(values.note),updatedAt:now,payableId:''});
     if(!existing)state.materialUsages.unshift(row);
     if(oldPayable)syncMaterialPayable(oldPayable); assignMaterialUsage(row);
-    await persist(`${id?'修改':'新增'}案場材料 ${project.name}`); return row;
+    persist(`${id?'修改':'新增'}案場材料 ${project.name}`); return row;
   }
   async function deleteMaterialUsage(id) {
-    await load(); const row=state.materialUsages.find((item)=>item.id===id); if(!row)return false;
+    requireStoreTransactionDraft(); const row=state.materialUsages.find((item)=>item.id===id); if(!row)return false;
     const payable=payableForUsage(row); if(payableLocked(payable))throw new Error('此材料來源的應付已有付款紀錄，不能直接刪除');
     state.materialUsages=state.materialUsages.filter((item)=>item.id!==id);
     if(payable){payable.usageIds=(payable.usageIds||[]).filter((usageId)=>String(usageId)!==String(id));syncMaterialPayable(payable)}
-    await persist('刪除案場材料使用'); return true;
+    persist('刪除案場材料使用'); return true;
   }
   async function saveProjectCost(values, id = '') {
-    await load(); const project=state.projects.find((row)=>row.id===values.project),amount=Math.max(0,Math.round(num(values.amount)));
+    requireStoreTransactionDraft(); const project=state.projects.find((row)=>row.id===values.project),amount=Math.max(0,Math.round(num(values.amount)));
     if(!project)throw new Error('找不到案場'); if(!amount)throw new Error('成本金額必須大於 0');
     const now=new Date().toISOString(),row=state.projectCosts.find((item)=>item.id===id)||{id:uid(),createdAt:now,payableId:''};
     const linked=state.payables.find((item)=>item.id===row.payableId); if(linked&&payableLocked(linked))throw new Error('此成本的應付已有付款紀錄，不能直接修改');
@@ -3569,10 +4557,10 @@
     Object.assign(row,{date:values.date||businessDate(new Date(now)),project:project.id,projectName:project.name,category:clean(values.category)||'其他工程費用',description:clean(values.description),amount,vendor:vendor?.id||'',vendorName:vendor?.name||payeeName||'',createPayable:Boolean(values.createPayable),note:clean(values.note),updatedAt:now});
     if(!id)state.projectCosts.unshift(row);
     if(row.createPayable){const payable=linked||{id:uid(),payableNo:nextPayableNumber(row.date),paid:0,status:'未付款',sourceType:'project-cost',sourceId:row.id,createdAt:now};Object.assign(payable,{date:row.date,vendor:row.vendor,vendorName:row.vendorName,project:project.id,projectName:project.name,category:row.category,item:row.description||row.category,amount:row.amount,dueDate:'',note:row.note,status:'未付款',updatedAt:now});if(!linked)state.payables.unshift(payable);row.payableId=payable.id}else if(linked){state.payables=state.payables.filter((item)=>item.id!==linked.id);row.payableId=''}
-    await persist(`${id?'修改':'新增'}案場其他成本 ${project.name}`); return row;
+    persist(`${id?'修改':'新增'}案場其他成本 ${project.name}`); return row;
   }
   async function deleteProjectCost(id) {
-    await load();const row=state.projectCosts.find((item)=>item.id===id);if(!row)return false;const payable=state.payables.find((item)=>item.id===row.payableId);if(payableLocked(payable))throw new Error('此成本的應付已有付款紀錄，不能直接刪除');state.projectCosts=state.projectCosts.filter((item)=>item.id!==id);if(payable)state.payables=state.payables.filter((item)=>item.id!==payable.id);await persist('刪除案場其他成本');return true;
+    requireStoreTransactionDraft();const row=state.projectCosts.find((item)=>item.id===id);if(!row)return false;const payable=state.payables.find((item)=>item.id===row.payableId);if(payableLocked(payable))throw new Error('此成本的應付已有付款紀錄，不能直接刪除');state.projectCosts=state.projectCosts.filter((item)=>item.id!==id);if(payable)state.payables=state.payables.filter((item)=>item.id!==payable.id);persist('刪除案場其他成本');return true;
   }
   function quotationTotals(lines, taxMode = '未稅', mode = '', lumpSumTotal = 0) {
     const normalized=pricingMode(mode),entered = Math.round(normalized==='lump_sum'?num(lumpSumTotal):(lines || []).reduce((sum, line) => sum + (line.pricingType==='lump_sum'?num(line.lumpSumAmount??line.subtotal):num(line.subtotal ?? num(line.qty) * num(line.price))), 0));
@@ -3597,15 +4585,15 @@
     return row?{...row,source:project?'project':customer?'customer':'company'}:null;
   }
   async function saveQuotationPrice(values) {
-    await load(); const item=clean(values.item),price=Math.max(0,num(values.price)),scope=['company','customer','project'].includes(values.scope)?values.scope:'company';
+    requireStoreTransactionDraft(); const item=clean(values.item),price=Math.max(0,num(values.price)),scope=['company','customer','project'].includes(values.scope)?values.scope:'company';
     if(!item)throw new Error('請輸入施工項目'); if(!clean(values.unit))throw new Error('請輸入單位');
     if(scope==='customer'&&!values.customerId)throw new Error('請選擇客戶'); if(scope==='project'&&!values.projectId)throw new Error('請選擇案場');
     const backupValue=values.isBackupPrice,isBackupPrice=backupValue===true||['true','1','on'].includes(String(backupValue??'').toLowerCase());
     const row={id:uid(),scope,customerId:scope==='company'?'':values.customerId||'',projectId:scope==='project'?values.projectId||'':'',item,unit:clean(values.unit),price,isBackupPrice,effectiveDate:values.effectiveDate||businessDate(),createdSource:clean(values.createdSource)||'manual',createdAt:new Date().toISOString()};
-    state.quotationPrices.unshift(row); await persist(`新增報價價格歷史 ${item}`); return row;
+    state.quotationPrices.unshift(row); persist(`新增報價價格歷史 ${item}`); return row;
   }
   async function saveQuotation(values, id = '') {
-    await load(); const customer=state.customers.find((row)=>String(row.id)===String(values.customer)),project=state.projects.find((row)=>String(row.id)===String(values.project));
+    requireStoreTransactionDraft(); const customer=state.customers.find((row)=>String(row.id)===String(values.customer)),project=state.projects.find((row)=>String(row.id)===String(values.project));
     if(!customer)throw new Error('請選擇客戶／建設公司'); if(!project)throw new Error('請選擇案場');
     const mode=pricingMode(values.pricingMode)||pricingMode(project.defaultPricingMode)||(String(values.sourceType||'').startsWith('import-')?'actual':'');if(!mode)throw new Error('請選擇計價方式');
     const lines=(values.lines||[]).filter((line)=>clean(line.item)).map((line)=>{const type=mode==='mixed'?(line.pricingType==='lump_sum'?'lump_sum':'actual'):mode,qty=String(line.qty??'').trim()===''?null:Math.max(0,num(line.qty)),price=Math.max(0,num(line.price)),enteredLump=Number(line.lumpSumAmount),hasEnteredLump=String(line.lumpSumAmount??'').trim()!==''&&Number.isFinite(enteredLump)&&enteredLump>=0,lumpSumAmount=type==='lump_sum'?Math.max(0,hasEnteredLump?enteredLump:qty!==null&&price>0?Math.round(qty*price):0):0;return {id:line.id||uid(),house:clean(line.house),item:clean(line.item),spec:clean(line.spec),unit:clean(line.unit)||'式',pricingType:type,qty,estimatedQty:qty,price,lumpSumAmount,subtotal:type==='lump_sum'?Math.round(lumpSumAmount):qty===null?0:Math.round(qty*price),priceSource:line.priceSource||'manual',priceId:line.priceId||'',scope:clean(line.scope),note:clean(line.note)};});
@@ -3615,13 +4603,13 @@
     const lumpSumTotal=mode==='lump_sum'?Math.max(0,num(values.lumpSumTotal)):0;if(mode==='lump_sum'&&lumpSumTotal<=0)throw new Error('請輸入合約／報價總價');
     const totals=quotationTotals(lines,values.taxMode,mode,lumpSumTotal),row=existing||{id:uid(),number:nextQuotationNumber(values.date),createdAt:now};
     Object.assign(row,{customer:customer.id,customerName:customer.name,project:project.id,projectName:project.name,date:values.date||businessDate(new Date(now)),dueDate:values.dueDate||'',pricingMode:mode,lumpSumTotal,billingPlan:values.billingPlan||row.billingPlan||'one_time',billingMilestones:Array.isArray(row.billingMilestones)?row.billingMilestones:[],taxMode:values.taxMode==='含稅'?'含稅':'未稅',lines,amount:totals.amount,tax:totals.tax,total:totals.total,status:['草稿','已送出','已確認','作廢'].includes(values.status)?values.status:(row.status||'草稿'),internalNote:clean(values.internalNote),publicNote:clean(values.publicNote),note:clean(values.publicNote),sourceType:values.sourceType||row.sourceType||'manual',importTemplateId:values.importTemplateId||row.importTemplateId||'',updatedAt:now});
-    if(!existing)state.quotations.unshift(row); mergeQuotationUnitPresets(lines.map((line)=>line.unit)); await persist(`${id?'修改':'新增'}報價單 ${row.number}`); return row;
+    if(!existing)state.quotations.unshift(row); mergeQuotationUnitPresets(lines.map((line)=>line.unit)); persist(`${id?'修改':'新增'}報價單 ${row.number}`); return row;
   }
   async function setQuotationStatus(id,status) {
-    await load(); const row=state.quotations.find((item)=>item.id===id); if(!row)throw new Error('找不到報價單');
+    requireStoreTransactionDraft(); const row=state.quotations.find((item)=>item.id===id); if(!row)throw new Error('找不到報價單');
     if(!['草稿','已送出','已確認','作廢'].includes(status))throw new Error('無效的報價狀態');
     if(row.status==='已確認'&&status!=='已確認')throw new Error('已確認報價請使用「取消確認」或「建立修訂版」');
-    row.status=status;row.updatedAt=new Date().toISOString();await persist(`報價單 ${row.number} 狀態改為 ${status}`);return row;
+    row.status=status;row.updatedAt=new Date().toISOString();persist(`報價單 ${row.number} 狀態改為 ${status}`);return row;
   }
   function quotationUsage(id) {
     const daily=[];state.dailyLogs.forEach((log)=>(log.items||[]).forEach((item)=>{if(String(item.quotationId||item.quoteId||'')===String(id))daily.push({logId:log.id,workItemId:item.workItemId||''})}));
@@ -3630,27 +4618,27 @@
     return {used:daily.length>0||billings.length>0||receivables.length>0,dailyCount:daily.length,billingCount:billings.length,receivableCount:receivables.length};
   }
   async function deleteQuotation(id) {
-    await load();const row=state.quotations.find((item)=>item.id===id);if(!row)throw new Error('找不到報價單');const usage=quotationUsage(id);
+    requireStoreTransactionDraft();const row=state.quotations.find((item)=>item.id===id);if(!row)throw new Error('找不到報價單');const usage=quotationUsage(id);
     if(usage.used)throw new Error('此報價已被施工或請款資料使用，為保留歷史紀錄無法刪除。請使用「建立修訂版」。');
     if(row.status==='已確認')throw new Error('已確認報價請先取消確認，再回到草稿刪除');
     if(!['草稿','已送出'].includes(row.status))throw new Error('此狀態的報價不可刪除');
-    state.quotations=state.quotations.filter((item)=>item.id!==id);await persist(`刪除報價單 ${row.number}`);return true;
+    state.quotations=state.quotations.filter((item)=>item.id!==id);persist(`刪除報價單 ${row.number}`);return true;
   }
   async function cancelQuotationConfirmation(id) {
-    await load();const row=state.quotations.find((item)=>item.id===id);if(!row)throw new Error('找不到報價單');if(row.status!=='已確認')throw new Error('只有已確認報價可以取消確認');
+    requireStoreTransactionDraft();const row=state.quotations.find((item)=>item.id===id);if(!row)throw new Error('找不到報價單');if(row.status!=='已確認')throw new Error('只有已確認報價可以取消確認');
     if(quotationUsage(id).used)throw new Error('此報價已被施工或請款資料使用，無法取消確認。請使用「建立修訂版」。');
-    row.status='草稿';row.updatedAt=new Date().toISOString();await persist(`取消確認報價單 ${row.number}`);return row;
+    row.status='草稿';row.updatedAt=new Date().toISOString();persist(`取消確認報價單 ${row.number}`);return row;
   }
   async function createQuotationRevision(id) {
-    await load();const source=state.quotations.find((item)=>item.id===id);if(!source)throw new Error('找不到報價單');if(source.status!=='已確認')throw new Error('只有已確認報價可以建立修訂版');if(!quotationUsage(id).used)throw new Error('此報價尚未被使用，可先取消確認後編輯');
+    requireStoreTransactionDraft();const source=state.quotations.find((item)=>item.id===id);if(!source)throw new Error('找不到報價單');if(source.status!=='已確認')throw new Error('只有已確認報價可以建立修訂版');if(!quotationUsage(id).used)throw new Error('此報價尚未被使用，可先取消確認後編輯');
     const rootId=source.revisionOf||source.id,siblings=state.quotations.filter((row)=>String(row.revisionOf||'')===String(rootId)),revisionNumber=Math.max(0,...siblings.map((row)=>num(row.revisionNumber)))+1,now=new Date().toISOString(),row={...source,id:uid(),number:`${String(source.number||'報價單').replace(/\s+Rev\.\d+$/i,'')} Rev.${revisionNumber}`,status:'草稿',revisionOf:rootId,revisionNumber,lines:(source.lines||[]).map((line)=>({...line,id:uid()})),createdAt:now,updatedAt:now};
-    state.quotations.unshift(row);await persist(`建立報價修訂版 ${row.number}`);return row;
+    state.quotations.unshift(row);persist(`建立報價修訂版 ${row.number}`);return row;
   }
   async function saveQuotationTemplate(values,id='') {
-    await load(); const customer=state.customers.find((row)=>row.id===values.customerId);if(!customer)throw new Error('請選擇客戶／建設公司');if(!clean(values.name))throw new Error('請輸入模板名稱');
+    requireStoreTransactionDraft(); const customer=state.customers.find((row)=>row.id===values.customerId);if(!customer)throw new Error('請選擇客戶／建設公司');if(!clean(values.name))throw new Error('請輸入模板名稱');
     const now=new Date().toISOString(),row=state.quotationTemplates.find((item)=>item.id===id)||{id:uid(),createdAt:now};
     Object.assign(row,{name:clean(values.name),customerId:customer.id,customerName:customer.name,fileFormat:clean(values.fileFormat)||'excel',headerRow:Math.max(1,num(values.headerRow)||1),detailStartRow:Math.max(1,num(values.detailStartRow)||2),mapping:{house:clean(values.mapping?.house),item:clean(values.mapping?.item),unit:clean(values.mapping?.unit),qty:clean(values.mapping?.qty),price:clean(values.mapping?.price),amount:clean(values.mapping?.amount),note:clean(values.mapping?.note)},updatedAt:now});
-    if(!id)state.quotationTemplates.unshift(row);await persist(`${id?'修改':'新增'}報價模板 ${row.name}`);return row;
+    if(!id)state.quotationTemplates.unshift(row);persist(`${id?'修改':'新增'}報價模板 ${row.name}`);return row;
   }
   function confirmedQuotationItems(projectId, customerId) {
     const rows=[],seen=new Set();
@@ -3665,5 +4653,320 @@
       }));
     return rows;
   }
-  window.KuSheERPStore = { load, getState: () => state, masterOptions, materialVendorOptions, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, persist, num };
+  async function storeTransactionDiagnostic() {
+    if(!db){try{db=await openDB()}catch(cause){return {available:false,error:String(cause?.message||cause)}}}
+    let journal=null,durableRecovery=null,durableReceiptRecovery=null,persistent;
+    try{journal=await dbGetCommitted(STORE_JOURNAL_KEY);durableRecovery=await dbGetCommitted(STORE_RECOVERY_KEY);durableReceiptRecovery=await dbGetCommitted(RECEIPT_RECOVERY_KEY);persistent=await dbGetCommitted(STATE_KEY)}catch(cause){return {available:false,error:String(cause?.message||cause)}}
+    let localRecovery=null,sessionRecovery=null,localReceiptRecovery=null,sessionReceiptRecovery=null,commitToken=null,receiptCommitToken='',emergencyRaw=null;
+    try{localRecovery=parseStoreJson(localStorage.getItem(STORE_RECOVERY_KEY),'Store local recovery marker');sessionRecovery=parseStoreJson(sessionStorage.getItem(STORE_RECOVERY_KEY),'Store session recovery marker');localReceiptRecovery=parseStoreJson(localStorage.getItem(RECEIPT_RECOVERY_KEY),'Receipt local recovery marker');sessionReceiptRecovery=parseStoreJson(sessionStorage.getItem(RECEIPT_RECOVERY_KEY),'Receipt session recovery marker');commitToken=parseStoreJson(localStorage.getItem(STORE_COMMIT_KEY),'本機提交版本');receiptCommitToken=localStorage.getItem(RECEIPT_COMMIT_KEY)||'';emergencyRaw=localStorage.getItem(EMERGENCY_KEY)}catch(error){return {available:false,error:error.message,code:error.code}}
+    let validationError=null;
+    try{const revision=storeRevisionOf(persistent),persistentFingerprint=storeStateFingerprint(persistent);assertStoreCommitTokensBound(persistentFingerprint,revision,commitToken,receiptCommitToken,persistent?.meta?.receiptCommitVersion);assertStoreEmergencyBound(persistentFingerprint,revision,emergencyRaw);if(revision.id&&!journal)throw storeError('已版本化業務資料缺少提交 journal','STORE_JOURNAL_MISSING');if(journal)assertStoreTerminalJournalBound(journal,persistentFingerprint,revision,commitToken,receiptCommitToken,persistent?.meta?.receiptCommitVersion)}catch(error){validationError={message:error.message,code:error.code||''}}
+    const recovery=storeRecoveryBlocked||sessionRecovery||localRecovery||sessionReceiptRecovery||localReceiptRecovery||durableRecovery||durableReceiptRecovery||null;
+    return freezeStoreState({available:true,blocked:Boolean(recovery||validationError),validationError,journal:journal?{schema:journal.schema,operationId:journal.operationId,operationType:journal.operationType,phase:journal.phase,startedAt:journal.startedAt,updatedAt:journal.updatedAt,beforeVersion:journal.before?.businessSnapshotRevision||journal.beforeVersion||null,afterVersion:journal.after?.businessSnapshotRevision||null,steps:journal.steps||null}:null,recovery,commitToken,receiptCommitToken,lastTransaction:lastStoreTransactionResult});
+  }
+  // Restore/recovery use the same commit kernel, not a second main/Emergency writer.
+  const recoveryPreviews=new Map();
+  async function requireRecoveryAuth(expectedPrincipal = '') {
+    if(!window.KusheAuthGate?.requireAuth||!await window.KusheAuthGate.requireAuth())throw storeError('請先登入再執行還原或恢復','AUTH_REQUIRED');
+    const principal=String(window.KusheAuthGate.user?.()?.id||'');
+    if(!principal)throw storeError('無法驗證登入帳號，請重新登入','AUTH_REQUIRED');
+    if(expectedPrincipal&&principal!==expectedPrincipal)throw storeError('登入帳號已變更，請重新預覽及確認','RECOVERY_PRINCIPAL_CHANGED');
+    return principal;
+  }
+  function coordinatedStorage(operation,work,{readOnly=false}={}) {
+    if(!navigator.locks?.request)return Promise.reject(storeError('目前瀏覽器不支援安全資料交易鎖','STORE_LOCK_UNAVAILABLE'));
+    if(readOnly)return navigator.locks.request(STORE_LOCK_NAME,{mode:'shared',ifAvailable:true},lock=>{
+      if(!lock)throw storeError('資料正在提交，請稍後再試','STORE_BUSY');return work();
+    });
+    const run=async()=>{
+      const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
+      try{return await navigator.locks.request(STORE_LOCK_NAME,{mode:'exclusive',signal:controller.signal},()=>{clearTimeout(timer);return work()})}
+      finally{clearTimeout(timer)}
+    };
+    return enqueueStoreWriter(run);
+  }
+  async function readStorageObservation({existingOnly=false}={}) {
+    // Do not create/upgrade a database from the recovery preview.
+    const connection=await new Promise((resolve,reject)=>{
+      const request=indexedDB.open(DB_NAME);request.onupgradeneeded=()=>{if(existingOnly)request.transaction.abort()};
+      request.onerror=()=>reject(request.error);request.onsuccess=()=>resolve(request.result);
+    });
+    let values;
+    try{values=await new Promise((resolve,reject)=>{
+      const tx=connection.transaction(DB_STORE,'readonly'),table=tx.objectStore(DB_STORE),out={};
+      for(const key of [STATE_KEY,STORE_JOURNAL_KEY,STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY]){const request=table.get(key);request.onsuccess=()=>{out[key]=request.result}}
+      tx.oncomplete=()=>resolve(out);tx.onabort=()=>reject(tx.error||new Error('診斷讀取中止'));tx.onerror=()=>{};
+    })}finally{connection.close()}
+    const local={},session={};
+    for(const key of [EMERGENCY_KEY,STORE_COMMIT_KEY,RECEIPT_COMMIT_KEY,STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY,RECEIPT_ACTIVE_KEY])local[key]=localStorage.getItem(key);
+    for(const key of [STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY])session[key]=sessionStorage.getItem(key);
+    return {values,local,session};
+  }
+  async function observationHash(value) {
+    const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(storeStateFingerprint(value)));
+    return Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
+  }
+  function assertObservationCommitted(observation) {
+    const {values,local,session}=observation,persistent=values[STATE_KEY],journal=values[STORE_JOURNAL_KEY];
+    for(const key of [STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY])if(values[key]||local[key]||session[key])throw storeError('資料復原尚未完成，禁止備份或還原','STORE_WRITES_BLOCKED');
+    if(local[RECEIPT_ACTIVE_KEY])throw storeError('尚有舊收款操作標記，請先核對','STORE_WRITES_BLOCKED');
+    const fp=storeStateFingerprint(persistent),revision=storeRevisionOf(persistent),token=parseStoreJson(local[STORE_COMMIT_KEY],'本機提交版本');
+    assertStoreCommitTokensBound(fp,revision,token,local[RECEIPT_COMMIT_KEY]||'',persistent?.meta?.receiptCommitVersion);
+    assertStoreEmergencyBound(fp,revision,local[EMERGENCY_KEY]);
+    if(local[EMERGENCY_KEY]!==null&&storeStateFingerprint(parseStoreJson(local[EMERGENCY_KEY],'Emergency'))!==fp)throw storeError('主資料與備份不同，不能選取一層上傳','STORE_LAYERS_DIVERGED');
+    if(revision.id&&!journal)throw storeError('缺少提交 journal','STORE_JOURNAL_MISSING');
+    if(journal)assertStoreTerminalJournalBound(journal,fp,revision,token,local[RECEIPT_COMMIT_KEY]||'',persistent?.meta?.receiptCommitVersion);
+  }
+  function portableStoreSnapshot(value) {
+    const result=storeStateClone(value||{});
+    if(result.meta){delete result.meta.receiptCommitVersion;delete result.meta.localCommitToken}
+    // businessSnapshotRevision is portable provenance. Local fencing is not.
+    delete result.localCommitToken;delete result.recoveryMarker;delete result.transactionJournal;
+    return result;
+  }
+  async function readCommittedSnapshot() {
+    if(!db)db=await openDB();
+    return coordinatedStorage('readCommittedSnapshot',async()=>{
+      const observation=await readStorageObservation();assertObservationCommitted(observation);
+      return freezeStoreState({data:portableStoreSnapshot(observation.values[STATE_KEY]),baseline:await observationHash(observation),revision:storeRevisionOf(observation.values[STATE_KEY])});
+    },{readOnly:true});
+  }
+  function validateReplacementSnapshot(value) {
+    if(!value||typeof value!=='object'||Array.isArray(value)||!value.settings||typeof value.settings!=='object'||Array.isArray(value.settings)||!value.meta||typeof value.meta!=='object'||Array.isArray(value.meta))throw storeError('還原快照格式不完整','SNAPSHOT_INVALID');
+    const collections=['customers','projects','vendors','materials','employees','banks','quotations','dailyLogs','attendance','commissions','billings','receivables','receipts','retentionReceipts','payables','payments','salaryPayments','bankTransactions','payroll','materialUsages','projectCosts','invoices','audit'];
+    collections.forEach(key=>{if(value[key]!==undefined&&!Array.isArray(value[key]))throw storeError(`還原快照 ${key} 格式錯誤`,'SNAPSHOT_INVALID')});
+    const cloned=JSON.parse(JSON.stringify(value));
+    if(storeStateFingerprint(cloned)!==storeStateFingerprint(value))throw storeError('還原快照不是可完整保存的 JSON','SNAPSHOT_INVALID');
+    return portableStoreSnapshot(cloned);
+  }
+  async function publishReplacementResult(operationId,operationType,revision) {
+    const warnings=[];
+    try{await window.KuSheLegacyData?.refresh()}catch(error){warnings.push(String(error?.message||error))}
+    try{dispatchStoreUpdated({action:operationType,operationId,revisionId:revision.id})}catch(error){warnings.push(String(error.message||error))}
+    return recordStoreTransaction(warnings.length?'COMMITTED_WITH_NOTIFICATION_WARNING':'COMMITTED',{operationId,operationType,revisionId:revision.id,notificationWarnings:warnings});
+  }
+  async function remoteApplyReadiness(expectedBaseline = '') {
+    const epoch = storeWriterEpoch;
+    const busy = () => activeStoreWriters || queuedStoreWriters || activeStoreTransaction || persistenceInFlight || storeLoadPromise;
+    if (busy()) return freezeStoreState({safe:false,code:'STORE_BUSY'});
+    // Never initialize storage or run load/recovery from this read-only gate.
+    if (!db || !publishedState || storeRecoveryBlocked || receiptWritesBlocked) return freezeStoreState({safe:false,code:'STORE_NOT_READY'});
+    try {
+      const committed = await readCommittedSnapshot();
+      const observation = await coordinatedStorage('remoteApplyReadiness', async () => {
+        const value = await readStorageObservation({existingOnly:true});
+        assertObservationCommitted(value);
+        if (!storeJournalHasValidTerminalShape(value.values[STORE_JOURNAL_KEY])) throw storeError('遠端套用需要完整提交 journal','STORE_JOURNAL_MISSING');
+        return observationHash(value);
+      }, {readOnly:true});
+      if (busy() || epoch !== storeWriterEpoch) return freezeStoreState({safe:false,code:'STORE_BUSY'});
+      if (observation !== committed.baseline || expectedBaseline && expectedBaseline !== observation) return freezeStoreState({safe:false,code:'STALE_STORE_STATE'});
+      return freezeStoreState({safe:true,code:'STORE_READY',...committed});
+    } catch (error) { return freezeStoreState({safe:false,code:error.code || 'STORE_UNVERIFIED'}); }
+  }
+  async function applyRemoteSnapshot(value, options = {}) {
+    if (!options.userId || typeof options.guard !== 'function' || !options.baseline) throw storeError('缺少遠端套用安全條件','REMOTE_APPLY_GUARD_REJECTED');
+    const ready = await remoteApplyReadiness(options.baseline);
+    if (!ready.safe) throw storeError('本機尚不能安全套用遠端資料',ready.code);
+    const guard = () => {
+      try {
+        const gate = window.KusheAuthGate;
+        if (!gate?.session?.()?.access_token || String(gate.user?.()?.id || '') !== options.userId
+          || activeStoreWriters !== 1 || queuedStoreWriters || storeRecoveryBlocked || receiptWritesBlocked
+          || options.guard() !== true) throw new Error('guard rejected');
+      } catch (_) { throw storeError('遠端套用條件已失效','REMOTE_APPLY_GUARD_REJECTED'); }
+    };
+    return replaceSnapshotInternal(value, {baseline:options.baseline}, guard);
+  }
+  async function replaceSnapshot(value,confirmation={}) {
+    return replaceSnapshotInternal(value,confirmation);
+  }
+  async function replaceSnapshotInternal(value,confirmation={},remoteGuard=null) {
+    await requireRecoveryAuth();
+    const candidate=validateReplacementSnapshot(value);
+    if(!confirmation.baseline||!remoteGuard&&confirmation.confirmed!==true)throw storeError('缺少還原預檢確認','SNAPSHOT_CONFIRMATION_REQUIRED');
+    await load();
+    return coordinatedStorage('snapshotReplacement',async()=>{
+      const operationId=`restore-${uid()}`;
+      let checkpoint=null,committed=null;
+      try{
+        const observation=await readStorageObservation();assertObservationCommitted(observation);
+        if(remoteGuard){remoteGuard();if(!storeJournalHasValidTerminalShape(observation.values[STORE_JOURNAL_KEY]))throw storeError('遠端套用需要完整提交 journal','STORE_JOURNAL_MISSING')}
+        if(await observationHash(observation)!==confirmation.baseline)throw storeError('本機資料已在確認期間變更，保留表單並重新預檢','STALE_STORE_STATE');
+        checkpoint=await captureStoreCheckpoint(operationId,'snapshotReplacement');
+        committed=await commitStoreDraft(checkpoint,candidate,{startedAt:new Date().toISOString(),action:remoteGuard?'受控遠端快照套用':'使用者確認雲端快照還原',auditDetails:{sourceBusinessRevision:storeRevisionOf(value)},deferNotification:true,preCommitGuard:remoteGuard});
+        const verified=await readStorageObservation();assertObservationCommitted(verified);
+        if(storeStateFingerprint(verified.values[STATE_KEY])!==loadedPersistentFingerprint)throw storeError('還原後獨立讀庫核對失敗','STORE_LAYERS_DIVERGED');
+        // Exercise the public load path before announcing completion.
+        publishedState=null;state=null;storeLoadPromise=null;await load();
+        if(remoteGuard){
+          if(storeStateFingerprint(publishedState)!==storeStateFingerprint(candidate))throw storeError('套用後載入內容不同','STORE_LAYERS_DIVERGED');
+          const result=await publishReplacementResult(operationId,'snapshotReplacement',committed.revision);
+          return freezeStoreState({...result,verifiedSnapshot:portableStoreSnapshot(candidate)});
+        }
+        return publishReplacementResult(operationId,'snapshotReplacement',committed.revision);
+      }catch(error){
+        if(committed&&checkpoint){
+          const afterFingerprint=storeStateFingerprint(candidate),journal=makeStoreJournal(checkpoint,'RESTORE_LOAD_VERIFY_FAILED',{after:{businessSnapshotRevision:committed.revision,stateFingerprint:storeFingerprintDigest(afterFingerprint)}});
+          const emergencyRaw=JSON.stringify(candidate),storeCommitRaw=JSON.stringify({schema:STORE_JOURNAL_SCHEMA,revisionId:committed.revision.id,sequence:committed.revision.sequence,stateFingerprint:storeFingerprintDigest(afterFingerprint),committedAt:committed.revision.committedAt});
+          await restoreStoreCheckpoint(checkpoint,afterFingerprint,error,journal,{emergencyRaw,storeCommitRaw,receiptCommitRaw:committed.revision.id});
+          publishedState=checkpoint.published;state=publishedState;settledStateFingerprint=checkpoint.publishedFingerprint;loadedPersistentHadValue=checkpoint.persistentHadValue;loadedPersistentFingerprint=checkpoint.persistentFingerprint;loadedEmergencyRaw=checkpoint.emergencyRaw;storeCommitTokenSeen=checkpoint.commitRaw;receiptCommitVersionSeen=checkpoint.receiptCommitRaw;lastSettledMemoryFingerprint=receiptStateFingerprint(publishedState);storeRecoveryBlocked=null;receiptWritesBlocked=null;storeLoadPromise=null;
+        }
+        if(error.transactionStatus)throw error;throwStoreTransaction(error,storeTransactionStatusForError(error),operationId);
+      }
+    });
+  }
+  function recoveryCandidate(observation) {
+    const {values,local,session}=observation,journal=values[STORE_JOURNAL_KEY];
+    if(!journal||journal.schema!==STORE_JOURNAL_SCHEMA||!journal.operationId)throw new Error('缺少可驗證的 journal；不能判定權威快照');
+    const owner=String(journal.recoveryOf||journal.operationId),markers=[];
+    for(const key of [STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY])for(const entry of [values[key],parseStoreJson(local[key],key),parseStoreJson(session[key],key)])if(entry)markers.push(entry);
+    if(markers.some(marker=>String(marker.operationId||'')!==owner&&String(marker.operationId||'')!==String(journal.operationId)))throw new Error('存在其他操作的 marker，禁止一併清除');
+    if(local[RECEIPT_ACTIVE_KEY])throw new Error('存在未解析的舊收款 active marker，需另行核對');
+    const current=values[STATE_KEY],currentDigest=storeFingerprintDigest(storeStateFingerprint(current));
+    if(journal.recoveryOf&&journal.phase==='COMMIT_VERIFIED'&&currentDigest===journal.after?.stateFingerprint){
+      assertStoreCommitTokensBound(storeStateFingerprint(current),storeRevisionOf(current),parseStoreJson(local[STORE_COMMIT_KEY],'本機版本'),local[RECEIPT_COMMIT_KEY]||'',current?.meta?.receiptCommitVersion);
+      assertStoreEmergencyBound(storeStateFingerprint(current),storeRevisionOf(current),local[EMERGENCY_KEY]);
+      return {owner,kind:'resume-verified-recovery',state:current,journal};
+    }
+    const before=journal.before;
+    if(!before?.persistentHadValue||!before.state||storeFingerprintDigest(storeStateFingerprint(before.state))!==before.persistentFingerprint)throw new Error('journal 沒有完整且可驗證的操作前快照；不可用空白資料復原');
+    if(!sameStoreRevision(storeRevisionOf(before.state),storeRevisionOf({meta:{businessSnapshotRevision:before.businessSnapshotRevision}})))throw new Error('checkpoint revision 與內容不一致');
+    if(currentDigest!==before.persistentFingerprint&&currentDigest!==journal.after?.stateFingerprint)throw new Error('主資料不屬於此操作前後版本，不能覆蓋');
+    const emergency=parseStoreJson(local[EMERGENCY_KEY],'Emergency'),emergencyDigest=storeFingerprintDigest(storeStateFingerprint(emergency));
+    if(local[EMERGENCY_KEY]!==before.emergencyRaw&&emergencyDigest!==journal.after?.stateFingerprint)throw new Error('Emergency 是未知版本，不能覆蓋');
+    for(const [key,original] of [[STORE_COMMIT_KEY,before.localCommitTokenRaw],[RECEIPT_COMMIT_KEY,before.receiptCommitTokenRaw]]){
+      if(local[key]!==original){
+        const token=key===STORE_COMMIT_KEY?parseStoreJson(local[key],'local token'):null,revision=journal.after?.businessSnapshotRevision,revisionId=token?token.revisionId:local[key];
+        if(!revision?.id||revisionId!==revision.id||token&&(token.schema!==STORE_JOURNAL_SCHEMA||token.sequence!==revision.sequence||token.stateFingerprint!==journal.after.stateFingerprint||token.committedAt!==revision.committedAt))throw new Error('本機 token 為未知版本，不能覆蓋');
+      }
+    }
+    // A failed recovery must retain the ORIGINAL trustworthy candidate, not
+    // promote the partially committed state captured by that recovery attempt.
+    let evidence=journal,depth=0;
+    while(evidence.recoveryEvidence){
+      const prior=evidence.recoveryEvidence;
+      if(++depth>8||prior.schema!==STORE_JOURNAL_SCHEMA||!prior.before?.persistentHadValue||!prior.before.state||storeFingerprintDigest(storeStateFingerprint(prior.before.state))!==prior.before.persistentFingerprint)throw new Error('多次恢復的 checkpoint 鏈不足或損壞，保持停止');
+      if(![prior.before.persistentFingerprint,prior.after?.stateFingerprint].includes(evidence.before?.persistentFingerprint))throw new Error('恢復 checkpoint 鏈有未核對的版本，保持停止');
+      evidence=prior;
+    }
+    return {owner,kind:'restore-before-checkpoint',state:evidence.before.state,journal};
+  }
+  async function recoveryPreview() {
+    const principal=await requireRecoveryAuth();
+    const inspect=async()=>{
+      try{
+        const observation=await readStorageObservation({existingOnly:true}),fingerprint=await observationHash(observation),journal=observation.values[STORE_JOURNAL_KEY];
+        let candidate=null,reason='';try{candidate=recoveryCandidate(observation)}catch(error){reason=String(error.message||error)}
+        if(!navigator.locks?.request){candidate=null;reason='此瀏覽器缺少 Web Locks，只能讀取诊斷，不可恢復或解除寫入保護'}
+        const token=crypto.randomUUID(),expiresAt=Date.now()+300000;
+        await requireRecoveryAuth(principal);
+        recoveryPreviews.clear();if(candidate)recoveryPreviews.set(token,{fingerprint,expiresAt,owner:candidate.owner,principal});
+        return freezeStoreState({allowed:Boolean(candidate),token:candidate?token:'',expiresAt,operationId:candidate?.owner||journal?.operationId||'',phase:journal?.phase||'missing',beforeRevision:journal?.before?.businessSnapshotRevision||null,afterRevision:journal?.after?.businessSnapshotRevision||null,candidate:candidate?.kind||null,checkpointAvailable:Boolean(journal?.before?.state),idbFingerprint:storeFingerprintDigest(storeStateFingerprint(observation.values[STATE_KEY])),emergencyFingerprint:storeFingerprintDigest(storeStateFingerprint(parseStoreJson(observation.local[EMERGENCY_KEY],'Emergency'))),observationFingerprint:fingerprint,reason});
+      }catch(error){return {allowed:false,reason:String(error.message||error),code:error.code||'RECOVERY_EVIDENCE_UNAVAILABLE'}}
+    };
+    return navigator.locks?.request?coordinatedStorage('recoveryPreview',inspect,{readOnly:true}):inspect();
+  }
+  async function retainRecoveryGate(observation,owner) {
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(DB_STORE,'readwrite'),table=tx.objectStore(DB_STORE),keys=[STATE_KEY,STORE_JOURNAL_KEY,STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY],values={};let remaining=keys.length,error;
+      keys.forEach(key=>{const request=table.get(key);request.onsuccess=()=>{values[key]=request.result;if(--remaining)return;
+        try{
+          if(keys.some(key=>storeStateFingerprint(values[key])!==storeStateFingerprint(observation.values[key])))throw storeError('恢復預覽後資料變更，請重新核對','RECOVERY_PREVIEW_STALE');
+          for(const key of [STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY])if(values[key]&&String(values[key].operationId)!==owner)throw storeError('未知 durable marker，保持停止','RECOVERY_MARKER_CONFLICT');
+          if(!values[STORE_RECOVERY_KEY]&&!values[RECEIPT_RECOVERY_KEY])table.put({operationId:owner,status:'RECOVERY_REQUIRED',phase:'RECOVERY_VERIFICATION_PENDING'},STORE_RECOVERY_KEY);
+        }catch(cause){error=cause;tx.abort()}
+      }});
+      tx.oncomplete=()=>resolve();tx.onabort=()=>reject(error||tx.error||new Error('恢復保護交易中止'));tx.onerror=()=>{};
+    });
+  }
+  async function clearRecoveryMarkers(observation,owner,committedFingerprint) {
+    // Web Storage first. Durable markers remain until the final IDB CAS completes.
+    for(const [storage,raws] of [[localStorage,observation.local],[sessionStorage,observation.session]])for(const key of [STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY]){
+      const raw=raws[key];if(!raw)continue;
+      if(storage.getItem(key)!==raw)throw storeError('恢復 marker 在確認後變更','RECOVERY_MARKER_CONFLICT');
+      const marker=parseStoreJson(raw,key);if(String(marker.operationId)!==owner)throw storeError('不能清除其他操作 marker','RECOVERY_MARKER_CONFLICT');
+      storage.removeItem(key);if(storage.getItem(key)!==null)throw storeError('marker 清除驗證失敗','RECOVERY_MARKER_CONFLICT');
+    }
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(DB_STORE,'readwrite'),table=tx.objectStore(DB_STORE),keys=[STATE_KEY,STORE_JOURNAL_KEY,STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY],values={};let remaining=keys.length,error;
+      keys.forEach(key=>{const request=table.get(key);request.onsuccess=()=>{values[key]=request.result;if(--remaining)return;
+        try{
+          if(storeStateFingerprint(values[STATE_KEY])!==committedFingerprint||values[STORE_JOURNAL_KEY]?.recoveryOf!==owner||values[STORE_JOURNAL_KEY]?.phase!=='COMMIT_VERIFIED')throw storeError('恢復提交已變更，禁止解除保護','RECOVERY_MARKER_CONFLICT');
+          for(const markerKey of [STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY]){if(values[markerKey]&&String(values[markerKey].operationId)!==owner)throw storeError('未知 durable marker','RECOVERY_MARKER_CONFLICT');if(values[markerKey])table.delete(markerKey)}
+        }catch(cause){error=cause;tx.abort()}
+      }});
+      tx.oncomplete=()=>resolve();tx.onabort=()=>reject(error||tx.error||new Error('恢復 marker 交易中止'));tx.onerror=()=>{};
+    });
+  }
+  async function recoverStore(confirmation={}) {
+    const principal=await requireRecoveryAuth();
+    const approved=recoveryPreviews.get(confirmation.token);
+    if(!approved||Date.now()>approved.expiresAt||confirmation.operationId!==approved.owner||confirmation.confirmed!==true)throw storeError('恢復預覽已過期或確認不符','RECOVERY_CONFIRMATION_REQUIRED');
+    if(!approved.principal||approved.principal!==principal)throw storeError('登入帳號與恢復確認不符，請重新預覽','RECOVERY_PRINCIPAL_CHANGED');
+    return coordinatedStorage('controlledRecovery',async()=>{
+      await requireRecoveryAuth(approved.principal);
+      const observation=await readStorageObservation({existingOnly:true});
+      if(await observationHash(observation)!==approved.fingerprint)throw storeError('恢復預覽後資料變更，請重新核對','RECOVERY_PREVIEW_STALE');
+      const candidate=recoveryCandidate(observation),operationId=`recovery-${uid()}`,current=observation.values[STATE_KEY];
+      if(!db)db=await openDB();
+      await requireRecoveryAuth(approved.principal);
+      // Refuse to start without a durable gate: a local/session-only marker
+      // must first be preserved in IDB, with the same observation CAS.
+      await retainRecoveryGate(observation,candidate.owner);
+      recoveryPreviews.delete(confirmation.token);
+      try{
+        let revision=storeRevisionOf(current);
+        if(candidate.kind!=='resume-verified-recovery'){
+          const checkpoint={operationId,operationType:'controlledRecovery',persistentHadValue:true,persistent:storeStateClone(current),persistentFingerprint:storeStateFingerprint(current),journal:observation.values[STORE_JOURNAL_KEY],journalFingerprint:storeStateFingerprint(observation.values[STORE_JOURNAL_KEY]),emergencyRaw:observation.local[EMERGENCY_KEY],commitRaw:observation.local[STORE_COMMIT_KEY],receiptCommitRaw:observation.local[RECEIPT_COMMIT_KEY],published:publishedState||current,revision:storeRevisionOf(current),recoveryEvidence:observation.values[STORE_JOURNAL_KEY]};
+          const result=await commitStoreDraft(checkpoint,storeStateClone(candidate.state),{startedAt:new Date().toISOString(),action:'使用者確認恢復操作前快照',auditDetails:{recoveredOperationId:candidate.owner},recoveryOf:candidate.owner,deferNotification:true});revision=result.revision;
+        }
+        const verified=await readStorageObservation({existingOnly:true});
+        const verifiedCandidate=recoveryCandidate(verified);if(verifiedCandidate.kind!=='resume-verified-recovery')throw storeError('恢復後資料未完整提交','RECOVERY_VERIFY_FAILED');
+        // All fallible storage/load verification runs while the durable gate
+        // is still present. There is no public bypass and no fallible load
+        // after the final marker CAS has opened normal access.
+        const verifiedState=await loadState({operationId:candidate.owner,persistentFingerprint:storeStateFingerprint(verified.values[STATE_KEY])});
+        await clearRecoveryMarkers(verified,candidate.owner,storeStateFingerprint(verified.values[STATE_KEY]));
+        storeRecoveryBlocked=null;receiptWritesBlocked=null;
+        publishedState=verifiedState;state=publishedState;settledStateFingerprint=storeStateFingerprint(state);lastSettledMemoryFingerprint=receiptStateFingerprint(state);
+        return publishReplacementResult(operationId,'controlledRecovery',revision);
+      }catch(error){
+        storeRecoveryBlocked={operationId:candidate.owner,status:'RECOVERY_REQUIRED'};
+        throwStoreTransaction(error,'RECOVERY_REQUIRED',operationId,{recoveryOf:candidate.owner});
+      }
+    });
+  }
+  const STORE_WRITER_NAMES=new Set([
+    'saveQuotationUnitPreset','saveQuotationPublicNotePreset','deleteQuotationPublicNotePreset',
+    'saveCommission','deleteCommission','saveDailyBatch','deleteDailyBatch','saveInvoice','createBilling','updateBilling','deleteBilling',
+    'addReceipt','updateReceipt','deleteReceipt','addRetentionReceipt','updateRetentionReceipt','deleteRetentionReceipt','deleteReceivableAccounting',
+    'savePayable','deletePayable','cleanupMaterialPayableTestData','repairMergedPayableHistory','addPayablePayment','updatePayablePayment','deletePayablePayment',
+    'updatePayrollAdjustments','addSalaryPayment','updateSalaryPayment','deleteSalaryPayment','updateBillingInvoice',
+    'saveCustomer','deleteCustomer','saveProject','deleteProject','mergeProject','saveEmployee','deleteEmployee','saveMaterial','deleteMaterial',
+    'saveMaterialUsage','deleteMaterialUsage','saveProjectCost','deleteProjectCost','saveQuotationPrice','saveQuotation','setQuotationStatus','deleteQuotation',
+    'cancelQuotationConfirmation','createQuotationRevision','saveQuotationTemplate'
+  ]);
+  function exposeStoreRead(name,reader) {
+    return function(...args){
+      if(!activeStoreTransaction)return reader(...args);
+      if(reader.constructor?.name==='AsyncFunction')return Promise.reject(storeError(`交易進行中，暫停執行 ${name} 唯讀作業`,'STORE_READ_DURING_TRANSACTION'));
+      const draft=state;state=publishedState;
+      try{return reader(...args)}finally{state=draft}
+    };
+  }
+  const rawStore={ load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const publicStore={
+    getState:()=>publishedState,
+    storeTransactionDiagnostic,
+    readCommittedSnapshot,remoteApplyReadiness,applyRemoteSnapshot,replaceSnapshot,recoveryPreview,recoverStore,
+    getLastStoreTransactionResult:()=>lastStoreTransactionResult,
+    persist:()=>Promise.reject(storeError('直接 persist 已停用；請使用正式 Store 寫入 API','DIRECT_PERSIST_FORBIDDEN'))
+  };
+  Object.entries(rawStore).forEach(([name,value])=>{
+    if(typeof value!=='function'){publicStore[name]=value;return}
+    if(name==='load'){publicStore.load=()=>publishedState?Promise.resolve(publishedState):load();return}
+    publicStore[name]=STORE_WRITER_NAMES.has(name)?(...args)=>runStoreWriter(name,value,args):exposeStoreRead(name,value);
+  });
+  window.KuSheERPStore=Object.freeze(publicStore);
 }());

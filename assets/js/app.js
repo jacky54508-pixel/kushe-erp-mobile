@@ -45,9 +45,16 @@
     if (form) form.setAttribute('aria-busy', String(Boolean(busy)));
     if (message) setLoginMessage(message);
   }
-  function startAuthenticatedApp() {
+  async function startAuthenticatedApp() {
     setAuthView(true);
     setLoginMessage();
+    try{await window.KuSheERPStore.load();await window.KuSheERPStore.readCommittedSnapshot()}
+    catch(error){
+      window.KusheCloudSync?.stopAutoBackup?.();
+      window.KusheRecovery?.showResult({status:'RECOVERY_REQUIRED',operationId:error.operationId||'',message:error.message});
+      await window.KusheRecovery?.open();
+      return;
+    }
     if (!initialized) {
       init();
       initialized = true;
@@ -55,6 +62,8 @@
     try { void Promise.resolve(window.KusheCloudSync?.startAutoBackup?.()).catch(() => {}); } catch (_) {}
   }
   async function handleLogout() {
+    if($('#recoveryModal'))$('#recoveryModal').hidden=true;
+    if($('#storeSafetyBanner'))$('#storeSafetyBanner').hidden=true;
     closePopovers();
     window.KusheCloudSync?.stopAutoBackup?.();
     window.KusheCloudSync?.close();
@@ -130,6 +139,7 @@
   function bindAuthUi() {
     if (authUiBound) return;
     authUiBound = true;
+    $('#recoveryLogout')?.addEventListener('click',()=>void handleLogout());
     $('#loginForm')?.addEventListener('submit', async (event) => {
       event.preventDefault();
       const email = $('#loginEmail'), password = $('#loginPassword');
@@ -139,7 +149,7 @@
         if (!window.KusheAuthGate) throw new Error('Auth gate unavailable');
         await window.KusheAuthGate.login(email?.value, password?.value);
         if (password) password.value = '';
-        startAuthenticatedApp();
+        await startAuthenticatedApp();
       } catch (_) {
         if (password) password.value = '';
         setLoginMessage('登入失敗，請確認 Email 與密碼後再試一次。', true);
@@ -171,7 +181,7 @@
       $('#loginEmail')?.focus();
       return false;
     }
-    startAuthenticatedApp();
+    await startAuthenticatedApp();
     return true;
   }
   function closePopovers(except) { $$('.topbar-popover.is-open').forEach((node)=>{if(node!==except)node.classList.remove('is-open')}); }

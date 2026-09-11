@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#061d3b">
   <title>酷舍 ERP｜首頁總覽</title>
-  <link rel="stylesheet" href="assets/css/app.css?v=20260908-p16-1-project-merge1">
+  <link rel="stylesheet" href="assets/css/app.css?v=20260911-p17-i3a-m1">
   <link rel="stylesheet" href="assets/css/projects-scoped.css?v=20260811-billing-settings1">
 </head>
 <body>
@@ -94,15 +94,15 @@
             <div class="chart-wrap"><canvas id="trendChart" aria-label="營業額趨勢圖"></canvas><div class="chart-tooltip" id="chartTooltip" hidden></div></div>
           </article>
           <article class="panel structure-panel">
-            <header class="panel-header"><h2>收支結構（本月）</h2><button class="text-button" type="button" data-module="reports">查看全部</button></header>
+            <header class="panel-header"><h2>本月應收結算結構</h2><button class="text-button" type="button" data-module="reports">查看全部</button></header>
             <div class="structure-body">
-              <div class="donut" id="collectionDonut"><div><span>收入總額</span><strong id="structureTotal">$0</strong></div></div>
+              <div class="donut" id="collectionDonut"><div><span>本期應收</span><strong id="structureTotal">$0</strong></div></div>
               <div class="structure-details">
-                <div class="legend-row"><span><i class="dot green"></i>已收款</span><b id="structurePaid">$0</b></div>
-                <div class="legend-row"><span><i class="dot orange"></i>未收款</span><b id="structureOpen">$0</b></div>
+                <div class="legend-row"><span><i class="dot green"></i>已沖銷應收（含客戶扣款）</span><b id="structurePaid">$0</b></div>
+                <div class="legend-row"><span><i class="dot orange"></i>尚未沖銷</span><b id="structureOpen">$0</b></div>
                 <hr>
-                <div class="progress-row"><div><span>收款進度</span><b id="collectionRate">0%</b></div><div class="progress"><i id="collectionBar"></i></div></div>
-                <div class="progress-row"><div><span>應收回收率</span><b id="recoveryRate">0%</b></div><div class="progress"><i id="recoveryBar"></i></div></div>
+                <div class="progress-row"><div><span>應收沖銷進度</span><b id="collectionRate">0%</b></div><div class="progress"><i id="collectionBar"></i></div></div>
+                <div class="progress-row"><div><span>應收沖銷率</span><b id="recoveryRate">0%</b></div><div class="progress"><i id="recoveryBar"></i></div></div>
               </div>
             </div>
           </article>
@@ -111,7 +111,7 @@
         <section class="middle-grid">
           <article class="panel projects-panel">
             <header class="panel-header"><h2>案場經營狀況 TOP 6</h2><button class="text-button" type="button" data-module="projects">查看全部</button></header>
-            <div class="table-wrap"><table class="project-table"><thead><tr><th>案場名稱</th><th>合約／請款金額</th><th>已收金額</th><th>未收金額</th><th>材料成本</th><th>人工成本</th><th>毛利</th><th>毛利率</th><th>狀態</th></tr></thead><tbody id="projectRows"></tbody></table></div>
+            <div class="table-wrap"><table class="project-table"><thead><tr><th>案場名稱</th><th>合約／請款金額</th><th>已沖銷應收</th><th>未沖銷應收</th><th>材料成本</th><th>人工成本</th><th>其他成本</th><th>客戶扣款</th><th>總成本</th><th>毛利</th><th>毛利率</th><th>狀態</th></tr></thead><tbody id="projectRows"></tbody></table></div>
           </article>
           <article class="panel attention-panel">
             <header class="panel-header"><h2>需要處理</h2><button class="text-button" type="button" id="viewAllAttention">查看全部</button></header>
@@ -152,7 +152,7 @@
           <p>此頁已納入新版 ERP Shell；既有資料、自動儲存、計算公式與模組連動仍由舊正式版安全保留。</p>
           <div class="placeholder-actions">
             <button class="shell-primary" type="button" data-route="dashboard"><i data-icon="arrow-left"></i>返回首頁</button>
-            <button class="shell-secondary" id="openLegacyModule" type="button"><i data-icon="external-link"></i>暫時開啟舊版功能</button>
+            <button class="shell-secondary" id="openLegacyModule" type="button" title="此入口只顯示安全封存說明，不啟動舊 ERP。"><i data-icon="external-link"></i>舊版功能已封存</button>
           </div>
         </section>
       </main>
@@ -267,14 +267,27 @@
     </section>
   </div>
   <div class="toast-host" id="toastHost" aria-live="polite"></div>
+  <aside id="storeSafetyBanner" class="store-safety-banner" role="alert" hidden>
+    <strong id="storeSafetyMessage"></strong><button id="recoveryOpen" type="button">診斷／安全恢復</button>
+  </aside>
+  <div id="recoveryModal" class="store-recovery-modal" role="dialog" aria-modal="true" aria-labelledby="recoveryTitle" hidden>
+    <section>
+      <header><h2 id="recoveryTitle">儲存狀態核對／安全恢復</h2><button id="recoveryClose" type="button">關閉</button><button id="recoveryLogout" type="button">登出</button></header>
+      <p id="recoveryMessage" role="status"></p><p id="recoveryCandidate"></p>
+      <pre id="recoveryEvidence"></pre>
+      <label>二次確認：輸入完整操作 ID<input id="recoveryConfirmation" autocomplete="off"></label>
+      <footer><button id="recoveryRefresh" type="button">重新唯讀預覽</button><button id="recoveryExport" type="button">匯出技術診斷（不含帳務快照）</button><button id="recoveryExecute" type="button" disabled>確認恢復所選候選</button><button id="recoveryReload" type="button" hidden>重新載入並恢復使用</button></footer>
+    </section>
+  </div>
   <script src="assets/js/lucide.min.js?v=20260809-commissions1"></script>
   <script src="assets/js/config.js?v=20260823-auth-p0-1"></script>
   <script src="assets/js/auth-gate.js?v=20260823-auth-p02-1"></script>
   <script src="assets/js/legacy-adapter.js?v=20260809-nav4"></script>
-  <script src="assets/js/erp-store.js?v=20260908-p16-1-project-merge1"></script>
-  <script src="assets/js/cloud-sync.js?v=20260824-cloud-p3-1"></script>
-  <script src="assets/js/dashboard.js?v=20260901-dashboard-collection-principal1"></script>
-  <script src="assets/js/commissions.js?v=20260908-p15-1-quick-project1"></script>
+  <script src="assets/js/erp-store.js?v=20260911-p17-legacy-bootstrap1"></script>
+  <script src="assets/js/cloud-sync.js?v=20260911-p17-i3b-m3d-final"></script>
+  <script src="assets/js/recovery.js?v=20260909-p17-1b-2-integration1"></script>
+  <script src="assets/js/dashboard.js?v=20260909-p17-1a-safety-fix1"></script>
+  <script src="assets/js/commissions.js?v=20260910-p17-2-multiunit1"></script>
   <script src="assets/js/unbilled-work.js?v=20260908-p15-3-month-select1"></script>
   <script src="assets/js/payables.js?v=20260901-taipei-business-date-d1"></script>
   <script src="assets/js/materials.js?v=20260812-material-actions2"></script>
@@ -283,12 +296,12 @@
   <script src="assets/js/payroll-print.js?v=20260828-payroll-vertical-center1"></script>
   <script src="assets/js/payroll.js?v=20260901-taipei-business-date1"></script>
   <script src="assets/js/invoices.js?v=20260901-pending-invoice-date1"></script>
-  <script src="assets/js/projects.js?v=20260908-p16-1-project-merge1"></script>
+  <script src="assets/js/projects.js?v=20260909-p17-1a-safety-fix1"></script>
   <script src="assets/js/table-scroll.js?v=20260809-global1"></script>
-  <script src="assets/js/billing-print.js?v=20260911-p16-house-sort-hotfix"></script>
+  <script src="assets/js/billing-print.js?v=20260911-p18-b-house-natural-sort"></script>
   <script src="assets/js/billing-bundle-print.js?v=20260908-p15-2-combined-billing1"></script>
-  <script src="assets/js/billing.js?v=20260908-p15-3-month-select1"></script>
+  <script src="assets/js/billing.js?v=20260910-p17-3-receivable-details2"></script>
   <script src="assets/js/quotations.js?v=20260901-taipei-business-date1"></script>
-  <script src="assets/js/app.js?v=20260901-taipei-business-date-d1"></script>
+  <script src="assets/js/app.js?v=20260909-p17-1b-2-integration1"></script>
 </body>
 </html>
