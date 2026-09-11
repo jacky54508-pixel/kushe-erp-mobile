@@ -214,38 +214,81 @@
 
   let editorTouched = false, editorComposition = false, editorGeneration = 0;
   let editorLease = false;
-  function passiveRoute() { return window.location?.hash === '#dashboard'; }
+  let editorCommitFloor = '';
+  const USER_COMMIT_OPERATIONS = new Set([
+    'saveQuotationUnitPreset','saveQuotationPublicNotePreset','deleteQuotationPublicNotePreset',
+    'saveCommission','deleteCommission','saveDailyBatch','deleteDailyBatch','saveInvoice','createBilling','updateBilling','deleteBilling',
+    'addReceipt','updateReceipt','deleteReceipt','addRetentionReceipt','updateRetentionReceipt','deleteRetentionReceipt','deleteReceivableAccounting',
+    'savePayable','deletePayable','addPayablePayment','updatePayablePayment','deletePayablePayment',
+    'updatePayrollAdjustments','addSalaryPayment','updateSalaryPayment','deleteSalaryPayment','updateBillingInvoice',
+    'saveCustomer','deleteCustomer','saveProject','deleteProject','saveEmployee','deleteEmployee','saveMaterial','deleteMaterial',
+    'saveMaterialUsage','deleteMaterialUsage','saveProjectCost','deleteProjectCost','saveQuotationPrice','saveQuotation','setQuotationStatus','deleteQuotation',
+    'cancelQuotationConfirmation','createQuotationRevision','saveQuotationTemplate'
+  ]);
   function noteEditorEvent(event) {
     if (editorLease) { event.preventDefault?.(); event.stopImmediatePropagation?.(); }
     if (event.type === 'compositionend') editorComposition = false;
     if (event.type === 'compositionstart') editorComposition = true;
     editorTouched = true;
+    editorCommitFloor = window.KuSheERPStore?.getLastStoreTransactionResult?.()?.operationId || '';
     editorGeneration += 1;
   }
   function noteEditorRoute() {
-    if (!passiveRoute()) { editorTouched = true; editorGeneration += 1; }
+    editorGeneration += 1;
   }
   ['beforeinput','input','change','compositionstart','compositionend','paste','drop','submit'].forEach(type => document.addEventListener(type,noteEditorEvent,true));
   // Capture business navigation before its handler can create a private draft.
   document.addEventListener('click', event => {
     if (editorLease) { event.preventDefault?.(); event.stopImmediatePropagation?.(); return; }
     const target = event.target?.closest?.('[data-module],[data-route],button,a');
-    if (target) { editorTouched = true; editorGeneration += 1; }
+    if (target) editorGeneration += 1;
   },true);
   window.addEventListener('hashchange',noteEditorRoute);
   window.addEventListener('popstate',noteEditorRoute);
-  function editorReadiness() {
-    noteEditorRoute();
-    const unsafe = {safe:false,code:'EDITOR_DIRTY',generation:editorGeneration};
-    if (editorTouched || editorComposition || !passiveRoute() || typeof document.querySelectorAll !== 'function') return unsafe;
-    if (document.activeElement?.matches?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) return unsafe;
-    const nodes = document.querySelectorAll('form,[role="dialog"],dialog,.erp-detail-overlay,.commission-drawer-layer,.commission-drawer,[contenteditable]:not([contenteditable="false"])');
+  function editorSurfaceSafe(allowLease = false) {
+    if (editorComposition || (editorLease && !allowLease) || typeof document.querySelectorAll !== 'function') return false;
+    if (document.activeElement?.matches?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) return false;
+    const nodes = document.querySelectorAll('form:not([role="search"]),[role="dialog"],dialog,.erp-detail-overlay,.commission-drawer-layer,.commission-drawer,[contenteditable]:not([contenteditable="false"])');
     for (const node of nodes) {
-      if (typeof node.getClientRects !== 'function') return unsafe;
-      if (!node.hidden && node.getClientRects().length) return unsafe;
+      if (typeof node.getClientRects !== 'function') return false;
+      if (!node.hidden && node.getClientRects().length) return false;
     }
     const shell = document.getElementById('appShell');
-    if (!shell || shell.hidden || !('inert' in shell)) return unsafe;
+    return Boolean(shell && !shell.hidden && 'inert' in shell);
+  }
+  async function isTrustedUserDurableCommit(detail) {
+    if (syncOrigin === 'REMOTE_APPLY' || detail?.syncOrigin === 'REMOTE_APPLY'
+      || !detail?.operationId || !detail?.revisionId || typeof detail.action !== 'string'
+      || /rollback|recovery|snapshotReplacement|controlledRecovery/i.test(detail.action)
+      || detail.operationId === editorCommitFloor) return false;
+    const store = window.KuSheERPStore, result = store?.getLastStoreTransactionResult?.();
+    if (!result || !['COMMITTED','COMMITTED_WITH_NOTIFICATION_WARNING'].includes(result.status)
+      || !USER_COMMIT_OPERATIONS.has(result.operationType) || result.noChange
+      || result.operationId !== detail.operationId || result.revisionId !== detail.revisionId) return false;
+    const ready = await store.remoteApplyReadiness?.();
+    return Boolean(ready?.safe && ready.revision?.id === detail.revisionId
+      && ready.revision?.operationId === detail.operationId
+      && ready.data?.audit?.[0]?.action === detail.action
+      && store.getLastStoreTransactionResult()?.operationId === detail.operationId);
+  }
+  function handleEditorCommit(event) {
+    if (syncOrigin === 'REMOTE_APPLY' || event?.detail?.syncOrigin === 'REMOTE_APPLY') return;
+    const detail = {...event?.detail}, generation = editorGeneration;
+    // Store records the completed transaction after synchronous notifications.
+    window.setTimeout(async () => {
+      try {
+        if (!await isTrustedUserDurableCommit(detail) || syncOrigin === 'REMOTE_APPLY'
+          || generation !== editorGeneration || !editorSurfaceSafe()) return;
+        editorTouched = false;
+        editorCommitFloor = detail.operationId;
+        editorGeneration += 1;
+      } catch (_) { /* Unverifiable notifications cannot release a draft. */ }
+    },0);
+  }
+  window.addEventListener('kushe:data-updated',handleEditorCommit);
+  function editorReadiness(allowLease = false) {
+    const unsafe = {safe:false,code:'EDITOR_DIRTY',generation:editorGeneration};
+    if (editorTouched || !editorSurfaceSafe(allowLease)) return unsafe;
     return {safe:true,code:'EDITOR_READY',generation:editorGeneration};
   }
   function decideRemote(input = {}) {
@@ -293,7 +336,7 @@
       if (JSON.stringify(readBaseline(auth.user.id))!==JSON.stringify(baseline)) throw new CloudSyncError('RACE_BLOCKED');
       const guard=()=>{
         assertOperation(auth);
-        const current=editorReadiness();
+        const current=editorReadiness(true);
         return Boolean(lifecycleGuard()&&activeOperation?.kind==='remote-apply'&&current.safe&&current.generation===editor.generation);
       };
       if (!guard()) throw new CloudSyncError('EDITOR_DIRTY');
