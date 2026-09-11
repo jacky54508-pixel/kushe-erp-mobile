@@ -149,13 +149,16 @@
 
   const CLOUD_RESUME_DELAY_MS = 250;
   const CLOUD_RESUME_THROTTLE_MS = 2000;
+  const CLOUD_POLL_MS = 30000;
+  let cloudPollTimer = null, cloudPollRunning = false, cloudPollEpoch = 0;
   let cloudEventsEnabled = false, cloudHasStarted = false;
   let cloudRequest = null, cloudTimer = null, cloudLastFinished = 0;
 
   function cloudVisible() { return document.visibilityState === 'visible'; }
   function reconcileFromCloud(reason) {
-    if (!['STARTUP','AUTH_READY','VISIBILITY','FOCUS','ONLINE'].includes(reason)) return Promise.resolve({code:'CANCELLED'});
+    if (!['STARTUP','AUTH_READY','VISIBILITY','FOCUS','ONLINE','POLL'].includes(reason)) return Promise.resolve({code:'CANCELLED'});
     if (!cloudEventsEnabled || !cloudVisible() || !observedPrincipal()) return Promise.resolve({code:'AUTH_REQUIRED',eligibleApply:false});
+    if (reason === 'POLL' && navigator.onLine === false) return Promise.resolve({code:'NETWORK_ERROR',eligibleApply:false});
     if (cloudRequest) return cloudRequest.promise;
     if (Date.now() - cloudLastFinished < CLOUD_RESUME_THROTTLE_MS) return Promise.resolve({code:'THROTTLED'});
     const generation = syncGeneration;
@@ -165,7 +168,8 @@
     cloudRequest = request;
     cloudTimer = window.setTimeout(async () => {
       cloudTimer = null;
-      const valid = () => cloudEventsEnabled && cloudVisible() && generation === syncGeneration && Boolean(observedPrincipal());
+      const valid = () => cloudEventsEnabled && cloudVisible() && generation === syncGeneration && Boolean(observedPrincipal())
+        && (reason !== 'POLL' || navigator.onLine !== false);
       try {
         if (!valid()) return resolve({code:'CANCELLED'});
         // Reuse the same operation kind and ownership guard as controlled apply.
@@ -186,8 +190,39 @@
     }, CLOUD_RESUME_DELAY_MS);
     return promise;
   }
+  function clearCloudPoll() {
+    cloudPollEpoch += 1;
+    if (cloudPollTimer !== null) window.clearTimeout(cloudPollTimer);
+    cloudPollTimer = null;
+    cloudPollRunning = false;
+  }
+  function scheduleCloudPoll() {
+    if (!cloudEventsEnabled || !cloudVisible() || cloudPollTimer !== null || cloudPollRunning) return;
+    const generation = syncGeneration, epoch = cloudPollEpoch, userId = observedPrincipal();
+    if (!userId) return;
+    cloudPollTimer = window.setTimeout(async () => {
+      cloudPollTimer = null;
+      cloudPollRunning = true;
+      try {
+        if (epoch !== cloudPollEpoch || generation !== syncGeneration || !cloudEventsEnabled || !cloudVisible()) return;
+        if (observePrincipal() !== userId || generation !== syncGeneration) return;
+        if (navigator.onLine !== false) await reconcileFromCloud('POLL');
+      } finally {
+        if (epoch === cloudPollEpoch && generation === syncGeneration) {
+          cloudPollRunning = false;
+          scheduleCloudPoll();
+        }
+      }
+    }, CLOUD_POLL_MS);
+  }
   function cloudFocus() { void reconcileFromCloud('FOCUS'); }
-  function cloudVisibility() { if (cloudVisible()) void reconcileFromCloud('VISIBILITY'); }
+  function cloudVisibility() {
+    clearCloudPoll();
+    if (cloudVisible()) {
+      void reconcileFromCloud('VISIBILITY');
+      scheduleCloudPoll();
+    }
+  }
   function cloudOnline() { void reconcileFromCloud('ONLINE'); }
   function startCloudEvents() {
     cloudEventsEnabled = true;
@@ -197,9 +232,11 @@
     const reason = cloudHasStarted ? 'AUTH_READY' : 'STARTUP';
     cloudHasStarted = true;
     void reconcileFromCloud(reason);
+    scheduleCloudPoll();
   }
   function stopCloudEvents() {
     cloudEventsEnabled = false;
+    clearCloudPoll();
     window.removeEventListener('focus',cloudFocus);
     document.removeEventListener('visibilitychange',cloudVisibility);
     window.removeEventListener('online',cloudOnline);
