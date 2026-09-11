@@ -85,6 +85,7 @@
   let activeOperation = null;
   const pendingOperations = new Map();
   let syncOrigin = 'USER_LOCAL_EDIT';
+  const requestControllers = new Set();
 
   function observedPrincipal() {
     const gate = window.KusheAuthGate;
@@ -262,7 +263,14 @@
     'saveMaterialUsage','deleteMaterialUsage','saveProjectCost','deleteProjectCost','saveQuotationPrice','saveQuotation','setQuotationStatus','deleteQuotation',
     'cancelQuotationConfirmation','createQuotationRevision','saveQuotationTemplate'
   ]);
+  function isBusinessEditorEvent(event) {
+    const shell = document.getElementById('appShell');
+    const target = event?.target;
+    return Boolean(shell && !shell.hidden && observedPrincipal()
+      && target instanceof Node && shell.contains(target));
+  }
   function noteEditorEvent(event) {
+    if (!isBusinessEditorEvent(event)) return;
     if (editorLease) { event.preventDefault?.(); event.stopImmediatePropagation?.(); }
     if (event.type === 'compositionend') editorComposition = false;
     if (event.type === 'compositionstart') editorComposition = true;
@@ -559,24 +567,34 @@
       ...(options.headers || {})
     };
     if (options.body !== undefined) headers['Content-Type'] = 'application/json';
-    const response = await fetch(`${url}${path}`, {
-      method: options.method || 'GET',
-      headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
-      signal: options.signal
-    });
-    assertOperation(auth);
-    if (!response.ok) {
-      const code = options.cas ? ([401, 403].includes(response.status) ? 'AUTH_REQUIRED' : 'SERVER_ERROR') : 'ERROR';
-      const error = new CloudSyncError(code);
-      error.httpStatus = response.status;
-      throw error;
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (options.signal?.aborted) abort();
+    else options.signal?.addEventListener('abort', abort, { once: true });
+    requestControllers.add(controller);
+    try {
+      const response = await fetch(`${url}${path}`, {
+        method: options.method || 'GET',
+        headers,
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        signal: controller.signal
+      });
+      assertOperation(auth);
+      if (!response.ok) {
+        const code = options.cas ? ([401, 403].includes(response.status) ? 'AUTH_REQUIRED' : 'SERVER_ERROR') : 'ERROR';
+        const error = new CloudSyncError(code);
+        error.httpStatus = response.status;
+        throw error;
+      }
+      if (response.status === 204) return null;
+      let result;
+      try { result = await response.json(); } catch (_) { result = null; }
+      assertOperation(auth);
+      return result;
+    } finally {
+      options.signal?.removeEventListener('abort', abort);
+      requestControllers.delete(controller);
     }
-    if (response.status === 204) return null;
-    let result;
-    try { result = await response.json(); } catch (_) { result = null; }
-    assertOperation(auth);
-    return result;
   }
 
   function remotePath(userId) {
@@ -1285,7 +1303,10 @@
   function stopAutoBackup() {
     stopCloudEvents();
     syncGeneration += 1;
-    if (principalId !== null) removeBaseline();
+    // Stopping a session does not forget its verified, principal-bound baseline.
+    principalId = null;
+    requestControllers.forEach(controller => controller.abort());
+    requestControllers.clear();
     currentStatus = null;
     syncOrigin = 'USER_LOCAL_EDIT';
     autoStarted = false;
