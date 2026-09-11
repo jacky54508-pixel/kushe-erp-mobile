@@ -196,8 +196,8 @@
     const prevOpenAR = sum(data.receivables.filter((row) => inMonth(row, prev)), (row) => Math.max(0, arAmount(row) - paidAR(row)));
     const prevOpenAP = sum(data.payables.filter((row) => inMonth(row, prev)), (row) => Math.max(0, apAmount(row) - paidAP(row)));
     const monthAR = data.receivables.filter((row) => inMonth(row, month));
-    const structureTotal = sum(monthAR, arAmount);
-    const structurePaid = structureTotal ? Math.min(structureTotal, sum(monthAR, paidAR)) : 0;
+    const structureTotal = sum(monthAR, arAmount) || revenue;
+    const structurePaid = structureTotal ? Math.min(structureTotal, sum(monthAR, paidAR) || collected) : 0;
     const structureOpen = Math.max(0, structureTotal - structurePaid);
     const allAR = sum(data.receivables, arAmount);
     const allReceived = sum(data.receivables, paidAR);
@@ -216,11 +216,9 @@
       const material = sum(materials, (row) => row.amount);
       const labor = sum(attendance, (row) => row.amount) + sum(commissions, (row) => row.commission);
       const other = sum(otherCosts, (row) => row.amount);
-      const customerDeduction = number(window.KuSheERPStore?.projectCustomerDeductionCost?.(id,data));
-      const totalCost = material + labor + other + customerDeduction;
-      const profit = billed - totalCost;
+      const profit = billed - material - labor - other;
       const margin = billed ? profit / billed * 100 : 0;
-      return { id, name: text(project.name) || '—', customer: entityName(maps.customers, text(project.customer), project.customerName), billed, received, outstanding, material, labor, other, customerDeduction, totalCost, profit, margin, status: text(project.status) || '進行中', activity: billed + received + outstanding + totalCost };
+      return { id, name: text(project.name) || '—', customer: entityName(maps.customers, text(project.customer), project.customerName), billed, received, outstanding, material, labor, other, profit, margin, status: text(project.status) || '進行中', activity: billed + received + outstanding + material + labor + other };
     }).filter((row) => row.activity > 0).sort((a, b) => b.billed - a.billed || b.activity - a.activity).slice(0, 6);
 
     const today = businessDate();
@@ -326,7 +324,7 @@
     $('#recoveryRate').textContent = `${vm.recoveryRate.toFixed(1)}%`; $('#recoveryBar').style.width = `${vm.recoveryRate}%`;
   }
   function renderProjects(vm) {
-    $('#projectRows').innerHTML = vm.projects.length ? vm.projects.map((row) => `<tr data-module="projects"><td title="${escapeHtml(row.name)}">${escapeHtml(row.name)}</td><td>${money(row.billed)}</td><td>${money(row.received)}</td><td>${money(row.outstanding)}</td><td>${money(row.material)}</td><td>${money(row.labor)}</td><td>${money(row.other)}</td><td>${money(row.customerDeduction)}</td><td>${money(row.totalCost)}</td><td>${money(row.profit)}</td><td>${row.margin.toFixed(1)}%</td><td><span class="status-pill ${/已完工/.test(row.status) ? 'done' : /暫停|未完工/.test(row.status) ? 'hold' : ''}">${escapeHtml(row.status)}</span></td></tr>`).join('') : '<tr><td colspan="12" class="empty-cell">目前沒有可彙整的案場資料</td></tr>';
+    $('#projectRows').innerHTML = vm.projects.length ? vm.projects.map((row) => `<tr data-module="projects"><td title="${escapeHtml(row.name)}">${escapeHtml(row.name)}</td><td>${money(row.billed)}</td><td>${money(row.received)}</td><td>${money(row.outstanding)}</td><td>${money(row.material)}</td><td>${money(row.labor)}</td><td>${money(row.profit)}</td><td>${row.margin.toFixed(1)}%</td><td><span class="status-pill ${/已完工/.test(row.status) ? 'done' : /暫停|未完工/.test(row.status) ? 'hold' : ''}">${escapeHtml(row.status)}</span></td></tr>`).join('') : '<tr><td colspan="9" class="empty-cell">目前沒有可彙整的案場資料</td></tr>';
   }
   function attentionMarkup(rows) {
     return rows.length ? rows.map((row) => `<button class="attention-item" type="button" data-module="${row.module}"><span class="attention-icon ${row.tone}"><i data-icon="${row.icon}"></i></span><span class="attention-copy"><strong>${row.type}</strong><small class="count-pill">${row.countLabel||`${row.count} 筆`}</small></span><b class="attention-amount">${money(row.amount)}</b><i class="attention-arrow" data-icon="chevron-right"></i></button>`).join('') : '<div class="all-clear">目前沒有待處理項目</div>';

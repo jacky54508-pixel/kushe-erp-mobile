@@ -553,10 +553,9 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 @media(max-width:520px){.auth-modal-layer{padding:12px}.auth-modal{max-height:calc(100dvh - 24px)}.auth-modal-body{padding:16px}.auth-modal footer{padding:12px 16px}.auth-modal footer button{flex:1}}
 
 /* Authenticated, manual-only cloud backup dialog. */
-.cloud-sync-modal{display:flex;flex-direction:column;width:min(100%,590px)}
-.cloud-sync-modal>header,.cloud-sync-modal>footer{flex:0 0 auto}
-.cloud-sync-body{display:grid;gap:14px;padding:18px 19px;min-height:0;flex:1 1 auto;overflow-y:auto;-webkit-overflow-scrolling:touch}.cloud-sync-intro{margin:0;color:#607288;font-size:12px;line-height:1.65}.cloud-sync-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.cloud-sync-item{min-width:0;padding:12px;border:1px solid #dde6ef;border-radius:10px;background:#f8fafc}.cloud-sync-item span{display:block;margin-bottom:5px;color:#718197;font-size:10px;font-weight:850}.cloud-sync-item b{display:block;overflow-wrap:anywhere;color:#173b66;font-size:13px}.cloud-sync-status{padding:13px;border:1px solid #cfe0f4;border-radius:10px;background:#f2f7fd}.cloud-sync-status strong{display:block;color:#0753b5;font-size:12px}.cloud-sync-status p{margin:6px 0 0;color:#486078;font-size:12px;line-height:1.55}.cloud-sync-fingerprint{margin:0;color:#7a8796;font-size:10px}.cloud-sync-upload:disabled{cursor:not-allowed;opacity:.48}
-@media(max-width:520px){#cloudSyncModal{padding-top:max(12px,env(safe-area-inset-top));padding-bottom:max(12px,env(safe-area-inset-bottom))}.cloud-sync-modal{max-height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}.cloud-sync-grid{grid-template-columns:1fr}.cloud-sync-body{padding:16px}.cloud-sync-modal>footer{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:12px 12px max(12px,env(safe-area-inset-bottom))}.cloud-sync-modal>footer button{min-width:0;width:100%;height:auto;min-height:44px;padding:8px 6px;white-space:normal;overflow-wrap:anywhere}}
+.cloud-sync-modal{width:min(100%,590px)}
+.cloud-sync-body{display:grid;gap:14px;padding:18px 19px;overflow-y:auto}.cloud-sync-intro{margin:0;color:#607288;font-size:12px;line-height:1.65}.cloud-sync-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.cloud-sync-item{min-width:0;padding:12px;border:1px solid #dde6ef;border-radius:10px;background:#f8fafc}.cloud-sync-item span{display:block;margin-bottom:5px;color:#718197;font-size:10px;font-weight:850}.cloud-sync-item b{display:block;overflow-wrap:anywhere;color:#173b66;font-size:13px}.cloud-sync-status{padding:13px;border:1px solid #cfe0f4;border-radius:10px;background:#f2f7fd}.cloud-sync-status strong{display:block;color:#0753b5;font-size:12px}.cloud-sync-status p{margin:6px 0 0;color:#486078;font-size:12px;line-height:1.55}.cloud-sync-fingerprint{margin:0;color:#7a8796;font-size:10px}.cloud-sync-upload:disabled{cursor:not-allowed;opacity:.48}
+@media(max-width:520px){.cloud-sync-grid{grid-template-columns:1fr}.cloud-sync-body{padding:16px}}
 
 /* Receivables-only outstanding view and expanded detail containment. */
 #receivablesApp .receivable-view-switch{display:flex;align-items:center;gap:8px;margin-bottom:13px;padding-bottom:13px;border-bottom:1px solid #e5ebf2}
@@ -617,35 +616,6 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 #receivablesApp .receivable-detail-panel h3{margin:0 0 9px;color:#173f6d;font-size:12px;font-weight:900}
 #receivablesApp .receivable-detail-panel h3:not(:first-child){margin-top:15px;padding-top:14px;border-top:1px solid #dce6f1}
 #receivablesApp .receivable-detail-panel .receipt-history-scroll{box-sizing:border-box;width:100%;max-width:100%;min-width:0;padding:0;overflow-x:auto;overflow-y:hidden}
-.customer-deduction-modal{width:min(920px,96vw)}
-.customer-deduction-modal>header,.customer-deduction-modal form>footer{flex:none}
-.customer-deduction-modal>form{display:flex;flex:1 1 auto;flex-direction:column;min-height:0}
-.customer-deduction-modal .erp-detail-body{flex:1 1 auto;min-height:0;overflow-y:auto}
-.customer-settlement-preview{grid-template-columns:repeat(4,minmax(0,1fr))}
-.receipt-note-field{grid-column:1/-1}
-.customer-deduction-editor{margin-top:18px;padding:16px;border:1px solid #dce6ef;border-radius:12px;background:#f8fbfe}
-.customer-deduction-editor>header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px}
-.customer-deduction-modal .customer-deduction-editor>header>button{width:auto;height:auto;min-height:30px;padding:7px 11px;border:1px solid #d6e0eb;border-radius:8px;background:#fff;color:#354a65;font-size:10px}
-.customer-deduction-editor h3{margin:0;color:#0a386f;font-size:14px}
-.customer-deduction-editor header p{margin:4px 0 0;color:#6d7f93;font-size:10px;line-height:1.5}
-.customer-deduction-row{display:grid;grid-template-columns:170px 125px minmax(190px,1fr) auto;gap:10px;align-items:end;padding:11px 0;border-top:1px solid #e3eaf2}
-.customer-deduction-row:first-child{border-top:0}
-.customer-deduction-row label{display:grid;gap:6px;min-width:0}
-.customer-deduction-row label>span{color:#69798e;font-size:10px;font-weight:800}
-.customer-deduction-row input,.customer-deduction-row select{box-sizing:border-box;width:100%;height:41px;min-width:0;padding:0 10px;border:1px solid #d7e1ec;border-radius:8px;background:#fff;font:inherit;font-size:12px}
-.customer-deduction-remove{height:41px;padding:0 12px;border:1px solid #efc7c3;border-radius:8px;background:#fff;color:#bd3e35;font-size:10px;font-weight:800}
-.customer-deduction-retention-note{margin:12px 0 0;padding:9px 11px;border-radius:8px;background:#fff4df;color:#8b5b12;font-size:10px}
-.customer-settlement-history{min-width:1250px}
-.customer-settlement-history th:nth-child(3),.customer-settlement-history td:nth-child(3){width:240px;white-space:normal;overflow:visible;text-overflow:clip}
-.receipt-deduction-list{display:grid;gap:5px;margin:0;padding:0;list-style:none}
-.receipt-deduction-list li{display:grid;gap:2px}
-.receipt-deduction-list strong{color:#087d74;font-size:10px}
-.receipt-deduction-list span{color:#53677f;font-size:9px;line-height:1.4}
-.customer-deduction-breakdown{grid-template-columns:repeat(5,minmax(0,1fr))}
-.customer-deduction-records .project-detail-table{min-width:850px}
-.customer-deduction-receipt-ref{color:#62758b;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:10px}
-@media(max-width:900px){.customer-settlement-preview{grid-template-columns:repeat(2,minmax(0,1fr))}.customer-deduction-breakdown{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:620px){.customer-deduction-modal{width:100%}.customer-deduction-editor{padding:12px}.customer-deduction-editor>header{display:grid}.customer-deduction-row{grid-template-columns:1fr 110px}.customer-deduction-note{grid-column:1/-1}.customer-deduction-remove{grid-column:1/-1}.customer-settlement-preview{grid-template-columns:1fr}}
 #receivablesApp .receivable-detail-panel .receipt-detail-table{box-sizing:border-box;width:100%;max-width:100%;min-width:0;table-layout:fixed}
 #receivablesApp .receivable-detail-panel .receipt-detail-table th,#receivablesApp .receivable-detail-panel .receipt-detail-table td{white-space:normal;overflow-wrap:anywhere}
 @media(max-width:620px){#receivablesApp .receivable-view-switch{align-items:stretch}#receivablesApp .receivable-view-switch button{flex:1;min-width:0}}
@@ -769,13 +739,3 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 .project-merge-issues{padding:10px 12px;border:1px solid #dce5ee;border-radius:9px;background:#f8fafc}.project-merge-issues h4{margin:0;color:#506980;font-size:10px}.project-merge-issues p{margin:5px 0 0;color:#16805f;font-size:10px;font-weight:850}.project-merge-issues ul{margin:7px 0 0;padding-left:18px;color:#a23f37;font-size:10px;line-height:1.55}.project-merge-issues.has-issues{border-color:#efc9c3;background:#fff7f5}.project-merge-preview-note,.project-merge-blocked,.project-merge-empty{margin:0;padding:10px 12px;border-radius:8px;background:#edf4fb;color:#526a82;font-size:10px;line-height:1.5}.project-merge-blocked{background:#fff0ed;color:#9f3f36;font-weight:850}.project-merge-confirm-open{justify-self:start}
 .project-merge-final-confirm{display:grid;gap:11px;padding:15px;border:1px solid #edc6c1;border-radius:10px;background:#fff8f6}.project-merge-final-confirm h3{margin:0;color:#963f36;font-size:13px}.project-merge-final-confirm p{margin:0;color:#744f4b;font-size:10px;line-height:1.55}.project-merge-final-confirm label{display:grid;gap:6px}.project-merge-final-confirm button{justify-self:start}.project-merge-final-confirm button:disabled{cursor:not-allowed;opacity:.45}
 @media(max-width:620px){.project-merge-zone .project-section-title{align-items:stretch;flex-direction:column}.project-merge-zone .project-section-title button{width:100%;min-height:44px}.project-merge-modal{width:100%}.project-merge-modal .erp-detail-body{padding:14px}.project-merge-form{grid-template-columns:1fr}.project-merge-form>p{grid-column:auto}.project-merge-form>button,.project-merge-confirm-open,.project-merge-final-confirm button{width:100%;min-height:44px}.project-merge-direction{grid-template-columns:1fr}.project-merge-direction>b{justify-self:center;transform:rotate(90deg)}.project-merge-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
-/* P17 storage warnings are independent of transient success toasts. */
-.store-safety-banner{position:fixed;bottom:12px;left:12px;right:12px;z-index:10050;padding:14px;background:#fff3d5;border:2px solid #ac6500;color:#452b00;display:flex;gap:12px;align-items:center;flex-wrap:wrap;overflow-wrap:anywhere}
-.store-safety-banner[hidden],.store-recovery-modal[hidden]{display:none!important}
-.store-recovery-modal{position:fixed;inset:0;z-index:10060;background:#092039ba;display:grid;place-items:center;padding:12px}
-.store-recovery-modal>section{background:#fff;border-radius:12px;width:min(760px,100%);max-height:calc(100dvh - 24px);overflow:auto;padding:18px;min-width:0;box-sizing:border-box}
-.store-recovery-modal header,.store-recovery-modal footer{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-.store-recovery-modal h2{flex:1;margin:0;font-size:20px}
-.store-recovery-modal pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f6f8;padding:10px;font-size:12px}
-.store-recovery-modal input{display:block;width:100%;min-width:0;box-sizing:border-box;margin:8px 0;padding:10px}
-.store-recovery-modal button,.store-safety-banner button{min-height:44px;white-space:normal;max-width:100%;padding:8px 12px}
