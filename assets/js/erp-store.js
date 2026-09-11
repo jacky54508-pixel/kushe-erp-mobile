@@ -423,6 +423,83 @@
     catch (error) { state.settings.quotationPublicNotePresets = previous; throw error; }
     return true;
   }
+  // P16 selected a positive-score primary before consulting Emergency. Bootstrap
+  // that exact snapshot before applying versioned mirror/journal requirements.
+  // The primary and its recoverable bootstrap journal are one IDB transaction.
+  async function bootstrapLegacyStore() {
+    // Replacement verifies a versioned reload while already owning this lock.
+    // Do not reacquire it for states handled by ordinary versioned validation.
+    const initial=await readStorageObservation(),initialJournal=initial.values[STORE_JOURNAL_KEY];
+    if(initialJournal&&!(initialJournal.operationType==='legacyBootstrap'&&initialJournal.phase!=='COMMIT_VERIFIED'))return;
+    if(!initialJournal&&(storeRevisionOf(initial.values[STATE_KEY]).id||storeRevisionOf(parseStoreJson(initial.local[EMERGENCY_KEY],'Emergency')).id))return;
+    if(!navigator.locks?.request)throw storeError('缺少安全交易鎖，無法升級舊資料','STORE_LOCK_UNAVAILABLE');
+    return navigator.locks.request(STORE_LOCK_NAME,{mode:'exclusive'},async()=>{
+      let observation=await readStorageObservation(),journal=observation.values[STORE_JOURNAL_KEY];
+      const blocked=()=>storeError('舊資料升級證據已變更，保持停止','LEGACY_BOOTSTRAP_CONFLICT');
+      const assertNoMarkers=(value)=>{
+        for(const key of [STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY])if(value.values[key]||value.local[key]||value.session[key])throw blocked();
+        if(value.local[RECEIPT_ACTIVE_KEY])throw blocked();
+      };
+      // Normal versioned/recovery states retain their existing verification path.
+      if(journal?.operationType!=='legacyBootstrap'||journal.phase==='COMMIT_VERIFIED'){
+        if(journal)return;
+        const primary=observation.values[STATE_KEY],emergency=parseStoreJson(observation.local[EMERGENCY_KEY],'Emergency');
+        if(storeRevisionOf(primary).id||storeRevisionOf(emergency).id)return;
+        const authority=score(primary)>0?primary:score(emergency)>0?emergency:null;
+        if(!authority)return;
+        assertNoMarkers(observation);
+        if(observation.local[STORE_COMMIT_KEY]!==null)throw blocked();
+        if(String(authority?.meta?.receiptCommitVersion||'')!==String(observation.local[RECEIPT_COMMIT_KEY]||''))throw storeError('舊收款版本與快照不一致，停止升級','STALE_AFTER_RECEIPT_COMMIT');
+        if(!authority||typeof authority!=='object'||Array.isArray(authority)||authority.meta!=null&&(typeof authority.meta!=='object'||Array.isArray(authority.meta)))throw blocked();
+        const after=JSON.parse(JSON.stringify(authority)),now=new Date().toISOString(),operationId=`bootstrap-${uid()}`;
+        const revision={sequence:1,id:`store-${uid()}`,parentId:'',operationId,committedAt:now};
+        if(!after.meta)after.meta={};
+        after.meta.businessSnapshotRevision=revision;after.meta.receiptCommitVersion=revision.id;
+        const fingerprint=storeStateFingerprint(after),digest=storeFingerprintDigest(fingerprint);
+        journal={schema:STORE_JOURNAL_SCHEMA,operationType:'legacyBootstrap',operationId,phase:'PRIMARY_WRITTEN',startedAt:now,updatedAt:now,
+          before:{persistentHadValue:primary!==undefined,state:primary===undefined?null:primary,emergencyRaw:observation.local[EMERGENCY_KEY],localCommitTokenRaw:observation.local[STORE_COMMIT_KEY],receiptCommitTokenRaw:observation.local[RECEIPT_COMMIT_KEY],journal:null,authority:score(primary)>0?'IndexedDB':'Emergency',authoritativeState:authority},
+          after:{businessSnapshotRevision:revision,stateFingerprint:digest},
+          bootstrapSnapshot:after,
+          bootstrapToken:JSON.stringify({schema:STORE_JOURNAL_SCHEMA,revisionId:revision.id,sequence:1,stateFingerprint:digest,committedAt:now})};
+        await storeCheckpointCapacity(journal);
+        const captured=storeStateFingerprint(observation);
+        if(storeStateFingerprint(await readStorageObservation())!==captured)throw blocked();
+        await dbReplaceStateCas(storeStateFingerprint(primary),after,journal,{expectedJournalFingerprint:storeStateFingerprint(undefined)});
+        observation=await readStorageObservation();
+      }
+      if(!['PRIMARY_WRITTEN','EMERGENCY_WRITTEN','TOKENS_WRITTEN'].includes(journal.phase))throw blocked();
+      assertNoMarkers(observation);
+      const before=journal.before,after=journal.bootstrapSnapshot,revision=storeRevisionOf(after);
+      if(journal.schema!==STORE_JOURNAL_SCHEMA||!before||!after||revision.sequence!==1||revision.parentId!==''||!revision.id||revision.operationId!==journal.operationId||before.journal!==null)throw blocked();
+      const selected=before.authority==='IndexedDB'&&before.persistentHadValue&&score(before.state)>0?before.state:before.authority==='Emergency'&&score(before.state)<=0?parseStoreJson(before.emergencyRaw,'Legacy Emergency'):null;
+      if(!selected||score(selected)<=0||storeRevisionOf(selected).id||storeStateFingerprint(selected)!==storeStateFingerprint(before.authoritativeState))throw blocked();
+      const reconstructed=JSON.parse(JSON.stringify(selected));if(!reconstructed.meta)reconstructed.meta={};
+      reconstructed.meta.businessSnapshotRevision=revision;reconstructed.meta.receiptCommitVersion=revision.id;
+      const fingerprint=storeStateFingerprint(after),digest=storeFingerprintDigest(fingerprint),emergencyRaw=JSON.stringify(after);
+      const expectedToken=JSON.stringify({schema:STORE_JOURNAL_SCHEMA,revisionId:revision.id,sequence:1,stateFingerprint:digest,committedAt:revision.committedAt});
+      if(storeStateFingerprint(reconstructed)!==fingerprint||!sameStoreRevision(revision,journal.after?.businessSnapshotRevision)||journal.after?.stateFingerprint!==digest||journal.bootstrapToken!==expectedToken||before.localCommitTokenRaw!==null||String(selected.meta?.receiptCommitVersion||'')!==String(before.receiptCommitTokenRaw||''))throw blocked();
+      const verifyOwned=async()=>{
+        const current=await readStorageObservation();assertNoMarkers(current);
+        if(storeStateFingerprint(current.values[STATE_KEY])!==fingerprint||storeStateFingerprint(current.values[STORE_JOURNAL_KEY])!==storeStateFingerprint(journal))throw blocked();
+        for(const [key,oldValue,newValue] of [[EMERGENCY_KEY,before.emergencyRaw,emergencyRaw],[STORE_COMMIT_KEY,before.localCommitTokenRaw,expectedToken],[RECEIPT_COMMIT_KEY,before.receiptCommitTokenRaw,revision.id]])if(current.local[key]!==oldValue&&current.local[key]!==newValue)throw blocked();
+        return current;
+      };
+      await verifyOwned();
+      localStorage.setItem(EMERGENCY_KEY,emergencyRaw);
+      if(localStorage.getItem(EMERGENCY_KEY)!==emergencyRaw)throw blocked();
+      const advance=async phase=>{const previous=journal.phase,next={...journal,phase,updatedAt:new Date().toISOString()};await dbAdvanceStoreJournal(fingerprint,journal.operationId,previous,next);journal=next;};
+      if(journal.phase==='PRIMARY_WRITTEN')await advance('EMERGENCY_WRITTEN');
+      await verifyOwned();
+      localStorage.setItem(STORE_COMMIT_KEY,expectedToken);localStorage.setItem(RECEIPT_COMMIT_KEY,revision.id);
+      if(localStorage.getItem(STORE_COMMIT_KEY)!==expectedToken||localStorage.getItem(RECEIPT_COMMIT_KEY)!==revision.id)throw blocked();
+      if(journal.phase==='EMERGENCY_WRITTEN')await advance('TOKENS_WRITTEN');
+      await verifyOwned();
+      assertStoreCommitTokensBound(fingerprint,revision,JSON.parse(expectedToken),revision.id,revision.id);
+      assertStoreEmergencyBound(fingerprint,revision,localStorage.getItem(EMERGENCY_KEY));
+      await advance('COMMIT_VERIFIED');
+      // No business normalization, audit event, updatedAt change or notification.
+    });
+  }
   async function loadState(recoveryVerification = null) {
     let persistentValue;
     try {
@@ -430,6 +507,10 @@
       persistentValue = await dbGetCommitted(STATE_KEY);
       state = persistentValue;
     } catch (_) { db = null; }
+    if(db&&!recoveryVerification){
+      await bootstrapLegacyStore();
+      persistentValue=await dbGetCommitted(STATE_KEY);state=persistentValue;
+    }
     loadedPersistentHadValue=persistentValue!==undefined;
     loadedPersistentFingerprint=storeStateFingerprint(persistentValue);
     try{loadedEmergencyRaw=localStorage.getItem(EMERGENCY_KEY)}catch(cause){state=null;throw storeError('無法讀取 Emergency backup，已停止載入','STORE_EMERGENCY_READ_FAILED',{cause})}
