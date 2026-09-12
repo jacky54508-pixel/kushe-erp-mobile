@@ -1480,7 +1480,12 @@
   async function startAutoBackup() {
     observePrincipal();
     startCloudEvents();
-    if (autoStarted) return coordinate('start', () => autoStatus());
+    if (autoStarted) {
+      if (autoState.code === 'PRINCIPAL_UNBOUND' && principalId && autoState.userId === principalId) {
+        return evaluateAutoStart(autoGeneration);
+      }
+      return coordinate('start', () => autoStatus());
+    }
     clearAutoTimer();
     clearOnlineTimer();
     autoStarted = true;
