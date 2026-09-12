@@ -4783,7 +4783,7 @@
         if(!legacy||typeof legacy!=='object'||Array.isArray(legacy)||score(legacy)<=0||storeRevisionOf(legacy).id||before.localCommitTokenRaw!==null)reject();
         const selected=before.authority==='IndexedDB'&&before.persistentHadValue&&score(before.state)>0?before.state:before.authority==='Emergency'&&score(before.state)<=0?parseStoreJson(before.emergencyRaw,'Legacy Emergency'):null;
         if(!selected||storeStateFingerprint(selected)!==storeStateFingerprint(legacy)||String(legacy.meta?.receiptCommitVersion||'')!==String(before.receiptCommitTokenRaw||''))reject();
-        const reconstructed=storeStateClone(legacy);
+        const reconstructed=JSON.parse(JSON.stringify(legacy));
         if(!reconstructed.meta)reconstructed.meta={};
         reconstructed.meta.businessSnapshotRevision=revision;reconstructed.meta.receiptCommitVersion=revision.id;
         if(storeStateFingerprint(reconstructed)!==fingerprint)reject();
