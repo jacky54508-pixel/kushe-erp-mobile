@@ -689,6 +689,21 @@
     } catch (_) { return null; }
   }
 
+  function readLegacyV1BaselineCandidate(userId) {
+    try {
+      if (!userId || window.localStorage.getItem(AUTO_APPLY_PENDING_KEY) !== null) return null;
+      const raw = window.localStorage.getItem(AUTO_BASELINE_KEY);
+      if (raw === null) return null;
+      const value = JSON.parse(raw);
+      if (!isPlainObject(value) || value.version !== 1 || value.userId !== userId
+        || typeof value.remoteUpdatedAt !== 'string' || !Number.isFinite(Date.parse(value.remoteUpdatedAt))
+        || typeof value.remoteFingerprint !== 'string' || !/^[a-f0-9]{64}$/i.test(value.remoteFingerprint)
+        || typeof value.localFingerprint !== 'string' || !/^[a-f0-9]{64}$/i.test(value.localFingerprint)) return null;
+      return {raw, userId:value.userId, remoteUpdatedAt:value.remoteUpdatedAt,
+        remoteFingerprint:value.remoteFingerprint, localFingerprint:value.localFingerprint};
+    } catch (_) { return null; }
+  }
+
   function readBaseline(userId) {
     try {
       if (!userId || window.localStorage.getItem(AUTO_APPLY_PENDING_KEY)) return null;
@@ -1253,10 +1268,13 @@
 
   async function recoverEquivalentLegacyCloudBaseline(checked, generation) {
     const {auth,local,remote}=checked,store=window.KuSheERPStore,editor=editorReadiness();
+    const baselineRaw=window.localStorage.getItem(AUTO_BASELINE_KEY);
+    const legacyV1=readLegacyV1BaselineCandidate(auth.user.id);
+    if(baselineRaw!==null&&(!legacyV1||legacyV1.raw!==baselineRaw))return false;
     const allowed=()=>activeAutoRun(generation)&&syncOrigin!=='REMOTE_APPLY'
       &&observedPrincipal()===auth.user.id&&editorReadiness().safe
       &&editorReadiness().generation===editor.generation
-      &&window.localStorage.getItem(AUTO_BASELINE_KEY)===null
+      &&window.localStorage.getItem(AUTO_BASELINE_KEY)===baselineRaw
       &&window.localStorage.getItem(AUTO_APPLY_PENDING_KEY)===null;
     const legacyRemote=value=>isPlainObject(value?.meta)&&!Object.prototype.hasOwnProperty.call(value.meta,'businessSnapshotRevision');
     if(!editor.safe||!allowed()||!checked.remoteExists||!local?.score||local.score!==remote?.score
@@ -1269,8 +1287,11 @@
     const ready=await store.remoteApplyReadiness(proof.baseline);
     if(!ready.safe||!allowed())return false;
     const committed=await snapshotInfo(ready.data);
+    const legacyLocalFingerprint=await fingerprint(legacyBusinessProjection(committed.data));
     if(committed.fingerprint!==local.fingerprint
-      ||await fingerprint(legacyBusinessProjection(committed.data))!==await fingerprint(legacyBusinessProjection(remote.data)))return false;
+      ||legacyLocalFingerprint!==await fingerprint(legacyBusinessProjection(remote.data)))return false;
+    if(legacyV1&&(legacyV1.userId!==auth.user.id||legacyV1.remoteUpdatedAt!==checked.remoteUpdatedAt
+      ||legacyV1.remoteFingerprint!==remote.fingerprint||legacyV1.localFingerprint!==legacyLocalFingerprint))return false;
     const row=await readRemote(await revalidatePrincipal(auth));
     if(!row||!sameSyncVersion(row.sync_version,checked.syncVersion)||row.updated_at!==checked.remoteUpdatedAt||!legacyRemote(row.data))return false;
     const accepted=await validateRemoteSnapshot(row.data,row.updated_at);
