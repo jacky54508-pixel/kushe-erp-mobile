@@ -4764,6 +4764,37 @@
       return freezeStoreState({safe:true,code:'STORE_READY',...committed});
     } catch (error) { return freezeStoreState({safe:false,code:error.code || 'STORE_UNVERIFIED'}); }
   }
+  async function legacyBootstrapEvidence(expectedBaseline = '') {
+    const epoch=storeWriterEpoch;
+    const busy=()=>activeStoreWriters||queuedStoreWriters||activeStoreTransaction||persistenceInFlight||storeLoadPromise;
+    if(busy())return freezeStoreState({safe:false,code:'STORE_BUSY'});
+    if(!db||!publishedState||storeRecoveryBlocked||receiptWritesBlocked)return freezeStoreState({safe:false,code:'STORE_NOT_READY'});
+    try{
+      const evidence=await coordinatedStorage('legacyBootstrapEvidence',async()=>{
+        const observation=await readStorageObservation({existingOnly:true});
+        assertObservationCommitted(observation);
+        const current=observation.values[STATE_KEY],journal=observation.values[STORE_JOURNAL_KEY],revision=storeRevisionOf(current);
+        const reject=()=>{throw storeError('無法證明已完成的 legacy bootstrap','LEGACY_BOOTSTRAP_UNVERIFIED')};
+        if(!journal||journal.schema!==STORE_JOURNAL_SCHEMA||journal.operationType!=='legacyBootstrap'||journal.phase!=='COMMIT_VERIFIED'||!storeJournalHasValidTerminalShape(journal))reject();
+        if(!revision.id||revision.sequence!==1||revision.parentId!==''||revision.operationId!==journal.operationId||!sameStoreRevision(revision,journal.after.businessSnapshotRevision))reject();
+        const fingerprint=storeStateFingerprint(current),digest=storeFingerprintDigest(fingerprint),before=journal.before;
+        if(journal.after.stateFingerprint!==digest||!journal.bootstrapSnapshot||storeStateFingerprint(journal.bootstrapSnapshot)!==fingerprint||!before||before.journal!==null)reject();
+        const legacy=before.authoritativeState;
+        if(!legacy||typeof legacy!=='object'||Array.isArray(legacy)||score(legacy)<=0||storeRevisionOf(legacy).id||before.localCommitTokenRaw!==null)reject();
+        const selected=before.authority==='IndexedDB'&&before.persistentHadValue&&score(before.state)>0?before.state:before.authority==='Emergency'&&score(before.state)<=0?parseStoreJson(before.emergencyRaw,'Legacy Emergency'):null;
+        if(!selected||storeStateFingerprint(selected)!==storeStateFingerprint(legacy)||String(legacy.meta?.receiptCommitVersion||'')!==String(before.receiptCommitTokenRaw||''))reject();
+        const reconstructed=storeStateClone(legacy);
+        if(!reconstructed.meta)reconstructed.meta={};
+        reconstructed.meta.businessSnapshotRevision=revision;reconstructed.meta.receiptCommitVersion=revision.id;
+        if(storeStateFingerprint(reconstructed)!==fingerprint)reject();
+        const baseline=await observationHash(observation);
+        if(expectedBaseline&&baseline!==expectedBaseline)throw storeError('本機資料已變更','STALE_STORE_STATE');
+        return {safe:true,code:'LEGACY_BOOTSTRAP_VERIFIED',operationId:journal.operationId,revision:storeStateClone(revision),authority:before.authority,currentFingerprint:digest,legacyBusinessUpdatedAt:String(legacy.meta?.updatedAt||''),baseline};
+      },{readOnly:true});
+      if(busy()||epoch!==storeWriterEpoch||storeRecoveryBlocked||receiptWritesBlocked)return freezeStoreState({safe:false,code:'STORE_BUSY'});
+      return freezeStoreState(evidence);
+    }catch(error){return freezeStoreState({safe:false,code:error.code||'LEGACY_BOOTSTRAP_UNVERIFIED'})}
+  }
   async function applyRemoteSnapshot(value, options = {}) {
     if (!options.userId || typeof options.guard !== 'function' || !options.baseline) throw storeError('缺少遠端套用安全條件','REMOTE_APPLY_GUARD_REJECTED');
     const ready = await remoteApplyReadiness(options.baseline);
@@ -4959,7 +4990,7 @@
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
-    readCommittedSnapshot,remoteApplyReadiness,applyRemoteSnapshot,replaceSnapshot,recoveryPreview,recoverStore,
+    readCommittedSnapshot,remoteApplyReadiness,legacyBootstrapEvidence,applyRemoteSnapshot,replaceSnapshot,recoveryPreview,recoverStore,
     getLastStoreTransactionResult:()=>lastStoreTransactionResult,
     persist:()=>Promise.reject(storeError('直接 persist 已停用；請使用正式 Store 寫入 API','DIRECT_PERSIST_FORBIDDEN'))
   };
