@@ -1245,6 +1245,55 @@
     return true;
   }
 
+  function legacyBusinessProjection(value) {
+    const snapshot=sanitizeCloudSnapshot(value);
+    if(snapshot.meta)delete snapshot.meta.businessSnapshotRevision;
+    return snapshot;
+  }
+
+  async function recoverEquivalentLegacyCloudBaseline(checked, generation) {
+    const {auth,local,remote}=checked,store=window.KuSheERPStore,editor=editorReadiness();
+    const allowed=()=>activeAutoRun(generation)&&syncOrigin!=='REMOTE_APPLY'
+      &&observedPrincipal()===auth.user.id&&editorReadiness().safe
+      &&editorReadiness().generation===editor.generation
+      &&window.localStorage.getItem(AUTO_BASELINE_KEY)===null
+      &&window.localStorage.getItem(AUTO_APPLY_PENDING_KEY)===null;
+    const legacyRemote=value=>isPlainObject(value?.meta)&&!Object.prototype.hasOwnProperty.call(value.meta,'businessSnapshotRevision');
+    if(!editor.safe||!allowed()||!checked.remoteExists||!local?.score||local.score!==remote?.score
+      ||!legacyRemote(remote.data)||typeof local.data?.meta?.updatedAt!=='string'
+      ||local.data.meta.updatedAt!==remote.data.meta.updatedAt
+      ||serverSyncVersion(checked.syncVersion)===null||!Number.isFinite(Date.parse(checked.remoteUpdatedAt)))return false;
+    const proof=await store?.legacyBootstrapEvidence?.(local.storeBaseline);
+    if(!proof?.safe||!allowed()||proof.legacyBusinessUpdatedAt!==local.data.meta.updatedAt
+      ||JSON.stringify(canonicalize(local.data.meta.businessSnapshotRevision))!==JSON.stringify(canonicalize(proof.revision)))return false;
+    const ready=await store.remoteApplyReadiness(proof.baseline);
+    if(!ready.safe||!allowed())return false;
+    const committed=await snapshotInfo(ready.data);
+    if(committed.fingerprint!==local.fingerprint
+      ||await fingerprint(legacyBusinessProjection(committed.data))!==await fingerprint(legacyBusinessProjection(remote.data)))return false;
+    const row=await readRemote(await revalidatePrincipal(auth));
+    if(!row||!sameSyncVersion(row.sync_version,checked.syncVersion)||row.updated_at!==checked.remoteUpdatedAt||!legacyRemote(row.data))return false;
+    const accepted=await validateRemoteSnapshot(row.data,row.updated_at);
+    if(accepted.fingerprint!==remote.fingerprint||!allowed())return false;
+    const saved=await writeBaseline(auth,row,committed.fingerprint,async()=>{
+      const latest=await readRemote(await revalidatePrincipal(auth));
+      if(!latest||!sameSyncVersion(latest.sync_version,row.sync_version)||latest.updated_at!==row.updated_at)return false;
+      const latestInfo=await validateRemoteSnapshot(latest.data,latest.updated_at);
+      if(latestInfo.fingerprint!==accepted.fingerprint)return false;
+      const finalProof=await store.legacyBootstrapEvidence(proof.baseline);
+      if(!finalProof.safe||finalProof.operationId!==proof.operationId||!allowed())return false;
+      const final=await store.remoteApplyReadiness(proof.baseline);
+      if(!final.safe)return false;
+      const finalInfo=await snapshotInfo(final.data);
+      return finalInfo.fingerprint===committed.fingerprint&&allowed();
+    });
+    if(!saved)return false;
+    autoArmed=true;autoRetryMode='';autoPendingVerification=null;
+    currentStatus=classified('SYNCED',auth,committed,accepted,row,false,false);
+    setAutoState('ARMED',{pending:false,armed:true});
+    return true;
+  }
+
   async function evaluateAutoStartOperation(generation) {
     try {
       const checked = await inspectCore();
@@ -1252,6 +1301,7 @@
       if (!readBaseline(checked.auth.user.id)) {
         if (await recoverSameStateBaseline(checked, generation)) return autoStatus();
         if (await recoverLegacyRestoreBaseline(checked, generation)) return autoStatus();
+        if (await recoverEquivalentLegacyCloudBaseline(checked, generation)) return autoStatus();
         autoArmed = false;
         return setAutoState('PRINCIPAL_UNBOUND', { pending: false, armed: false });
       }
