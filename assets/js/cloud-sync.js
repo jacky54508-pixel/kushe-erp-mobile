@@ -217,15 +217,28 @@
       }
     }, CLOUD_POLL_MS);
   }
-  function cloudFocus() { void reconcileFromCloud('FOCUS'); }
+  function retryUnboundAutoStart() {
+    const userId = observePrincipal();
+    if (autoStarted && autoState.code === 'PRINCIPAL_UNBOUND' && userId && autoState.userId === userId) {
+      void startAutoBackup().catch(() => {});
+    }
+  }
+  function reconcileThenRetryUnbound(reason) {
+    const generation = syncGeneration, userId = observedPrincipal();
+    const retry = () => {
+      if (generation === syncGeneration && userId && observedPrincipal() === userId) retryUnboundAutoStart();
+    };
+    void reconcileFromCloud(reason).then(retry, retry);
+  }
+  function cloudFocus() { reconcileThenRetryUnbound('FOCUS'); }
   function cloudVisibility() {
     clearCloudPoll();
     if (cloudVisible()) {
-      void reconcileFromCloud('VISIBILITY');
+      reconcileThenRetryUnbound('VISIBILITY');
       scheduleCloudPoll();
     }
   }
-  function cloudOnline() { void reconcileFromCloud('ONLINE'); }
+  function cloudOnline() { reconcileThenRetryUnbound('ONLINE'); }
   function startCloudEvents() {
     cloudEventsEnabled = true;
     window.addEventListener('focus',cloudFocus);
@@ -1135,6 +1148,7 @@
       clearOnlineTimer();
       return;
     }
+    retryUnboundAutoStart();
     if (autoStarted && autoArmed) scheduleAutoBackup();
   }
 
