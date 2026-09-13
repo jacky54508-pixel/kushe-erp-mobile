@@ -650,6 +650,9 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 #receivablesApp .receivable-detail-panel .receipt-detail-table th,#receivablesApp .receivable-detail-panel .receipt-detail-table td{white-space:normal;overflow-wrap:anywhere}
 #receivablesApp .original-billing-detail-table tr[data-original-daily-source] td{background:#f8fafc}
 #receivablesApp .receivable-source-label{display:inline;color:#68798d;font-size:9px;font-weight:700;margin-right:6px}
+#receivablesApp .original-billing-detail-table tr[data-original-daily-source][hidden]{display:none}
+#receivablesApp .receivable-source-toggle{display:inline-block;max-width:100%;min-height:26px;margin-left:6px;padding:2px 5px;border:1px solid #dce5ef;border-radius:5px;background:#fff;color:#60758c;font-size:9px;font-weight:700;line-height:1.3;vertical-align:middle;cursor:pointer}
+#receivablesApp .receivable-source-toggle:hover,#receivablesApp .receivable-source-toggle:focus-visible{border-color:#b7cbe1;background:#f5f8fc}
 @media(max-width:620px){#receivablesApp .receivable-view-switch{align-items:stretch}#receivablesApp .receivable-view-switch button{flex:1;min-width:0}}
 
 /* Payables-only safe-delete menu and preflight dialog. */
