@@ -276,13 +276,14 @@
   function originalBillingDetailMarkup(billing,state){
     if(!billing)return '<h3>原請款細項</h3><p data-billing-unresolved>無法確認唯一原請款單</p>';
     const lines=Array.isArray(billing.lines)?billing.lines:[];
-    const rows=lines.map((line,index)=>{
+    const displayLines=lines.map((line,originalIndex)=>({line,originalIndex})).sort((a,b)=>window.KusheDisplaySort.compareHouse(a.line?.house,b.line?.house)||a.originalIndex-b.originalIndex);
+    const rows=displayLines.map(({line,originalIndex})=>{
       if(!line||typeof line!=='object')return '<tr><td colspan="7">原請款列資料不完整</td></tr>';
       const sources=originalDailySources(line,billing,state),cells=[detailText(line.house)||'—',originalBillingDates(line),detailText(line.item)||'—',detailText(line.unit)||'—',detailNumber(line.qty)===null?'—':detailText(line.qty)];
-      let html='<tr data-original-billing-line="'+index+'">'+cells.map(value=>'<td>'+esc(value)+'</td>').join('')+'<td class="num">'+detailMoney(line.price)+'</td><td class="num">'+detailMoney(line.subtotal)+'</td></tr>';
+      let html='<tr data-original-billing-line="'+originalIndex+'">'+cells.map(value=>'<td>'+esc(value)+'</td>').join('')+'<td class="num">'+detailMoney(line.price)+'</td><td class="num">'+detailMoney(line.subtotal)+'</td></tr>';
       if(sources.rows.length){
         html+='<tr><td colspan="7"><strong>↳ 原施工來源（不另計請款金額）</strong></td></tr>';
-        html+=sources.rows.map(({log,item,ref,key})=>'<tr data-original-daily-source="'+esc(key)+'"><td>'+esc(detailText(item.house)||'—')+'</td><td>'+esc(detailText(ref.date||log.date)||'—')+'</td><td>'+esc(detailText(item.item)||'—')+'<small>報價：'+esc(detailText(ref.quotationId||item.quotationId)||'—')+'／'+esc(detailText(ref.quotationLineId||item.quotationLineId)||'—')+'</small><small>施工來源：'+esc(detailText(item.workItemId)||detailText(log.groupId||log.id)+' / '+ref.sourceItemIndex)+'</small></td><td>'+esc(detailText(item.unit)||'—')+'</td><td>'+esc(detailNumber(item.qty)===null?'—':detailText(item.qty))+'</td><td class="num">'+detailMoney(item.price)+'</td><td class="num">'+detailMoney(item.untaxedSubtotal??item.subtotal)+'</td></tr>').join('');
+        html+=sources.rows.map(({log,item,ref,key})=>'<tr data-original-daily-source="'+esc(key)+'"><td>'+esc(detailText(item.house)||'—')+'</td><td>'+esc(detailText(ref.date||log.date)||'—')+'</td><td>'+esc(detailText(item.item)||'—')+'</td><td>'+esc(detailText(item.unit)||'—')+'</td><td>'+esc(detailNumber(item.qty)===null?'—':detailText(item.qty))+'</td><td class="num">'+detailMoney(item.price)+'</td><td class="num">'+detailMoney(item.untaxedSubtotal??item.subtotal)+'</td></tr>').join('');
       }
       if(sources.incomplete)html+='<tr><td colspan="7" data-source-incomplete>原施工來源資料不完整</td></tr>';
       if(billingSourceDifference(line,sources))html+='<tr><td colspan="7" data-source-difference>請款內容與原施工來源已有差異，以目前請款單內容為準。</td></tr>';
