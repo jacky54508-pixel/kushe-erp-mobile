@@ -282,8 +282,7 @@
       const sources=originalDailySources(line,billing,state),cells=[detailText(line.house)||'—',originalBillingDates(line),detailText(line.item)||'—',detailText(line.unit)||'—',detailNumber(line.qty)===null?'—':detailText(line.qty)];
       let html='<tr data-original-billing-line="'+originalIndex+'">'+cells.map(value=>'<td>'+esc(value)+'</td>').join('')+'<td class="num">'+detailMoney(line.price)+'</td><td class="num">'+detailMoney(line.subtotal)+'</td></tr>';
       if(sources.rows.length){
-        html+='<tr><td colspan="7"><strong>↳ 原施工來源（不另計請款金額）</strong></td></tr>';
-        html+=sources.rows.map(({log,item,ref,key})=>'<tr data-original-daily-source="'+esc(key)+'"><td>'+esc(detailText(item.house)||'—')+'</td><td>'+esc(detailText(ref.date||log.date)||'—')+'</td><td>'+esc(detailText(item.item)||'—')+'</td><td>'+esc(detailText(item.unit)||'—')+'</td><td>'+esc(detailNumber(item.qty)===null?'—':detailText(item.qty))+'</td><td class="num">'+detailMoney(item.price)+'</td><td class="num">'+detailMoney(item.untaxedSubtotal??item.subtotal)+'</td></tr>').join('');
+        html+=sources.rows.map(({log,item,ref,key})=>'<tr data-original-daily-source="'+esc(key)+'"><td>'+esc(detailText(item.house)||'—')+'</td><td>'+esc(detailText(ref.date||log.date)||'—')+'</td><td><span class="receivable-source-label">↳ 來源｜不另計</span>'+esc(detailText(item.item)||'—')+'</td><td>'+esc(detailText(item.unit)||'—')+'</td><td>'+esc(detailNumber(item.qty)===null?'—':detailText(item.qty))+'</td><td class="num">'+detailMoney(item.price)+'</td><td class="num">'+detailMoney(item.untaxedSubtotal??item.subtotal)+'</td></tr>').join('');
       }
       if(sources.incomplete)html+='<tr><td colspan="7" data-source-incomplete>原施工來源資料不完整</td></tr>';
       if(billingSourceDifference(line,sources))html+='<tr><td colspan="7" data-source-difference>請款內容與原施工來源已有差異，以目前請款單內容為準。</td></tr>';

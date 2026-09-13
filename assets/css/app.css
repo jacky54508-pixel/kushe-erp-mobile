@@ -648,6 +648,8 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 @media(max-width:620px){.customer-deduction-modal{width:100%}.customer-deduction-editor{padding:12px}.customer-deduction-editor>header{display:grid}.customer-deduction-row{grid-template-columns:1fr 110px}.customer-deduction-note{grid-column:1/-1}.customer-deduction-remove{grid-column:1/-1}.customer-settlement-preview{grid-template-columns:1fr}}
 #receivablesApp .receivable-detail-panel .receipt-detail-table{box-sizing:border-box;width:100%;max-width:100%;min-width:0;table-layout:fixed}
 #receivablesApp .receivable-detail-panel .receipt-detail-table th,#receivablesApp .receivable-detail-panel .receipt-detail-table td{white-space:normal;overflow-wrap:anywhere}
+#receivablesApp .original-billing-detail-table tr[data-original-daily-source] td{background:#f8fafc}
+#receivablesApp .receivable-source-label{display:inline;color:#68798d;font-size:9px;font-weight:700;margin-right:6px}
 @media(max-width:620px){#receivablesApp .receivable-view-switch{align-items:stretch}#receivablesApp .receivable-view-switch button{flex:1;min-width:0}}
 
 /* Payables-only safe-delete menu and preflight dialog. */
