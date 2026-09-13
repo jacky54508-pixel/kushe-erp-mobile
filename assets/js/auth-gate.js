@@ -3,23 +3,26 @@
 
   const config = window.KUSHE_PHASE1_CONFIG || {};
   const SESSION_KEY = config.authSessionStorageKey || 'kushe_erp_supabase_auth_v1';
+  let authGeneration = 0;
+  let activeValidation = null;
 
   // Persistent Auth sessions from earlier releases are intentionally discarded.
   try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
 
   class AuthRequestError extends Error {
-    constructor(status = 0, code = '') {
+    constructor(status = 0, code = '', kind = '') {
       super('Authentication request failed');
       this.name = 'AuthRequestError';
       this.status = Number(status) || 0;
       this.code = String(code || '');
+      this.kind = kind || (this.status >= 500 ? 'server' : this.status ? 'http' : 'invalid');
     }
   }
 
   function authConfig() {
     const url = String(config.supabaseUrl || '').trim().replace(/\/+$/, '');
     const key = String(config.supabasePublishableKey || '').trim();
-    if (!/^https:\/\//i.test(url) || !key || /(?:service[_-]?role|sb_secret_)/i.test(key)) throw new AuthRequestError();
+    if (!/^https:\/\//i.test(url) || !key || /(?:service[_-]?role|sb_secret_)/i.test(key)) throw new AuthRequestError(0, 'invalid_config');
     return { url, key };
   }
 
@@ -32,7 +35,7 @@
     const accessToken = String(value?.access_token || '').trim();
     const refreshToken = String(value?.refresh_token || fallbackRefreshToken || '').trim();
     const expiresAt = Number(value?.expires_at) || Math.floor(Date.now() / 1000) + Math.max(0, Number(value?.expires_in) || 0);
-    if (!accessToken) throw new AuthRequestError();
+    if (!accessToken) throw new AuthRequestError(0, 'invalid_session_payload');
     return {
       access_token: accessToken,
       refresh_token: refreshToken,
@@ -52,9 +55,11 @@
 
   function saveSession(value) {
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(value));
+    authGeneration += 1;
   }
 
   function clearSession() {
+    authGeneration += 1;
     try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
     try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
   }
@@ -72,8 +77,8 @@
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
         signal: options.signal
       });
-    } catch (_) {
-      throw new AuthRequestError();
+    } catch (error) {
+      throw new AuthRequestError(0, '', error?.name === 'AbortError' ? 'aborted' : 'transport');
     }
     let payload = {};
     try { payload = await response.json(); } catch (_) {}
@@ -84,40 +89,80 @@
   async function verifiedUser(accessToken) {
     const value = await requestJson('/auth/v1/user', { token: accessToken });
     const user = storedUser(value);
-    if (!user) throw new AuthRequestError();
+    if (!user) throw new AuthRequestError(0, 'invalid_user_payload');
     return user;
   }
 
-  async function refreshSession(current) {
+  function sameSession(current, generation) {
+    const stored = readSession();
+    return authGeneration === generation && Boolean(stored)
+      && stored.access_token === current.access_token
+      && stored.refresh_token === current.refresh_token
+      && stored.user?.id === current.user?.id;
+  }
+
+  function transientAuthError(error) {
+    return ['transport', 'aborted', 'server'].includes(error?.kind);
+  }
+
+  async function refreshSession(current, generation, onRotation) {
     if (!String(current?.refresh_token || '').trim()) throw new AuthRequestError(401);
     const payload = await requestJson('/auth/v1/token?grant_type=refresh_token', {
       method: 'POST',
       body: { refresh_token: current.refresh_token }
     });
-    const next = normalizeSession(payload, current.refresh_token);
-    next.user = await verifiedUser(next.access_token);
+    if (!String(payload?.refresh_token || '').trim()) throw new AuthRequestError(0, 'invalid_refresh_payload');
+    const next = normalizeSession(payload);
+    if (!current.user?.id || !next.user?.id || next.user.id !== current.user.id) {
+      throw new AuthRequestError(0, 'principal_mismatch');
+    }
+    if (!sameSession(current, generation)) return false;
+    // Preserve rotated credentials only after the response proves the same principal.
     saveSession(next);
-    return next;
+    const rotationGeneration = authGeneration;
+    onRotation(next, rotationGeneration);
+    const verified = await verifiedUser(next.access_token);
+    if (verified.id !== current.user.id) throw new AuthRequestError(0, 'principal_mismatch');
+    if (!sameSession(next, rotationGeneration)) return false;
+    next.user = verified;
+    saveSession(next);
+    return true;
   }
 
-  async function requireAuth() {
+  async function validateAuth() {
     const current = readSession();
     if (!current) return false;
+    let protectedSession = current, protectedGeneration = authGeneration;
     try {
       const next = normalizeSession(current);
       next.user = await verifiedUser(next.access_token);
+      if (!current.user?.id || next.user.id !== current.user.id) throw new AuthRequestError(0, 'principal_mismatch');
+      if (!sameSession(current, protectedGeneration)) return false;
       saveSession(next);
       return true;
     } catch (error) {
       if ((error?.status === 401 || error?.status === 403) && current.refresh_token) {
         try {
-          await refreshSession(current);
-          return true;
-        } catch (_) {}
+          return await refreshSession(current, protectedGeneration, (next, generation) => {
+            protectedSession = next;
+            protectedGeneration = generation;
+          });
+        } catch (refreshError) {
+          error = refreshError;
+        }
       }
-      clearSession();
+      if (!transientAuthError(error) && sameSession(protectedSession, protectedGeneration)) clearSession();
       return false;
     }
+  }
+
+  function requireAuth() {
+    if (activeValidation) return activeValidation;
+    const validation = validateAuth();
+    activeValidation = validation;
+    const clear = () => { if (activeValidation === validation) activeValidation = null; };
+    validation.then(clear, clear);
+    return validation;
   }
 
   async function login(email, password) {
@@ -130,6 +175,7 @@
     });
     const next = normalizeSession(payload);
     next.user = await verifiedUser(next.access_token);
+    if (storedUser(payload?.user)?.id !== next.user.id) throw new AuthRequestError(0, 'principal_mismatch');
     saveSession(next);
     return next.user;
   }
@@ -179,6 +225,8 @@
 
   async function logout() {
     const current = readSession();
+    // Invalidate local auth before the best-effort remote request can yield.
+    clearSession();
     if (current?.access_token) {
       const controller = typeof AbortController === 'function' ? new AbortController() : null;
       const timeout = controller ? setTimeout(() => controller.abort(), 4000) : 0;
@@ -190,7 +238,6 @@
         if (timeout) clearTimeout(timeout);
       }
     }
-    clearSession();
     return true;
   }
 
