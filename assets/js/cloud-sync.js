@@ -223,10 +223,24 @@
       void startAutoBackup().catch(() => {});
     }
   }
+  async function retryAuthRequiredAutoStart(generation, userId) {
+    if (!autoStarted || autoState.code !== 'AUTH_REQUIRED' || !userId || autoState.userId !== userId
+      || principalId !== userId || generation !== syncGeneration || syncOrigin === 'REMOTE_APPLY') return;
+    const autoRun = autoGeneration;
+    let verified = false;
+    try { verified = await window.KusheAuthGate?.requireAuth?.(); } catch (_) {}
+    if (!verified || !autoStarted || autoState.code !== 'AUTH_REQUIRED' || autoState.userId !== userId
+      || generation !== syncGeneration || autoRun !== autoGeneration || syncOrigin === 'REMOTE_APPLY'
+      || observePrincipal() !== userId || principalId !== userId) return;
+    void evaluateAutoStart(autoRun).catch(() => {});
+  }
   function reconcileThenRetryUnbound(reason) {
     const generation = syncGeneration, userId = observedPrincipal();
     const retry = () => {
-      if (generation === syncGeneration && userId && observedPrincipal() === userId) retryUnboundAutoStart();
+      if (generation === syncGeneration && userId && observedPrincipal() === userId) {
+        retryUnboundAutoStart();
+        void retryAuthRequiredAutoStart(generation, userId);
+      }
     };
     void reconcileFromCloud(reason).then(retry, retry);
   }
