@@ -14,6 +14,8 @@
   const RESTORE_MAX_BYTES = 20 * 1024 * 1024;
   const AUTO_BASELINE_KEY = 'kushe_erp_cloud_auto_v1';
   const AUTO_APPLY_PENDING_KEY = 'kushe_erp_cloud_apply_pending_v1';
+  const RESTORE_BACKUP_MARKER_KEY = 'kushe_erp_restore_backup_handoff_v1';
+  const RESTORE_BACKUP_MARKER_TTL_MS = 30 * 60 * 1000;
   const AUTO_DEBOUNCE_MS = 8000;
   const AUTO_ONLINE_RETRY_MS = 3000;
   const SETTINGS_CREDENTIAL_KEYS = new Set([
@@ -42,6 +44,7 @@
     UPLOAD_COMPLETE: '雲端同步完成。',
     RESTORE_BLOCKED: '目前資料狀態不允許雲端還原。',
     RESTORE_CANCELLED: '已取消雲端還原。',
+    RESTORE_BACKUP_READY: '本機備份下載已觸發。請完成瀏覽器下載；若 Safari 要求重新登入，登入後回到雲端同步即可繼續。系統不會自動還原。',
     RESTORE_RACE_BLOCKED: '雲端資料剛剛已更新，為避免還原錯誤已停止。',
     RESTORE_VERIFY_FAILED: '還原驗證失敗，已嘗試恢復原本本機資料。請停止操作。',
     RESTORE_CRITICAL_FAILURE: 'RESTORE CRITICAL FAILURE：原本本機資料也無法完整恢復，請立即停止操作。',
@@ -802,7 +805,7 @@
     const row = await readRemote(auth);
     const local = await readLocal();
     const remote = await remoteInfo(row);
-    return classify(auth, local, remote, row);
+    return withRestoreBackupMarker(classify(auth, local, remote, row));
   }
 
   function shortFingerprint(value) {
@@ -816,6 +819,7 @@
       message: value.message,
       canUpload: Boolean(value.canUpload),
       canRestore: Boolean(value.canRestore),
+      backupReady: Boolean(value.backupReady),
       remoteExists: Boolean(value.remoteExists),
       syncVersion: value.syncVersion ?? null,
       userEmail: value.auth?.user?.email || '',
@@ -831,6 +835,64 @@
   function manualRestoreEligible(status) {
     return Boolean(status?.canRestore || status?.code === 'LOCAL_NEWER'
       && status.remoteExists && status.remoteScore > 0);
+  }
+
+  function restoreIntentForStatus(status) {
+    if (status?.code === 'LOCAL_NEWER' && status.remoteExists && status.remote?.score > 0)
+      return 'MANUAL_LOCAL_NEWER';
+    if (status?.code === 'REMOTE_NEWER' && status.canRestore && status.local?.score > 0)
+      return 'ORDINARY_REMOTE_RESTORE';
+    return null;
+  }
+
+  function clearRestoreBackupMarker() {
+    try { window.localStorage.removeItem(RESTORE_BACKUP_MARKER_KEY); } catch (_) {}
+  }
+
+  function readValidRestoreBackupMarker(status) {
+    let marker;
+    try {
+      const raw = window.localStorage.getItem(RESTORE_BACKUP_MARKER_KEY);
+      if (raw === null) return null;
+      marker = JSON.parse(raw);
+    } catch (_) { clearRestoreBackupMarker(); return null; }
+    const now = Date.now(), generatedAt = Date.parse(marker?.generatedAt);
+    const valid = isPlainObject(marker)
+      && Object.keys(marker).sort().join(',') === 'backupFileName,generatedAt,localFingerprint,localScore,restoreIntent,userId,version'
+      && marker.version === 1
+      && typeof marker.userId === 'string' && marker.userId === status?.auth?.user?.id
+      && typeof marker.localFingerprint === 'string' && /^[a-f0-9]{64}$/i.test(marker.localFingerprint)
+      && marker.localFingerprint === status?.local?.fingerprint
+      && Number.isSafeInteger(marker.localScore) && marker.localScore > 0 && marker.localScore === status?.local?.score
+      && typeof marker.generatedAt === 'string' && Number.isFinite(generatedAt)
+      && generatedAt <= now && now - generatedAt <= RESTORE_BACKUP_MARKER_TTL_MS
+      && typeof marker.backupFileName === 'string'
+      && /^KusheERP_pre_cloud_restore_[0-9]{8}_[0-9]{6}\.json$/.test(marker.backupFileName)
+      && marker.restoreIntent === restoreIntentForStatus(status);
+    if (!valid) { clearRestoreBackupMarker(); return null; }
+    return marker;
+  }
+
+  function withRestoreBackupMarker(status) {
+    if (readValidRestoreBackupMarker(status)) {
+      status.backupReady = true;
+      status.message = STATUS_TEXT.RESTORE_BACKUP_READY;
+    }
+    return status;
+  }
+
+  function writeRestoreBackupMarker(status, local, fileName) {
+    const marker = {
+      version: 1, userId: status.auth.user.id, localFingerprint: local.fingerprint,
+      localScore: local.score, generatedAt: new Date().toISOString(),
+      backupFileName: fileName, restoreIntent: restoreIntentForStatus(status)
+    };
+    if (!marker.restoreIntent || !/^[a-f0-9]{64}$/i.test(marker.localFingerprint)) return false;
+    try {
+      const encoded = JSON.stringify(marker);
+      window.localStorage.setItem(RESTORE_BACKUP_MARKER_KEY, encoded);
+      return window.localStorage.getItem(RESTORE_BACKUP_MARKER_KEY) === encoded;
+    } catch (_) { clearRestoreBackupMarker(); return false; }
   }
 
   function formatTime(value) {
@@ -858,7 +920,8 @@
     const restore = document.getElementById('cloudSyncRestore');
     if (restore) {
       restore.disabled = busy || !manualRestoreEligible(view);
-      restore.textContent = view.code === 'LOCAL_NEWER' ? '以雲端覆蓋本機' : '從雲端還原至本機';
+      restore.textContent = view.backupReady ? '繼續以雲端覆蓋本機'
+        : view.code === 'LOCAL_NEWER' ? '以雲端覆蓋本機' : '從雲端還原至本機';
     }
     renderAutoState();
   }
@@ -904,7 +967,7 @@
     const local = await readLocal();
     const row = await readRemote(auth);
     const remote = await remoteInfo(row);
-    return { status: classify(auth, local, remote, row), row };
+    return { status: withRestoreBackupMarker(classify(auth, local, remote, row)), row };
   }
 
   function restoreContentEquivalent(targetRemote, committedLocal) {
@@ -960,6 +1023,20 @@
     ].join('\n'));
   }
 
+  function restoreBackupCompletionConfirmation(preflight, manualOverride) {
+    return window.confirm([
+      '請確認本機備份檔已完成下載。現在要以目前最新的雲端資料覆蓋本機。',
+      ...(manualOverride ? ['⚠ 本機資料時間較新，但你選擇使用雲端資料。'] : []),
+      `登入帳號：${preflight.auth?.user?.email || '—'}`,
+      `本機更新時間：${formatTime(preflight.local?.time?.raw)}`,
+      `雲端更新時間：${formatTime(preflight.remote?.time?.raw || preflight.remoteUpdatedAt)}`,
+      `本機資料筆數：${preflight.local?.score || 0}`,
+      `雲端資料筆數：${preflight.remote?.score || 0}`,
+      `本機 fingerprint：${preflight.local?.fingerprint || '—'}`,
+      `雲端 fingerprint：${preflight.remote?.fingerprint || '—'}`
+    ].join('\n'));
+  }
+
   function backupFileName() {
     const now = new Date();
     const stamp = [
@@ -974,12 +1051,12 @@
     return `KusheERP_pre_cloud_restore_${stamp}.json`;
   }
 
-  function downloadLocalBackup(data) {
+  function downloadLocalBackup(data, fileName = backupFileName()) {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = backupFileName();
+    link.download = fileName;
     link.hidden = true;
     document.body.appendChild(link);
     link.click();
@@ -996,6 +1073,7 @@
 
   async function restoreOperation(allowLocalNewer = false) {
     let restoreCommitted = false, restoreSource = false;
+    const expectedContinuation = Boolean(currentStatus?.backupReady);
     setBusy(true);
 
     try {
@@ -1009,24 +1087,62 @@
         currentStatus = failure('RESTORE_BLOCKED');
         return publicStatus();
       }
+      if (expectedContinuation && preflight.local.score > 0 && !preflight.backupReady) {
+        currentStatus = failure('RESTORE_RACE_BLOCKED');
+        return publicStatus();
+      }
 
       const target = await validateRemoteSnapshot(row?.data, row?.updated_at);
-      if (target.fingerprint !== preflight.remote?.fingerprint || !restoreConfirmation(preflight, manualOverride)) {
-        currentStatus = target.fingerprint === preflight.remote?.fingerprint
-          ? { ...preflight, code: 'RESTORE_CANCELLED', message: STATUS_TEXT.RESTORE_CANCELLED, canUpload: false, canRestore: ordinaryRestore }
-          : failure('RESTORE_BLOCKED');
+      if (target.fingerprint !== preflight.remote?.fingerprint) {
+        currentStatus = failure('RESTORE_BLOCKED');
+        return publicStatus();
+      }
+
+      if (preflight.local.score > 0 && !preflight.backupReady) {
+        if (!restoreConfirmation(preflight, manualOverride)) {
+          currentStatus = { ...preflight, code: 'RESTORE_CANCELLED', message: STATUS_TEXT.RESTORE_CANCELLED, canUpload: false, canRestore: ordinaryRestore };
+          return publicStatus();
+        }
+        await revalidatePrincipal(preflight.auth);
+        const durableLocal = await readLocal();
+        if (durableLocal.fingerprint !== preflight.local.fingerprint
+          || durableLocal.score !== preflight.local.score
+          || durableLocal.storeBaseline !== preflight.local.storeBaseline) {
+          currentStatus = failure('RESTORE_RACE_BLOCKED');
+          return publicStatus();
+        }
+        const fileName = backupFileName();
+        if (!writeRestoreBackupMarker(preflight, durableLocal, fileName)) {
+          currentStatus = failure('RESTORE_BLOCKED');
+          return publicStatus();
+        }
+        try { downloadLocalBackup(durableLocal.data, fileName); }
+        catch (error) { clearRestoreBackupMarker(); throw error; }
+        currentStatus = { ...preflight, backupReady: true, message: STATUS_TEXT.RESTORE_BACKUP_READY };
         return publicStatus();
       }
 
       if (preflight.local.score > 0) {
-        downloadLocalBackup(preflight.local.data);
-        const backupConfirmed = window.confirm(manualOverride
-          ? '已產生目前本機資料備份檔。請確認瀏覽器已完成下載，再按確定繼續以雲端覆蓋本機。'
-          : '已產生目前本機資料備份檔。請確認瀏覽器已完成下載，再按確定繼續雲端還原。');
-        if (!backupConfirmed) {
+        if (!readValidRestoreBackupMarker(preflight)) {
+          currentStatus = failure('RESTORE_BLOCKED');
+          return publicStatus();
+        }
+        if (!restoreBackupCompletionConfirmation(preflight, manualOverride)) {
           currentStatus = { ...preflight, code: 'RESTORE_CANCELLED', message: STATUS_TEXT.RESTORE_CANCELLED, canUpload: false, canRestore: ordinaryRestore };
           return publicStatus();
         }
+        const durableLocal = await readLocal();
+        if (durableLocal.fingerprint !== preflight.local.fingerprint
+          || durableLocal.score !== preflight.local.score
+          || durableLocal.storeBaseline !== preflight.local.storeBaseline
+          || !readValidRestoreBackupMarker({ ...preflight, local: durableLocal })) {
+          clearRestoreBackupMarker();
+          currentStatus = failure('RESTORE_RACE_BLOCKED');
+          return publicStatus();
+        }
+      } else if (!restoreConfirmation(preflight, manualOverride)) {
+        currentStatus = { ...preflight, code: 'RESTORE_CANCELLED', message: STATUS_TEXT.RESTORE_CANCELLED, canUpload: false, canRestore: ordinaryRestore };
+        return publicStatus();
       }
 
       const expectedVersion = serverSyncVersion(row?.sync_version);
@@ -1070,6 +1186,7 @@
         return Boolean(verified.safe);
       });
       if (!saved) throw new CloudSyncError('VERIFY_FAILED');
+      clearRestoreBackupMarker();
       autoArmed = true;
       if (!autoStarted) { autoStarted = true; autoGeneration += 1; ensureAutoListeners(); }
       setAutoState('ARMED', { pending: false, armed: true });
@@ -1086,6 +1203,7 @@
       return publicStatus();
     } catch (error) {
       if (restoreCommitted) {
+        clearRestoreBackupMarker();
         autoArmed = false;
         try { invalidateApplyBaseline(); } catch (_) {}
         setAutoState('MANUAL_REQUIRED', { pending: false, armed: false });
