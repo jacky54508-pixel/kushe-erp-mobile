@@ -29,7 +29,7 @@
     PRINCIPAL_UNBOUND: '本機資料尚未確認屬於目前帳號，請手動核對雲端同步。',
     REMOTE_EMPTY: '雲端尚無資料，可手動上傳本機備份。',
     SYNCED: '本機與雲端一致。',
-    LOCAL_NEWER: '本機資料較新，可手動同步至雲端。',
+    LOCAL_NEWER: '本機資料時間較新。系統不會自動覆蓋；若確認雲端才是正確版本，可手動以雲端覆蓋本機。',
     REMOTE_NEWER: '雲端資料較新，可在確認後安全還原至本機。',
     LOCAL_EMPTY_REMOTE_EXISTS: '此瀏覽器沒有 ERP 資料，可從雲端安全還原。',
     UNKNOWN_CONFLICT: '資料版本無法安全判定，已停止同步。',
@@ -828,6 +828,11 @@
     });
   }
 
+  function manualRestoreEligible(status) {
+    return Boolean(status?.canRestore || status?.code === 'LOCAL_NEWER'
+      && status.remoteExists && status.remoteScore > 0);
+  }
+
   function formatTime(value) {
     const parsed = Date.parse(value || '');
     return Number.isFinite(parsed) ? new Intl.DateTimeFormat('zh-TW', { dateStyle: 'medium', timeStyle: 'short' }).format(parsed) : '未知';
@@ -851,7 +856,10 @@
     const upload = document.getElementById('cloudSyncUpload');
     if (upload) upload.disabled = busy || !view.canUpload;
     const restore = document.getElementById('cloudSyncRestore');
-    if (restore) restore.disabled = busy || !view.canRestore;
+    if (restore) {
+      restore.disabled = busy || !manualRestoreEligible(view);
+      restore.textContent = view.code === 'LOCAL_NEWER' ? '以雲端覆蓋本機' : '從雲端還原至本機';
+    }
     renderAutoState();
   }
 
@@ -899,7 +907,48 @@
     return { status: classify(auth, local, remote, row), row };
   }
 
-  function restoreConfirmation(preflight) {
+  function restoreContentEquivalent(targetRemote, committedLocal) {
+    if (!isPlainObject(targetRemote?.meta) || !isPlainObject(committedLocal?.meta)
+      || targetRemote.audit !== undefined && !Array.isArray(targetRemote.audit)
+      || !Array.isArray(committedLocal.audit)) return false;
+    const equal = (left, right) => JSON.stringify(canonicalize(left)) === JSON.stringify(canonicalize(right));
+    const remote = deepClone(targetRemote), local = deepClone(committedLocal);
+    const entry = local.audit[0], previous = remote.audit || [];
+    const revision = remote.meta.businessSnapshotRevision;
+    const sourceRevision = isPlainObject(revision)
+      ? { sequence: Number(revision.sequence), id: revision.id, parentId: String(revision.parentId || ''),
+        operationId: String(revision.operationId || ''), committedAt: String(revision.committedAt || '') }
+      : { sequence: 0, id: '', parentId: '', operationId: '', committedAt: '' };
+    if (!isPlainObject(entry) || Object.keys(entry).sort().join(',') !== 'action,id,sourceBusinessRevision,time'
+      || entry.action !== '使用者確認雲端快照還原' || typeof entry.id !== 'string' || !entry.id.trim()
+      || typeof entry.time !== 'string' || !Number.isFinite(Date.parse(entry.time))
+      || !isPlainObject(entry.sourceBusinessRevision) || !equal(entry.sourceBusinessRevision, sourceRevision)
+      || local.audit.length !== Math.min(previous.length + 1, 300)
+      || !equal(local.audit.slice(1), previous.slice(0, 299))) return false;
+    delete remote.audit; delete local.audit;
+    for (const snapshot of [remote, local]) {
+      delete snapshot.meta.updatedAt;
+      delete snapshot.meta.businessSnapshotRevision;
+      delete snapshot.meta.receiptCommitVersion;
+    }
+    const remoteMeta = remote.meta, localMeta = local.meta;
+    delete remote.meta; delete local.meta;
+    return equal(remoteMeta, localMeta) && equal(remote, local);
+  }
+
+  function restoreConfirmation(preflight, manualOverride = false) {
+    if (manualOverride) return window.confirm([
+      '⚠ 本機資料時間較新',
+      '你正在選擇：捨棄本機較新的資料，以雲端備份覆蓋本機。',
+      '系統不會自動做這件事，只有你這次手動確認才會繼續。',
+      `登入帳號：${preflight.auth?.user?.email || '—'}`,
+      `本機更新時間：${formatTime(preflight.local?.time?.raw)}`,
+      `雲端更新時間：${formatTime(preflight.remote?.time?.raw || preflight.remoteUpdatedAt)}`,
+      `本機資料筆數：${preflight.local?.score || 0}`,
+      `雲端資料筆數：${preflight.remote?.score || 0}`,
+      `本機 fingerprint：${preflight.local?.fingerprint || '—'}`,
+      `雲端 fingerprint：${preflight.remote?.fingerprint || '—'}`
+    ].join('\n'));
     return window.confirm([
       '確定要以雲端備份取代此瀏覽器目前 ERP 資料嗎？',
       `本機更新時間：${formatTime(preflight.local?.time?.raw)}`,
@@ -939,9 +988,13 @@
     return link.download;
   }
 
-  function restoreRemote() { return coordinate('restore', restoreOperation); }
+  const MANUAL_RESTORE_TOKEN = Symbol('manual cloud restore');
+  function restoreRemote(options = {}) {
+    const allowLocalNewer = options?.manualToken === MANUAL_RESTORE_TOKEN;
+    return coordinate('restore', () => restoreOperation(allowLocalNewer));
+  }
 
-  async function restoreOperation() {
+  async function restoreOperation(allowLocalNewer = false) {
     let restoreCommitted = false, restoreSource = false;
     setBusy(true);
 
@@ -949,32 +1002,38 @@
       const { status: preflight, row } = await restorePreflight();
       currentStatus = preflight;
       render(currentStatus);
-      if (!preflight.canRestore || !['REMOTE_NEWER', 'LOCAL_EMPTY_REMOTE_EXISTS'].includes(preflight.code)) {
+      const ordinaryRestore = preflight.canRestore && ['REMOTE_NEWER', 'LOCAL_EMPTY_REMOTE_EXISTS'].includes(preflight.code);
+      const manualOverride = allowLocalNewer && preflight.code === 'LOCAL_NEWER'
+        && manualRestoreEligible(publicStatus(preflight));
+      if (!ordinaryRestore && !manualOverride) {
         currentStatus = failure('RESTORE_BLOCKED');
         return publicStatus();
       }
 
       const target = await validateRemoteSnapshot(row?.data, row?.updated_at);
-      if (target.fingerprint !== preflight.remote?.fingerprint || !restoreConfirmation(preflight)) {
+      if (target.fingerprint !== preflight.remote?.fingerprint || !restoreConfirmation(preflight, manualOverride)) {
         currentStatus = target.fingerprint === preflight.remote?.fingerprint
-          ? { ...preflight, code: 'RESTORE_CANCELLED', message: STATUS_TEXT.RESTORE_CANCELLED, canUpload: false, canRestore: true }
+          ? { ...preflight, code: 'RESTORE_CANCELLED', message: STATUS_TEXT.RESTORE_CANCELLED, canUpload: false, canRestore: ordinaryRestore }
           : failure('RESTORE_BLOCKED');
         return publicStatus();
       }
 
       if (preflight.local.score > 0) {
         downloadLocalBackup(preflight.local.data);
-        const backupConfirmed = window.confirm('已產生目前本機資料備份檔。請確認瀏覽器已完成下載，再按確定繼續雲端還原。');
+        const backupConfirmed = window.confirm(manualOverride
+          ? '已產生目前本機資料備份檔。請確認瀏覽器已完成下載，再按確定繼續以雲端覆蓋本機。'
+          : '已產生目前本機資料備份檔。請確認瀏覽器已完成下載，再按確定繼續雲端還原。');
         if (!backupConfirmed) {
-          currentStatus = { ...preflight, code: 'RESTORE_CANCELLED', message: STATUS_TEXT.RESTORE_CANCELLED, canUpload: false, canRestore: true };
+          currentStatus = { ...preflight, code: 'RESTORE_CANCELLED', message: STATUS_TEXT.RESTORE_CANCELLED, canUpload: false, canRestore: ordinaryRestore };
           return publicStatus();
         }
       }
 
+      const expectedVersion = serverSyncVersion(row?.sync_version);
       const expected = { updatedAt: String(row?.updated_at || ''), fingerprint: target.fingerprint };
       const raceRow = await readRemote(await revalidatePrincipal(preflight.auth));
       const actual = await remoteObservation(raceRow);
-      if (!sameObservation(expected, actual)) {
+      if (!raceRow || !sameSyncVersion(expectedVersion, raceRow.sync_version) || !sameObservation(expected, actual)) {
         currentStatus = failure('RESTORE_RACE_BLOCKED');
         return publicStatus();
       }
@@ -996,6 +1055,9 @@
       const durable = await store.remoteApplyReadiness();
       if (!durable.safe) throw new CloudSyncError('VERIFY_FAILED');
       const local = await snapshotInfo(durable.data);
+      if (!/^[a-f0-9]{64}$/i.test(raceTarget.fingerprint)
+        || !/^[a-f0-9]{64}$/i.test(local.fingerprint)
+        || !restoreContentEquivalent(raceTarget.data, durable.data)) throw new CloudSyncError('VERIFY_FAILED');
       const handoffAuth = await revalidatePrincipal(currentAuth);
       assertOperation(currentAuth);
       const latestRow = await readRemote(handoffAuth);
@@ -1552,7 +1614,11 @@
     if (uiBound) return;
     uiBound = true;
     document.getElementById('cloudSyncRefresh')?.addEventListener('click', () => { void inspect(); });
-    document.getElementById('cloudSyncRestore')?.addEventListener('click', () => { void restoreRemote(); });
+    document.getElementById('cloudSyncRestore')?.addEventListener('click', () => {
+      void (currentStatus?.code === 'LOCAL_NEWER'
+        ? restoreRemote({ manualToken: MANUAL_RESTORE_TOKEN })
+        : restoreRemote());
+    });
     document.getElementById('cloudSyncUpload')?.addEventListener('click', () => { void uploadLocal(); });
     document.getElementById('cloudSyncClose')?.addEventListener('click', close);
     document.getElementById('cloudSyncHeaderClose')?.addEventListener('click', close);
