@@ -670,6 +670,50 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 #receivablesApp .receivable-house-detail .receipt-history-scroll{padding:4px 0 8px}
 @media(max-width:620px){#receivablesApp .receivable-view-switch{align-items:stretch}#receivablesApp .receivable-view-switch button{flex:1;min-width:0}}
 @media(max-width:620px){#receivablesApp .receivable-house-summary{cursor:pointer}#receivablesApp .receivable-house-summary>td:first-child,#receivablesApp .receivable-house-summary>td:nth-child(2){padding-inline:6px!important;white-space:nowrap}#receivablesApp .receivable-house-chevron{display:inline-block;margin-left:4px;font-size:9px;line-height:1}}
+#receivablesApp .mobile-receivables,#receivablesApp .mobile-filter-bar{display:none}
+@media(max-width:620px){
+  #receivablesApp .billing-list-panel>.commission-table-wrap,#receivablesApp .commission-filters>.receivable-filter-grid,#receivablesApp .commission-filters>.receivable-view-switch{display:none}
+  #receivablesApp .mobile-receivables{display:grid;gap:12px;padding:12px;min-width:0;max-width:100%}
+  #receivablesApp .mobile-record-card{display:grid;gap:10px;min-width:0;max-width:100%;padding:14px;border:1px solid #dce5ee;border-radius:12px;background:#fff;overflow-wrap:anywhere}
+  #receivablesApp .mobile-record-card__header{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:start;min-width:0}
+  #receivablesApp .mobile-record-card__title{display:grid;gap:4px;min-width:0}
+  #receivablesApp .mobile-record-card__title strong{font-size:14px;color:#173f6d;line-height:1.3}
+  #receivablesApp .mobile-record-card__title span{font-size:11px;color:#66798e}
+  #receivablesApp .mobile-record-card__amount{display:grid;gap:3px;min-width:0;text-align:right}
+  #receivablesApp .mobile-record-card__amount small{font-size:10px;color:#62768d}
+  #receivablesApp .mobile-record-card__amount strong{font-size:17px;color:#a65118;line-height:1.25}
+  #receivablesApp .mobile-status-badge{justify-self:start;max-width:100%;padding:4px 8px;border-radius:99px;background:#edf4fb;color:#255b85;font-size:11px;font-weight:850}
+  #receivablesApp .mobile-card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 12px;min-width:0}
+  #receivablesApp .mobile-meta-row{display:grid;gap:2px;min-width:0;overflow-wrap:anywhere}
+  #receivablesApp .mobile-meta-row span{font-size:10px;color:#77889a}
+  #receivablesApp .mobile-meta-row strong{font-size:11px;color:#2f4c6a;font-weight:800;line-height:1.4;white-space:normal;overflow-wrap:anywhere}
+  #receivablesApp .mobile-action-row{display:flex;flex-wrap:wrap;gap:7px;min-width:0}
+  #receivablesApp .mobile-action-row button,#receivablesApp .mobile-house-toggle,#receivablesApp .mobile-billing-line>button{min-height:40px;max-width:100%;padding:8px 11px;border:1px solid #cddded;border-radius:8px;background:#f4f8fd;color:#204f79;font-size:11px;font-weight:850;white-space:normal;overflow-wrap:anywhere}
+  #receivablesApp .mobile-primary-action{background:#075bd8!important;border-color:#075bd8!important;color:#fff!important}
+  #receivablesApp .mobile-danger-action{border-color:#efc7c3!important;color:#9e3c35!important;background:#fff8f6!important}
+  #receivablesApp .mobile-action-more{min-width:0}
+  #receivablesApp .mobile-action-more>summary{min-height:40px;padding:10px;color:#60758c;font-size:11px;font-weight:800;cursor:pointer}
+  #receivablesApp .mobile-receivable-detail,#receivablesApp .mobile-detail-stack{display:grid;gap:9px;min-width:0;max-width:100%}
+  #receivablesApp .mobile-receivable-detail{padding-top:12px;border-top:1px solid #e2eaf1}
+  #receivablesApp .mobile-detail-stack h4{margin:8px 0 0;color:#173f6d;font-size:12px}
+  #receivablesApp .mobile-detail-item,#receivablesApp .mobile-house-group{display:grid;gap:8px;min-width:0;max-width:100%;padding:11px;border:1px solid #e1e9f1;border-radius:9px;background:#f8fbfe;overflow-wrap:anywhere}
+  #receivablesApp .mobile-detail-title strong{font-size:13px;color:#173f6d}
+  #receivablesApp .mobile-source-item{margin-left:9px;border-left:3px solid #9dbbd9;background:#fff}
+  #receivablesApp .mobile-detail-warning{margin:0;color:#a1641e;font-size:10px;line-height:1.5}
+  #receivablesApp .mobile-detail-note{margin:0;color:#697e92;font-size:10px;line-height:1.5}
+  #receivablesApp .mobile-house-toggle{width:100%;text-align:left}
+  #receivablesApp .mobile-receivable-detail[hidden],#receivablesApp .mobile-detail-stack[hidden],#receivablesApp .mobile-source-item[hidden]{display:none!important}
+  #receivablesApp .mobile-filter-bar{display:grid;gap:9px;min-width:0;max-width:100%;margin-top:10px}
+  #receivablesApp .mobile-filter-control{display:grid;gap:4px;min-width:0;font-size:10px;color:#64788b}
+  #receivablesApp .mobile-filter-control input,#receivablesApp .mobile-filter-control select{width:100%;min-width:0;max-width:100%;min-height:40px}
+  #receivablesApp .mobile-filter-views,#receivablesApp .mobile-filter-common{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;min-width:0}
+  #receivablesApp .mobile-filter-views{grid-template-columns:repeat(3,minmax(0,1fr))}
+  #receivablesApp .mobile-filter-views button{min-width:0;min-height:38px;border:1px solid #d7e3ee;border-radius:7px;background:#fff;font-size:10px;white-space:normal}
+  #receivablesApp .mobile-filter-views button.is-active{background:#075bd8;color:#fff}
+  #receivablesApp .mobile-filter-more{display:grid;gap:8px;min-width:0}
+  #receivablesApp .mobile-filter-more>summary{cursor:pointer;color:#376386;font-size:11px;font-weight:850}
+  #receivablesApp .mobile-filter-more:not([open])>.mobile-filter-control{display:none}
+}
 
 /* Payables-only safe-delete menu and preflight dialog. */
 #payablesApp .payable-row-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;white-space:nowrap}

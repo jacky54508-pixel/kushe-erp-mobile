@@ -127,7 +127,7 @@
   const retentionStatus=(amount,received,current)=>{const total=store.num(amount),paid=store.num(received);if(total<=0)return 'no_retention';if(paid>=total)return 'collected';if(paid>0)return 'partial';return current==='claimable'?'claimable':'holding'},retentionLabel=(status)=>({no_retention:'無保留款',holding:'保留中',claimable:'可請領',partial:'部分收回',collected:'已收回'}[status]||'保留中');
   const receivableView=(row,state)=>{const billing=state.billings.find((item)=>item.id===row.billingId||String(item.number||'')===String(row.sourceNo||'')),amount=store.num(row.amount),received=store.num(row.received),outstanding=Math.max(0,amount-received),dueDate=row.dueDate||'',invoiceStatus=invoiceState(billing||row),retention=store.num(billing?.retentionAmount??billing?.retention??row.retentionAmount??row.retention),retentionReceived=store.num(row.retentionReceived??billing?.retentionReceived),retentionOutstanding=Math.max(0,store.num(row.remainingRetention??retention-retentionReceived)),retentionStatusValue=retentionStatus(retention,retentionReceived,row.retentionStatus||billing?.retentionStatus),status=outstanding>0?(received>0?'部分收款':'未收'):retention>0&&retentionOutstanding<=0?'全部收清':'本期已收清';return {...row,billing,amount,received,outstanding,status,dueDate,invoiceStatus,customerName:row.customerName||billing?.customerName||state.customers.find((item)=>item.id===row.customer)?.name||'—',projectName:row.projectName||billing?.projectName||state.projects.find((item)=>item.id===row.project)?.name||'—',billingDate:billing?.date||row.date||'',billingGross:store.num(billing?.taxIncludedAmount??billing?.grossTotal??row.taxIncludedAmount??row.grossTotal)||amount+retention,retention,retentionReceived,retentionOutstanding,retentionStatus:retentionStatusValue,overdue:Boolean(dueDate&&dueDate<today()&&outstanding>0)}};
   function receiptDetailMarkup(id,state){const history=state.receipts.filter((receipt)=>receipt.receivableId===id).sort((a,b)=>String(b.date).localeCompare(String(a.date))),retentionHistory=(state.retentionReceipts||[]).filter((receipt)=>receipt.receivableId===id).sort((a,b)=>String(b.date).localeCompare(String(a.date))),row=receivableView(state.receivables.find((item)=>item.id===id)||{},state);return `<tr class="receipt-history-row" data-receipt-detail="${esc(id)}"><td colspan="12"><h3>本期收款紀錄</h3>${history.length?`<div class="receipt-history-scroll"><table class="receipt-detail-table"><thead><tr><th>收款日期</th><th class="num">本次收款</th><th>銀行帳戶</th><th>收款方式</th><th class="num">手續費</th><th class="num">實際入帳</th><th>備註</th><th>操作</th></tr></thead><tbody>${history.map((receipt)=>{const bank=state.banks.find((item)=>item.id===(receipt.bankAccountId||receipt.bankId));return `<tr><td>${esc(receipt.date||'—')}</td><td class="num">${money(receipt.amount)}</td><td>${esc(bank?.name||bank?.bank||bank?.account||'—')}</td><td>${esc(receipt.paymentMethod||'銀行轉帳')}</td><td class="num">${money(receipt.fee)}</td><td class="num">${money(receipt.netAmount??store.num(receipt.amount)-store.num(receipt.fee))}</td><td>${esc(receipt.note||'—')}</td><td><button class="commission-link" type="button" data-edit-receipt="${esc(receipt.id)}">編輯</button><button class="commission-link" type="button" data-delete-receipt="${esc(receipt.id)}">刪除</button></td></tr>`}).join('')}</tbody></table></div>`:`<div class="receipt-empty-state"><span>尚無收款紀錄</span>${row.outstanding>0?`<button class="commission-secondary compact" type="button" data-empty-receive="${esc(id)}">＋ 新增收款</button>`:''}</div>`}<h3>保留款收回紀錄</h3>${retentionHistory.length?`<div class="receipt-history-scroll"><table class="receipt-detail-table"><thead><tr><th>收回日期</th><th class="num">本次收回</th><th>銀行帳戶</th><th>收款方式</th><th class="num">手續費</th><th>備註</th><th>操作</th></tr></thead><tbody>${retentionHistory.map((receipt)=>{const bank=state.banks.find((item)=>item.id===(receipt.bankAccountId||receipt.bankId));return `<tr><td>${esc(receipt.date||'—')}</td><td class="num">${money(receipt.amount)}</td><td>${esc(bank?.name||bank?.bank||bank?.account||'未指定')}</td><td>${esc(receipt.paymentMethod||'銀行轉帳')}</td><td class="num">${money(receipt.fee)}</td><td>${esc(receipt.note||'—')}</td><td><button class="commission-link" type="button" data-edit-retention-receipt="${esc(receipt.retentionReceiptId||receipt.id)}">編輯</button><button class="commission-link" type="button" data-delete-retention-receipt="${esc(receipt.retentionReceiptId||receipt.id)}">刪除</button></td></tr>`}).join('')}</tbody></table></div>`:`<div class="receipt-empty-state"><span>${row.retention>0?'尚無保留款收回紀錄':'此筆無保留款'}</span>${row.retentionOutstanding>0?`<button class="commission-secondary compact" type="button" data-empty-retention-receive="${esc(id)}">＋ 收回保留款</button>`:''}</div>`}</td></tr>`}
-  function toggleReceivableDetail(id,force){const main=$$('[data-expand-receivable]').find((row)=>row.dataset.expandReceivable===id);if(!main)return;let detail=main.nextElementSibling?.matches(`[data-receipt-detail]`)?main.nextElementSibling:null;const expanded=force===undefined?!main.classList.contains('is-expanded'):Boolean(force);if(expanded&&!detail){main.insertAdjacentHTML('afterend',receiptDetailMarkup(id,store.getState()));detail=main.nextElementSibling;$$('[data-source-toggle]',detail).forEach((toggle)=>toggle.onclick=(event)=>{event.stopPropagation();const originalIndex=toggle.dataset.sourceToggle,expanded=toggle.getAttribute('aria-expanded')==='true';$$('[data-source-parent-line]',detail).filter((row)=>row.dataset.sourceParentLine===originalIndex).forEach((row)=>{row.hidden=expanded});toggle.setAttribute('aria-expanded',String(!expanded));toggle.textContent=expanded?'查看來源 '+toggle.dataset.sourceCount+'筆':'收合來源'});const emptyButton=$('[data-empty-receive]',detail),retentionButton=$('[data-empty-retention-receive]',detail);if(emptyButton)emptyButton.onclick=(event)=>{event.stopPropagation();openReceipt(id)};if(retentionButton)retentionButton.onclick=(event)=>{event.stopPropagation();openRetentionReceipt(id)};$$('[data-edit-receipt]',detail).forEach((button)=>button.onclick=(event)=>{event.stopPropagation();openEditReceipt(button.dataset.editReceipt)});$$('[data-delete-receipt]',detail).forEach((button)=>button.onclick=async(event)=>{event.stopPropagation();if(!window.confirm('確定要刪除此收款紀錄嗎？銀行入帳將同步沖回。'))return;try{await store.deleteReceipt(button.dataset.deleteReceipt);openReceiptHistories.add(id);renderReceivables();setTimeout(()=>toggleReceivableDetail(id,true),0);window.KushePhase1.toast('收款已刪除，銀行入帳已沖回')}catch(error){window.KushePhase1.toast(error.message||String(error))}});$$('[data-edit-retention-receipt]',detail).forEach((button)=>button.onclick=(event)=>{event.stopPropagation();openEditRetentionReceipt(button.dataset.editRetentionReceipt)});$$('[data-delete-retention-receipt]',detail).forEach((button)=>button.onclick=async(event)=>{event.stopPropagation();if(!window.confirm('確定要刪除此保留款收回紀錄嗎？銀行入帳將同步沖回。'))return;try{await store.deleteRetentionReceipt(button.dataset.deleteRetentionReceipt);openReceiptHistories.add(id);renderReceivables();setTimeout(()=>toggleReceivableDetail(id,true),0);window.KushePhase1.toast('保留款收回紀錄已刪除，銀行入帳已沖回')}catch(error){window.KushePhase1.toast(error.message||String(error))}})}if(detail)detail.hidden=!expanded;main.classList.toggle('is-expanded',expanded);main.setAttribute('aria-expanded',String(expanded));const button=$('[data-expand-button]',main);if(button){button.setAttribute('aria-expanded',String(expanded));button.setAttribute('aria-label',`${expanded?'收合':'展開'}明細`);button.textContent=expanded?'收合明細':'展開明細'}if(expanded)openReceiptHistories.add(id);else openReceiptHistories.delete(id)}
+  function toggleReceivableDetail(id,force){const main=$$('[data-expand-receivable]').find((row)=>row.dataset.expandReceivable===id);if(!main)return;let detail=main.nextElementSibling?.matches(`[data-receipt-detail]`)?main.nextElementSibling:null;const expanded=force===undefined?!main.classList.contains('is-expanded'):Boolean(force);if(expanded&&!detail){main.insertAdjacentHTML('afterend',receiptDetailMarkup(id,store.getState()));detail=main.nextElementSibling;$$('[data-source-toggle]',detail).forEach((toggle)=>toggle.onclick=(event)=>{event.stopPropagation();const originalIndex=toggle.dataset.sourceToggle,expanded=toggle.getAttribute('aria-expanded')==='true';$$('[data-source-parent-line]',detail).filter((row)=>row.dataset.sourceParentLine===originalIndex).forEach((row)=>{row.hidden=expanded});toggle.setAttribute('aria-expanded',String(!expanded));toggle.textContent=expanded?'查看來源 '+toggle.dataset.sourceCount+'筆':'收合來源'});const emptyButton=$('[data-empty-receive]',detail),retentionButton=$('[data-empty-retention-receive]',detail);if(emptyButton)emptyButton.onclick=(event)=>{event.stopPropagation();openReceipt(id)};if(retentionButton)retentionButton.onclick=(event)=>{event.stopPropagation();openRetentionReceipt(id)};$$('[data-edit-receipt]',detail).forEach((button)=>button.onclick=(event)=>{event.stopPropagation();openEditReceipt(button.dataset.editReceipt)});$$('[data-delete-receipt]',detail).forEach((button)=>button.onclick=(event)=>{event.stopPropagation();deleteReceiptAction(button.dataset.deleteReceipt,id)});$$('[data-edit-retention-receipt]',detail).forEach((button)=>button.onclick=(event)=>{event.stopPropagation();openEditRetentionReceipt(button.dataset.editRetentionReceipt)});$$('[data-delete-retention-receipt]',detail).forEach((button)=>button.onclick=(event)=>{event.stopPropagation();deleteRetentionReceiptAction(button.dataset.deleteRetentionReceipt,id)});}if(detail)detail.hidden=!expanded;main.classList.toggle('is-expanded',expanded);main.setAttribute('aria-expanded',String(expanded));const button=$('[data-expand-button]',main);if(button){button.setAttribute('aria-expanded',String(expanded));button.setAttribute('aria-label',`${expanded?'收合':'展開'}明細`);button.textContent=expanded?'收合明細':'展開明細'}if(expanded)openReceiptHistories.add(id);else openReceiptHistories.delete(id);renderMobileReceivableDetail(id)}
   receivableRows=function(){const state=store.getState(),q=receivableFilters.query.toLocaleLowerCase('zh-Hant'),receiptMonths=receivableFilters.receiptMonth?receivableReceiptMonthsById(state):new Map();return state.receivables.map((row)=>receivableView(row,state)).filter((row)=>{if(receivableFilters.view==='outstanding'&&row.outstanding<=0&&row.retentionOutstanding<=0)return false;if(receivableFilters.view==='settled'&&(row.outstanding>0||row.retentionOutstanding>0))return false;if(receivableFilters.month&&monthOf(row.billingDate)!==receivableFilters.month)return false;if(receivableFilters.receiptMonth&&!receiptMonths.get(String(row.id||''))?.has(receivableFilters.receiptMonth))return false;if(receivableFilters.customer&&row.customer!==receivableFilters.customer)return false;if(receivableFilters.project&&row.project!==receivableFilters.project)return false;if(receivableFilters.status&&row.status!==receivableFilters.status)return false;if(receivableFilters.overdue==='overdue'&&!row.overdue)return false;if(receivableFilters.invoice&&row.invoiceStatus!==receivableFilters.invoice)return false;const deductionText=(state.receipts||[]).filter((receipt)=>String(receipt.receivableId||'')===String(row.id)).flatMap((receipt)=>store.receiptDeductions(receipt)).map((deduction)=>`${deduction.category} ${deduction.note||''}`).join(' ');return !q||`${row.sourceNo||''} ${row.customerName} ${row.projectName} ${row.invoiceNo||row.billing?.invoiceNo||''} ${deductionText}`.toLocaleLowerCase('zh-Hant').includes(q)}).sort((a,b)=>String(b.billingDate).localeCompare(String(a.billingDate)))};
   renderReceivables=function(){if(!receivableActive)return;const state=store.getState(),rows=receivableRows(),all=state.receivables.map((row)=>receivableView(row,state)),month=monthOf(today()),total=all.reduce((sum,row)=>sum+row.amount,0),monthReceived=state.receipts.filter((row)=>monthOf(row.date)===month).reduce((sum,row)=>sum+store.num(row.amount),0),open=all.reduce((sum,row)=>sum+row.outstanding,0),overdue=all.filter((row)=>row.overdue).reduce((sum,row)=>sum+row.outstanding,0),retention=state.billings.reduce((sum,row)=>sum+Math.max(0,store.num(row.retention)-store.num(row.retentionReceived)),0);
     $('#receivablesApp').innerHTML=`<section class="commissions-heading"><div><h1>應收帳款</h1><p>管理請款應收、分次收款與銀行實際入帳</p></div></section><section class="commission-kpis receivable-kpis"><article><span>應收總額</span><strong>${money(total)}</strong><small>${all.length} 筆請款應收</small></article><article class="is-success"><span>本月已收</span><strong>${money(monthReceived)}</strong><small>${esc(month)} 收款</small></article><article class="is-warning"><span>未收帳款</span><strong>${money(open)}</strong><small>含部分收款餘額</small></article><article class="is-warning"><span>逾期應收</span><strong>${money(overdue)}</strong><small>${all.filter((row)=>row.overdue).length} 筆逾期</small></article><article><span>保留款未收</span><strong>${money(retention)}</strong><small>待後續收回</small></article></section><section class="commission-panel commission-filters"><div class="receivable-filter-grid"><label><span>月份</span><input id="receivableMonth" type="month" value="${esc(receivableFilters.month)}"></label><label><span>客戶</span><select id="receivableCustomer">${selectOptions(state.customers,receivableFilters.customer,'全部客戶')}</select></label><label><span>案場</span><select id="receivableProject">${selectOptions(state.projects,receivableFilters.project,'全部案場')}</select></label><label><span>收款狀態</span><select id="receivableStatus"><option value="">全部狀態</option>${['未收','部分收款','已收清'].map((value)=>`<option ${receivableFilters.status===value?'selected':''}>${value}</option>`).join('')}</select></label><label><span>逾期</span><select id="receivableOverdue"><option value="">全部</option><option value="overdue" ${receivableFilters.overdue==='overdue'?'selected':''}>只看逾期</option></select></label><label><span>發票狀態</span><select id="receivableInvoice"><option value="">全部發票狀態</option><option value="no_invoice" ${receivableFilters.invoice==='no_invoice'?'selected':''}>免開發票</option><option value="invoice_pending" ${receivableFilters.invoice==='invoice_pending'?'selected':''}>待開發票</option><option value="invoiced" ${receivableFilters.invoice==='invoiced'?'selected':''}>已開發票</option></select></label><label class="receivable-search"><span>關鍵字</span><input id="receivableQuery" type="search" value="${esc(receivableFilters.query)}" placeholder="請款單、客戶、案場、發票"></label></div></section><section class="commission-panel billing-list-panel"><div class="commission-table-wrap"><table class="commission-table receivable-table"><thead><tr><th>請款單號</th><th>客戶</th><th>案場</th><th>請款日期</th><th class="num">應收金額</th><th class="num">已收</th><th class="num">未收</th><th class="num">保留款</th><th>發票狀態</th><th>收款狀態</th><th>操作</th></tr></thead><tbody>${rows.map((row)=>{const history=state.receipts.filter((receipt)=>receipt.receivableId===row.id).sort((a,b)=>String(b.date).localeCompare(String(a.date))),opened=openReceiptHistories.has(row.id);return `<tr><td><b>${esc(row.sourceNo||'—')}</b>${row.dueDate?`<small class="receivable-due ${row.overdue?'is-overdue':''}">到期 ${esc(row.dueDate)}</small>`:''}</td><td>${esc(row.customerName)}</td><td>${esc(row.projectName)}</td><td>${esc(row.billingDate||'—')}</td><td class="num">${money(row.amount)}</td><td class="num">${money(row.received)}</td><td class="num"><b>${money(row.outstanding)}</b></td><td class="num">${money(row.retention)}</td><td><span class="invoice-status-badge ${row.invoiceStatus}">${invoiceLabel(row.invoiceStatus)}</span></td><td><span class="commission-status ${row.status==='已收清'?'settled':row.status==='部分收款'?'partial':''}">${row.status}</span></td><td><div class="receivable-actions">${row.outstanding>0?`<button class="commission-primary compact" type="button" data-receive="${esc(row.id)}">收款</button>`:''}<button class="commission-link" type="button" data-history="${esc(row.id)}">${opened?'收合':'收款歷程'} (${history.length})</button></div></td></tr>${opened?`<tr class="receipt-history-row"><td colspan="11">${history.length?`<div class="receipt-history"><h3>收款歷程</h3><table><thead><tr><th>日期</th><th class="num">本次收款</th><th>銀行帳戶</th><th>收款方式</th><th class="num">手續費</th><th class="num">實際入帳</th><th>備註</th></tr></thead><tbody>${history.map((receipt)=>{const bank=state.banks.find((item)=>item.id===receipt.bankId);return `<tr><td>${esc(receipt.date||'—')}</td><td class="num">${money(receipt.amount)}</td><td>${esc(bank?.name||bank?.bank||bank?.account||'—')}</td><td>${esc(receipt.paymentMethod||'銀行轉帳')}</td><td class="num">${money(receipt.fee)}</td><td class="num">${money(receipt.netAmount??store.num(receipt.amount)-store.num(receipt.fee))}</td><td>${esc(receipt.note||'—')}</td></tr>`}).join('')}</tbody></table></div>`:'<p class="receipt-history-empty">尚無收款紀錄。</p>'}</td></tr>`:''}`}).join('')||'<tr><td colspan="11" class="billing-empty">此篩選條件下沒有應收帳款。</td></tr>'}</tbody></table></div></section>`;
@@ -283,24 +283,18 @@
       &&detailNumber(line.price)===detailNumber(item.price)
       &&detailNumber(line.subtotal)===detailNumber(item.untaxedSubtotal??item.subtotal);
   }
-  function originalBillingDetailMarkup(billing,state){
-    if(!billing)return '<h3>原請款細項</h3><p data-billing-unresolved>無法確認唯一原請款單</p>';
+  function buildOriginalBillingPresentation(billing,state){
+    if(!billing)return {resolved:false,groups:[]};
     const lines=Array.isArray(billing.lines)?billing.lines:[];
     const displayLines=lines.map((line,originalIndex)=>({line,originalIndex})).sort((a,b)=>window.KusheDisplaySort.compareHouse(a.line?.house,b.line?.house)||a.originalIndex-b.originalIndex);
     const displayRows=displayLines.map(({line,originalIndex})=>{
       const house=detailText(line?.house),subtotal=detailNumber(line?.subtotal);
-      if(!line||typeof line!=='object')return {house,originalIndex,subtotal,warning:true,html:'<tr><td colspan="7">原請款列資料不完整</td></tr>'};
+      if(!line||typeof line!=='object')return {house,originalIndex,subtotal,warning:true,incomplete:true};
       const sources=originalDailySources(line,billing,state),cells=[detailText(line.house)||'—',originalBillingDates(line),detailText(line.item)||'—',detailText(line.unit)||'—',detailNumber(line.qty)===null?'—':detailText(line.qty)];
       const sourceDifferent=billingSourceDifference(line,sources);
       const sourceMatch=sources.rows.length===1&&!sources.incomplete&&!sourceDifferent&&billingSingleSourceDisplayEqual(line,sources.rows[0]);
-      const sourceControl=sourceMatch?'':sources.rows.length?'<button class="receivable-source-toggle" type="button" data-source-toggle="'+originalIndex+'" data-source-count="'+sources.rows.length+'" aria-expanded="false">查看來源 '+sources.rows.length+'筆</button>':'';
-      let html='<tr data-original-billing-line="'+originalIndex+'">'+cells.map((value,cellIndex)=>'<td>'+esc(value)+(cellIndex===2?sourceControl:'')+'</td>').join('')+'<td class="num">'+detailMoney(line.price)+'</td><td class="num">'+detailMoney(line.subtotal)+'</td></tr>';
-      if(sources.rows.length){
-        html+=sources.rows.map(({log,item,ref,key})=>'<tr data-original-daily-source="'+esc(key)+'" data-source-parent-line="'+originalIndex+'" hidden><td>'+esc(detailText(item.house)||'—')+'</td><td>'+esc(detailText(ref.date||log.date)||'—')+'</td><td><span class="receivable-source-label">↳ 來源｜不另計</span>'+esc(detailText(item.item)||'—')+'</td><td>'+esc(detailText(item.unit)||'—')+'</td><td>'+esc(detailNumber(item.qty)===null?'—':detailText(item.qty))+'</td><td class="num">'+detailMoney(item.price)+'</td><td class="num">'+detailMoney(item.untaxedSubtotal??item.subtotal)+'</td></tr>').join('');
-      }
-      if(sources.incomplete)html+='<tr><td colspan="7" data-source-incomplete>原施工來源資料不完整</td></tr>';
-      if(sourceDifferent)html+='<tr><td colspan="7" data-source-difference>請款內容與原施工來源已有差異，以目前請款單內容為準。</td></tr>';
-      return {house,originalIndex,subtotal,warning:sources.incomplete||sourceDifferent,html};
+      const sourceItems=sources.rows.map(({log,item,ref,key})=>({key,values:[detailText(item.house)||'—',detailText(ref.date||log.date)||'—',detailText(item.item)||'—',detailText(item.unit)||'—',detailNumber(item.qty)===null?'—':detailText(item.qty),detailMoney(item.price),detailMoney(item.untaxedSubtotal??item.subtotal)]}));
+      return {house,originalIndex,subtotal,warning:sources.incomplete||sourceDifferent,values:[...cells,detailMoney(line.price),detailMoney(line.subtotal)],sourceItems,sourceCount:sources.rows.length,sourceMatch,sourceIncomplete:sources.incomplete,sourceDifferent};
     });
     const groups=[],byHouse=new Map();
     for(const row of displayRows){
@@ -309,11 +303,24 @@
       if(!group){group={key:row.originalIndex,house:known?row.house:'—',rows:[]};byHouse.set(key,group);groups.push(group)}
       group.rows.push(row);
     }
-    const rows=groups.map(group=>{
-      const total=group.rows.every(row=>row.subtotal!==null)?group.rows.reduce((sum,row)=>sum+row.subtotal,0):null;
-      const warnings=group.rows.filter(row=>row.warning).length;
-      const detail='<tr class="receivable-house-detail" data-house-detail="'+group.key+'" hidden><td colspan="4"><div class="receipt-history-scroll"><table class="receipt-detail-table original-billing-detail-table" data-original-billing="'+esc(billing.id)+'"><thead><tr><th>戶別</th><th>日期</th><th>品項</th><th>單位</th><th>數量</th><th>單價</th><th>小計</th></tr></thead><tbody>'+group.rows.map(row=>row.html).join('')+'</tbody></table></div></td></tr>';
-      return '<tr class="receivable-house-summary" data-house-summary="'+group.key+'"><td><strong>'+esc(group.house)+'</strong></td><td>'+group.rows.length+' 筆明細<span class="receivable-house-chevron" aria-hidden="true">▼</span>'+(warnings?'<span class="receivable-house-warning">⚠ '+warnings+' 筆需確認</span>':'')+'</td><td class="num">'+(total===null?'—':detailMoney(total))+'</td><td><button type="button" class="receivable-house-toggle" data-house-toggle="'+group.key+'" aria-expanded="false">展開明細</button></td></tr>'+detail;
+    groups.forEach(group=>{group.total=group.rows.every(row=>row.subtotal!==null)?group.rows.reduce((sum,row)=>sum+row.subtotal,0):null;group.warnings=group.rows.filter(row=>row.warning).length});
+    return {resolved:true,billingId:billing.id,groups};
+  }
+  function originalBillingDetailMarkup(billing,state){
+    const presentation=buildOriginalBillingPresentation(billing,state);
+    if(!presentation.resolved)return '<h3>原請款細項</h3><p data-billing-unresolved>無法確認唯一原請款單</p>';
+    const rows=presentation.groups.map(group=>{
+      const lines=group.rows.map(row=>{
+        if(row.incomplete)return '<tr><td colspan="7">原請款列資料不完整</td></tr>';
+        const sourceControl=row.sourceMatch?'':row.sourceCount?'<button class="receivable-source-toggle" type="button" data-source-toggle="'+row.originalIndex+'" data-source-count="'+row.sourceCount+'" aria-expanded="false">查看來源 '+row.sourceCount+'筆</button>':'';
+        let html='<tr data-original-billing-line="'+row.originalIndex+'">'+row.values.map((value,index)=>'<td'+(index>=5?' class="num"':'')+'>'+esc(value)+(index===2?sourceControl:'')+'</td>').join('')+'</tr>';
+        html+=row.sourceItems.map(source=>'<tr data-original-daily-source="'+esc(source.key)+'" data-source-parent-line="'+row.originalIndex+'" hidden>'+source.values.map((value,index)=>'<td'+(index>=5?' class="num"':'')+'>'+(index===2?'<span class="receivable-source-label">↳ 來源｜不另計</span>':'')+esc(value)+'</td>').join('')+'</tr>').join('');
+        if(row.sourceIncomplete)html+='<tr><td colspan="7" data-source-incomplete>原施工來源資料不完整</td></tr>';
+        if(row.sourceDifferent)html+='<tr><td colspan="7" data-source-difference>請款內容與原施工來源已有差異，以目前請款單內容為準。</td></tr>';
+        return html;
+      }).join('');
+      const detail='<tr class="receivable-house-detail" data-house-detail="'+group.key+'" hidden><td colspan="4"><div class="receipt-history-scroll"><table class="receipt-detail-table original-billing-detail-table" data-original-billing="'+esc(presentation.billingId)+'"><thead><tr><th>戶別</th><th>日期</th><th>品項</th><th>單位</th><th>數量</th><th>單價</th><th>小計</th></tr></thead><tbody>'+lines+'</tbody></table></div></td></tr>';
+      return '<tr class="receivable-house-summary" data-house-summary="'+group.key+'"><td><strong>'+esc(group.house)+'</strong></td><td>'+group.rows.length+' 筆明細<span class="receivable-house-chevron" aria-hidden="true">▼</span>'+(group.warnings?'<span class="receivable-house-warning">⚠ '+group.warnings+' 筆需確認</span>':'')+'</td><td class="num">'+(group.total===null?'—':detailMoney(group.total))+'</td><td><button type="button" class="receivable-house-toggle" data-house-toggle="'+group.key+'" aria-expanded="false">展開明細</button></td></tr>'+detail;
     }).join('');
     return '<h3>原請款細項</h3><div class="receivable-house-wrap"><table class="receipt-detail-table receivable-house-table"><thead><tr><th>戶別</th><th>明細</th><th class="num">金額合計</th><th>操作</th></tr></thead><tbody>'+ (rows||'<tr><td colspan="4">原請款細項資料不完整</td></tr>')+'</tbody></table></div>';
   }
@@ -325,43 +332,86 @@
     const recorded=history.reduce((sum,receipt)=>sum+store.receiptSettlementAmount(receipt),0),legacy=row.received!==recorded;
     return '<h3>帳務摘要</h3><div class="receipt-history-scroll"><table class="receipt-detail-table receivable-detail-summary"><tbody>'+values.map(([label,value])=>'<tr data-summary="'+label+'"><th scope="row">'+label+'</th><td class="num">'+detailMoney(value)+'</td></tr>').join('')+'</tbody></table></div>'+(legacy?'<p>含歷史累計沖銷；實際匯款與客戶扣款僅列可驗證收款紀錄，無法由歷史累計推定銀行淨入帳。</p>':'');
   }
-  receiptDetailMarkup=function(id,state){const history=(state.receipts||[]).filter((receipt)=>receipt.receivableId===id).sort((a,b)=>String(b.date).localeCompare(String(a.date))),retentionHistory=(state.retentionReceipts||[]).filter((receipt)=>receipt.receivableId===id).sort((a,b)=>String(b.date).localeCompare(String(a.date))),ar=state.receivables.find((item)=>item.id===id)||{},billing=originalBillingForReceivable(ar,state),row=receivableView(ar,{...state,billings:billing?[billing]:[]}),showRetention=row.retention>0||retentionHistory.length>0,receiptRows=history.map((receipt)=>{const bank=state.banks.find((item)=>item.id===(receipt.bankAccountId||receipt.bankId)),deductions=store.receiptDeductions(receipt),deductionHtml=deductions.length?'<ul class="receipt-deduction-list">'+deductions.map((item)=>'<li><strong>'+esc(item.category)+'</strong><span>'+money(item.amount)+(item.note?' · '+esc(item.note):'')+'</span></li>').join('')+'</ul>':'—';return '<tr><td>'+esc(receipt.date||'—')+'</td><td class="num">'+money(store.receiptCashAmount(receipt))+'</td><td>'+deductionHtml+'</td><td class="num"><b>'+money(store.receiptSettlementAmount(receipt))+'</b></td><td>'+esc(bank?.name||bank?.bank||bank?.account||(store.receiptCashAmount(receipt)>0?'—':'無銀行入帳'))+'</td><td class="num">'+money(receipt.netAmount??store.receiptCashAmount(receipt)-store.num(receipt.fee))+'</td><td>'+esc(receipt.note||'—')+'</td><td><button class="commission-link" type="button" data-edit-receipt="'+esc(receipt.id)+'">編輯</button><button class="commission-link" type="button" data-delete-receipt="'+esc(receipt.id)+'">刪除</button></td></tr>'}).join(''),retentionRows=retentionHistory.map((receipt)=>{const bank=state.banks.find((item)=>item.id===(receipt.bankAccountId||receipt.bankId));return '<tr><td>'+esc(receipt.date||'—')+'</td><td class="num">'+money(receipt.amount)+'</td><td>'+esc(bank?.name||bank?.bank||bank?.account||'未指定')+'</td><td>'+esc(receipt.paymentMethod||'銀行轉帳')+'</td><td class="num">'+money(receipt.fee)+'</td><td>'+esc(receipt.note||'—')+'</td><td><button class="commission-link" type="button" data-edit-retention-receipt="'+esc(receipt.retentionReceiptId||receipt.id)+'">編輯</button><button class="commission-link" type="button" data-delete-retention-receipt="'+esc(receipt.retentionReceiptId||receipt.id)+'">刪除</button></td></tr>'}).join('');return '<tr class="receipt-history-row" data-receipt-detail="'+esc(id)+'"><td colspan="7"><div class="receivable-detail-panel">'+originalBillingDetailMarkup(billing,state)+receivableDetailSummary(ar,row,billing,history,showRetention)+'<h3>本期收款紀錄</h3>'+(history.length?'<div class="receipt-history-scroll"><table class="receipt-detail-table customer-settlement-history"><thead><tr><th>收款日期</th><th class="num">實際匯款</th><th>客戶扣款</th><th class="num">本次沖銷</th><th>銀行帳戶</th><th class="num">銀行實際入帳</th><th>備註</th><th>操作</th></tr></thead><tbody>'+receiptRows+'</tbody></table></div>':'<div class="receipt-empty-state"><span>尚無收款紀錄</span>'+(row.outstanding>0?'<button class="commission-secondary compact" type="button" data-empty-receive="'+esc(id)+'">＋ 新增收款</button>':'')+'</div>')+(showRetention?'<h3>保留款收回紀錄</h3>'+(retentionHistory.length?'<div class="receipt-history-scroll"><table class="receipt-detail-table"><thead><tr><th>收回日期</th><th class="num">本次收回</th><th>銀行帳戶</th><th>收款方式</th><th class="num">手續費</th><th>備註</th><th>操作</th></tr></thead><tbody>'+retentionRows+'</tbody></table></div>':'<div class="receipt-empty-state"><span>'+(row.retention>0?'尚無保留款收回紀錄':'此筆無保留款')+'</span>'+(row.retentionOutstanding>0?'<button class="commission-secondary compact" type="button" data-empty-retention-receive="'+esc(id)+'">＋ 收回保留款</button>':'')+'</div>'):'')+'</div></td></tr>'};
+  receiptDetailMarkup=function(id,state){
+    const {history,payments,retentions}=receivableHistoryPresentation(state,id);
+    const ar=state.receivables.find(item=>item.id===id)||{},billing=originalBillingForReceivable(ar,state),row=receivableView(ar,{...state,billings:billing?[billing]:[]}),showRetention=row.retention>0||retentions.length>0;
+    const receiptRows=payments.map(payment=>{
+      const v=payment.values,deductionHtml=payment.deductions.length?'<ul class="receipt-deduction-list">'+payment.deductions.map(item=>'<li><strong>'+esc(item.category)+'</strong><span>'+item.amount+(item.note?' · '+esc(item.note):'')+'</span></li>').join('')+'</ul>':'—';
+      return '<tr><td>'+esc(v[0])+'</td><td class="num">'+v[1]+'</td><td>'+deductionHtml+'</td><td class="num"><b>'+v[3]+'</b></td><td>'+esc(v[4])+'</td><td class="num">'+v[5]+'</td><td>'+esc(v[6])+'</td><td><button class="commission-link" type="button" data-edit-receipt="'+esc(payment.id)+'">編輯</button><button class="commission-link" type="button" data-delete-receipt="'+esc(payment.id)+'">刪除</button></td></tr>';
+    }).join('');
+    const retentionRows=retentions.map(retention=>{
+      const v=retention.values;
+      return '<tr><td>'+esc(v[0])+'</td><td class="num">'+v[1]+'</td><td>'+esc(v[2])+'</td><td>'+esc(v[3])+'</td><td class="num">'+v[4]+'</td><td>'+esc(v[5])+'</td><td><button class="commission-link" type="button" data-edit-retention-receipt="'+esc(retention.id)+'">編輯</button><button class="commission-link" type="button" data-delete-retention-receipt="'+esc(retention.id)+'">刪除</button></td></tr>';
+    }).join('');
+    return '<tr class="receipt-history-row" data-receipt-detail="'+esc(id)+'"><td colspan="7"><div class="receivable-detail-panel">'+originalBillingDetailMarkup(billing,state)+receivableDetailSummary(ar,row,billing,history,showRetention)+'<h3>本期收款紀錄</h3>'+(history.length?'<div class="receipt-history-scroll"><table class="receipt-detail-table customer-settlement-history"><thead><tr><th>收款日期</th><th class="num">實際匯款</th><th>客戶扣款</th><th class="num">本次沖銷</th><th>銀行帳戶</th><th class="num">銀行實際入帳</th><th>備註</th><th>操作</th></tr></thead><tbody>'+receiptRows+'</tbody></table></div>':'<div class="receipt-empty-state"><span>尚無收款紀錄</span>'+(row.outstanding>0?'<button class="commission-secondary compact" type="button" data-empty-receive="'+esc(id)+'">＋ 新增收款</button>':'')+'</div>')+(showRetention?'<h3>保留款收回紀錄</h3>'+(retentions.length?'<div class="receipt-history-scroll"><table class="receipt-detail-table"><thead><tr><th>收回日期</th><th class="num">本次收回</th><th>銀行帳戶</th><th>收款方式</th><th class="num">手續費</th><th>備註</th><th>操作</th></tr></thead><tbody>'+retentionRows+'</tbody></table></div>':'<div class="receipt-empty-state"><span>'+(row.retention>0?'尚無保留款收回紀錄':'此筆無保留款')+'</span>'+(row.retentionOutstanding>0?'<button class="commission-secondary compact" type="button" data-empty-retention-receive="'+esc(id)+'">＋ 收回保留款</button>':'')+'</div>'):'')+'</div></td></tr>';
+  };
   const renderReceivablesWithoutCustomerDeductionKpi=renderReceivables;
   renderReceivables=function(){renderReceivablesWithoutCustomerDeductionKpi();if(!receivableActive)return;const state=store.getState(),month=monthOf(today()),deductionTotal=(state.receipts||[]).filter((row)=>monthOf(row.date)===month).reduce((sum,row)=>sum+store.receiptDeductionAmount(row),0),card=$$('.receivable-kpis article')[1],small=card&&$('small',card);if(small)small.textContent=month+' 實際現金｜客戶扣款 '+money(deductionTotal)};
   function receiptDisplayNet(receipt){const cash=store.receiptCashAmount(receipt);return receipt.netAmount===undefined?Math.max(0,cash-(receipt.feePayer==='company'?store.num(receipt.fee):0)):store.num(receipt.netAmount)}
-  function clarifyReceiptHistoryNet(){const state=store.getState();$$('[data-receipt-detail]').forEach((detail)=>{const history=(state.receipts||[]).filter((receipt)=>String(receipt.receivableId||'')===String(detail.dataset.receiptDetail||'')).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))),rows=$$('.customer-settlement-history tbody tr',detail);rows.forEach((row,index)=>{if(row.children[5]&&history[index])row.children[5].textContent=money(receiptDisplayNet(history[index]))})})}
+  const receivableStatusText=status=>status==='本期已收清'?'本期已沖銷':status==='部分收款'?'部分沖銷':status;
   function clarifyReceivableSettlementLabels(){
     const cards=$$('.receivable-kpis article');if(cards[1])$('span',cards[1]).textContent='本月實際匯款';if(cards[2])$('span',cards[2]).textContent='未沖銷應收';
     const header=$('#receivablesApp .receivable-table thead tr');if(header?.children[3])header.children[3].textContent='應收沖銷';
     $$('.receivable-progress').forEach((progress)=>{const strong=$('strong',progress),small=$('small',progress),badge=$('.receivable-paid-badge',progress);if(strong&&strong.textContent.startsWith('未收 '))strong.textContent=strong.textContent.replace(/^未收 /,'未沖銷 ');if(small&&small.textContent.startsWith('已收 '))small.textContent=small.textContent.replace(/^已收 /,'已沖銷 ');if(badge)badge.textContent='已沖銷完成'});
     $$('.receivable-view-switch button').forEach((button)=>{if(button.textContent==='已收完')button.textContent='已沖銷完'});
-    $$('#receivableStatus option').forEach((option)=>{if(option.value==='本期已收清')option.textContent='本期已沖銷';else if(option.value==='部分收款')option.textContent='部分沖銷'});
-    $$('#receivablesApp .commission-status').forEach((badge)=>{if(badge.textContent==='本期已收清')badge.textContent='本期已沖銷';else if(badge.textContent==='部分收款')badge.textContent='部分沖銷'});clarifyReceiptHistoryNet();
+    $$('#receivableStatus option').forEach((option)=>{if(option.value)option.textContent=receivableStatusText(option.value)});
+    $$('#receivablesApp .commission-status').forEach((badge)=>{badge.textContent=receivableStatusText(badge.textContent)});
   }
   const renderReceivablesWithSettlementLabels=renderReceivables;
   renderReceivables=function(){renderReceivablesWithSettlementLabels();if(receivableActive)clarifyReceivableSettlementLabels()};
   const toggleReceivableDetailWithSettlementLabels=toggleReceivableDetail;
+  const receivableHouseExpanded=new Map();
+  const receivableSourceExpanded=new Map();
+  const receivableHouseStateKey=(id,key)=>JSON.stringify([String(id),String(key)]);
+  function toggleHouseGroup(id,key){
+    const stateKey=receivableHouseStateKey(id,key),expanded=!receivableHouseExpanded.has(stateKey);
+    if(expanded)receivableHouseExpanded.set(stateKey,true);else receivableHouseExpanded.delete(stateKey);
+    const main=$$('#receivablesApp [data-expand-receivable]').find(row=>row.dataset.expandReceivable===String(id));
+    const detail=main?.nextElementSibling?.matches('[data-receipt-detail]')?main.nextElementSibling:null;
+    const summary=detail?$$('[data-house-summary]',detail).find(row=>row.dataset.houseSummary===String(key)):null;
+    const row=detail?$$('[data-house-detail]',detail).find(item=>item.dataset.houseDetail===String(key)):null;
+    const button=summary?.querySelector('[data-house-toggle]');
+    if(row)row.hidden=!expanded;
+    if(button){button.setAttribute('aria-expanded',String(expanded));button.textContent=expanded?'收合明細':'展開明細'}
+    summary?.classList.toggle('is-expanded',expanded);
+    const chevron=summary?.querySelector('.receivable-house-chevron');if(chevron)chevron.textContent=expanded?'▲':'▼';
+    renderMobileReceivableDetail(id);
+    return expanded;
+  }
+  function toggleSourceGroup(id,index){
+    const stateKey=receivableHouseStateKey(id,index),expanded=!receivableSourceExpanded.has(stateKey);
+    if(expanded)receivableSourceExpanded.set(stateKey,true);else receivableSourceExpanded.delete(stateKey);
+    const main=$$('#receivablesApp [data-expand-receivable]').find(row=>row.dataset.expandReceivable===String(id));
+    const detail=main?.nextElementSibling?.matches('[data-receipt-detail]')?main.nextElementSibling:null;
+    if(detail){
+      $$('[data-source-parent-line]',detail).filter(row=>row.dataset.sourceParentLine===String(index)).forEach(row=>{row.hidden=!expanded});
+      const button=$$('[data-source-toggle]',detail).find(item=>item.dataset.sourceToggle===String(index));
+      if(button){button.setAttribute('aria-expanded',String(expanded));button.textContent=expanded?'收合來源':'查看來源 '+button.dataset.sourceCount+'筆'}
+    }
+    renderMobileReceivableDetail(id);
+    return expanded;
+  }
   toggleReceivableDetail=function(id,force){
     const result=toggleReceivableDetailWithSettlementLabels(id,force);
     const main=$$('[data-expand-receivable]').find(row=>row.dataset.expandReceivable===id),detail=main?.nextElementSibling;
     if(detail?.matches('[data-receipt-detail]')){
-      const toggleHouseGroup=button=>{
-        const expanded=button.getAttribute('aria-expanded')==='true',key=button.dataset.houseToggle;
-        const row=$$('[data-house-detail]',detail).find(item=>item.dataset.houseDetail===key);
-        if(!row)return;
-        const summary=button.closest('[data-house-summary]');
-        row.hidden=expanded;
-        button.setAttribute('aria-expanded',String(!expanded));
-        button.textContent=expanded?'展開明細':'收合明細';
-        summary?.classList.toggle('is-expanded',!expanded);
-        const chevron=summary?.querySelector('.receivable-house-chevron');
-        if(chevron)chevron.textContent=expanded?'▼':'▲';
-      };
-      $$('[data-house-toggle]',detail).forEach(button=>button.onclick=event=>{event.stopPropagation();toggleHouseGroup(button)});
+      $$('[data-source-toggle]',detail).forEach(button=>{
+        const index=button.dataset.sourceToggle,expanded=receivableSourceExpanded.has(receivableHouseStateKey(id,index));
+        $$('[data-source-parent-line]',detail).filter(row=>row.dataset.sourceParentLine===index).forEach(row=>{row.hidden=!expanded});
+        button.setAttribute('aria-expanded',String(expanded));button.textContent=expanded?'收合來源':'查看來源 '+button.dataset.sourceCount+'筆';
+        button.onclick=event=>{event.stopPropagation();toggleSourceGroup(id,index)};
+      });
+      $$('[data-house-summary]',detail).forEach(summary=>{
+        const key=summary.dataset.houseSummary;if(!receivableHouseExpanded.has(receivableHouseStateKey(id,key)))return;
+        const row=$$('[data-house-detail]',detail).find(item=>item.dataset.houseDetail===key);if(row)row.hidden=false;
+        summary.classList.add('is-expanded');const button=summary.querySelector('[data-house-toggle]');if(button){button.setAttribute('aria-expanded','true');button.textContent='收合明細'}
+        const chevron=summary.querySelector('.receivable-house-chevron');if(chevron)chevron.textContent='▲';
+      });
+      $$('[data-house-toggle]',detail).forEach(button=>button.onclick=event=>{event.stopPropagation();toggleHouseGroup(id,button.dataset.houseToggle)});
       $$('[data-house-summary]',detail).forEach(summary=>summary.onclick=event=>{
         if(!window.matchMedia('(max-width: 620px)').matches||event.target.closest?.('button,a,input,select,textarea,label'))return;
         const button=summary.querySelector('[data-house-toggle]');
-        if(button)toggleHouseGroup(button);
+        if(button)toggleHouseGroup(id,button.dataset.houseToggle);
       });
     }
     clarifyReceivableSettlementLabels();
@@ -374,6 +424,186 @@
   }
   const renderBillingListWithSettlementLabels=renderBillingList;
   renderBillingList=function(){const result=renderBillingListWithSettlementLabels();if(billingActive)clarifyBillingSettlementLabels();return result};
+  // P18-1B: both layouts consume the same read-only receivable presentation values.
+  const mobileReceivableNode=(tag,className,value)=>{const node=document.createElement(tag);if(className)node.className=className;if(value!==undefined)node.textContent=String(value);return node};
+  const mobileReceivablePresentations=new Map();
+  async function deleteReceiptAction(receiptId,receivableId){
+    if(!window.confirm('確定要刪除此收款紀錄嗎？銀行入帳將同步沖回。'))return;
+    try{await store.deleteReceipt(receiptId);openReceiptHistories.add(receivableId);renderReceivables();setTimeout(()=>toggleReceivableDetail(receivableId,true),0);window.KushePhase1.toast('收款已刪除，銀行入帳已沖回')}
+    catch(error){window.KushePhase1.toast(error.message||String(error))}
+  }
+  async function deleteRetentionReceiptAction(receiptId,receivableId){
+    if(!window.confirm('確定要刪除此保留款收回紀錄嗎？銀行入帳將同步沖回。'))return;
+    try{await store.deleteRetentionReceipt(receiptId);openReceiptHistories.add(receivableId);renderReceivables();setTimeout(()=>toggleReceivableDetail(receivableId,true),0);window.KushePhase1.toast('保留款收回紀錄已刪除，銀行入帳已沖回')}
+    catch(error){window.KushePhase1.toast(error.message||String(error))}
+  }
+  function mobileReceivableField(label,value){
+    if(value===undefined||value===null||value===''||value==='—')return null;
+    const field=mobileReceivableNode('div','mobile-meta-row');
+    field.append(mobileReceivableNode('span','',label),mobileReceivableNode('strong','',value));
+    return field;
+  }
+  function mobileReceivableItem(values,labels){
+    const item=mobileReceivableNode('article','mobile-detail-item');
+    values.forEach((value,index)=>{const field=mobileReceivableField(labels[index],value);if(field)item.append(field)});
+    return item;
+  }
+  function receiptNetAmount(receipt){return receipt.netAmount??store.receiptCashAmount(receipt)-store.num(receipt.fee)}
+  function receivablePaymentHistory(state,id){return (state.receipts||[]).filter(item=>item.receivableId===id).sort((a,b)=>String(b.date).localeCompare(String(a.date)))}
+  function receivableRetentionHistory(state,id){return (state.retentionReceipts||[]).filter(item=>item.receivableId===id).sort((a,b)=>String(b.date).localeCompare(String(a.date)))}
+  const receivableHistoryPresentations=new Map();
+  function buildPaymentPresentation(history,state){
+    return history.map(receipt=>{
+      const bank=state.banks.find(item=>item.id===(receipt.bankAccountId||receipt.bankId));
+      const deductions=store.receiptDeductions(receipt).map(item=>({category:item.category,amount:money(item.amount),note:item.note||''}));
+      const deductionText=deductions.map(item=>item.category+' '+item.amount+(item.note?' · '+item.note:'')).join('、')||'—';
+      return {id:receipt.id,deductions,values:[receipt.date||'—',money(store.receiptCashAmount(receipt)),deductionText,money(store.receiptSettlementAmount(receipt)),bank?.name||bank?.bank||bank?.account||(store.receiptCashAmount(receipt)>0?'—':'無銀行入帳'),money(receiptDisplayNet(receipt)),receipt.note||'—']};
+    });
+  }
+  function buildRetentionPresentation(history,state){
+    return history.map(receipt=>{
+      const bank=state.banks.find(item=>item.id===(receipt.bankAccountId||receipt.bankId));
+      return {id:receipt.retentionReceiptId||receipt.id,values:[receipt.date||'—',money(receipt.amount),bank?.name||bank?.bank||bank?.account||'未指定',receipt.paymentMethod||'銀行轉帳',money(receipt.fee),receipt.note||'—']};
+    });
+  }
+  function receivableHistoryPresentation(state,id){
+    const key=String(id);
+    if(receivableHistoryPresentations.has(key))return receivableHistoryPresentations.get(key);
+    const history=receivablePaymentHistory(state,id),retentionHistory=receivableRetentionHistory(state,id);
+    const presentation={history,payments:buildPaymentPresentation(history,state),retentions:buildRetentionPresentation(retentionHistory,state)};
+    receivableHistoryPresentations.set(key,presentation);
+    return presentation;
+  }
+  function buildMobileReceivablePresentation(row,state){
+    const ar=(state.receivables||[]).find(item=>String(item.id)===String(row.id));
+    const billing=ar?originalBillingForReceivable(ar,state):null;
+    const detail=buildOriginalBillingPresentation(billing,state);
+    const {payments,retentions}=receivableHistoryPresentation(state,row.id);
+    return {id:String(row.id),projectName:row.projectName||'—',customerName:row.customerName||'—',outstanding:row.outstanding,status:row.status,statusText:receivableStatusText(row.status),sourceNo:row.sourceNo,billingDate:row.billingDate,dueDate:row.dueDate,received:row.received,retention:row.retention,retentionOutstanding:row.retentionOutstanding,invoiceStatus:row.invoiceStatus,detail,payments,retentions};
+  }
+  function mobileReceivableSection(title,items,labels,id,kind){
+    const stack=mobileReceivableNode('section','mobile-detail-stack');
+    stack.append(mobileReceivableNode('h4','',title));
+    if(!items.length){stack.append(mobileReceivableNode('p','mobile-detail-note','尚無紀錄'));return stack}
+    items.forEach(entry=>{
+      const item=mobileReceivableItem(entry.values,labels);
+      const actions=mobileReceivableNode('div','mobile-action-row');
+      const edit=mobileReceivableNode('button','mobile-secondary-action','編輯');
+      edit.type='button';edit.onclick=()=>kind==='payment'?openEditReceipt(entry.id):openEditRetentionReceipt(entry.id);
+      const remove=mobileReceivableNode('button','mobile-danger-action','刪除');
+      remove.type='button';remove.onclick=()=>kind==='payment'?deleteReceiptAction(entry.id,id):deleteRetentionReceiptAction(entry.id,id);
+      actions.append(edit,remove);item.append(actions);stack.append(item);
+    });
+    return stack;
+  }
+  function renderMobileReceivableDetail(id){
+    const model=mobileReceivablePresentations.get(String(id));
+    const card=$$('#receivablesApp [data-mobile-receivable]').find(item=>item.dataset.mobileReceivable===String(id));
+    if(!model||!card)return;
+    const expanded=openReceiptHistories.has(id),holder=$('.mobile-receivable-detail',card),button=$('[data-mobile-expand]',card);
+    holder.hidden=!expanded;button.setAttribute('aria-expanded',String(expanded));button.textContent=expanded?'收合明細':'查看明細';
+    if(!expanded)return;
+    holder.replaceChildren();
+    const groups=mobileReceivableNode('section','mobile-detail-stack');groups.append(mobileReceivableNode('h4','','原請款細項'));
+    if(!model.detail.resolved)groups.append(mobileReceivableNode('p','mobile-detail-warning','無法確認唯一原請款單'));
+    else if(!model.detail.groups.length)groups.append(mobileReceivableNode('p','mobile-detail-warning','原請款細項資料不完整'));
+    model.detail.groups.forEach(group=>{
+      const shell=mobileReceivableNode('article','mobile-house-group');
+      const stateKey=receivableHouseStateKey(id,group.key),open=receivableHouseExpanded.has(stateKey);
+      const toggle=mobileReceivableNode('button','mobile-house-toggle',group.house+' · '+group.rows.length+' 筆明細 · '+(group.total===null?'—':detailMoney(group.total))+' '+(open?'▲':'▼'));
+      toggle.type='button';toggle.setAttribute('aria-expanded',String(open));
+      toggle.onclick=()=>toggleHouseGroup(id,group.key);
+      shell.append(toggle);
+      if(group.warnings)shell.append(mobileReceivableNode('p','mobile-detail-warning','⚠ '+group.warnings+' 筆需確認'));
+      const lines=mobileReceivableNode('div','mobile-detail-stack');lines.hidden=!open;
+      group.rows.forEach(line=>{
+        if(line.incomplete){lines.append(mobileReceivableNode('p','mobile-detail-warning','原請款列資料不完整'));return}
+        const item=mobileReceivableItem(line.values,['戶別','日期','品項','單位','數量','單價','小計']);
+        item.classList.add('mobile-billing-line');
+        const title=item.querySelector('.mobile-meta-row:nth-child(3)');if(title)title.classList.add('mobile-detail-title');
+        if(line.sourceCount&&!line.sourceMatch){
+          const sourceOpen=receivableSourceExpanded.has(receivableHouseStateKey(id,line.originalIndex));
+          const sourceButton=mobileReceivableNode('button','mobile-secondary-action',sourceOpen?'收合來源':'查看來源 '+line.sourceCount+'筆');
+          sourceButton.type='button';sourceButton.setAttribute('aria-expanded',String(sourceOpen));
+          sourceButton.onclick=()=>toggleSourceGroup(id,line.originalIndex);
+          item.append(sourceButton);
+          if(sourceOpen)line.sourceItems.forEach(source=>{const sourceItem=mobileReceivableItem(source.values,['戶別','日期','來源品項','單位','數量','單價','小計']);sourceItem.classList.add('mobile-source-item');item.append(sourceItem)});
+        }
+        if(line.sourceIncomplete)item.append(mobileReceivableNode('p','mobile-detail-warning','原施工來源資料不完整'));
+        if(line.sourceDifferent)item.append(mobileReceivableNode('p','mobile-detail-warning','請款內容與原施工來源已有差異，以目前請款單內容為準。'));
+        lines.append(item);
+      });
+      shell.append(lines);groups.append(shell);
+    });
+    holder.append(groups);
+    holder.append(mobileReceivableSection('本期收款紀錄',model.payments,['收款日期','實際匯款','客戶扣款','本次沖銷','銀行帳戶','銀行實際入帳','備註'],id,'payment'));
+    if(model.retention>0||model.retentions.length)holder.append(mobileReceivableSection('保留款收回紀錄',model.retentions,['收回日期','本次收回','銀行帳戶','收款方式','手續費','備註'],id,'retention'));
+  }
+  function renderMobileReceivableFilters(panel,state){
+    const bar=mobileReceivableNode('div','mobile-filter-bar');
+    const control=(label,key,tag,options)=>{
+      const wrap=mobileReceivableNode('label','mobile-filter-control');wrap.append(mobileReceivableNode('span','',label));
+      const input=document.createElement(tag);
+      if(tag==='input'){input.type=key==='query'?'search':'month';if(key==='query')input.placeholder='請款單、客戶、案場、發票'}
+      else options.forEach(([value,text])=>{const option=document.createElement('option');option.value=value;option.textContent=text;input.append(option)});
+      input.value=receivableFilters[key]||'';
+      input.addEventListener(key==='query'?'input':'change',()=>{receivableFilters[key]=input.value;renderReceivables()});
+      wrap.append(input);return wrap;
+    };
+    bar.append(control('搜尋','query','input'));
+    const views=mobileReceivableNode('div','mobile-filter-views');
+    [['outstanding','待收款'],['settled','已收完'],['all','全部']].forEach(([value,label])=>{
+      const button=mobileReceivableNode('button',receivableFilters.view===value?'is-active':'',label);
+      button.type='button';button.setAttribute('aria-pressed',String(receivableFilters.view===value));
+      button.onclick=()=>{if(receivableFilters.view===value)return;receivableFilters.view=value;renderReceivables()};
+      views.append(button);
+    });
+    bar.append(views);
+    const common=mobileReceivableNode('div','mobile-filter-common');
+    common.append(control('應收月份','month','input'),control('收款狀態','status','select',[['','全部狀態'],['未收',receivableStatusText('未收')],['部分收款',receivableStatusText('部分收款')],['本期已收清',receivableStatusText('本期已收清')]]));
+    bar.append(common);
+    const more=mobileReceivableNode('details','mobile-filter-more');more.append(mobileReceivableNode('summary','','更多篩選'));
+    const master=(name,label)=>[['','全部'+label],...store.masterOptions(name).map(row=>[String(row.id),row.name||'—'])];
+    more.append(control('收款月份','receiptMonth','input'),control('客戶','customer','select',master('customers','客戶')),control('案場','project','select',master('projects','案場')));
+    more.append(control('逾期','overdue','select',[['','全部'],['overdue','只看逾期']]),control('發票狀態','invoice','select',[['','全部發票狀態'],['no_invoice','免開發票'],['invoice_pending','待開發票'],['invoiced','已開發票']]));
+    bar.append(more);panel.append(bar);
+  }
+  const renderReceivablesBeforeMobilePilot=renderReceivables;
+  renderReceivables=function(){
+    receivableHouseExpanded.clear();receivableSourceExpanded.clear();
+    receivableHistoryPresentations.clear();
+    const result=renderReceivablesBeforeMobilePilot();if(!receivableActive)return result;
+    const app=$('#receivablesApp'),panel=$('.commission-filters',app),list=$('.billing-list-panel',app),state=store.getState();
+    if(!panel||!list)return result;
+    renderMobileReceivableFilters(panel,state);
+    const mobile=mobileReceivableNode('div','mobile-receivables');list.append(mobile);
+    mobileReceivablePresentations.clear();
+    receivableRows().forEach(row=>{
+      const model=buildMobileReceivablePresentation(row,state);mobileReceivablePresentations.set(model.id,model);
+      const card=mobileReceivableNode('article','mobile-record-card');card.dataset.mobileReceivable=model.id;
+      const header=mobileReceivableNode('header','mobile-record-card__header');
+      const title=mobileReceivableNode('div','mobile-record-card__title');title.append(mobileReceivableNode('strong','',model.projectName),mobileReceivableNode('span','',model.customerName));header.append(title);
+      const amount=mobileReceivableNode('div','mobile-record-card__amount');amount.append(mobileReceivableNode('small','','未沖銷'),mobileReceivableNode('strong','',money(model.outstanding)));header.append(amount);card.append(header);
+      card.append(mobileReceivableNode('span','mobile-status-badge',model.statusText));
+      const meta=mobileReceivableNode('div','mobile-card-grid');
+      [['請款單號',model.sourceNo],['請款日期',model.billingDate],['到期日',model.dueDate],['已沖銷',money(model.received)],['保留款',model.retention>0?money(model.retention):''],['發票狀態',invoiceLabel(model.invoiceStatus)],['收款紀錄',model.payments.length?model.payments.length+' 次收款':'']].forEach(([label,value])=>{const field=mobileReceivableField(label,value);if(field)meta.append(field)});
+      if(model.detail.resolved)meta.append(mobileReceivableField('戶別／明細',model.detail.groups.length+' 戶／'+model.detail.groups.reduce((count,group)=>count+group.rows.length,0)+' 筆明細'));
+      card.append(meta);
+      const actions=mobileReceivableNode('div','mobile-action-row');
+      const expand=mobileReceivableNode('button','mobile-primary-action',openReceiptHistories.has(row.id)?'收合明細':'查看明細');
+      expand.type='button';expand.dataset.mobileExpand='';expand.setAttribute('aria-expanded',String(openReceiptHistories.has(row.id)));
+      expand.onclick=()=>toggleReceivableDetail(row.id);actions.append(expand);
+      if(model.outstanding>0){const collect=mobileReceivableNode('button','mobile-primary-action','收款');collect.type='button';collect.onclick=()=>openReceipt(row.id);actions.append(collect)}
+      if(model.retentionOutstanding>0){const retention=mobileReceivableNode('button','mobile-secondary-action','收保留款');retention.type='button';retention.onclick=()=>openRetentionReceipt(row.id);actions.append(retention)}
+      const more=mobileReceivableNode('details','mobile-action-more');
+      const deletion=mobileReceivableNode('button','mobile-danger-action','刪除整筆帳務');deletion.type='button';deletion.onclick=()=>openAccountingDelete(row.id);
+      more.append(mobileReceivableNode('summary','','更多操作'),deletion);actions.append(more);
+      card.append(actions);const detail=mobileReceivableNode('div','mobile-receivable-detail');detail.hidden=true;card.append(detail);mobile.append(card);
+      if(openReceiptHistories.has(row.id))renderMobileReceivableDetail(row.id);
+    });
+    if(!mobile.children.length)mobile.append(mobileReceivableNode('p','mobile-detail-item','此篩選條件下沒有應收帳款。'));
+    return result;
+  };
   async function activateReceivables(){receivableActive=true;if(!ready){await store.load();ready=true}renderReceivables()}function deactivateReceivables(){receivableActive=false}
   window.addEventListener('kushe:data-updated',()=>{if(billingActive)renderBillingList();if(receivableActive)renderReceivables()});
   window.KusheBilling={activate:activateBilling,deactivate:deactivateBilling,activateDraft,deactivateDraft,startDraft,render:renderBillingList,openDetail:openBillingDetail};
