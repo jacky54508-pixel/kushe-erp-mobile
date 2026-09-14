@@ -313,7 +313,7 @@
       const total=group.rows.every(row=>row.subtotal!==null)?group.rows.reduce((sum,row)=>sum+row.subtotal,0):null;
       const warnings=group.rows.filter(row=>row.warning).length;
       const detail='<tr class="receivable-house-detail" data-house-detail="'+group.key+'" hidden><td colspan="4"><div class="receipt-history-scroll"><table class="receipt-detail-table original-billing-detail-table" data-original-billing="'+esc(billing.id)+'"><thead><tr><th>戶別</th><th>日期</th><th>品項</th><th>單位</th><th>數量</th><th>單價</th><th>小計</th></tr></thead><tbody>'+group.rows.map(row=>row.html).join('')+'</tbody></table></div></td></tr>';
-      return '<tr class="receivable-house-summary" data-house-summary="'+group.key+'"><td><strong>'+esc(group.house)+'</strong></td><td>'+group.rows.length+' 筆明細'+(warnings?'<span class="receivable-house-warning">⚠ '+warnings+' 筆需確認</span>':'')+'</td><td class="num">'+(total===null?'—':detailMoney(total))+'</td><td><button type="button" class="receivable-house-toggle" data-house-toggle="'+group.key+'" aria-expanded="false">展開明細</button></td></tr>'+detail;
+      return '<tr class="receivable-house-summary" data-house-summary="'+group.key+'"><td><strong>'+esc(group.house)+'</strong></td><td>'+group.rows.length+' 筆明細<span class="receivable-house-chevron" aria-hidden="true">▼</span>'+(warnings?'<span class="receivable-house-warning">⚠ '+warnings+' 筆需確認</span>':'')+'</td><td class="num">'+(total===null?'—':detailMoney(total))+'</td><td><button type="button" class="receivable-house-toggle" data-house-toggle="'+group.key+'" aria-expanded="false">展開明細</button></td></tr>'+detail;
     }).join('');
     return '<h3>原請款細項</h3><div class="receivable-house-wrap"><table class="receipt-detail-table receivable-house-table"><thead><tr><th>戶別</th><th>明細</th><th class="num">金額合計</th><th>操作</th></tr></thead><tbody>'+ (rows||'<tr><td colspan="4">原請款細項資料不完整</td></tr>')+'</tbody></table></div>';
   }
@@ -341,7 +341,32 @@
   const renderReceivablesWithSettlementLabels=renderReceivables;
   renderReceivables=function(){renderReceivablesWithSettlementLabels();if(receivableActive)clarifyReceivableSettlementLabels()};
   const toggleReceivableDetailWithSettlementLabels=toggleReceivableDetail;
-  toggleReceivableDetail=function(id,force){const result=toggleReceivableDetailWithSettlementLabels(id,force);const main=$$('[data-expand-receivable]').find(row=>row.dataset.expandReceivable===id),detail=main?.nextElementSibling;if(detail?.matches('[data-receipt-detail]'))$$('[data-house-toggle]',detail).forEach(button=>button.onclick=event=>{event.stopPropagation();const expanded=button.getAttribute('aria-expanded')==='true',key=button.dataset.houseToggle,row=$$('[data-house-detail]',detail).find(item=>item.dataset.houseDetail===key);if(!row)return;row.hidden=expanded;button.setAttribute('aria-expanded',String(!expanded));button.textContent=expanded?'展開明細':'收合明細'});clarifyReceivableSettlementLabels();return result};
+  toggleReceivableDetail=function(id,force){
+    const result=toggleReceivableDetailWithSettlementLabels(id,force);
+    const main=$$('[data-expand-receivable]').find(row=>row.dataset.expandReceivable===id),detail=main?.nextElementSibling;
+    if(detail?.matches('[data-receipt-detail]')){
+      const toggleHouseGroup=button=>{
+        const expanded=button.getAttribute('aria-expanded')==='true',key=button.dataset.houseToggle;
+        const row=$$('[data-house-detail]',detail).find(item=>item.dataset.houseDetail===key);
+        if(!row)return;
+        const summary=button.closest('[data-house-summary]');
+        row.hidden=expanded;
+        button.setAttribute('aria-expanded',String(!expanded));
+        button.textContent=expanded?'展開明細':'收合明細';
+        summary?.classList.toggle('is-expanded',!expanded);
+        const chevron=summary?.querySelector('.receivable-house-chevron');
+        if(chevron)chevron.textContent=expanded?'▼':'▲';
+      };
+      $$('[data-house-toggle]',detail).forEach(button=>button.onclick=event=>{event.stopPropagation();toggleHouseGroup(button)});
+      $$('[data-house-summary]',detail).forEach(summary=>summary.onclick=event=>{
+        if(!window.matchMedia('(max-width: 620px)').matches||event.target.closest?.('button,a,input,select,textarea,label'))return;
+        const button=summary.querySelector('[data-house-toggle]');
+        if(button)toggleHouseGroup(button);
+      });
+    }
+    clarifyReceivableSettlementLabels();
+    return result;
+  };
   function clarifyBillingSettlementLabels(){
     const cards=$$('#billingsApp .billing-kpis article');if(cards[1]){$('span',cards[1]).textContent='本月請款已沖銷';$('small',cards[1]).textContent='依本月請款之應收結算'}if(cards[2])$('span',cards[2]).textContent='本月請款未沖銷';
     const headers=$$('#billingsApp .billing-list-table thead th');if(headers[8])headers[8].textContent='已沖銷';if(headers[9])headers[9].textContent='未沖銷';

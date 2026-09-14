@@ -661,6 +661,7 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 #receivablesApp .receivable-house-table>thead>tr>th:nth-child(3){width:25%}
 #receivablesApp .receivable-house-table>thead>tr>th:nth-child(4){width:25%}
 #receivablesApp .receivable-house-summary > td:first-child strong{font-size:14px;font-weight:900;color:#173f6d;line-height:1.2;letter-spacing:.01em}
+#receivablesApp .receivable-house-chevron{display:none}
 #receivablesApp .receivable-house-warning{display:block;color:#9a6b24;font-size:9px;font-weight:700}
 #receivablesApp .receivable-house-toggle{max-width:100%;min-height:28px;padding:3px 6px;border:1px solid #dce5ef;border-radius:5px;background:#fff;color:#60758c;font-size:10px;cursor:pointer}
 #receivablesApp .receivable-house-toggle:hover,#receivablesApp .receivable-house-toggle:focus-visible{border-color:#b7cbe1;background:#f5f8fc}
@@ -668,6 +669,7 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 #receivablesApp .receivable-house-detail>td{padding:0!important}
 #receivablesApp .receivable-house-detail .receipt-history-scroll{padding:4px 0 8px}
 @media(max-width:620px){#receivablesApp .receivable-view-switch{align-items:stretch}#receivablesApp .receivable-view-switch button{flex:1;min-width:0}}
+@media(max-width:620px){#receivablesApp .receivable-house-summary{cursor:pointer}#receivablesApp .receivable-house-summary>td:first-child,#receivablesApp .receivable-house-summary>td:nth-child(2){padding-inline:6px!important;white-space:nowrap}#receivablesApp .receivable-house-chevron{display:inline-block;margin-left:4px;font-size:9px;line-height:1}}
 
 /* Payables-only safe-delete menu and preflight dialog. */
 #payablesApp .payable-row-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;white-space:nowrap}
