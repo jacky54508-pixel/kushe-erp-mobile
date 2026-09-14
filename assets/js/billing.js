@@ -273,6 +273,16 @@
     const date=detailText(line.date),dates=sources.rows.map(row=>detailText(row.ref.date||row.log.date)).filter(Boolean);
     return Boolean(date&&!date.includes('、')&&dates.some(value=>value!==date));
   }
+  function billingSingleSourceDisplayEqual(line,{log,item,ref}){
+    const text=(value)=>detailText(value)||'—';
+    return text(line.house)===text(item.house)
+      &&originalBillingDates(line)===text(ref.date||log.date)
+      &&text(line.item)===text(item.item)
+      &&text(line.unit)===text(item.unit)
+      &&detailNumber(line.qty)===detailNumber(item.qty)
+      &&detailNumber(line.price)===detailNumber(item.price)
+      &&detailNumber(line.subtotal)===detailNumber(item.untaxedSubtotal??item.subtotal);
+  }
   function originalBillingDetailMarkup(billing,state){
     if(!billing)return '<h3>原請款細項</h3><p data-billing-unresolved>無法確認唯一原請款單</p>';
     const lines=Array.isArray(billing.lines)?billing.lines:[];
@@ -280,13 +290,15 @@
     const rows=displayLines.map(({line,originalIndex})=>{
       if(!line||typeof line!=='object')return '<tr><td colspan="7">原請款列資料不完整</td></tr>';
       const sources=originalDailySources(line,billing,state),cells=[detailText(line.house)||'—',originalBillingDates(line),detailText(line.item)||'—',detailText(line.unit)||'—',detailNumber(line.qty)===null?'—':detailText(line.qty)];
-      const sourceToggle=sources.rows.length?'<button class="receivable-source-toggle" type="button" data-source-toggle="'+originalIndex+'" data-source-count="'+sources.rows.length+'" aria-expanded="false">查看來源 '+sources.rows.length+'筆</button>':'';
-      let html='<tr data-original-billing-line="'+originalIndex+'">'+cells.map((value,cellIndex)=>'<td>'+esc(value)+(cellIndex===2?sourceToggle:'')+'</td>').join('')+'<td class="num">'+detailMoney(line.price)+'</td><td class="num">'+detailMoney(line.subtotal)+'</td></tr>';
+      const sourceDifferent=billingSourceDifference(line,sources);
+      const sourceMatch=sources.rows.length===1&&!sources.incomplete&&!sourceDifferent&&billingSingleSourceDisplayEqual(line,sources.rows[0]);
+      const sourceControl=sourceMatch?'<span class="receivable-source-match">✓ 來源一致</span>':sources.rows.length?'<button class="receivable-source-toggle" type="button" data-source-toggle="'+originalIndex+'" data-source-count="'+sources.rows.length+'" aria-expanded="false">查看來源 '+sources.rows.length+'筆</button>':'';
+      let html='<tr data-original-billing-line="'+originalIndex+'">'+cells.map((value,cellIndex)=>'<td>'+esc(value)+(cellIndex===2?sourceControl:'')+'</td>').join('')+'<td class="num">'+detailMoney(line.price)+'</td><td class="num">'+detailMoney(line.subtotal)+'</td></tr>';
       if(sources.rows.length){
         html+=sources.rows.map(({log,item,ref,key})=>'<tr data-original-daily-source="'+esc(key)+'" data-source-parent-line="'+originalIndex+'" hidden><td>'+esc(detailText(item.house)||'—')+'</td><td>'+esc(detailText(ref.date||log.date)||'—')+'</td><td><span class="receivable-source-label">↳ 來源｜不另計</span>'+esc(detailText(item.item)||'—')+'</td><td>'+esc(detailText(item.unit)||'—')+'</td><td>'+esc(detailNumber(item.qty)===null?'—':detailText(item.qty))+'</td><td class="num">'+detailMoney(item.price)+'</td><td class="num">'+detailMoney(item.untaxedSubtotal??item.subtotal)+'</td></tr>').join('');
       }
       if(sources.incomplete)html+='<tr><td colspan="7" data-source-incomplete>原施工來源資料不完整</td></tr>';
-      if(billingSourceDifference(line,sources))html+='<tr><td colspan="7" data-source-difference>請款內容與原施工來源已有差異，以目前請款單內容為準。</td></tr>';
+      if(sourceDifferent)html+='<tr><td colspan="7" data-source-difference>請款內容與原施工來源已有差異，以目前請款單內容為準。</td></tr>';
       return html;
     }).join('');
     return '<h3>原請款細項</h3><div class="receipt-history-scroll"><table class="receipt-detail-table original-billing-detail-table" data-original-billing="'+esc(billing.id)+'"><thead><tr><th>戶別</th><th>日期</th><th>品項</th><th>單位</th><th>數量</th><th>單價</th><th>小計</th></tr></thead><tbody>'+ (rows||'<tr><td colspan="7">原請款細項資料不完整</td></tr>')+'</tbody></table></div>';
