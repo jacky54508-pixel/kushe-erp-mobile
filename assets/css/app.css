@@ -698,6 +698,11 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
   #receivablesApp .mobile-detail-stack h4{margin:8px 0 0;color:#173f6d;font-size:12px}
   #receivablesApp .mobile-detail-item,#receivablesApp .mobile-house-group{display:grid;gap:8px;min-width:0;max-width:100%;padding:11px;border:1px solid #e1e9f1;border-radius:9px;background:#f8fbfe;overflow-wrap:anywhere}
   #receivablesApp .mobile-detail-title strong{font-size:13px;color:#173f6d}
+  #receivablesApp .mobile-detail-item__top,#receivablesApp .mobile-detail-item__amount-row{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px;min-width:0;color:#66798e;font-size:10px}
+  #receivablesApp .mobile-detail-item__title{min-width:0;color:#173f6d;font-size:13px;line-height:1.4;overflow-wrap:anywhere}
+  #receivablesApp .mobile-detail-item__meta{min-width:0;color:#405c78;font-size:11px;font-weight:800;overflow-wrap:anywhere}
+  #receivablesApp .mobile-detail-item__amount-row{color:#526d87;font-size:11px}
+  #receivablesApp .mobile-detail-item__amount-row strong{color:#a65118;font-size:12px}
   #receivablesApp .mobile-source-item{margin-left:9px;border-left:3px solid #9dbbd9;background:#fff}
   #receivablesApp .mobile-detail-warning{margin:0;color:#a1641e;font-size:10px;line-height:1.5}
   #receivablesApp .mobile-detail-note{margin:0;color:#697e92;font-size:10px;line-height:1.5}

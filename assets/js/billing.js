@@ -448,6 +448,21 @@
     values.forEach((value,index)=>{const field=mobileReceivableField(labels[index],value);if(field)item.append(field)});
     return item;
   }
+  function mobileBillingDetailItem(values){
+    const [house,date,itemName,unit,qty,unitPrice,subtotal]=values;
+    const item=mobileReceivableNode('article','mobile-detail-item mobile-billing-line');
+    const top=mobileReceivableNode('div','mobile-detail-item__top');
+    [house,date].forEach(value=>{if(value&&value!=='—')top.append(mobileReceivableNode('span','',value))});
+    if(top.children.length)item.append(top);
+    if(itemName&&itemName!=='—')item.append(mobileReceivableNode('strong','mobile-detail-item__title',itemName));
+    const quantity=[qty,unit].filter(value=>value&&value!=='—').join(' ');
+    if(quantity)item.append(mobileReceivableNode('div','mobile-detail-item__meta',quantity));
+    const amountRow=mobileReceivableNode('div','mobile-detail-item__amount-row');
+    if(unitPrice&&unitPrice!=='—')amountRow.append(mobileReceivableNode('span','','單價 '+unitPrice));
+    if(subtotal&&subtotal!=='—')amountRow.append(mobileReceivableNode('strong','','小計 '+subtotal));
+    if(amountRow.children.length)item.append(amountRow);
+    return item;
+  }
   function receiptNetAmount(receipt){return receipt.netAmount??store.receiptCashAmount(receipt)-store.num(receipt.fee)}
   function receivablePaymentHistory(state,id){return (state.receipts||[]).filter(item=>item.receivableId===id).sort((a,b)=>String(b.date).localeCompare(String(a.date)))}
   function receivableRetentionHistory(state,id){return (state.retentionReceipts||[]).filter(item=>item.receivableId===id).sort((a,b)=>String(b.date).localeCompare(String(a.date)))}
@@ -518,9 +533,7 @@
       const lines=mobileReceivableNode('div','mobile-detail-stack');lines.hidden=!open;
       group.rows.forEach(line=>{
         if(line.incomplete){lines.append(mobileReceivableNode('p','mobile-detail-warning','原請款列資料不完整'));return}
-        const item=mobileReceivableItem(line.values,['戶別','日期','品項','單位','數量','單價','小計']);
-        item.classList.add('mobile-billing-line');
-        const title=item.querySelector('.mobile-meta-row:nth-child(3)');if(title)title.classList.add('mobile-detail-title');
+        const item=mobileBillingDetailItem(line.values);
         if(line.sourceCount&&!line.sourceMatch){
           const sourceOpen=receivableSourceExpanded.has(receivableHouseStateKey(id,line.originalIndex));
           const sourceButton=mobileReceivableNode('button','mobile-secondary-action',sourceOpen?'收合來源':'查看來源 '+line.sourceCount+'筆');
