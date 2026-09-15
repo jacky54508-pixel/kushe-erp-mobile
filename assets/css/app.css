@@ -688,11 +688,17 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
   #receivablesApp .mobile-meta-row span{font-size:10px;color:#77889a}
   #receivablesApp .mobile-meta-row strong{font-size:11px;color:#2f4c6a;font-weight:800;line-height:1.4;white-space:normal;overflow-wrap:anywhere}
   #receivablesApp .mobile-action-row{display:flex;flex-wrap:wrap;gap:7px;min-width:0}
+  #receivablesApp .mobile-action-layout{display:grid;gap:7px;min-width:0;max-width:100%}
+  #receivablesApp .mobile-action-primary{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,82px),1fr));gap:7px;min-width:0}
+  #receivablesApp .mobile-action-primary>button{width:100%;min-width:0}
   #receivablesApp .mobile-action-row button,#receivablesApp .mobile-house-toggle,#receivablesApp .mobile-billing-line>button{min-height:40px;max-width:100%;padding:8px 11px;border:1px solid #cddded;border-radius:8px;background:#f4f8fd;color:#204f79;font-size:11px;font-weight:850;white-space:normal;overflow-wrap:anywhere}
+  #receivablesApp .mobile-action-primary button,#receivablesApp .mobile-action-more-panel button{min-height:40px;max-width:100%;padding:8px 11px;border:1px solid #cddded;border-radius:8px;background:#f4f8fd;color:#204f79;font-size:11px;font-weight:850;white-space:normal;overflow-wrap:anywhere}
   #receivablesApp .mobile-primary-action{background:#075bd8!important;border-color:#075bd8!important;color:#fff!important}
   #receivablesApp .mobile-danger-action{border-color:#efc7c3!important;color:#9e3c35!important;background:#fff8f6!important}
-  #receivablesApp .mobile-action-more{min-width:0}
+  #receivablesApp .mobile-action-more{display:block;width:100%;min-width:0}
   #receivablesApp .mobile-action-more>summary{min-height:40px;padding:10px;color:#60758c;font-size:11px;font-weight:800;cursor:pointer}
+  #receivablesApp .mobile-action-more-panel{display:grid;width:100%;min-width:0;padding-top:7px}
+  #receivablesApp .mobile-action-more-panel .mobile-danger-action{width:100%;min-width:0}
   #receivablesApp .mobile-receivable-detail,#receivablesApp .mobile-detail-stack{display:grid;gap:9px;min-width:0;max-width:100%}
   #receivablesApp .mobile-receivable-detail{padding-top:12px;border-top:1px solid #e2eaf1}
   #receivablesApp .mobile-detail-stack h4{margin:8px 0 0;color:#173f6d;font-size:12px}

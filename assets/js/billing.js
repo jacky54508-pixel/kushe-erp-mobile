@@ -602,15 +602,17 @@
       [['請款單號',model.sourceNo],['請款日期',model.billingDate],['到期日',model.dueDate],['已沖銷',money(model.received)],['保留款',model.retention>0?money(model.retention):''],['發票狀態',invoiceLabel(model.invoiceStatus)],['收款紀錄',model.payments.length?model.payments.length+' 次收款':'']].forEach(([label,value])=>{const field=mobileReceivableField(label,value);if(field)meta.append(field)});
       if(model.detail.resolved)meta.append(mobileReceivableField('戶別／明細',model.detail.groups.length+' 戶／'+model.detail.groups.reduce((count,group)=>count+group.rows.length,0)+' 筆明細'));
       card.append(meta);
-      const actions=mobileReceivableNode('div','mobile-action-row');
+      const actions=mobileReceivableNode('div','mobile-action-layout');
+      const primaryActions=mobileReceivableNode('div','mobile-action-primary');
       const expand=mobileReceivableNode('button','mobile-primary-action',openReceiptHistories.has(row.id)?'收合明細':'查看明細');
       expand.type='button';expand.dataset.mobileExpand='';expand.setAttribute('aria-expanded',String(openReceiptHistories.has(row.id)));
-      expand.onclick=()=>toggleReceivableDetail(row.id);actions.append(expand);
-      if(model.outstanding>0){const collect=mobileReceivableNode('button','mobile-primary-action','收款');collect.type='button';collect.onclick=()=>openReceipt(row.id);actions.append(collect)}
-      if(model.retentionOutstanding>0){const retention=mobileReceivableNode('button','mobile-secondary-action','收保留款');retention.type='button';retention.onclick=()=>openRetentionReceipt(row.id);actions.append(retention)}
+      expand.onclick=()=>toggleReceivableDetail(row.id);primaryActions.append(expand);
+      if(model.outstanding>0){const collect=mobileReceivableNode('button','mobile-primary-action','收款');collect.type='button';collect.onclick=()=>openReceipt(row.id);primaryActions.append(collect)}
+      if(model.retentionOutstanding>0){const retention=mobileReceivableNode('button','mobile-secondary-action','收保留款');retention.type='button';retention.onclick=()=>openRetentionReceipt(row.id);primaryActions.append(retention)}
       const more=mobileReceivableNode('details','mobile-action-more');
       const deletion=mobileReceivableNode('button','mobile-danger-action','刪除整筆帳務');deletion.type='button';deletion.onclick=()=>openAccountingDelete(row.id);
-      more.append(mobileReceivableNode('summary','','更多操作'),deletion);actions.append(more);
+      const morePanel=mobileReceivableNode('div','mobile-action-more-panel');morePanel.append(deletion);
+      more.append(mobileReceivableNode('summary','mobile-action-more-toggle','更多操作'),morePanel);actions.append(primaryActions,more);
       card.append(actions);const detail=mobileReceivableNode('div','mobile-receivable-detail');detail.hidden=true;card.append(detail);mobile.append(card);
       if(openReceiptHistories.has(row.id))renderMobileReceivableDetail(row.id);
     });
