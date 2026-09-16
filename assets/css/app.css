@@ -992,6 +992,11 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
   #quotationsApp #quotationForm .quotation-line :is(input,select,button){box-sizing:border-box;width:100%;min-width:0;max-width:100%;min-height:40px}
   #quotationsApp #quotationForm .quote-subtotal{display:flex;align-items:center;min-height:40px;color:#a65118;font-size:13px}
   #quotationsApp #quotationForm .quotation-note-grid textarea{white-space:pre-wrap}
+  #quotationsApp #quotationForm .quotation-save-price{display:grid;grid-template-columns:1fr;gap:8px;min-width:0}
+  #quotationsApp #quotationForm .quotation-save-price>strong,#quotationsApp #quotationForm .quotation-save-price>p{min-width:0}
+  #quotationsApp #quotationForm .quotation-save-price>p{margin-bottom:2px;overflow-wrap:anywhere}
+  #quotationsApp #quotationForm .quotation-save-price>label{display:flex;width:100%;min-width:0;margin:0;align-items:flex-start;gap:9px;padding:9px 10px;border:1px solid #ecd5a8;border-radius:8px;background:#fffdf7;font-size:11px;line-height:1.5;white-space:normal;overflow-wrap:anywhere}
+  #quotationsApp #quotationForm .quotation-save-price>label>input[type="radio"]{flex:0 0 18px;width:18px;height:18px;margin:0;accent-color:#075bd8}
 }
 /* P17 storage warnings are independent of transient success toasts. */
 .store-safety-banner{position:fixed;bottom:12px;left:12px;right:12px;z-index:10050;padding:14px;background:#fff3d5;border:2px solid #ac6500;color:#452b00;display:flex;gap:12px;align-items:center;flex-wrap:wrap;overflow-wrap:anywhere}
