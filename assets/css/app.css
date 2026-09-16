@@ -920,6 +920,61 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 .billing-bundle-confirm{width:min(880px,96vw)}.billing-bundle-meta{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}.billing-bundle-meta>span{display:grid;min-width:0;gap:5px;padding:11px 12px;border:1px solid #dce6f0;border-radius:9px;background:#f8fafc;color:#66798e;font-size:10px;font-weight:800}.billing-bundle-meta>span b{overflow-wrap:anywhere;color:#173d69;font-size:12px}.billing-bundle-meta .wide{grid-column:1/-1}.billing-bundle-confirm-table{min-width:680px}.billing-bundle-totals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0 0}.billing-bundle-totals>div{display:grid;gap:6px;padding:12px 14px;border:1px solid #d7e3ed;border-radius:10px;background:#f8fafc}.billing-bundle-totals dt{color:#61758b;font-size:10px;font-weight:850}.billing-bundle-totals dd{margin:0;color:#173d69;font-size:17px;font-weight:900;font-variant-numeric:tabular-nums}.billing-bundle-totals .emphasis{border-color:#b9ded8;background:#e8f6f3}.billing-bundle-totals .emphasis dd{color:#087d74}.billing-bundle-safety-note{margin:12px 0 0;padding:10px 12px;border-radius:8px;background:#edf4fb;color:#4f6680;font-size:11px;line-height:1.5}
 @media(max-width:620px){.billing-bundle-toolbar{align-items:stretch;flex-direction:column}.billing-bundle-toolbar>span{white-space:normal}.billing-bundle-toolbar>div{display:grid;grid-template-columns:1fr 1fr}.billing-bundle-toolbar button{width:100%;min-height:44px}.billing-bundle-confirm{width:100%}.billing-bundle-meta{grid-template-columns:repeat(2,minmax(0,1fr))}.billing-bundle-totals{grid-template-columns:1fr}.billing-bundle-confirm .erp-detail-body{padding:14px}}
 
+/* P18-3B: billing-only mobile list, detail, draft and safe-editor presentation. */
+#billingsApp .mobile-billings,.mobile-billing-detail{display:none}
+@media(max-width:620px){
+  #billingsApp .billing-desktop-list,.billing-desktop-detail{display:none}
+  #billingsApp .mobile-billings{display:grid;gap:12px;min-width:0;margin-top:12px}
+  #billingsApp .mobile-billing-card{display:grid;gap:12px;min-width:0;padding:14px;border:1px solid #dbe5ef;border-radius:14px;background:#fff;box-shadow:0 4px 14px rgba(31,62,91,.07)}
+  #billingsApp .mobile-billing-card>header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:start}
+  #billingsApp .mobile-billing-card>header>div:first-child{display:grid;gap:4px;min-width:0}
+  #billingsApp .mobile-billing-card h3,#billingsApp .mobile-billing-card small,#billingsApp .mobile-billing-card span{overflow-wrap:anywhere}
+  #billingsApp .mobile-billing-card h3{margin:0;color:#173d69;font-size:16px}
+  #billingsApp .mobile-billing-card header small{color:#718297;font-weight:750}
+  #billingsApp .mobile-billing-amount{display:grid;justify-items:end;gap:4px;min-width:0;text-align:right}
+  #billingsApp .mobile-billing-amount>span{color:#718297;font-size:10px;font-weight:800}
+  #billingsApp .mobile-billing-amount>strong{max-width:100%;color:#075bd8;font-size:18px;overflow-wrap:anywhere}
+  #billingsApp .mobile-meta-row,.mobile-billing-detail .mobile-meta-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  #billingsApp .mobile-meta-row>span,.mobile-billing-detail .mobile-meta-row>span{display:grid;gap:3px;min-width:0;padding:9px;border-radius:9px;background:#f5f8fb}
+  #billingsApp .mobile-meta-row small,.mobile-billing-detail .mobile-meta-row small{color:#718297;font-size:9px;font-weight:800}
+  #billingsApp .mobile-meta-row b,.mobile-billing-detail .mobile-meta-row b{color:#284d70;font-size:12px;overflow-wrap:anywhere}
+  #billingsApp .mobile-billing-bundle{display:flex;align-items:center;gap:9px;min-height:42px;padding:8px 10px;border:1px solid #dce6ef;border-radius:9px;color:#45617e;font-size:12px;font-weight:750}
+  #billingsApp .mobile-billing-bundle input{width:18px;height:18px;flex:none;accent-color:#075bd8}
+  #billingsApp .mobile-action-primary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  #billingsApp .mobile-action-primary:has(>:only-child){grid-template-columns:minmax(0,1fr)}
+  #billingsApp .mobile-action-primary>*{width:100%;min-width:0;min-height:44px}
+  #billingsApp .mobile-action-more{display:block;min-width:0}
+  #billingsApp .mobile-action-more>summary{display:flex;align-items:center;justify-content:center;min-height:42px;border:1px solid #dce6ef;border-radius:9px;color:#45617e;font-size:12px;font-weight:800;cursor:pointer;list-style:none}
+  #billingsApp .mobile-action-more>summary::-webkit-details-marker{display:none}
+  #billingsApp .mobile-action-more-panel{display:grid;gap:8px;padding-top:8px}
+  #billingsApp .mobile-action-more-panel>*{width:100%;min-height:44px}
+  #billingsApp .billing-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #billingsApp .billing-filter-grid label{min-width:0}
+  #billingsApp .billing-filter-grid input,#billingsApp .billing-filter-grid select{width:100%;min-width:0}
+  #billingsApp .billing-bundle-toolbar{margin-top:12px}
+  .mobile-billing-detail{display:grid;gap:10px}
+  .mobile-billing-detail .mobile-detail-card{display:grid;gap:8px;min-width:0;padding:12px;border:1px solid #dce6ef;border-radius:11px;background:#fff}
+  .mobile-billing-detail .mobile-detail-card>span{color:#718297;font-size:10px;font-weight:800}
+  .mobile-billing-detail .mobile-detail-card h4{margin:0;color:#173d69;font-size:14px;overflow-wrap:anywhere}
+  #billingEditForm .billing-edit-table-wrap,#billingDraftApp .commission-table-wrap{overflow:visible;max-height:none;border:0;background:transparent}
+  #billingEditForm .billing-edit-table,#billingDraftApp .billing-contract-table,#billingDraftApp .billing-draft-table{display:block;width:100%;min-width:0}
+  #billingEditForm .billing-edit-table colgroup,#billingEditForm .billing-edit-table thead,#billingDraftApp .billing-contract-table thead,#billingDraftApp .billing-draft-table thead{display:none}
+  #billingEditForm .billing-edit-table tbody,#billingDraftApp .billing-contract-table tbody,#billingDraftApp .billing-draft-table tbody{display:grid;gap:12px;width:100%}
+  #billingEditForm .billing-edit-table tr,#billingDraftApp .billing-contract-table tr,#billingDraftApp .billing-draft-table tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;width:100%;padding:12px;border:1px solid #dce6ef;border-radius:12px;background:#fff}
+  #billingEditForm .billing-edit-table td,#billingDraftApp .billing-contract-table td,#billingDraftApp .billing-draft-table td{display:grid;align-content:start;gap:5px;width:auto;height:auto;min-width:0;padding:0;border:0!important;background:transparent!important;text-align:left!important;white-space:normal}
+  #billingEditForm .billing-edit-table td::before,#billingDraftApp .billing-contract-table td::before,#billingDraftApp .billing-draft-table td::before{color:#718297;font-size:9px;font-weight:850}
+  #billingEditForm .billing-edit-table td:nth-child(1)::before{content:'施工日期'}#billingEditForm .billing-edit-table td:nth-child(2)::before{content:'戶別'}#billingEditForm .billing-edit-table td:nth-child(3)::before{content:'施工項目'}#billingEditForm .billing-edit-table td:nth-child(4)::before{content:'單位'}#billingEditForm .billing-edit-table td:nth-child(5)::before{content:'數量'}#billingEditForm .billing-edit-table td:nth-child(6)::before{content:'單價'}#billingEditForm .billing-edit-table td:nth-child(7)::before{content:'小計'}#billingEditForm .billing-edit-table td:nth-child(8)::before{content:'來源'}
+  #billingEditForm .billing-edit-table td:nth-child(3),#billingDraftApp .billing-contract-table td:nth-child(2),#billingDraftApp .billing-draft-table td:nth-child(4),#billingDraftApp .billing-draft-table td:nth-child(9){grid-column:1/-1}
+  #billingDraftApp .billing-contract-table td:nth-child(1)::before{content:'選取'}#billingDraftApp .billing-contract-table td:nth-child(2)::before{content:'總價工程項目'}#billingDraftApp .billing-contract-table td:nth-child(3)::before{content:'合約總價'}#billingDraftApp .billing-contract-table td:nth-child(4)::before{content:'累計已請'}#billingDraftApp .billing-contract-table td:nth-child(5)::before{content:'剩餘未請'}#billingDraftApp .billing-contract-table td:nth-child(6)::before{content:'本次 %'}#billingDraftApp .billing-contract-table td:nth-child(7)::before{content:'本次請款金額'}
+  #billingDraftApp .billing-draft-table td:nth-child(1)::before{content:'選取'}#billingDraftApp .billing-draft-table td:nth-child(2)::before{content:'施工日期'}#billingDraftApp .billing-draft-table td:nth-child(3)::before{content:'戶別'}#billingDraftApp .billing-draft-table td:nth-child(4)::before{content:'施工項目'}#billingDraftApp .billing-draft-table td:nth-child(5)::before{content:'單位'}#billingDraftApp .billing-draft-table td:nth-child(6)::before{content:'單價'}#billingDraftApp .billing-draft-table td:nth-child(7)::before{content:'數量'}#billingDraftApp .billing-draft-table td:nth-child(8)::before{content:'小計'}#billingDraftApp .billing-draft-table td:nth-child(9)::before{content:'備註'}
+  #billingDraftApp .billing-heading-actions,#billingDraftApp .billing-section-head,#billingEditForm>footer{align-items:stretch;flex-direction:column}
+  #billingDraftApp .billing-heading-actions button,#billingDraftApp .billing-mode-switch button,#billingEditForm>footer button{width:100%;min-height:44px}
+  #billingDraftApp .billing-mode-switch{display:grid;grid-template-columns:1fr;gap:8px;width:100%}
+  #billingDraftApp .billing-document-head,#billingEditForm .billing-document-head,#billingEditForm .billing-field-grid{grid-template-columns:1fr}
+  #billingEditForm>.erp-detail-body{padding:14px}
+  #billingEditForm>footer{padding:12px 14px}
+}
+
 /* Project-only safe duplicate merge preview and guarded confirmation. */
 .project-merge-zone{margin-top:13px;border-color:#eadfdc;background:#fffdfc;overflow:hidden}.project-merge-zone .project-section-title{border-bottom:0}.project-merge-zone .project-section-title p{max-width:660px;line-height:1.5}.project-merge-modal{width:min(920px,96vw)}
 .project-merge-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:end;padding-bottom:16px;border-bottom:1px solid #e3eaf1}.project-merge-form label{display:grid;min-width:0;gap:6px}.project-merge-form label>span,.project-merge-final-confirm label>span{color:#63758a;font-size:10px;font-weight:850}.project-merge-form input,.project-merge-form select,.project-merge-final-confirm input{width:100%;min-width:0;height:40px;padding:0 11px;border:1px solid #d6e1ec;border-radius:9px;background:#fff;color:#173d69}.project-merge-form input:disabled{background:#f3f6f9;color:#60758a}.project-merge-form>p{grid-column:1/-1;margin:0;color:#687b90;font-size:10px;line-height:1.5}.project-merge-form>button{justify-self:start}
