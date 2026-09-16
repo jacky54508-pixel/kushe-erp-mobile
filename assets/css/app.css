@@ -875,6 +875,43 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
   #invoicesApp .payable-filter-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
   #invoicesApp .commission-status:not(.settled):not(.overdue){background:#fff1dd;color:#b86506}
 }
+#invoicesApp .mobile-invoices{display:none}
+@media(max-width:620px){
+  #invoicesApp .invoice-heading{align-items:stretch}
+  #invoicesApp .invoice-heading>button{width:100%;min-height:44px}
+  #invoicesApp .commission-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #invoicesApp .invoice-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #invoicesApp .invoice-filter-grid .invoice-month-filter{grid-column:1/-1}
+  #invoicesApp .invoice-filter-grid :is(input,select){width:100%;min-width:0;max-width:100%}
+  #invoicesApp .invoice-desktop-table-wrap{display:none}
+  #invoicesApp .mobile-invoices{display:grid;gap:12px;padding:12px;min-width:0;max-width:100%}
+  #invoicesApp .mobile-record-card{display:grid;gap:10px;min-width:0;max-width:100%;padding:14px;border:1px solid #dce5ee;border-radius:12px;background:#fff;overflow-wrap:anywhere}
+  #invoicesApp .mobile-record-card__header{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:start;min-width:0}
+  #invoicesApp .mobile-record-card__title,#invoicesApp .mobile-record-card__amount{display:grid;gap:4px;min-width:0}
+  #invoicesApp .mobile-record-card__title strong{color:#173f6d;font-size:14px;line-height:1.3;overflow-wrap:anywhere}
+  #invoicesApp .mobile-record-card__title span{color:#66798e;font-size:11px;overflow-wrap:anywhere}
+  #invoicesApp .mobile-record-card__amount{text-align:right}
+  #invoicesApp .mobile-record-card__amount small{color:#62768d;font-size:10px}
+  #invoicesApp .mobile-record-card__amount strong{color:#a65118;font-size:17px;line-height:1.25;overflow-wrap:anywhere}
+  #invoicesApp .mobile-status-badge{justify-self:start;max-width:100%;padding:4px 8px;border-radius:99px;background:#fff1dd;color:#a45b08;font-size:11px;font-weight:850}
+  #invoicesApp .mobile-status-badge.is-issued{background:#e5f7ee;color:#07844c}
+  #invoicesApp .mobile-status-badge.is-void{background:#fff0ed;color:#a13d35}
+  #invoicesApp .mobile-card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 12px;min-width:0}
+  #invoicesApp .mobile-meta-row{display:grid;gap:2px;min-width:0;overflow-wrap:anywhere}
+  #invoicesApp .mobile-meta-row span{color:#77889a;font-size:10px}
+  #invoicesApp .mobile-meta-row strong{color:#2f4c6a;font-size:11px;line-height:1.4;white-space:normal;overflow-wrap:anywhere}
+  #invoicesApp .mobile-action-primary{display:grid;grid-template-columns:1fr;gap:7px;min-width:0}
+  #invoicesApp .mobile-action-primary button{width:100%;min-width:0;min-height:40px;max-width:100%;padding:8px 11px;border:1px solid #075bd8;border-radius:8px;background:#075bd8;color:#fff;font-size:11px;font-weight:850;white-space:normal;overflow-wrap:anywhere}
+  #invoicesApp .mobile-invoice-empty{margin:0;padding:24px 14px;color:#77879a;text-align:center}
+  .erp-detail-overlay:has(.invoice-editor-card){padding:8px}
+  .invoice-editor-card{width:calc(100vw - 16px);max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px)}
+  .invoice-editor-card :is(#inputInvoiceForm,#outputInvoiceForm){min-width:0;min-height:0;display:flex;flex:1 1 auto;flex-direction:column;overflow:hidden}
+  .invoice-editor-card :is(#inputInvoiceForm,#outputInvoiceForm)>.erp-detail-body{min-width:0;min-height:0;overflow-x:hidden;overflow-y:auto;padding:14px}
+  .invoice-editor-card .receipt-form-grid,.invoice-editor-card .billing-detail-summary{grid-template-columns:1fr}
+  .invoice-editor-card :is(input,select){width:100%;min-width:0;max-width:100%}
+  .invoice-editor-card form>footer{position:sticky;bottom:0;display:flex;flex-wrap:wrap;padding:12px;background:#fff}
+  .invoice-editor-card form>footer button{flex:1 1 120px;min-width:0;min-height:44px}
+}
 
 /* Billing-only selection and confirmation UI for read-only combined external PDFs. */
 .billing-bundle-toolbar{display:flex;align-items:center;gap:12px;margin:14px 0;padding:12px 14px;border:1px solid #cfe0ee;border-radius:12px;background:#f4f8fc;color:#536980}
