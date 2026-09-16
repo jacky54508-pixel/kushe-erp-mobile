@@ -503,6 +503,7 @@
         unitPrice,
         amount: usage.amount === undefined ? quantity * unitPrice : store.num(usage.amount),
         date: usage.date || '',
+        source: payableBlockerLabel({key:'materialUsages'}),
         note: usage.note || ''
       };
     });
@@ -522,6 +523,7 @@
         unitPrice,
         amount: receipt.amount === undefined ? quantity * unitPrice : store.num(receipt.amount),
         date: receipt.date || '',
+        source: payableBlockerLabel({key:'inventoryReceipts'}),
         note: receipt.note || ''
       };
     });
@@ -551,11 +553,9 @@
         && (!query || `${row.payableNo} ${row.vendorName} ${projectLabel(row,state)} ${row.category} ${row.item} ${row.note || ''} ${searchableDetails}`.toLocaleLowerCase('zh-Hant').includes(query));
     }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
   }
-  function materialDetailsMarkup(payable, state) {
+  function buildSourcePresentation(payable, state) {
+    if (!materialSource(payable)) return {kind:'expense',lines:[{date:payable.date || '—',projectName:payable.projectName || state.projects.find((row) => row.id === payable.project)?.name || '—',source:payable.category || payable.sourceNo || '其他',item:payable.item || payable.description || payable.sourceNo || '—',amount:payable.amount,note:payable.note || '—'}]};
     const lines = linkedMaterialLines(payable, state);
-    if (!lines.length) {
-      return `<section class="payable-source-section"><header><div><h3>材料使用明細</h3><p>直接讀取既有材料來源</p></div></header><div class="payable-source-empty"><b>現有資料未保存可展開的逐筆材料明細</b><span>${esc(payable.note || payable.sourceNo || '僅保留應付彙總資料')}</span></div></section>`;
-    }
     const groups = new Map();
     lines.forEach((line) => {
       const key = line.projectId || line.projectName || 'unassigned';
@@ -564,49 +564,56 @@
     });
     const sourceTotal = lines.reduce((sum, line) => sum + store.num(line.amount), 0);
     const matches = Math.abs(sourceTotal - store.num(payable.amount)) < 0.5;
-    return `<section class="payable-source-section"><header><div><h3>材料使用明細</h3><p>${groups.size} 個案場・${lines.length} 筆既有材料來源</p></div></header><div class="payable-material-groups">${[...groups.values()].map((group) => {
-      const subtotal = group.lines.reduce((sum, line) => sum + store.num(line.amount), 0);
-      return `<article class="payable-material-group"><div class="payable-material-group-head"><b>${esc(group.name)}</b><span>案場小計 ${money(subtotal)}</span></div><div class="payable-detail-scroll"><table class="payable-source-table"><thead><tr><th>案場</th><th>材料名稱</th><th>規格／型號</th><th>單位</th><th class="num">數量</th><th class="num">單價</th><th class="num">小計</th><th>使用／紀錄日期</th></tr></thead><tbody>${group.lines.map((line) => `<tr><td>${esc(line.projectName)}</td><td><b>${esc(line.materialName)}</b></td><td>${esc(line.model || '—')}</td><td>${esc(line.unit)}</td><td class="num">${line.quantity}</td><td class="num">${money(line.unitPrice)}</td><td class="num"><b>${money(line.amount)}</b></td><td>${esc(line.date || '—')}</td></tr>`).join('')}</tbody></table></div></article>`;
-    }).join('')}</div><div class="payable-source-total ${matches ? 'is-matched' : 'is-mismatch'}"><span>材料應付合計</span><strong>${money(sourceTotal)}</strong><small>${matches ? '與應付金額一致' : `應付帳款金額 ${money(payable.amount)}，現有來源資料有差異`}</small></div></section>`;
+    return {kind:'material',lines,groups:[...groups.values()].map((group) => ({...group,subtotal:group.lines.reduce((sum, line) => sum + store.num(line.amount), 0)})),sourceTotal,matches,emptyNote:payable.note || payable.sourceNo || '僅保留應付彙總資料'};
   }
-  function expenseDetailsMarkup(payable, state) {
-    const project = payable.projectName || state.projects.find((row) => row.id === payable.project)?.name || '—';
-    return `<section class="payable-source-section"><header><div><h3>費用明細</h3><p>直接顯示此筆應付既有來源</p></div></header><div class="payable-detail-scroll"><table class="payable-expense-table"><thead><tr><th>日期</th><th>案場</th><th>類別／來源</th><th>項目／說明</th><th class="num">金額</th><th>備註</th></tr></thead><tbody><tr><td>${esc(payable.date || '—')}</td><td>${esc(project)}</td><td>${esc(payable.category || payable.sourceNo || '其他')}</td><td>${esc(payable.item || payable.description || payable.sourceNo || '—')}</td><td class="num"><b>${money(payable.amount)}</b></td><td>${esc(payable.note || '—')}</td></tr></tbody></table></div></section>`;
+  function sourceDetailsMarkup(source, payable) {
+    if (source.kind === 'expense') {
+      const line=source.lines[0];
+      return `<section class="payable-source-section"><header><div><h3>費用明細</h3><p>直接顯示此筆應付既有來源</p></div></header><div class="payable-detail-scroll"><table class="payable-expense-table"><thead><tr><th>日期</th><th>案場</th><th>類別／來源</th><th>項目／說明</th><th class="num">金額</th><th>備註</th></tr></thead><tbody><tr><td>${esc(line.date)}</td><td>${esc(line.projectName)}</td><td>${esc(line.source)}</td><td>${esc(line.item)}</td><td class="num"><b>${money(line.amount)}</b></td><td>${esc(line.note)}</td></tr></tbody></table></div></section>`;
+    }
+    if (!source.lines.length) return `<section class="payable-source-section"><header><div><h3>材料使用明細</h3><p>直接讀取既有材料來源</p></div></header><div class="payable-source-empty"><b>現有資料未保存可展開的逐筆材料明細</b><span>${esc(source.emptyNote)}</span></div></section>`;
+    return `<section class="payable-source-section"><header><div><h3>材料使用明細</h3><p>${source.groups.length} 個案場・${source.lines.length} 筆既有材料來源</p></div></header><div class="payable-material-groups">${source.groups.map((group) => `<article class="payable-material-group"><div class="payable-material-group-head"><b>${esc(group.name)}</b><span>案場小計 ${money(group.subtotal)}</span></div><div class="payable-detail-scroll"><table class="payable-source-table"><thead><tr><th>案場</th><th>材料名稱</th><th>規格／型號</th><th>單位</th><th class="num">數量</th><th class="num">單價</th><th class="num">小計</th><th>使用／紀錄日期</th></tr></thead><tbody>${group.lines.map((line) => `<tr><td>${esc(line.projectName)}</td><td><b>${esc(line.materialName)}</b></td><td>${esc(line.model || '—')}</td><td>${esc(line.unit)}</td><td class="num">${line.quantity}</td><td class="num">${money(line.unitPrice)}</td><td class="num"><b>${money(line.amount)}</b></td><td>${esc(line.date || '—')}</td></tr>`).join('')}</tbody></table></div></article>`).join('')}</div><div class="payable-source-total ${source.matches ? 'is-matched' : 'is-mismatch'}"><span>材料應付合計</span><strong>${money(source.sourceTotal)}</strong><small>${source.matches ? '與應付金額一致' : `應付帳款金額 ${money(payable.amount)}，現有來源資料有差異`}</small></div></section>`;
   }
   function verifiedHistoricalPaymentMarkup(payable, truth) {
     return `<section class="payable-payment-section"><header><div><h3>付款紀錄</h3><p>${truth.paymentCount} 次付款（歷史資料已核對）</p></div></header><div class="payable-history-scroll"><table class="payable-detail-table payable-tax-payment-table"><thead><tr><th>付款日期</th><th class="num">未稅沖帳</th><th class="num">進項稅額</th><th class="num">銀行實際付款</th><th>銀行帳戶</th><th>付款狀態</th><th>備註</th></tr></thead><tbody><tr><td>${esc(truth.bankDate || '—')}</td><td class="num">${money(truth.netAmount)}</td><td class="num">${money(truth.taxAmount)}</td><td class="num"><b>${money(truth.bankAmount)}</b></td><td>${esc(truth.bankName)}</td><td><span class="commission-status settled">已完成</span></td><td>歷史付款資料，材料、發票與銀行金額已完整核對</td></tr></tbody></table></div></section>`;
   }
-  function paymentHistoryMarkup(payable, state, taxPayment = null) {
-    if (taxPayment?.verified) return verifiedHistoricalPaymentMarkup(payable, taxPayment);
-    const history = state.payments.filter((row) => row.payableId === payable.id).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
-    return `<section class="payable-payment-section"><header><div><h3>付款紀錄</h3><p>${history.length ? `${history.length} 次付款` : '尚未付款'}</p></div></header>${history.length ? `<div class="payable-history-scroll"><table class="payable-detail-table"><thead><tr><th>付款日期</th><th class="num">本次付款</th><th>銀行帳戶</th><th>付款方式</th><th class="num">手續費</th><th class="num">實際扣款</th><th>備註</th><th>操作</th></tr></thead><tbody>${history.map((payment) => {
-      const bank = state.banks.find((item) => item.id === payment.bankId);
-      return `<tr><td>${esc(payment.date || '—')}</td><td class="num">${money(payment.amount)}</td><td>${esc(bank?.name || bank?.bank || bank?.account || '—')}</td><td>${esc(payment.paymentMethod || '銀行轉帳')}</td><td class="num">${money(payment.fee)}</td><td class="num">${money(payment.actualDebit ?? payment.amount)}</td><td>${esc(payment.note || '—')}</td><td>${payment.legacy?'—':`<button class="commission-link" type="button" data-edit-payment="${esc(payment.id)}">編輯</button><button class="commission-link" type="button" data-delete-payment="${esc(payment.id)}">刪除</button>`}</td></tr>`;
-    }).join('')}</tbody></table></div>` : `<div class="payable-empty-state"><span>尚無付款紀錄</span><button class="commission-secondary compact" type="button" data-empty-pay="${esc(payable.id)}">＋ 新增付款</button></div>`}</section>`;
+  function buildPaymentPresentation(payable, state, taxPayment = null) {
+    if (taxPayment?.verified) return {kind:'historical',count:taxPayment.paymentCount,rows:[{id:'',date:taxPayment.bankDate || '—',amount:taxPayment.netAmount,taxAmount:taxPayment.taxAmount,actualDebit:taxPayment.bankAmount,bankName:taxPayment.bankName,status:'已完成',note:'歷史付款資料，材料、發票與銀行金額已完整核對',editable:false,deletable:false}]};
+    const rows=state.payments.filter((row) => row.payableId === payable.id).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).map((payment) => {
+      const bank=state.banks.find((item) => item.id === payment.bankId);
+      return {id:payment.id,date:payment.date || '—',amount:payment.amount,bankName:bank?.name || bank?.bank || bank?.account || '—',method:payment.paymentMethod || '銀行轉帳',fee:payment.fee,actualDebit:payment.actualDebit ?? payment.amount,note:payment.note || '—',editable:!payment.legacy,deletable:!payment.legacy};
+    });
+    return {kind:'standard',count:rows.length,rows};
+  }
+  function paymentHistoryMarkup(payable, payments) {
+    if (payments.kind==='historical') return verifiedHistoricalPaymentMarkup(payable, {...payments.rows[0],verified:true,paymentCount:payments.count,bankDate:payments.rows[0].date,netAmount:payments.rows[0].amount,bankAmount:payments.rows[0].actualDebit});
+    return `<section class="payable-payment-section"><header><div><h3>付款紀錄</h3><p>${payments.count ? `${payments.count} 次付款` : '尚未付款'}</p></div></header>${payments.count ? `<div class="payable-history-scroll"><table class="payable-detail-table"><thead><tr><th>付款日期</th><th class="num">本次付款</th><th>銀行帳戶</th><th>付款方式</th><th class="num">手續費</th><th class="num">實際扣款</th><th>備註</th><th>操作</th></tr></thead><tbody>${payments.rows.map((payment) => `<tr><td>${esc(payment.date)}</td><td class="num">${money(payment.amount)}</td><td>${esc(payment.bankName)}</td><td>${esc(payment.method)}</td><td class="num">${money(payment.fee)}</td><td class="num">${money(payment.actualDebit)}</td><td>${esc(payment.note)}</td><td>${payment.editable?`<button class="commission-link" type="button" data-edit-payment="${esc(payment.id)}">編輯</button><button class="commission-link" type="button" data-delete-payment="${esc(payment.id)}">刪除</button>`:'—'}</td></tr>`).join('')}</tbody></table></div>` : `<div class="payable-empty-state"><span>尚無付款紀錄</span><button class="commission-secondary compact" type="button" data-empty-pay="${esc(payable.id)}">＋ 新增付款</button></div>`}</section>`;
   }
   function taxPaymentDetailsMarkup(payable, truth) {
     if (!truth?.verified) return '';
     return `<section class="payable-tax-payment-section"><header><div><h3>實際付款資訊</h3><p>${esc(truth.sourceLabel)}；未稅應付與含稅銀行付款分開呈現</p></div></header><div class="payable-tax-payment-groups"><article><h4>應付資訊</h4><dl><div><dt>材料未稅</dt><dd>${money(truth.netAmount)}</dd></div><div><dt>稅額</dt><dd>${money(truth.taxAmount)}</dd></div><div><dt>含稅總額</dt><dd>${money(truth.grossAmount)}</dd></div><div><dt>付款狀態</dt><dd>已付清</dd></div></dl></article><article><h4>發票</h4><dl><div><dt>發票號碼</dt><dd>${esc(truth.invoiceNumber)}</dd></div><div><dt>未稅</dt><dd>${money(truth.netAmount)}</dd></div><div><dt>稅額</dt><dd>${money(truth.taxAmount)}</dd></div><div><dt>含稅</dt><dd>${money(truth.grossAmount)}</dd></div></dl></article><article><h4>銀行付款</h4><dl><div><dt>實際付款</dt><dd>${money(truth.bankAmount)}</dd></div><div><dt>銀行交易日期</dt><dd>${esc(truth.bankDate)}</dd></div><div><dt>付款銀行</dt><dd>${esc(truth.bankName)}</dd></div><div><dt>付款狀態</dt><dd>已完成</dd></div></dl></article></div><p class="payable-tax-history-note">此筆為歷史付款資料，原始舊應付關聯已不存在，但目前材料、發票與銀行付款可完整核對。</p></section>`;
   }
-  function detailMarkup(id, state) {
-    const raw = state.payables.find((row) => row.id === id);
-    if (!raw) return '';
-    const payable = payableView(raw, state);
-    const taxPayment = historicalTaxPaymentTruth(raw, state);
-    const source = materialSource(payable) ? materialDetailsMarkup(payable, state) : expenseDetailsMarkup(payable, state);
-    return `<tr class="payable-history-row" data-payment-detail="${esc(id)}"><td colspan="9"><div class="payable-expanded-content">${taxPaymentDetailsMarkup(payable,taxPayment)}${source}${paymentHistoryMarkup(payable,state,taxPayment)}</div></td></tr>`;
+  function buildPayablePresentation(payable, state) {
+    const raw=state.payables.find((row)=>row.id===payable.id)||payable;
+    const taxPayment=historicalTaxPaymentTruth(raw,state),source=buildSourcePresentation(payable,state),payments=buildPaymentPresentation(payable,state,taxPayment);
+    const projectNames=source.kind==='material'?[...new Set(source.lines.map((line)=>line.projectName).filter((name)=>name&&name!=='未指定案場'))]:[];
+    const project=projectNames.length>1?`${projectNames.length} 個案場`:projectNames[0]||payable.projectName||state.projects.find((row)=>row.id===payable.project)?.name||'—';
+    return {...payable,project,sourceLabel:payable.sourceNo||payable.item||payable.category,sourceTypeLabel:payableSourceLabel(payable.sourceType),paymentMonths:[...payablePaymentMonths(payable,state)],taxPayment,source,payments,canPay:payable.outstanding>0};
   }
-  function toggleDetail(id) {
+  function detailMarkup(model) {
+    return `<tr class="payable-history-row" data-payment-detail="${esc(model.id)}"><td colspan="9"><div class="payable-expanded-content">${taxPaymentDetailsMarkup(model,model.taxPayment)}${sourceDetailsMarkup(model.source,model)}${paymentHistoryMarkup(model,model.payments)}</div></td></tr>`;
+  }
+  function toggleDetail(id, model) {
     const main = $(`[data-expand-payable="${CSS.escape(id)}"]`);
     if (!main) return;
     let detail = main.nextElementSibling?.matches('[data-payment-detail]') ? main.nextElementSibling : null;
     const expanded = !main.classList.contains('is-expanded');
     if (expanded && !detail) {
-      main.insertAdjacentHTML('afterend', detailMarkup(id, store.getState()));
+      main.insertAdjacentHTML('afterend', detailMarkup(model));
       detail = main.nextElementSibling;
       $('[data-empty-pay]', detail)?.addEventListener('click', (event) => { event.stopPropagation(); openPayment(id); });
       $$('[data-edit-payment]',detail).forEach((button)=>button.addEventListener('click',(event)=>{event.stopPropagation();openEditPayment(button.dataset.editPayment)}));
-      $$('[data-delete-payment]',detail).forEach((button)=>button.addEventListener('click',async(event)=>{event.stopPropagation();if(!window.confirm('確定要刪除此付款紀錄嗎？銀行扣款將同步沖回。'))return;try{await store.deletePayablePayment(button.dataset.deletePayment);render();setTimeout(()=>toggleDetail(id),0);window.KushePhase1.toast('付款已刪除，銀行扣款已沖回')}catch(error){window.KushePhase1.toast(error.message||String(error))}}));
+      $$('[data-delete-payment]',detail).forEach((button)=>button.addEventListener('click',(event)=>{event.stopPropagation();deletePaymentAction(button.dataset.deletePayment,id)}));
     }
     if (detail) detail.hidden = !expanded;
     main.classList.toggle('is-expanded', expanded);
@@ -618,6 +625,11 @@
       $('span', button).textContent = expanded ? '⌃' : '⌄';
     }
     requestAnimationFrame(scheduleStickyScrollbar);
+  }
+  async function deletePaymentAction(paymentId, payableId, reopenDesktopDetail=true) {
+    if(!window.confirm('確定要刪除此付款紀錄嗎？銀行扣款將同步沖回。'))return;
+    try{await store.deletePayablePayment(paymentId);render();if(reopenDesktopDetail)setTimeout(()=>{const state=store.getState(),view=allRows().find((row)=>row.id===payableId);if(view)toggleDetail(payableId,buildPayablePresentation(view,state))},0);window.KushePhase1.toast('付款已刪除，銀行扣款已沖回')}
+    catch(error){window.KushePhase1.toast(error.message||String(error))}
   }
   function openPayableTestCleanup(id) {
     let target, preview;
@@ -789,7 +801,26 @@
       }
     };
   }
-  function bindListEvents() {
+  function mobileSourceMarkup(model) {
+    const source=model.source;
+    if(source.kind==='expense'){
+      const line=source.lines[0];
+      return `<section class="mobile-detail-stack"><h4>費用明細</h4><article class="mobile-detail-item"><div class="mobile-detail-item__top"><span>${esc(line.projectName)}</span><span>${esc(line.date)}</span></div><strong class="mobile-detail-item__title">${esc(line.item)}</strong><div class="mobile-meta-row"><span>${esc(line.source)}</span><strong>${money(line.amount)}</strong></div>${line.note!=='—'?`<p class="mobile-detail-note">${esc(line.note)}</p>`:''}</article></section>`;
+    }
+    if(!source.lines.length)return `<section class="mobile-detail-stack"><h4>材料使用明細</h4><p class="mobile-detail-note">${esc(source.emptyNote)}</p></section>`;
+    return `<section class="mobile-detail-stack"><h4>材料使用明細</h4>${source.lines.map((line)=>`<article class="mobile-detail-item"><div class="mobile-detail-item__top">${[line.projectName,line.source].filter((value)=>value&&value!=='—').map((value)=>`<span>${esc(value)}</span>`).join('')}</div><strong class="mobile-detail-item__title">${esc(line.materialName)}</strong>${line.date?`<p class="mobile-detail-note">${esc(line.date)}</p>`:''}${line.model?`<p class="mobile-detail-note">${esc(line.model)}</p>`:''}<div class="mobile-detail-item__meta">${esc([line.quantity,line.unit].filter((value)=>value!==''&&value!==undefined&&value!==null&&value!=='—').join(' '))}</div><div class="mobile-detail-item__amount-row"><span>單價 ${money(line.unitPrice)}</span><strong>小計 ${money(line.amount)}</strong></div></article>`).join('')}<div class="mobile-source-total ${source.matches?'is-matched':'is-mismatch'}"><span>材料應付合計</span><strong>${money(source.sourceTotal)}</strong></div></section>`;
+  }
+  function mobilePaymentMarkup(model) {
+    const payments=model.payments;
+    if(!payments.count)return `<section class="mobile-detail-stack"><h4>付款紀錄</h4><div class="mobile-detail-item"><span>尚無付款紀錄</span></div></section>`;
+    return `<section class="mobile-detail-stack"><h4>付款紀錄</h4>${payments.rows.map((payment)=>`<article class="mobile-detail-item"><div class="mobile-detail-item__top"><span>${esc(payment.date)}</span><strong>${money(payment.amount)}</strong></div>${payment.bankName?`<div class="mobile-meta-row"><span>銀行帳戶</span><strong>${esc(payment.bankName)}</strong></div>`:''}${payment.method?`<div class="mobile-meta-row"><span>付款方式</span><strong>${esc(payment.method)}</strong></div>`:''}${payment.fee!==undefined?`<div class="mobile-meta-row"><span>手續費</span><strong>${money(payment.fee)}</strong></div>`:''}<div class="mobile-meta-row"><span>實際扣款</span><strong>${money(payment.actualDebit)}</strong></div>${payment.note&&payment.note!=='—'?`<p class="mobile-detail-note">${esc(payment.note)}</p>`:''}${payment.editable?`<div class="mobile-action-row"><button type="button" data-mobile-edit-payment="${esc(payment.id)}">編輯</button><button class="mobile-danger-action" type="button" data-mobile-delete-payment="${esc(payment.id)}" data-payable-id="${esc(model.id)}">刪除</button></div>`:''}</article>`).join('')}</section>`;
+  }
+  function mobilePayableCardMarkup(model) {
+    const meta=[['應付金額',money(model.amount)],['已付',money(model.paid)],['應付日期',model.date||''],['到期日',model.dueDate||''],['應付月份',monthOf(model.date)],['付款月份',model.paymentMonths.join('、')],['來源類型',model.sourceTypeLabel]].filter(([,value])=>value&&value!=='—');
+    return `<article class="mobile-record-card" data-mobile-payable="${esc(model.id)}"><header class="mobile-record-card__header"><div class="mobile-record-card__title"><strong>${esc(model.vendorName)}</strong><span>${esc(model.project)}${model.sourceLabel&&model.sourceLabel!==model.project?`｜${esc(model.sourceLabel)}`:''}</span></div><div class="mobile-record-card__amount"><small>未付金額</small><strong>${money(model.outstanding)}</strong></div></header><span class="mobile-status-badge">${esc(model.status)}</span><div class="mobile-card-grid">${meta.map(([label,value])=>`<div class="mobile-meta-row"><span>${label}</span><strong>${esc(value)}</strong></div>`).join('')}</div><div class="mobile-action-layout"><div class="mobile-action-primary"><button class="mobile-primary-action" type="button" data-mobile-payable-expand aria-expanded="false">查看明細</button>${model.canPay?`<button class="mobile-primary-action" type="button" data-pay="${esc(model.id)}">付款</button>`:''}</div><details class="mobile-action-more"><summary>更多操作</summary><div class="mobile-action-more-panel"><button class="mobile-danger-action" type="button" data-mobile-payable-delete="${esc(model.id)}">刪除整筆帳務</button></div></details></div><div class="mobile-payable-detail" hidden>${mobileSourceMarkup(model)}${mobilePaymentMarkup(model)}</div></article>`;
+  }
+  function bindListEvents(models) {
+    const modelById=new Map(models.map((model)=>[String(model.id),model]));
     [['payableMonth','month'],['payablePaymentMonth','paymentMonth'],['payableVendor','vendor'],['payableProject','project'],['payableCategory','category'],['payableStatus','status']].forEach(([id,key]) => {
       $(`#${id}`).onchange = (event) => { filters[key] = event.target.value; render(); };
     });
@@ -805,25 +836,30 @@
     };
     $('#newPayable').onclick = openNewPayable;
     $$('[data-pay]').forEach((button) => { button.onclick = (event) => { event.stopPropagation(); openPayment(button.dataset.pay); }; });
-    $$('[data-expand-button]').forEach((button) => { button.onclick = (event) => { event.stopPropagation(); toggleDetail(button.dataset.expandButton); }; });
+    $$('[data-expand-button]').forEach((button) => { button.onclick = (event) => { event.stopPropagation();toggleDetail(button.dataset.expandButton,modelById.get(String(button.dataset.expandButton)));}; });
     $$('[data-payable-more]').forEach((button) => { button.onclick = (event) => {
       event.stopPropagation();
       openPayableMenu(button, button.dataset.payableMore);
     }; });
     $$('[data-expand-payable]').forEach((row) => {
-      row.onclick = (event) => { if (!event.target.closest('button,a,input,select')) toggleDetail(row.dataset.expandPayable); };
+      row.onclick = (event) => { if (!event.target.closest('button,a,input,select')) toggleDetail(row.dataset.expandPayable,modelById.get(String(row.dataset.expandPayable))); };
       row.onkeydown = (event) => {
         if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('button,a,input,select')) {
           event.preventDefault();
-          toggleDetail(row.dataset.expandPayable);
+          toggleDetail(row.dataset.expandPayable,modelById.get(String(row.dataset.expandPayable)));
         }
       };
     });
+    $$('[data-mobile-payable-expand]').forEach((button)=>button.onclick=()=>{const card=button.closest('[data-mobile-payable]'),detail=$('.mobile-payable-detail',card),expanded=detail.hidden;detail.hidden=!expanded;button.setAttribute('aria-expanded',String(expanded));button.textContent=expanded?'收合明細':'查看明細'});
+    $$('[data-mobile-payable-delete]').forEach((button)=>button.onclick=()=>openPayableDelete(button.dataset.mobilePayableDelete));
+    $$('[data-mobile-edit-payment]').forEach((button)=>button.onclick=()=>openEditPayment(button.dataset.mobileEditPayment));
+    $$('[data-mobile-delete-payment]').forEach((button)=>button.onclick=()=>deletePaymentAction(button.dataset.mobileDeletePayment,button.dataset.payableId,false));
   }
   function render() {
     if (!active) return;
     const state = store.getState();
     const rows = filteredRows();
+    const models = rows.map((row)=>buildPayablePresentation(row,state));
     const all = allRows();
     const month = monthOf(today());
     const total = all.reduce((sum, row) => sum + row.amount, 0);
@@ -835,15 +871,8 @@
     $('#payablesApp').innerHTML = `<section class="commissions-heading"><div><h1>應付帳款</h1><p>管理廠商款項、分次付款與銀行實際扣款</p></div><button class="commission-primary" id="newPayable" type="button">＋ 新增應付</button></section>
       <section class="commission-kpis payable-kpis"><article><span>應付總額</span><strong>${money(total)}</strong><small>${all.length} 筆應付</small></article><article class="is-success"><span>本月已付</span><strong>${money(monthPaid)}</strong><small>${esc(month)} 付款</small></article><article class="is-warning"><span>未付帳款</span><strong>${money(open)}</strong><small>含部分付款餘額</small></article><article class="is-warning"><span>逾期應付</span><strong>${money(overdue)}</strong><small>已超過到期日</small></article><article><span>本月新增應付</span><strong>${money(monthAdded)}</strong><small>${esc(month)} 新增</small></article></section>
       <section class="commission-panel commission-filters"><div class="payable-filter-grid"><label><span>應付月份</span><input id="payableMonth" type="month" value="${esc(filters.month)}"></label><label><span>付款月份</span><input id="payablePaymentMonth" type="month" value="${esc(filters.paymentMonth)}"></label><label><span>廠商／收款人</span><select id="payableVendor">${selectOptions(state.vendors,filters.vendor,'全部廠商／收款人')}</select></label><label><span>案場</span><select id="payableProject">${selectOptions(state.projects,filters.project,'全部案場')}</select></label><label><span>類別</span><select id="payableCategory"><option value="">全部類別</option>${categories.map((value) => `<option ${filters.category === value ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select></label><label><span>付款狀態</span><select id="payableStatus"><option value="">全部狀態</option>${['未付款','部分付款','已付清'].map((value) => `<option ${filters.status === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label class="payable-search" style="grid-column:1/-1"><span>關鍵字</span><input id="payableQuery" type="search" value="${esc(filters.query)}" placeholder="廠商、案場、材料或費用"></label></div><p class="payable-filter-note" style="margin:10px 0 0;color:#718096;font-size:12px">應付月份＝帳款建立月份｜付款月份＝實際付款月份</p></section>
-      <section class="commission-panel billing-list-panel"><div class="commission-table-wrap"><table class="commission-table payable-table"><thead><tr><th>日期</th><th>廠商／收款人</th><th>案場</th><th>類別／來源</th><th class="num">應付金額</th><th class="num">已付</th><th class="num">未付</th><th>狀態</th><th>操作</th></tr></thead><tbody>${rows.map((row) => {
-        const history = state.payments.filter((payment) => payment.payableId === row.id);
-        const taxPayment = historicalTaxPaymentTruth(state.payables.find((payable) => payable.id === row.id), state);
-        const project = projectLabel(row, state);
-        const source = row.sourceNo || row.item || row.category;
-        const paymentCount = taxPayment?.verified ? taxPayment.paymentCount : history.length;
-        return `<tr class="payable-main-row" data-expand-payable="${esc(row.id)}" tabindex="0" aria-expanded="false"><td>${esc(row.date || '—')}</td><td><b>${esc(row.vendorName)}</b>${paymentCount ? `<span class="receipt-count-badge">${paymentCount} 次付款</span>` : ''}</td><td><b>${esc(project)}</b></td><td><span class="payable-category">${esc(row.category)}</span><small class="payable-source-label">${esc(source)}</small></td><td class="num"><span class="payable-net-amount">${money(row.amount)}</span>${taxPayment?.verified ? `<small class="payable-tax-paid">含稅實付 ${money(taxPayment.bankAmount)}</small>` : ''}</td><td class="num">${money(row.paid)}</td><td class="num"><b>${money(row.outstanding)}</b></td><td><span class="commission-status ${row.baseStatus === '已付清' ? 'settled' : row.baseStatus === '部分付款' ? 'partial' : row.overdue ? 'overdue' : ''}">${esc(row.status)}</span></td><td><div class="receivable-actions payable-row-actions">${row.outstanding > 0 ? `<button class="commission-primary compact" type="button" data-pay="${esc(row.id)}">付款</button>` : ''}<button class="receivable-expand" type="button" data-expand-button="${esc(row.id)}" aria-label="展開應付明細" aria-expanded="false"><span aria-hidden="true">⌄</span></button><div class="payable-more"><button class="payable-more-toggle" type="button" data-payable-more="${esc(row.id)}" aria-label="更多操作" aria-expanded="false">⋯</button></div></div></td></tr>`;
-      }).join('') || '<tr><td colspan="9" class="billing-empty">此篩選條件下沒有應付帳款。</td></tr>'}</tbody></table></div></section>`;
-    bindListEvents();
+      <section class="commission-panel billing-list-panel"><div class="commission-table-wrap"><table class="commission-table payable-table"><thead><tr><th>日期</th><th>廠商／收款人</th><th>案場</th><th>類別／來源</th><th class="num">應付金額</th><th class="num">已付</th><th class="num">未付</th><th>狀態</th><th>操作</th></tr></thead><tbody>${models.map((row) => `<tr class="payable-main-row" data-expand-payable="${esc(row.id)}" tabindex="0" aria-expanded="false"><td>${esc(row.date || '—')}</td><td><b>${esc(row.vendorName)}</b>${row.payments.count ? `<span class="receipt-count-badge">${row.payments.count} 次付款</span>` : ''}</td><td><b>${esc(row.project)}</b></td><td><span class="payable-category">${esc(row.category)}</span><small class="payable-source-label">${esc(row.sourceLabel)}</small></td><td class="num"><span class="payable-net-amount">${money(row.amount)}</span>${row.taxPayment?.verified ? `<small class="payable-tax-paid">含稅實付 ${money(row.taxPayment.bankAmount)}</small>` : ''}</td><td class="num">${money(row.paid)}</td><td class="num"><b>${money(row.outstanding)}</b></td><td><span class="commission-status ${row.baseStatus === '已付清' ? 'settled' : row.baseStatus === '部分付款' ? 'partial' : row.overdue ? 'overdue' : ''}">${esc(row.status)}</span></td><td><div class="receivable-actions payable-row-actions">${row.canPay ? `<button class="commission-primary compact" type="button" data-pay="${esc(row.id)}">付款</button>` : ''}<button class="receivable-expand" type="button" data-expand-button="${esc(row.id)}" aria-label="展開應付明細" aria-expanded="false"><span aria-hidden="true">⌄</span></button><div class="payable-more"><button class="payable-more-toggle" type="button" data-payable-more="${esc(row.id)}" aria-label="更多操作" aria-expanded="false">⋯</button></div></div></td></tr>`).join('') || '<tr><td colspan="9" class="billing-empty">此篩選條件下沒有應付帳款。</td></tr>'}</tbody></table></div><div class="mobile-payables">${models.map(mobilePayableCardMarkup).join('')||'<p class="mobile-detail-item">此篩選條件下沒有應付帳款。</p>'}</div></section>`;
+    bindListEvents(models);
     requestAnimationFrame(scheduleStickyScrollbar);
   }
   function openNewPayable() {

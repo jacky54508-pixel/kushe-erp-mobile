@@ -726,6 +726,51 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
   #receivablesApp .mobile-filter-more:not([open])>.mobile-filter-control{display:none}
 }
 
+#payablesApp .mobile-payables{display:none}
+@media(max-width:620px){
+  #payablesApp .billing-list-panel>.commission-table-wrap{display:none}
+  #payablesApp .mobile-payables{display:grid;gap:12px;padding:12px;min-width:0;max-width:100%}
+  #payablesApp .mobile-record-card{display:grid;gap:10px;min-width:0;max-width:100%;padding:14px;border:1px solid #dce5ee;border-radius:12px;background:#fff;overflow-wrap:anywhere}
+  #payablesApp .mobile-record-card__header{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:start;min-width:0}
+  #payablesApp .mobile-record-card__title,#payablesApp .mobile-record-card__amount{display:grid;gap:4px;min-width:0}
+  #payablesApp .mobile-record-card__title strong{color:#173f6d;font-size:14px;line-height:1.3;overflow-wrap:anywhere}
+  #payablesApp .mobile-record-card__title span{color:#66798e;font-size:11px;overflow-wrap:anywhere}
+  #payablesApp .mobile-record-card__amount{text-align:right}
+  #payablesApp .mobile-record-card__amount small{color:#62768d;font-size:10px}
+  #payablesApp .mobile-record-card__amount strong{color:#a65118;font-size:17px;line-height:1.25;overflow-wrap:anywhere}
+  #payablesApp .mobile-status-badge{justify-self:start;max-width:100%;padding:4px 8px;border-radius:99px;background:#edf4fb;color:#255b85;font-size:11px;font-weight:850}
+  #payablesApp .mobile-card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 12px;min-width:0}
+  #payablesApp .mobile-meta-row{display:grid;gap:2px;min-width:0;overflow-wrap:anywhere}
+  #payablesApp .mobile-meta-row span{color:#77889a;font-size:10px}
+  #payablesApp .mobile-meta-row strong{color:#2f4c6a;font-size:11px;line-height:1.4;white-space:normal;overflow-wrap:anywhere}
+  #payablesApp .mobile-action-layout{display:grid;gap:7px;min-width:0;max-width:100%}
+  #payablesApp .mobile-action-primary{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,82px),1fr));gap:7px;min-width:0}
+  #payablesApp .mobile-action-primary>button{width:100%;min-width:0}
+  #payablesApp .mobile-action-primary button,#payablesApp .mobile-action-more-panel button,#payablesApp .mobile-action-row button{min-height:40px;max-width:100%;padding:8px 11px;border:1px solid #cddded;border-radius:8px;background:#f4f8fd;color:#204f79;font-size:11px;font-weight:850;white-space:normal;overflow-wrap:anywhere}
+  #payablesApp .mobile-primary-action{border-color:#075bd8!important;background:#075bd8!important;color:#fff!important}
+  #payablesApp .mobile-danger-action{border-color:#efc7c3!important;background:#fff8f6!important;color:#9e3c35!important}
+  #payablesApp .mobile-action-more{display:block;width:100%;min-width:0}
+  #payablesApp .mobile-action-more>summary{min-height:40px;padding:10px;color:#60758c;font-size:11px;font-weight:800;cursor:pointer}
+  #payablesApp .mobile-action-more-panel{display:grid;width:100%;min-width:0;padding-top:7px}
+  #payablesApp .mobile-action-more-panel button{width:100%;min-width:0}
+  #payablesApp .mobile-payable-detail{display:grid;gap:10px;min-width:0;max-width:100%;padding-top:12px;border-top:1px solid #e2eaf1}
+  #payablesApp .mobile-payable-detail[hidden]{display:none!important}
+  #payablesApp .mobile-detail-stack{display:grid;gap:9px;min-width:0;max-width:100%}
+  #payablesApp .mobile-detail-stack h4{margin:8px 0 0;color:#173f6d;font-size:12px}
+  #payablesApp .mobile-detail-item{display:grid;gap:8px;min-width:0;max-width:100%;padding:11px;border:1px solid #e1e9f1;border-radius:9px;background:#f8fbfe;overflow-wrap:anywhere}
+  #payablesApp .mobile-detail-item__top,#payablesApp .mobile-detail-item__amount-row{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px;min-width:0;color:#66798e;font-size:10px}
+  #payablesApp .mobile-detail-item__title{min-width:0;color:#173f6d;font-size:13px;line-height:1.4;overflow-wrap:anywhere}
+  #payablesApp .mobile-detail-item__meta{min-width:0;color:#405c78;font-size:11px;font-weight:800;overflow-wrap:anywhere}
+  #payablesApp .mobile-detail-item__amount-row strong{color:#a65118;font-size:12px}
+  #payablesApp .mobile-detail-note{margin:0;color:#697e92;font-size:10px;line-height:1.5;overflow-wrap:anywhere}
+  #payablesApp .mobile-action-row{display:flex;flex-wrap:wrap;gap:7px;min-width:0}
+  #payablesApp .mobile-source-total{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;padding:9px 11px;border-radius:8px;background:#edf7f3;color:#23624f;font-size:11px}
+  #payablesApp .mobile-source-total.is-mismatch{background:#fff5e8;color:#955b12}
+  #payablesApp .payable-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #payablesApp .payable-filter-grid .payable-search{grid-column:1/-1!important}
+  #payablesApp .payable-filter-grid :is(input,select){width:100%;min-width:0;max-width:100%}
+}
+
 /* Payables-only safe-delete menu and preflight dialog. */
 #payablesApp .payable-row-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;white-space:nowrap}
 #payablesApp .payable-row-actions>button{min-height:32px;height:32px;margin:0}
