@@ -116,13 +116,14 @@ html,body{height:100%;overflow:hidden}
 @media(max-width:520px){.unbilled-summary,.unbilled-filter-grid,.daily-form-grid,.daily-pay-grid,.daily-total-bar{grid-template-columns:1fr}.daily-work-panel>header,.unbilled-project>header{display:grid}.unbilled-project-stats{justify-content:flex-start}}
 @media(max-width:520px){.unbilled-month-selection{padding:12px}.unbilled-month-selection>header{align-items:flex-start;display:grid}.unbilled-month-selection>header>strong{white-space:normal}.unbilled-month-list{grid-template-columns:1fr}.unbilled-month-list label{grid-template-columns:auto minmax(0,1fr) auto}.unbilled-month-list label>strong{grid-column:2/-1}.unbilled-month-list input{width:22px;height:22px}}
 @media(max-width:620px){
- #unbilledWorkApp{min-width:0;max-width:100%;overflow-x:hidden}
- #unbilledWorkApp .unbilled-summary,#unbilledWorkApp .unbilled-filter-grid{grid-template-columns:1fr}
- #unbilledWorkApp .unbilled-project{overflow:hidden}
+ #unbilledWorkApp,#unbilledWorkApp .unbilled-list,#unbilledWorkApp .unbilled-project,#unbilledWorkApp .unbilled-project>header,#unbilledWorkApp .unbilled-project-stats,#unbilledWorkApp .unbilled-summary,#unbilledWorkApp .unbilled-filter-grid,#unbilledWorkApp .unbilled-card-actions,#unbilledWorkApp .unbilled-month-selection,#unbilledWorkApp .unbilled-month-list,#unbilledWorkApp .unbilled-details,#unbilledWorkApp .unbilled-mobile-details,#unbilledWorkApp .unbilled-mobile-source,#unbilledWorkApp .unbilled-mobile-month,#unbilledWorkApp .unbilled-mobile-detail-card{box-sizing:border-box;width:100%;inline-size:100%;min-width:0;max-width:100%}
+ #unbilledWorkApp{overflow-x:hidden}
+ #unbilledWorkApp .unbilled-summary,#unbilledWorkApp .unbilled-filter-grid{grid-template-columns:minmax(0,1fr)}
+ #unbilledWorkApp .unbilled-project{justify-self:stretch;overflow:hidden}
  #unbilledWorkApp .unbilled-project>header{display:grid;align-items:stretch;gap:14px;padding:15px}
  #unbilledWorkApp .unbilled-project>header>div{min-width:0}
  #unbilledWorkApp .unbilled-project h2,#unbilledWorkApp .unbilled-project header p{overflow-wrap:anywhere}
- #unbilledWorkApp .unbilled-project-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:12px 0 0}
+ #unbilledWorkApp .unbilled-project-meta{display:grid;width:100%;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:12px 0 0}
  #unbilledWorkApp .unbilled-project-meta>div{min-width:0;padding:8px;border:1px solid #e1e9f2;border-radius:9px;background:#f8fafc}
  #unbilledWorkApp .unbilled-project-meta dt{color:#6a7a8f;font-size:10px;font-weight:750}
  #unbilledWorkApp .unbilled-project-meta dd{margin:4px 0 0;color:#173d69;font-size:12px;font-weight:850;overflow-wrap:anywhere}
@@ -135,7 +136,7 @@ html,body{height:100%;overflow:hidden}
  #unbilledWorkApp .unbilled-month-selection>header{display:grid;align-items:start;gap:8px}
  #unbilledWorkApp .unbilled-month-selection>header>strong{white-space:normal;overflow-wrap:anywhere}
  #unbilledWorkApp .unbilled-month-list{grid-template-columns:1fr}
- #unbilledWorkApp .unbilled-month-list label{grid-template-columns:auto minmax(0,1fr) auto;min-width:0;padding:11px 10px}
+ #unbilledWorkApp .unbilled-month-list label{box-sizing:border-box;width:100%;inline-size:100%;grid-template-columns:auto minmax(0,1fr) auto;min-width:0;max-width:100%;padding:11px 10px}
  #unbilledWorkApp .unbilled-month-list label>strong{grid-column:2/-1;white-space:normal;overflow-wrap:anywhere}
  #unbilledWorkApp .unbilled-month-list small{white-space:normal;overflow-wrap:anywhere}
  #unbilledWorkApp .unbilled-month-list input{width:22px;height:22px}
