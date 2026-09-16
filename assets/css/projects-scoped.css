@@ -38,9 +38,205 @@
   margin-top: 14px;
 }
 
+.customer-manager-modal .customer-manager-search {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.customer-manager-modal .customer-manager-search span {
+  color: #63748a;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.customer-manager-modal .customer-manager-search input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0 11px;
+  border: 1px solid #d7e1ec;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.customer-manager-modal .customer-mobile-list {
+  display: none;
+}
+
 @media (max-width: 900px) {
   .project-master-modal .project-setting-grid,
   #projectsView .project-billing-settings-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .customer-manager-modal,
+  .customer-master-form-modal {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+
+  .customer-manager-modal .erp-detail-body,
+  .customer-master-form-modal .erp-detail-body {
+    min-width: 0;
+    padding: 14px;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .customer-manager-modal .customer-desktop-list {
+    display: none;
+  }
+
+  .customer-manager-modal .customer-mobile-list {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    gap: 10px;
+  }
+
+  .customer-manager-modal .customer-mobile-card {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    gap: 10px;
+    padding: 13px;
+    border: 1px solid #dce5ee;
+    border-radius: 12px;
+    background: #fff;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-manager-modal .customer-mobile-card h3 {
+    margin: 0;
+    color: #173f6d;
+    font-size: 15px;
+  }
+
+  .customer-manager-modal .customer-mobile-card header span {
+    display: block;
+    margin-top: 4px;
+    color: #6d7e92;
+    font-size: 10px;
+  }
+
+  .customer-manager-modal .customer-mobile-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    margin: 0;
+  }
+
+  .customer-manager-modal .customer-mobile-meta div {
+    min-width: 0;
+    padding: 8px;
+    border-radius: 8px;
+    background: #f6f9fc;
+  }
+
+  .customer-manager-modal .customer-mobile-meta dt {
+    color: #718197;
+    font-size: 9px;
+    font-weight: 800;
+  }
+
+  .customer-manager-modal .customer-mobile-meta dd {
+    margin: 4px 0 0;
+    color: #294c6d;
+    font-size: 11px;
+    font-weight: 750;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-manager-modal .customer-mobile-projects {
+    display: grid;
+    gap: 7px;
+    min-width: 0;
+  }
+
+  .customer-manager-modal .customer-mobile-projects strong {
+    color: #315573;
+    font-size: 10px;
+  }
+
+  .customer-manager-modal .customer-mobile-projects div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .customer-manager-modal .customer-mobile-projects span {
+    max-width: 100%;
+    padding: 4px 7px;
+    border-radius: 99px;
+    background: #edf4fb;
+    color: #315b82;
+    font-size: 9px;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-manager-modal .customer-mobile-note {
+    margin: 0;
+    padding: 9px;
+    border-radius: 8px;
+    background: #fff9ec;
+    color: #6d6049;
+    font-size: 10px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-manager-modal .customer-mobile-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .customer-manager-modal .customer-mobile-actions button {
+    width: 100%;
+    min-width: 0;
+    min-height: 42px;
+    border: 1px solid #d4dfeb;
+    border-radius: 8px;
+    background: #f7fafe;
+    color: #31516f;
+    font-weight: 800;
+  }
+
+  .customer-manager-modal .customer-mobile-actions button:last-child {
+    color: #b9473c;
+  }
+
+  .customer-manager-modal > footer,
+  .customer-master-form-modal form > footer {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 12px 14px;
+  }
+
+  .customer-manager-modal > footer button,
+  .customer-master-form-modal form > footer button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .customer-master-form-modal .project-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .customer-master-form-modal .project-form-grid .wide {
+    grid-column: auto;
+  }
+
+  .customer-master-form-modal .project-form-grid :is(input, textarea) {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
   }
 }
