@@ -120,8 +120,8 @@ html,body{height:100%;overflow:hidden}
  #unbilledWorkApp{overflow-x:hidden}
  #unbilledWorkApp .unbilled-summary,#unbilledWorkApp .unbilled-filter-grid{grid-template-columns:minmax(0,1fr)}
  #unbilledWorkApp .unbilled-project{justify-self:stretch;overflow:hidden}
- #unbilledWorkApp .unbilled-project>header{display:grid;align-items:stretch;gap:14px;padding:15px}
- #unbilledWorkApp .unbilled-project>header>div{min-width:0}
+ #unbilledWorkApp .unbilled-project>header{display:grid;grid-template-columns:minmax(0,1fr);justify-content:stretch;justify-items:stretch;align-items:stretch;width:100%;inline-size:100%;min-width:0;max-width:100%;gap:14px;padding:15px}
+ #unbilledWorkApp .unbilled-project>header>div{width:100%;inline-size:100%;min-width:0;max-width:100%}
  #unbilledWorkApp .unbilled-project h2,#unbilledWorkApp .unbilled-project header p{overflow-wrap:anywhere}
  #unbilledWorkApp .unbilled-project-meta{display:grid;width:100%;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:12px 0 0}
  #unbilledWorkApp .unbilled-project-meta>div{min-width:0;padding:8px;border:1px solid #e1e9f2;border-radius:9px;background:#f8fafc}
