@@ -927,6 +927,72 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 .project-merge-issues{padding:10px 12px;border:1px solid #dce5ee;border-radius:9px;background:#f8fafc}.project-merge-issues h4{margin:0;color:#506980;font-size:10px}.project-merge-issues p{margin:5px 0 0;color:#16805f;font-size:10px;font-weight:850}.project-merge-issues ul{margin:7px 0 0;padding-left:18px;color:#a23f37;font-size:10px;line-height:1.55}.project-merge-issues.has-issues{border-color:#efc9c3;background:#fff7f5}.project-merge-preview-note,.project-merge-blocked,.project-merge-empty{margin:0;padding:10px 12px;border-radius:8px;background:#edf4fb;color:#526a82;font-size:10px;line-height:1.5}.project-merge-blocked{background:#fff0ed;color:#9f3f36;font-weight:850}.project-merge-confirm-open{justify-self:start}
 .project-merge-final-confirm{display:grid;gap:11px;padding:15px;border:1px solid #edc6c1;border-radius:10px;background:#fff8f6}.project-merge-final-confirm h3{margin:0;color:#963f36;font-size:13px}.project-merge-final-confirm p{margin:0;color:#744f4b;font-size:10px;line-height:1.55}.project-merge-final-confirm label{display:grid;gap:6px}.project-merge-final-confirm button{justify-self:start}.project-merge-final-confirm button:disabled{cursor:not-allowed;opacity:.45}
 @media(max-width:620px){.project-merge-zone .project-section-title{align-items:stretch;flex-direction:column}.project-merge-zone .project-section-title button{width:100%;min-height:44px}.project-merge-modal{width:100%}.project-merge-modal .erp-detail-body{padding:14px}.project-merge-form{grid-template-columns:1fr}.project-merge-form>p{grid-column:auto}.project-merge-form>button,.project-merge-confirm-open,.project-merge-final-confirm button{width:100%;min-height:44px}.project-merge-direction{grid-template-columns:1fr}.project-merge-direction>b{justify-self:center;transform:rotate(90deg)}.project-merge-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+#quotationsApp .mobile-quotations,#quotationsApp .mobile-quotation-detail{display:none}
+@media(max-width:620px){
+  #quotationsApp .quotation-desktop-list,#quotationsApp .quotation-desktop-detail,#quotationsApp .quotation-desktop-totals{display:none}
+  #quotationsApp .mobile-quotations{display:grid;gap:12px;padding:12px;min-width:0;max-width:100%}
+  #quotationsApp .mobile-record-card{display:grid;gap:10px;min-width:0;max-width:100%;padding:14px;border:1px solid #dce5ee;border-radius:12px;background:#fff;overflow-wrap:anywhere}
+  #quotationsApp .mobile-record-card__header{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:start;min-width:0}
+  #quotationsApp .mobile-record-card__title,#quotationsApp .mobile-record-card__amount{display:grid;gap:4px;min-width:0}
+  #quotationsApp .mobile-record-card__title strong{color:#173f6d;font-size:14px;line-height:1.3;overflow-wrap:anywhere}
+  #quotationsApp .mobile-record-card__title span{color:#66798e;font-size:11px;line-height:1.4;overflow-wrap:anywhere}
+  #quotationsApp .mobile-record-card__amount{text-align:right}
+  #quotationsApp .mobile-record-card__amount small{color:#62768d;font-size:10px}
+  #quotationsApp .mobile-record-card__amount strong{color:#a65118;font-size:17px;line-height:1.25;overflow-wrap:anywhere}
+  #quotationsApp .mobile-quote-badges{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+  #quotationsApp .mobile-card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 12px;min-width:0}
+  #quotationsApp .mobile-meta-row{display:grid;gap:2px;min-width:0;overflow-wrap:anywhere}
+  #quotationsApp .mobile-meta-row span{color:#77889a;font-size:10px}
+  #quotationsApp .mobile-meta-row strong{color:#2f4c6a;font-size:11px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere}
+  #quotationsApp .mobile-action-layout{display:grid;gap:7px;min-width:0;max-width:100%}
+  #quotationsApp .mobile-action-primary{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,82px),1fr));gap:7px;min-width:0}
+  #quotationsApp .mobile-action-primary>button{width:100%;min-width:0}
+  #quotationsApp .mobile-action-primary button,#quotationsApp .mobile-action-more-panel button{min-height:40px;max-width:100%;padding:8px 11px;border:1px solid #cddded;border-radius:8px;background:#f4f8fd;color:#204f79;font-size:11px;font-weight:850;white-space:normal;overflow-wrap:anywhere}
+  #quotationsApp .mobile-primary-action{border-color:#075bd8!important;background:#075bd8!important;color:#fff!important}
+  #quotationsApp .mobile-danger-action{border-color:#efc7c3!important;background:#fff8f6!important;color:#9e3c35!important}
+  #quotationsApp .mobile-action-more{display:block;width:100%;min-width:0}
+  #quotationsApp .mobile-action-more>summary{min-height:40px;padding:10px;color:#60758c;font-size:11px;font-weight:800;cursor:pointer}
+  #quotationsApp .mobile-action-more-panel{display:grid;width:100%;min-width:0;gap:7px;padding-top:7px}
+  #quotationsApp .mobile-action-more-panel button{width:100%;min-width:0}
+  #quotationsApp .mobile-quotation-empty{margin:0;padding:24px 14px;color:#77879a;text-align:center}
+  #quotationsApp .mobile-quotation-detail{display:grid;gap:9px;min-width:0;max-width:100%;margin-top:12px}
+  #quotationsApp .mobile-detail-item{display:grid;gap:8px;min-width:0;max-width:100%;padding:11px;border:1px solid #e1e9f1;border-radius:9px;background:#f8fbfe;overflow-wrap:anywhere}
+  #quotationsApp .mobile-detail-item__top,#quotationsApp .mobile-detail-item__amount-row{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px;min-width:0;color:#66798e;font-size:10px}
+  #quotationsApp .mobile-detail-item__title{min-width:0;color:#173f6d;font-size:13px;line-height:1.4;overflow-wrap:anywhere}
+  #quotationsApp .mobile-detail-item__meta{min-width:0;color:#405c78;font-size:11px;font-weight:800;overflow-wrap:anywhere}
+  #quotationsApp .mobile-detail-item__amount-row{color:#526d87;font-size:11px}
+  #quotationsApp .mobile-detail-item__amount-row strong{color:#a65118;font-size:12px}
+  #quotationsApp .mobile-detail-note{margin:0;color:#697e92;font-size:10px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+  #quotationsApp .quotation-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #quotationsApp .quotation-filter-grid .quotation-search{grid-column:1/-1}
+  #quotationsApp .quotation-filter-grid :is(input,select){width:100%;min-width:0;max-width:100%}
+  #quotationsApp .quotation-drawer{width:100%;max-width:100%}
+  #quotationsApp .quotation-drawer .commission-drawer-body{min-width:0;padding:14px;overflow-x:hidden}
+  #quotationsApp .quotation-detail-notes p{white-space:pre-wrap;overflow-wrap:anywhere}
+  #quotationsApp #quotationForm .daily-lines-wrap{max-width:100%;overflow:visible}
+  #quotationsApp #quotationForm .quotation-lines-table{display:block;width:100%;min-width:0}
+  #quotationsApp #quotationForm .quotation-lines-table thead{display:none}
+  #quotationsApp #quotationForm .quotation-lines-table tbody{display:grid;gap:12px;width:100%;min-width:0}
+  #quotationsApp #quotationForm .quotation-line{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px 10px;min-width:0;padding:12px;border:1px solid #dce5ee;border-radius:11px;background:#f8fafc}
+  #quotationsApp #quotationForm .quotation-line td{display:grid;gap:4px;width:auto;min-width:0;padding:0;border:0;background:transparent!important;text-align:left}
+  #quotationsApp #quotationForm .quotation-line td[hidden]{display:none!important}
+  #quotationsApp #quotationForm .quotation-line td::before{color:#718297;font-size:9px;font-weight:800}
+  #quotationsApp #quotationForm .quotation-line td:nth-child(1)::before{content:'項目計價'}
+  #quotationsApp #quotationForm .quotation-line td:nth-child(2)::before{content:'戶別'}
+  #quotationsApp #quotationForm .quotation-line td:nth-child(3)::before{content:'品名／施工項目'}
+  #quotationsApp #quotationForm .quotation-line td:nth-child(4)::before{content:'單位'}
+  #quotationsApp #quotationForm .quotation-line td:nth-child(5)::before{content:'預估數量'}
+  #quotationsApp #quotationForm .quotation-line td:nth-child(6)::before{content:'單價'}
+  #quotationsApp #quotationForm .quotation-line td:nth-child(7)::before{content:'總價'}
+  #quotationsApp #quotationForm .quotation-line td:nth-child(8)::before{content:'價格來源'}
+  #quotationsApp #quotationForm .quotation-line td:nth-child(9)::before{content:'預估／總價金額'}
+  #quotationsApp #quotationForm .quotation-line td:nth-child(10)::before{content:'工作範圍／備註'}
+  #quotationsApp #quotationForm .quotation-line td:nth-child(11)::before{content:'操作'}
+  #quotationsApp #quotationForm .quotation-line td:nth-child(3),#quotationsApp #quotationForm .quotation-line td:nth-child(10),#quotationsApp #quotationForm .quotation-line td:nth-child(11){grid-column:1/-1}
+  #quotationsApp #quotationForm .quotation-line :is(input,select,button){box-sizing:border-box;width:100%;min-width:0;max-width:100%;min-height:40px}
+  #quotationsApp #quotationForm .quote-subtotal{display:flex;align-items:center;min-height:40px;color:#a65118;font-size:13px}
+  #quotationsApp #quotationForm .quotation-note-grid textarea{white-space:pre-wrap}
+}
 /* P17 storage warnings are independent of transient success toasts. */
 .store-safety-banner{position:fixed;bottom:12px;left:12px;right:12px;z-index:10050;padding:14px;background:#fff3d5;border:2px solid #ac6500;color:#452b00;display:flex;gap:12px;align-items:center;flex-wrap:wrap;overflow-wrap:anywhere}
 .store-safety-banner[hidden],.store-recovery-modal[hidden]{display:none!important}
