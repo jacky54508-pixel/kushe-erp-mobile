@@ -191,7 +191,7 @@
     return route === 'dashboard' || config.moduleLabels?.[route] ? route : 'dashboard';
   }
   function currentHashRoute() { return validRoute(decodeURIComponent(window.location.hash.slice(1))); }
-  function renderRoute(module) {
+  function renderRoute(module, options = {}) {
     const route = validRoute(module);
     ui.route = route;
     const isDashboard = route === 'dashboard';
@@ -239,7 +239,7 @@
     if (!isQuotations) window.KusheQuotations?.deactivate();
     if (isProjects) {
       window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();window.KusheBanks?.deactivate();
-      window.KusheProjects?.activate({customer:route==='customers'});document.title = '酷舍 ERP｜客戶／案場';
+      window.KusheProjects?.activate({customer:route==='customers',customerId:route==='customers'?(options.customerId||''):''});document.title = '酷舍 ERP｜客戶／案場';
     } else if (isQuotations) {
       window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();window.KusheBanks?.deactivate();
       window.KusheQuotations?.activate();document.title = '酷舍 ERP－報價單管理';
@@ -302,7 +302,7 @@
     const route = validRoute(module);
     if (!options.replace && currentHashRoute() !== route) history.pushState({ route }, '', `#${route}`);
     else if (options.replace) history.replaceState({ route }, '', `#${route}`);
-    renderRoute(route);
+    renderRoute(route, options);
     ui.mobileOpen = false;
     setShell();
     closePopovers();
@@ -343,14 +343,14 @@
     const data=window.KuSheLegacyData.getState(); const labels=config.moduleLabels||{};
     const modules=Object.entries(labels).filter(([key])=>key!=='dashboard'&&key!=='billing-draft').map(([module,label])=>({module,label,sub:'功能模組'}));
     const projects=(data.projects||[]).map((row)=>({module:'projects',label:row.name||'—',sub:'案場'}));
-    const customers=(data.customers||[]).map((row)=>({module:'customers',label:row.name||'—',sub:'客戶'}));
+    const customers=(data.customers||[]).map((row)=>({module:'customers',label:row.name||'—',sub:'客戶',targetId:row.id}));
     const docs=[]; (data.billings||[]).forEach((row)=>docs.push({module:'billings',label:row.number||row.sourceNo||'—',sub:row.projectName||'請款單'}));
     (data.receivables||[]).forEach((row)=>{if(row.invoiceNo||row.sourceNo)docs.push({module:'receivables',label:row.invoiceNo||row.sourceNo,sub:row.projectName||'應收帳款'})});
     return [...modules,...projects,...customers,...docs].filter((row)=>row.label&&row.label!=='—');
   }
   function setupSearch() {
     const input=$('#globalSearch'),popover=$('#searchPopover');
-    function render(){const term=input.value.trim().toLocaleLowerCase('zh-Hant');const rows=searchItems().filter((row)=>!term||`${row.label} ${row.sub}`.toLocaleLowerCase('zh-Hant').includes(term)).slice(0,8);popover.innerHTML=rows.length?rows.map((row)=>`<button class="search-result" type="button" data-search-module="${row.module}"><span><b>${escapeText(row.label)}</b><small>　${escapeText(row.sub)}</small></span><span>→</span></button>`).join(''):'<div class="popover-empty">找不到相符資料</div>';popover.classList.add('is-open');$$('[data-search-module]',popover).forEach((button)=>button.addEventListener('click',()=>navigate(button.dataset.searchModule)))}
+    function render(){const term=input.value.trim().toLocaleLowerCase('zh-Hant');const rows=searchItems().filter((row)=>!term||`${row.label} ${row.sub}`.toLocaleLowerCase('zh-Hant').includes(term)).slice(0,8);popover.innerHTML=rows.length?rows.map((row)=>`<button class="search-result" type="button" data-search-module="${row.module}"${row.targetId?` data-search-target-id="${escapeText(row.targetId)}"`:''}><span><b>${escapeText(row.label)}</b><small>　${escapeText(row.sub)}</small></span><span>→</span></button>`).join(''):'<div class="popover-empty">找不到相符資料</div>';popover.classList.add('is-open');$$('[data-search-module]',popover).forEach((button)=>button.addEventListener('click',()=>{const customerId=button.dataset.searchTargetId||'';navigate(button.dataset.searchModule,customerId?{customerId}:{})}))}
     input.addEventListener('focus',render);input.addEventListener('input',render);input.addEventListener('keydown',(event)=>{if(event.key==='Escape'){popover.classList.remove('is-open');input.blur()}if(event.key==='Enter')$('[data-search-module]',popover)?.click()});
     document.addEventListener('keydown',(event)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){event.preventDefault();input.focus();input.select()}});
   }
