@@ -64,6 +64,10 @@
   display: none;
 }
 
+#projectsView .project-mobile-list {
+  display: none;
+}
+
 @media (max-width: 900px) {
   .project-master-modal .project-setting-grid,
   #projectsView .project-billing-settings-grid {
@@ -72,6 +76,170 @@
 }
 
 @media (max-width: 620px) {
+  #projectsView #projectsApp,
+  #projectsView .project-list-panel,
+  #projectsView .project-filter-grid,
+  #projectsView .project-filter-grid label,
+  #projectsView .project-filter-grid :is(select, input) {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-filter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #projectsView .project-desktop-list {
+    display: none;
+  }
+
+  #projectsView .project-mobile-list {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 10px;
+    padding: 12px;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-mobile-card {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 11px;
+    padding: 13px;
+    border: 1px solid #dce5ee;
+    border-radius: 12px;
+    background: #fff;
+    box-sizing: border-box;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-mobile-card-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+  }
+
+  #projectsView .project-mobile-card-head > div {
+    min-width: 0;
+  }
+
+  #projectsView .project-mobile-card-head h3 {
+    margin: 0;
+    color: #0b3b70;
+    font-size: 16px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-mobile-card-head p,
+  #projectsView .project-mobile-address {
+    margin: 4px 0 0;
+    color: #687b91;
+    font-size: 11px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-mobile-condition {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: baseline;
+    gap: 8px;
+    margin: 0;
+    padding: 9px 10px;
+    border-radius: 8px;
+    background: #edf4ff;
+  }
+
+  #projectsView .project-mobile-condition span {
+    color: #64778d;
+    font-size: 10px;
+    font-weight: 800;
+  }
+
+  #projectsView .project-mobile-condition strong {
+    min-width: 0;
+    color: #245b96;
+    font-size: 11px;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-mobile-financials {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    margin: 0;
+  }
+
+  #projectsView .project-mobile-financials div {
+    min-width: 0;
+    padding: 9px;
+    border-radius: 8px;
+    background: #f6f9fc;
+  }
+
+  #projectsView .project-mobile-financials dt {
+    color: #718197;
+    font-size: 9px;
+    font-weight: 800;
+  }
+
+  #projectsView .project-mobile-financials dd {
+    margin: 5px 0 0;
+    color: #173f6d;
+    font-size: 12px;
+    font-weight: 850;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-mobile-profit {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    padding: 10px;
+    border-top: 1px solid #e4ebf3;
+  }
+
+  #projectsView .project-mobile-profit span,
+  #projectsView .project-mobile-profit small {
+    color: #687b91;
+    font-size: 10px;
+    font-weight: 800;
+  }
+
+  #projectsView .project-mobile-profit strong {
+    min-width: 0;
+    font-size: 15px;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-mobile-action {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+  }
+
+  #projectsView .project-mobile-empty {
+    margin: 0;
+    padding: 24px 14px;
+  }
+
+  .project-sticky-scrollbar {
+    display: none !important;
+  }
+
   .customer-manager-modal,
   .customer-master-form-modal {
     width: calc(100vw - 16px);
