@@ -76,6 +76,140 @@
 }
 
 @media (max-width: 620px) {
+  #projectsView .project-detail-head {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-back {
+    width: fit-content;
+    max-width: 100%;
+    min-height: 44px;
+    justify-self: start;
+    white-space: normal;
+  }
+
+  #projectsView .project-detail-head > div {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #projectsView .project-detail-head > div > span,
+  #projectsView .project-detail-head h1,
+  #projectsView .project-detail-head em {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  #projectsView .project-detail-head p {
+    min-width: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+
+  #projectsView .project-detail-head > .project-row-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #projectsView .project-detail-head > .project-row-actions button {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    white-space: normal;
+  }
+
+  #projectsView .project-detail-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #projectsView .project-detail-kpis article,
+  #projectsView .project-detail-kpis span,
+  #projectsView .project-detail-kpis strong {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  #projectsView .project-tabs button {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    height: auto;
+    white-space: normal;
+  }
+
+  #projectsView .project-overview-grid,
+  #projectsView .project-overview-grid.recent {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #projectsView .project-overview-grid > *,
+  #projectsView .project-progress-card,
+  #projectsView .project-profit-card,
+  #projectsView .project-mini-list {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #projectsView .project-overview-grid .project-section-title {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  #projectsView .project-overview-grid .project-section-title > div,
+  #projectsView .project-overview-grid .project-section-title :is(h2, p, strong),
+  #projectsView .project-finance-bars > div,
+  #projectsView .project-finance-bars :is(span, b),
+  #projectsView .project-cost-breakdown div,
+  #projectsView .project-cost-breakdown :is(dt, dd),
+  #projectsView .project-profit-card :is(h2, strong, span, p),
+  #projectsView .project-mini-list > header,
+  #projectsView .project-mini-list > div,
+  #projectsView .project-mini-list > div :is(span, b, strong) {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-finance-bars {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #projectsView .project-cost-breakdown {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #projectsView .project-mini-list > header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  #projectsView .project-mini-list > div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+    gap: 8px;
+  }
+
   #projectsView #projectsApp,
   #projectsView .project-list-panel,
   #projectsView .project-filter-grid,
@@ -406,5 +540,12 @@
     width: 100%;
     min-width: 0;
     max-width: 100%;
+  }
+}
+
+@media (max-width: 360px) {
+  #projectsView .project-detail-kpis,
+  #projectsView .project-cost-breakdown {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
