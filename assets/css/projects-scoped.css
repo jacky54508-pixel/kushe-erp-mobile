@@ -68,6 +68,10 @@
   display: none;
 }
 
+#projectsView .project-daily-mobile-list {
+  display: none;
+}
+
 @media (max-width: 900px) {
   .project-master-modal .project-setting-grid,
   #projectsView .project-billing-settings-grid {
@@ -76,6 +80,118 @@
 }
 
 @media (max-width: 620px) {
+  #projectsView .project-daily-desktop {
+    display: none;
+  }
+
+  #projectsView .project-daily-mobile-list {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 10px;
+    padding: 12px;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-daily-card {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 11px;
+    padding: 13px;
+    border: 1px solid #dce5ee;
+    border-radius: 12px;
+    background: #fff;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-daily-card header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  #projectsView .project-daily-card header > div,
+  #projectsView .project-daily-card :is(h3, p, span, strong, dl, div, dt, dd) {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #projectsView .project-daily-card header > div > span,
+  #projectsView .project-daily-card dt,
+  #projectsView .project-daily-employee > span {
+    color: #718197;
+    font-size: 9px;
+    font-weight: 800;
+  }
+
+  #projectsView .project-daily-card h3 {
+    margin: 4px 0 0;
+    color: #173f6d;
+    font-size: 15px;
+    line-height: 1.4;
+  }
+
+  #projectsView .project-daily-employee {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+  }
+
+  #projectsView .project-daily-employee strong {
+    color: #315573;
+    font-size: 11px;
+  }
+
+  #projectsView .project-daily-meta,
+  #projectsView .project-daily-amounts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    margin: 0;
+  }
+
+  #projectsView .project-daily-meta div,
+  #projectsView .project-daily-amounts div {
+    padding: 9px;
+    border-radius: 8px;
+    background: #f6f9fc;
+  }
+
+  #projectsView .project-daily-meta div:last-child {
+    grid-column: 1 / -1;
+  }
+
+  #projectsView .project-daily-card dd {
+    margin: 5px 0 0;
+    color: #173f6d;
+    font-size: 12px;
+    font-weight: 850;
+    line-height: 1.35;
+  }
+
+  #projectsView .project-daily-amounts dd {
+    font-size: 14px;
+  }
+
+  #projectsView .project-daily-card :is(h3, p, span, strong, dt, dd) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  #projectsView .project-daily-empty {
+    margin: 0;
+    padding: 24px 14px;
+    color: #748499;
+    text-align: center;
+  }
+
   #projectsView .project-detail-head {
     width: 100%;
     min-width: 0;
