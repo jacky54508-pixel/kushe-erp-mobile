@@ -72,6 +72,10 @@
   display: none;
 }
 
+#projectsView .project-billing-mobile-list {
+  display: none;
+}
+
 @media (max-width: 900px) {
   .project-master-modal .project-setting-grid,
   #projectsView .project-billing-settings-grid {
@@ -80,6 +84,105 @@
 }
 
 @media (max-width: 620px) {
+  #projectsView .project-billing-desktop {
+    display: none;
+  }
+
+  #projectsView .project-billing-mobile-list {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 10px;
+    padding: 12px;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-billing-mobile-card {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 11px;
+    padding: 13px;
+    border: 1px solid #dce5ee;
+    border-radius: 12px;
+    background: #fff;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-billing-mobile-card header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  #projectsView .project-billing-mobile-card header > div,
+  #projectsView .project-billing-mobile-card :is(h3, span, dl, div, dt, dd) {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #projectsView .project-billing-mobile-card header > div > span,
+  #projectsView .project-billing-mobile-card dt {
+    color: #718197;
+    font-size: 9px;
+    font-weight: 800;
+  }
+
+  #projectsView .project-billing-mobile-card h3 {
+    margin: 4px 0 0;
+    color: #173f6d;
+    font-size: 15px;
+    line-height: 1.4;
+  }
+
+  #projectsView .project-billing-mobile-meta,
+  #projectsView .project-billing-mobile-amounts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    margin: 0;
+  }
+
+  #projectsView .project-billing-mobile-meta div,
+  #projectsView .project-billing-mobile-amounts div {
+    min-width: 0;
+    max-width: 100%;
+    padding: 9px;
+    border-radius: 8px;
+    background: #f6f9fc;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-billing-mobile-card dd {
+    margin: 5px 0 0;
+    color: #173f6d;
+    font-size: 12px;
+    font-weight: 850;
+    line-height: 1.35;
+  }
+
+  #projectsView .project-billing-mobile-amounts dd {
+    font-size: 14px;
+  }
+
+  #projectsView .project-billing-mobile-card :is(h3, span, dt, dd) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  #projectsView .project-billing-mobile-empty {
+    margin: 0;
+    padding: 24px 14px;
+    color: #748499;
+    text-align: center;
+  }
+
   #projectsView .project-daily-desktop {
     display: none;
   }
