@@ -60,13 +60,48 @@
     const all=data.projects.map((project)=>({project,metrics:projectMetrics(project)}));
     const filtered=all.filter(({project})=>{if(filters.customer&&project.customer!==filters.customer)return false;if(filters.project&&project.id!==filters.project)return false;if(filters.status&&projectStatus(project)!==filters.status)return false;if(filters.year&&!String(project.startDate||project.createdAt||'').startsWith(filters.year))return false;return !query||`${project.name} ${customerName(project)} ${project.address||''} ${project.note||''}`.toLocaleLowerCase('zh-Hant').includes(query)}),rows=filtered.map(({project,metrics})=>buildProjectPresentation(project,metrics));
     const month=today().slice(0,7),ongoing=all.filter(({project})=>projectStatus(project)==='進行中').length,monthConstruction=all.reduce((sum,{metrics})=>sum+metrics.entries.filter((row)=>monthOf(row.date)===month).reduce((part,row)=>part+row.subtotal,0),0),unbilled=all.reduce((sum,{metrics})=>sum+metrics.unbilled,0),open=all.reduce((sum,{metrics})=>sum+metrics.outstanding,0),monthMaterial=(data.materialUsages||[]).filter((row)=>monthOf(row.date)===month).reduce((sum,row)=>sum+store.num(row.amount),0),profit=all.reduce((sum,{metrics})=>sum+metrics.profit,0);
+    const homeKpis=[
+      {label:'進行中案場',value:ongoing,small:'個案場',action:'ongoing',ariaLabel:'查看進行中案場'},
+      {label:'本月施工金額',value:money(monthConstruction),small:month,action:'project-list',ariaLabel:'查看案場經營總覽'},
+      {label:'待請款施工',value:money(unbilled),small:'真實每日施工',action:'unbilled-work',ariaLabel:'前往待請款施工',className:'is-warning'},
+      {label:'未收帳款',value:money(open),small:'不含保留款',action:'receivables',ariaLabel:'前往應收帳款',className:'is-warning'},
+      {label:'本月材料成本',value:money(monthMaterial),small:'材料使用紀錄',action:'materials',ariaLabel:'前往材料管理'},
+      {label:'預估／實際毛利',value:money(profit),small:'已請款－案場成本',action:'project-list',ariaLabel:'查看案場經營總覽',className:profit>=0?'is-success':'is-warning'}
+    ];
     $('#projectsApp').innerHTML=`<section class="commissions-heading project-page-heading"><div><h1>客戶／案場</h1><p>管理客戶、工程案場與完整經營狀況</p></div><div class="project-heading-actions"><button class="commission-secondary" id="manageCustomers" type="button">客戶主檔</button><button class="commission-secondary" id="newCustomer" type="button">＋ 新增客戶</button><button class="commission-primary" id="newProject" type="button">＋ 新增案場</button></div></section>
-      <section class="commission-kpis project-kpis"><article><span>進行中案場</span><strong>${ongoing}</strong><small>個案場</small></article><article><span>本月施工金額</span><strong>${money(monthConstruction)}</strong><small>${esc(month)}</small></article><article class="is-warning"><span>待請款施工</span><strong>${money(unbilled)}</strong><small>真實每日施工</small></article><article class="is-warning"><span>未收帳款</span><strong>${money(open)}</strong><small>不含保留款</small></article><article><span>本月材料成本</span><strong>${money(monthMaterial)}</strong><small>材料使用紀錄</small></article><article class="${profit>=0?'is-success':'is-warning'}"><span>預估／實際毛利</span><strong>${money(profit)}</strong><small>已請款－案場成本</small></article></section>
+      <section class="commission-kpis project-kpis">${homeKpis.map((item)=>`<article${item.className?` class="${esc(item.className)}"`:''} data-project-home-kpi-action="${esc(item.action)}" role="button" tabindex="0" aria-label="${esc(item.ariaLabel)}"><span>${esc(item.label)}</span><strong>${esc(item.value)}</strong><small>${esc(item.small)}</small></article>`).join('')}</section>
       <section class="commission-panel commission-filters"><div class="project-filter-grid"><label><span>客戶</span><select id="projectCustomerFilter">${optionRows(data.customers,filters.customer,'全部客戶')}</select></label><label><span>案場</span><select id="projectProjectFilter">${optionRows(data.projects,filters.project,'全部案場')}</select></label><label><span>工程狀態</span><select id="projectStatusFilter"><option value="">全部狀態</option>${['進行中','已完工','暫停'].map((value)=>`<option ${filters.status===value?'selected':''}>${value}</option>`).join('')}</select></label><label><span>年份</span><select id="projectYearFilter"><option value="">全部年份</option>${[...new Set(data.projects.map((row)=>String(row.startDate||row.createdAt||'').slice(0,4)).filter(Boolean))].sort().reverse().map((year)=>`<option ${filters.year===year?'selected':''}>${year}</option>`).join('')}</select></label><label class="project-search"><span>關鍵字</span><input id="projectQuery" type="search" value="${esc(filters.query)}" placeholder="案場、客戶、地址或備註"></label></div></section>
       <section class="commission-panel project-list-panel"><header class="project-section-title"><div><h2>案場經營總覽</h2><p>${rows.length} 個案場；所有金額均由既有 ERP 紀錄即時計算</p></div></header><div class="commission-table-wrap project-list-scroll project-desktop-list"><table class="commission-table project-master-table"><thead><tr><th>案場／客戶</th><th>工程狀態</th><th>請款條件</th><th class="num">累計施工</th><th class="num">已請款</th><th class="num">待請款</th><th class="num">未收</th><th class="num">總成本</th><th class="num">毛利</th><th>操作</th></tr></thead><tbody>${projectDesktopRows(rows)}</tbody></table></div>${projectMobileCards(rows)}</section>`;
     clarifyProjectSettlementLabels();bindHome();bindProjectScroll($('.project-list-scroll'));scheduleProjectScrollbar();window.KusheIcons?.render($('#projectsApp'));if(customerManagerPending){const targetCustomerId=customerManagerTargetId;customerManagerPending=false;customerManagerTargetId='';openCustomerManager({targetCustomerId})}
   }
+  function scrollProjectHomeListIntoView(){
+    requestAnimationFrame(()=>{
+      $('.project-list-panel')?.scrollIntoView({
+        behavior:'smooth',
+        block:'start',
+        inline:'nearest'
+      });
+    });
+  }
   function bindHome(){
+    const homeKpiActions=new Set(['ongoing','project-list','unbilled-work','receivables','materials']),openHomeKpi=(card)=>{
+      const action=card.dataset.projectHomeKpiAction;
+      if(!homeKpiActions.has(action))return;
+      if(action==='ongoing'){
+        filters.status='進行中';
+        renderHome();
+      }
+      if(action==='ongoing'||action==='project-list')scrollProjectHomeListIntoView();
+      else window.KushePhase1.navigate(action);
+    };
+    $$('[data-project-home-kpi-action]').forEach((card)=>{
+      card.onclick=()=>openHomeKpi(card);
+      card.onkeydown=(event)=>{
+        if(event.key!=='Enter'&&event.key!==' ')return;
+        if(event.key===' ')event.preventDefault();
+        openHomeKpi(card);
+      };
+    });
     $('#newCustomer').onclick=()=>openCustomerForm();$('#newProject').onclick=()=>openProjectForm();$('#manageCustomers').onclick=openCustomerManager;
     [['projectCustomerFilter','customer'],['projectProjectFilter','project'],['projectStatusFilter','status'],['projectYearFilter','year']].forEach(([id,key])=>{$(`#${id}`).onchange=(event)=>{filters[key]=event.target.value;renderHome()}});
     let timer;$('#projectQuery').oninput=(event)=>{filters.query=event.target.value;clearTimeout(timer);timer=setTimeout(renderHome,180)};

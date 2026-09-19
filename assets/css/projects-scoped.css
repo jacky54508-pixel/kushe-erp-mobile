@@ -82,6 +82,23 @@
   display: none;
 }
 
+#projectsView .project-kpis [data-project-home-kpi-action] {
+  cursor: pointer;
+}
+
+#projectsView .project-kpis [data-project-home-kpi-action]:hover {
+  box-shadow: 0 8px 20px rgba(24, 62, 101, 0.13);
+}
+
+#projectsView .project-kpis [data-project-home-kpi-action]:focus-visible {
+  outline: 3px solid rgba(7, 91, 216, 0.38);
+  outline-offset: 2px;
+}
+
+#projectsView .project-kpis [data-project-home-kpi-action]:active {
+  opacity: 0.82;
+}
+
 #projectsView .project-detail-kpis [data-project-kpi-tab] {
   cursor: pointer;
 }
