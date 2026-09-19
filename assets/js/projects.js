@@ -239,37 +239,79 @@
     return `<section class="commission-panel project-tab-panel"><header class="project-section-title"><div><h2>員工／點工與業績</h2><p>直接讀取每日施工、出勤點工及抽成紀錄；不另建人工成本資料。</p></div></header><div class="commission-table-wrap project-people-desktop"><table class="commission-table project-detail-table"><thead><tr><th>日期</th><th>員工</th><th>來源</th><th>計薪方式</th><th class="num">點工薪資</th><th class="num">未稅業績</th><th class="num">抽成</th></tr></thead><tbody>${desktopRows}${legacyEmpty?'<tr><td colspan="7" class="billing-empty">此案場尚無可歸屬的員工／點工資料。</td></tr>':''}</tbody></table></div><div class="project-people-mobile-list">${mobileCards}${legacyEmpty?'<p class="project-people-mobile-empty">此案場尚無可歸屬的員工／點工資料。</p>':''}</div></section>`;
   }
   function settingsTab(project){const hasRetention=['5','10','custom'].includes(project.defaultRetentionMode),invoice=invoiceDefault(project),rate=retentionRateValue(project),rateOptions=retentionRateOptions(),pricing=project.defaultPricingMode||'',retentionBase=project.defaultRetentionBase==='preTax'?'preTax':'taxIncluded';return `<section class="commission-panel project-billing-settings"><header class="project-section-title"><div><div class="project-settings-title-line"><h2>請款／報價設定</h2><span class="project-billing-summary-badge">${esc(billingCondition(project))}</span></div><p>只作為未來新報價與新請款單預設；單張修改不會回寫案場主檔。</p></div></header><form id="projectBillingSettingsForm"><div class="project-billing-settings-grid"><section class="project-billing-setting-block"><h3>預設計價方式</h3><fieldset><legend class="sr-only">預設計價方式</legend>${[['actual','實做實算'],['lump_sum','總價承攬'],['mixed','混合計價']].map(([value,label])=>`<label><input type="radio" name="defaultPricingMode" value="${value}" ${pricing===value?'checked':''}> ${label}</label>`).join('')}</fieldset></section><section class="project-billing-setting-block"><h3>保留款</h3><fieldset><legend class="sr-only">保留款設定</legend><label><input type="radio" name="retentionChoice" value="none" ${hasRetention?'':'checked'}> 無保留款</label><label><input type="radio" name="retentionChoice" value="has" ${hasRetention?'checked':''}> 有保留款</label></fieldset><label class="project-conditional-field" id="detailRetentionRate"><span>保留比例 (%)</span><span class="project-rate-combobox"><input name="defaultRetentionRate" type="number" inputmode="decimal" min="0" max="100" step="any" list="projectRetentionRateOptions" value="${hasRetention?esc(formatRate(rate)):''}" autocomplete="off"><i aria-hidden="true">%</i></span><datalist id="projectRetentionRateOptions">${rateOptions.map((value)=>`<option value="${esc(formatRate(value))}">${esc(formatRate(value))}%</option>`).join('')}</datalist></label><fieldset class="project-conditional-field" id="detailRetentionBase"><legend>保留款計算基準</legend><label><input type="radio" name="defaultRetentionBase" value="preTax" ${retentionBase==='preTax'?'checked':''}> 未稅金額</label><label><input type="radio" name="defaultRetentionBase" value="taxIncluded" ${retentionBase==='taxIncluded'?'checked':''}> 含稅金額</label></fieldset></section><section class="project-billing-setting-block"><h3>發票</h3><fieldset><legend class="sr-only">發票預設</legend><label><input type="radio" name="defaultInvoiceChoice" value="no_invoice" ${invoice==='no_invoice'?'checked':''}> 不開發票</label><label><input type="radio" name="defaultInvoiceChoice" value="invoice_required" ${invoice==='invoice_required'?'checked':''}> 需要開發票</label></fieldset><label class="project-conditional-field" id="detailTaxMode"><span>稅務方式</span><select name="defaultTaxMode"><option value="未稅" ${project.defaultTaxMode!=='含稅'?'selected':''}>未稅</option><option value="含稅" ${project.defaultTaxMode==='含稅'?'selected':''}>含稅</option></select></label></section></div><div class="project-billing-settings-note">總價項目依進度請款；實做實算項目依施工數量 × 確認單價。歷史報價、請款與應收資料不受影響。</div><footer><button class="commission-primary" type="submit">儲存請款／報價設定</button></footer></form></section><section class="commission-panel project-settings-summary"><header class="project-section-title"><div><h2>案場基本設定</h2><p>客戶、工程日期、狀態與合約資訊。</p></div><button class="commission-secondary" id="editProjectSettings" type="button">編輯案場資料</button></header><div class="project-settings-grid"><article><span>客戶</span><strong>${esc(customerName(project))}</strong></article><article><span>工程狀態</span><strong>${esc(projectStatus(project))}</strong></article><article><span>預設計價方式</span><strong>${esc({actual:'實做實算',lump_sum:'總價承攬',mixed:'混合計價'}[pricing]||'未設定')}</strong></article><article><span>預設保留款</span><strong>${esc(retentionLabel(project))}</strong></article><article><span>保留款計算基準</span><strong>${hasRetention?(retentionBase==='preTax'?'未稅金額':'含稅金額'):'—'}</strong></article><article><span>發票預設</span><strong>${esc(invoiceLabel(invoice))}</strong></article><article><span>稅務方式</span><strong>${invoice==='invoice_required'?esc(project.defaultTaxMode==='含稅'?'含稅':'未稅'):'—'}</strong></article><article><span>合約／預估金額</span><strong>${money(project.contractAmount)}</strong></article></div></section><section class="commission-panel project-merge-zone"><header class="project-section-title"><div><h2>重複案場處理</h2><p>僅在同一客戶誤建重複案場時使用；執行前會完整預覽關聯與衝突。</p></div><button class="commission-secondary danger" id="openProjectMerge" type="button">合併重複案場</button></header></section>`}
-  function recoverProjectSettingsViewport(){
+  function clampProjectSettingsScroll(){
     const frame=$('.page-frame');
     if(!frame)return;
-    const settle=()=>{
-      const maxScroll=Math.max(0,frame.scrollHeight-frame.clientHeight);
-      if(frame.scrollTop>maxScroll)frame.scrollTop=maxScroll;
+    const maxScroll=Math.max(0,frame.scrollHeight-frame.clientHeight);
+    if(frame.scrollTop>maxScroll)frame.scrollTop=maxScroll;
+  }
+  function deferProjectSettingsCollapse(form,viewport,baseline,isCurrent,collapse){
+    let stopped=false,checking=false,firstFrame=0,secondFrame=0,poll=0,deadline=0;
+    const recovered=()=>!viewport||(viewport.height>=baseline.height-32&&Math.abs(viewport.offsetTop-baseline.offsetTop)<=32);
+    const cleanup=()=>{
+      stopped=true;
+      clearInterval(poll);clearTimeout(deadline);
+      cancelAnimationFrame(firstFrame);cancelAnimationFrame(secondFrame);
+      viewport?.removeEventListener('resize',check);viewport?.removeEventListener('scroll',check);
     };
-    requestAnimationFrame(()=>{settle();requestAnimationFrame(settle)});
-    const viewport=window.visualViewport;
-    viewport?.addEventListener('resize',settle,{once:true});
-    setTimeout(()=>{viewport?.removeEventListener('resize',settle);settle()},300);
+    const check=()=>{
+      if(stopped)return;
+      if(!form.isConnected||!isCurrent()){cleanup();return}
+      if(checking||!recovered())return;
+      checking=true;
+      firstFrame=requestAnimationFrame(()=>{
+        secondFrame=requestAnimationFrame(()=>{
+          checking=false;
+          if(stopped)return;
+          if(!form.isConnected||!isCurrent()){cleanup();return}
+          if(!recovered())return;
+          cleanup();collapse();clampProjectSettingsScroll();
+        });
+      });
+    };
+    const activeElement=document.activeElement;
+    if(activeElement&&form.contains(activeElement)&&['INPUT','SELECT','TEXTAREA'].includes(activeElement.tagName))activeElement.blur();
+    if(viewport){
+      viewport.addEventListener('resize',check);viewport.addEventListener('scroll',check);
+      poll=setInterval(check,50);
+      deadline=setTimeout(cleanup,1500);
+      check();
+    }else deadline=setTimeout(check,400);
+    return cleanup;
   }
   function bindTab(project,metrics){
     $$('[data-project-tab-jump]').forEach((button)=>button.onclick=()=>{detailTab=button.dataset.projectTabJump;renderDetail()});
     $('#editProjectSettings')?.addEventListener('click',()=>openProjectForm(project.id));
     $('#openProjectMerge')?.addEventListener('click',()=>openProjectMerge(project));
     const settingsForm=$('#projectBillingSettingsForm');if(settingsForm){
-      const sync=(recoverViewport=false)=>{
-        const has=settingsForm.elements.retentionChoice.value==='has',needsInvoice=settingsForm.elements.defaultInvoiceChoice.value==='invoice_required';
-        const retentionRate=$('#detailRetentionRate'),retentionBase=$('#detailRetentionBase'),taxMode=$('#detailTaxMode');
-        const retentionWasVisible=!retentionRate.hidden,taxWasVisible=!taxMode.hidden;
-        const collapsingRetention=recoverViewport&&retentionWasVisible&&!has,collapsingTax=recoverViewport&&taxWasVisible&&!needsInvoice;
-        if(collapsingRetention||collapsingTax){
-          const activeElement=document.activeElement;
-          if(activeElement&&settingsForm.contains(activeElement)&&['INPUT','SELECT','TEXTAREA'].includes(activeElement.tagName))activeElement.blur();
-        }
-        retentionRate.hidden=!has;retentionBase.hidden=!has;taxMode.hidden=!needsInvoice;
-        if(collapsingRetention||collapsingTax)recoverProjectSettingsViewport();
+      const viewport=window.visualViewport,baseline=viewport?{height:viewport.height,offsetTop:viewport.offsetTop}:null;
+      const retentionPending={sequence:0,cancel:null},taxPending={sequence:0,cancel:null};
+      const refreshBaseline=()=>{
+        const activeElement=document.activeElement;
+        const editing=activeElement&&settingsForm.contains(activeElement)&&['INPUT','SELECT','TEXTAREA'].includes(activeElement.tagName)&&activeElement.type!=='radio';
+        if(viewport&&!editing&&viewport.height>=baseline.height&&Math.abs(viewport.offsetTop-baseline.offsetTop)<=32){baseline.height=viewport.height;baseline.offsetTop=viewport.offsetTop}
       };
-      $$('[name="retentionChoice"],[name="defaultInvoiceChoice"]',settingsForm).forEach((input)=>input.onchange=()=>sync(true));
-      sync(false);
+      const syncGroup=(pending,fields,visible,initial,stillCollapsed)=>{
+        if(initial||visible){
+          pending.sequence++;pending.cancel?.();pending.cancel=null;
+          fields.forEach((field)=>field.hidden=!visible);
+          if(!initial&&visible)refreshBaseline();
+          return;
+        }
+        if(pending.cancel||fields.every((field)=>field.hidden))return;
+        const sequence=++pending.sequence;
+        pending.cancel=deferProjectSettingsCollapse(settingsForm,viewport,baseline,()=>sequence===pending.sequence&&stillCollapsed(),()=>{
+          fields.forEach((field)=>field.hidden=true);
+          pending.cancel=null;
+        });
+      };
+      const sync=(initial=false)=>{
+        const has=settingsForm.elements.retentionChoice.value==='has',needsInvoice=settingsForm.elements.defaultInvoiceChoice.value==='invoice_required';
+        syncGroup(retentionPending,[$('#detailRetentionRate'),$('#detailRetentionBase')],has,initial,()=>settingsForm.elements.retentionChoice.value==='none');
+        syncGroup(taxPending,[$('#detailTaxMode')],needsInvoice,initial,()=>settingsForm.elements.defaultInvoiceChoice.value==='no_invoice');
+      };
+      $$('[name="retentionChoice"],[name="defaultInvoiceChoice"]',settingsForm).forEach((input)=>input.onchange=()=>sync(false));
+      sync(true);
       settingsForm.onsubmit=async(event)=>{event.preventDefault();const button=event.submitter;button.disabled=true;try{const values={...project,...Object.fromEntries(new FormData(settingsForm))},has=values.retentionChoice==='has',rate=Number(values.defaultRetentionRate);if(has&&(!Number.isFinite(rate)||rate<0||rate>100))throw new Error('保留比例必須介於 0～100%');values.defaultRetentionMode=has?'custom':'none';values.defaultRetentionRate=has?rate:0;values.defaultRetentionBase=has&&values.defaultRetentionBase==='preTax'?'preTax':'taxIncluded';await store.saveProject(values,project.id);window.KushePhase1.toast('案場請款預設已儲存');renderDetail()}catch(error){button.disabled=false;window.KushePhase1.toast(error.message)}}}
     $('#projectCreateBilling')?.addEventListener('click',()=>{const row=store.unbilledWork({project:project.id})[0];if(!row)return window.KushePhase1.toast('此案場目前沒有未請款施工');window.KusheBilling.startDraft(row,{month:''})});
     $('#addProjectMaterial')?.addEventListener('click',()=>openMaterialForm(project.id));$('#addProjectCost')?.addEventListener('click',()=>openCostForm(project.id));
