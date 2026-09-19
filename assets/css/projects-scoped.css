@@ -1029,6 +1029,120 @@
   }
 }
 
+#projectsView #detailRetentionRate[hidden],
+#projectsView #detailRetentionBase[hidden],
+#projectsView #detailTaxMode[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 620px) {
+  #projectsView .project-billing-settings > .project-section-title,
+  #projectsView .project-settings-summary > .project-section-title,
+  #projectsView .project-merge-zone > .project-section-title {
+    flex-direction: column;
+    align-items: stretch;
+    min-width: 0;
+  }
+
+  #projectsView .project-billing-settings > .project-section-title > div,
+  #projectsView .project-settings-summary > .project-section-title > div,
+  #projectsView .project-merge-zone > .project-section-title > div {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-settings-title-line {
+    width: 100%;
+    min-width: 0;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  #projectsView .project-billing-summary-badge {
+    white-space: normal;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-billing-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #projectsView .project-billing-settings-grid,
+  #projectsView .project-billing-setting-block,
+  #projectsView .project-billing-setting-block fieldset,
+  #projectsView .project-settings-summary,
+  #projectsView .project-settings-grid,
+  #projectsView .project-settings-grid article {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-billing-setting-block fieldset {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  #projectsView .project-billing-setting-block label {
+    white-space: normal;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-billing-settings input,
+  #projectsView .project-billing-settings select,
+  #projectsView .project-billing-settings .project-rate-combobox {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-billing-settings input:not([type="radio"]),
+  #projectsView .project-billing-settings select,
+  #projectsView .project-billing-settings .project-rate-combobox {
+    width: 100%;
+  }
+
+  #projectsView .project-billing-settings input[type="radio"] {
+    flex: 0 0 auto;
+    width: auto;
+  }
+
+  #projectsView .project-billing-settings footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #projectsView .project-billing-settings footer button,
+  #projectsView .project-settings-summary #editProjectSettings,
+  #projectsView .project-merge-zone #openProjectMerge {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-settings-grid span,
+  #projectsView .project-settings-grid strong {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  #projectsView .project-billing-settings-note {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
 @media (max-width: 360px) {
   #projectsView .project-detail-kpis,
   #projectsView .project-cost-breakdown {
