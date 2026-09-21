@@ -1,0 +1,45 @@
+/* Materials presentation only; business controls retain their existing handlers. */
+body[data-route="materials"] #materialsApp .materials-mobile-list {
+  display: none;
+}
+
+@media (max-width: 820px) {
+  body[data-route="materials"] #materialsApp .materials-desktop-table { display: none; }
+  body[data-route="materials"] #materialsApp .materials-mobile-list { display: grid; gap: 12px; }
+  body[data-route="materials"] #materialsApp .materials-list-panel { border: 0; background: transparent; box-shadow: none; }
+  body[data-route="materials"] #materialsApp .commissions-heading { align-items: stretch; flex-direction: column; }
+  body[data-route="materials"] #materialsApp .commissions-heading > div { min-width: 0; overflow-wrap: anywhere; }
+  body[data-route="materials"] #materialsApp #newMaterial { min-height: 44px; white-space: normal; }
+  body[data-route="materials"] #materialsApp .commission-filters,
+  body[data-route="materials"] #materialsApp .payable-search { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+  body[data-route="materials"] #materialsApp #materialQuery { width: 100%; min-width: 0; min-height: 44px; box-sizing: border-box; }
+  body[data-route="materials"] #materialsApp .material-mobile-card { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; padding: 16px; border: 1px solid #dfe7f0; border-radius: 12px; background: #fff; }
+  body[data-route="materials"] #materialsApp .material-mobile-card-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  body[data-route="materials"] #materialsApp .material-mobile-card-head strong { display: block; margin-top: 4px; font-size: 17px; line-height: 1.45; color: #173f6d; }
+  body[data-route="materials"] #materialsApp .material-mobile-price { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+  body[data-route="materials"] #materialsApp .material-mobile-price b { min-width: 0; font-size: 20px; color: #075bd8; font-variant-numeric: tabular-nums; }
+  body[data-route="materials"] #materialsApp .material-mobile-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; padding-top: 14px; border-top: 1px solid #edf1f5; }
+  body[data-route="materials"] #materialsApp .material-mobile-meta > div { min-width: 0; }
+  body[data-route="materials"] #materialsApp .material-mobile-meta strong { display: block; margin-top: 4px; font-size: 13px; line-height: 1.5; }
+  body[data-route="materials"] #materialsApp .material-mobile-card span { color: #66758d; font-size: 12px; }
+  body[data-route="materials"] #materialsApp .material-mobile-card :is(strong, b, p, span) { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  body[data-route="materials"] #materialsApp .material-mobile-note { margin-top: 14px; }
+  body[data-route="materials"] #materialsApp .material-mobile-note p { margin: 4px 0 0; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+  body[data-route="materials"] #materialsApp .material-mobile-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+  body[data-route="materials"] #materialsApp .material-mobile-actions button { width: 100%; min-width: 0; min-height: 44px; border: 1px solid #d7e0eb; border-radius: 8px; background: #f5f9ff; color: #075bd8; font: inherit; font-weight: 700; white-space: normal; }
+  body[data-route="materials"] #materialsApp .material-mobile-actions [data-delete-material-master] { background: #fff; color: #b33932; }
+  body[data-route="materials"] #materialsApp .material-mobile-actions button:focus-visible { outline: 3px solid #73a5eb; outline-offset: 2px; }
+  body[data-route="materials"] #materialsApp .materials-mobile-empty { margin: 0; padding: 24px 16px; border: 1px solid #dfe7f0; border-radius: 12px; background: #fff; color: #66758d; text-align: center; }
+  body[data-route="materials"] .materials-master-modal { max-width: 100%; min-width: 0; box-sizing: border-box; }
+  body[data-route="materials"] .materials-master-modal .project-form-grid,
+  body[data-route="materials"] .materials-master-modal .project-form-grid label { min-width: 0; }
+  body[data-route="materials"] .materials-master-modal :is(input, select, textarea) { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+  body[data-route="materials"] .materials-master-modal #materialMasterForm :is(input, select) { min-height: 44px; }
+  body[data-route="materials"] .materials-master-modal footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  body[data-route="materials"] .materials-master-modal footer button { width: 100%; min-width: 0; min-height: 44px; white-space: normal; }
+}
+
+@media (max-width: 620px) {
+  body[data-route="materials"] .materials-master-modal .project-form-grid { grid-template-columns: minmax(0, 1fr); }
+  body[data-route="materials"] .materials-master-modal .project-form-grid .wide { grid-column: auto; }
+}
