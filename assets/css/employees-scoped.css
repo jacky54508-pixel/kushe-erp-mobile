@@ -1,0 +1,47 @@
+body[data-route="employees"] #employeesApp .employee-mobile-list { display: none; }
+
+@media (max-width: 820px) {
+  body[data-route="employees"] #employeesApp .employee-desktop-table { display: none; }
+  body[data-route="employees"] #employeesApp .employee-mobile-list { display: grid; gap: 12px; padding: 12px; }
+  body[data-route="employees"] #employeesApp .employee-mobile-card { width: 100%; max-width: 100%; min-width: 0; padding: 16px; border: 1px solid #dfe7f0; border-radius: 12px; background: #fff; overflow-wrap: anywhere; }
+  body[data-route="employees"] #employeesApp .employee-mobile-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  body[data-route="employees"] #employeesApp .employee-mobile-card-head>div { min-width: 0; flex: 1; }
+  body[data-route="employees"] #employeesApp .employee-mobile-card-head strong { display: block; margin-top: 4px; font-size: 18px; color: #0a386f; }
+  body[data-route="employees"] #employeesApp .employee-mobile-card span { font-size: 12px; }
+  body[data-route="employees"] #employeesApp .employee-mobile-card :is(.employee-status,.employee-compensation) { white-space: normal; max-width: 100%; }
+  body[data-route="employees"] #employeesApp .employee-mobile-card-head>.employee-status { max-width: 42%; }
+  body[data-route="employees"] #employeesApp :is(.employee-mobile-basic,.employee-mobile-compensation) { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 16px; }
+  body[data-route="employees"] #employeesApp :is(.employee-mobile-basic,.employee-mobile-compensation)>div { min-width: 0; display: grid; gap: 5px; align-content: start; }
+  body[data-route="employees"] #employeesApp :is(.employee-mobile-basic,.employee-mobile-compensation) span { color: #68798d; }
+  body[data-route="employees"] #employeesApp .employee-mobile-compensation { padding: 12px; border-radius: 9px; background: #f2f7fd; }
+  body[data-route="employees"] #employeesApp .employee-mobile-compensation>div:first-child { grid-column: 1/-1; }
+  body[data-route="employees"] #employeesApp .employee-mobile-history { font-size: 12px; line-height: 1.6; color: #945a0a; }
+  body[data-route="employees"] #employeesApp .employee-mobile-actions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; margin-top: 16px; }
+  body[data-route="employees"] #employeesApp .employee-mobile-actions button { min-width: 0; min-height: 44px; border: 1px solid #d8e2ed; border-radius: 8px; background: #fff; color: #075bd8; font-weight: 750; overflow-wrap: anywhere; }
+  body[data-route="employees"] #employeesApp .employee-mobile-actions button:last-child { grid-column: 1/-1; }
+  body[data-route="employees"] #employeesApp .employee-mobile-actions .is-terminate { color: #a45c08; }
+  body[data-route="employees"] #employeesApp .employee-mobile-actions .is-restore { color: #07844c; }
+  body[data-route="employees"] #employeesApp .employee-mobile-actions .employee-delete { color: #bd3e34; }
+  body[data-route="employees"] #employeesApp .employee-mobile-empty { padding: 24px 12px; text-align: center; color: #68798d; }
+  body[data-route="employees"] #employeesApp :is(#newEmployee,.employee-filter-grid input,.employee-filter-grid select,.employee-filter-grid button) { min-height: 44px; max-width: 100%; }
+  body[data-route="employees"] #employeesApp .employee-kpis article { min-width: 0; padding: 12px; overflow-wrap: anywhere; }
+  body[data-route="employees"] .employee-detail-drawer { max-width: 100%; }
+  body[data-route="employees"] .employee-detail-drawer>header { height: auto; min-height: 76px; flex: 0 0 auto; align-items: flex-start; }
+  body[data-route="employees"] .employee-detail-drawer>header>div { min-width: 0; }
+  body[data-route="employees"] .employee-detail-drawer :is(h2,dd,section p,.employee-history-notice) { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  body[data-route="employees"] .employee-detail-drawer .employee-status { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  body[data-route="employees"] .employee-detail-drawer>header h2 { max-height: 20vh; overflow-y: auto; }
+  body[data-route="employees"] :is(.employee-detail-drawer,.employee-editor-modal)>header>button { min-width: 44px; min-height: 44px; flex-shrink: 0; }
+  body[data-route="employees"] :is(.employee-detail-drawer,.employee-editor-modal) footer { flex: 0 0 auto; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
+  body[data-route="employees"] :is(.employee-detail-drawer,.employee-editor-modal) footer button { min-width: 0; width: 100%; min-height: 44px; }
+  body[data-route="employees"] .employee-editor-modal :is(input,select) { height: 44px; min-height: 44px; }
+}
+
+@media (max-width: 620px) {
+  body[data-route="employees"] #employeesApp .employee-kpis { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+}
+
+@media (max-width: 430px) {
+  body[data-route="employees"] #employeesApp .employee-heading { display: grid; grid-template-columns: minmax(0,1fr); }
+  body[data-route="employees"] #employeesApp #newEmployee { width: 100%; }
+}
