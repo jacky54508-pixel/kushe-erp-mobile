@@ -274,7 +274,36 @@
     attempt();
     return cleanup;
   }
-  function deferProjectSettingsCollapse(form,viewport,baseline,isCurrent,collapse){
+  function guardProjectSettingsPostCollapseRootDrift(form,viewport,baseline,isCurrent,onCleanup){
+    if(!viewport)return null;
+    const timers=new Set(),interactionBaseline={...baseline};
+    let stopped=false,recoveries=0,recoveryCancel=null;
+    const cleanup=()=>{
+      if(stopped)return;
+      stopped=true;
+      timers.forEach((timer)=>clearTimeout(timer));timers.clear();
+      recoveryCancel?.();recoveryCancel=null;
+      onCleanup();
+    };
+    const current=()=>!stopped&&form.isConnected&&isCurrent();
+    const check=()=>{
+      if(!current()){cleanup();return}
+      if(recoveryCancel||recoveries>=2)return;
+      if(viewport.height<interactionBaseline.height-32||Math.abs(viewport.offsetTop-interactionBaseline.offsetTop)>32)return;
+      if(Math.abs(viewport.pageTop-interactionBaseline.pageTop)<=12)return;
+      recoveries++;
+      recoveryCancel=recoverProjectSettingsRootViewport(viewport,interactionBaseline,current,()=>{
+        recoveryCancel=null;
+        if(!current())cleanup();
+      });
+    };
+    [50,150,300,500,700].forEach((delay)=>{
+      const timer=setTimeout(()=>{timers.delete(timer);check()},delay);timers.add(timer);
+    });
+    const deadline=setTimeout(cleanup,900);timers.add(deadline);
+    return cleanup;
+  }
+  function deferProjectSettingsCollapse(form,viewport,baseline,isCurrent,collapse,afterCollapse=()=>{}){
     let stopped=false,checking=false,firstFrame=0,secondFrame=0,poll=0,deadline=0,rootCancel=null;
     const recovered=()=>!viewport||(viewport.height>=baseline.height-32&&Math.abs(viewport.offsetTop-baseline.offsetTop)<=32);
     const cleanup=()=>{
@@ -297,7 +326,7 @@
           const complete=()=>{
             if(stopped||!form.isConnected||!isCurrent()||!recovered())return;
             if(viewport&&Math.abs(viewport.pageTop-baseline.pageTop)>12)return;
-            cleanup();collapse();clampProjectSettingsScroll();
+            cleanup();collapse();clampProjectSettingsScroll();afterCollapse();
           };
           if(viewport&&Math.abs(viewport.pageTop-baseline.pageTop)>12){
             rootCancel=recoverProjectSettingsRootViewport(viewport,baseline,()=>!stopped&&form.isConnected&&isCurrent(),(success)=>{if(success)complete();else cleanup()});
@@ -321,17 +350,18 @@
     $('#openProjectMerge')?.addEventListener('click',()=>openProjectMerge(project));
     const settingsForm=$('#projectBillingSettingsForm');if(settingsForm){
       const viewport=window.visualViewport,baseline=viewport?{height:viewport.height,offsetTop:viewport.offsetTop,pageTop:viewport.pageTop,pageLeft:viewport.pageLeft,scrollX:window.scrollX,scrollY:window.scrollY}:null;
-      const retentionPending={sequence:0,cancel:null},taxPending={sequence:0,cancel:null};
+      const retentionPending={sequence:0,cancel:null,postCancel:null},taxPending={sequence:0,cancel:null,postCancel:null};
       const refreshBaseline=()=>{
         const activeElement=document.activeElement;
         const editing=activeElement&&settingsForm.contains(activeElement)&&['INPUT','SELECT','TEXTAREA'].includes(activeElement.tagName)&&activeElement.type!=='radio';
-        if(viewport&&!editing&&!retentionPending.cancel&&!taxPending.cancel&&viewport.height>=baseline.height&&Math.abs(viewport.offsetTop-baseline.offsetTop)<=32){baseline.height=viewport.height;baseline.offsetTop=viewport.offsetTop;baseline.pageTop=viewport.pageTop;baseline.pageLeft=viewport.pageLeft;baseline.scrollX=window.scrollX;baseline.scrollY=window.scrollY}
+        if(viewport&&!editing&&!retentionPending.cancel&&!taxPending.cancel&&!retentionPending.postCancel&&!taxPending.postCancel&&viewport.height>=baseline.height&&Math.abs(viewport.offsetTop-baseline.offsetTop)<=32){baseline.height=viewport.height;baseline.offsetTop=viewport.offsetTop;baseline.pageTop=viewport.pageTop;baseline.pageLeft=viewport.pageLeft;baseline.scrollX=window.scrollX;baseline.scrollY=window.scrollY}
       };
       const syncGroup=(pending,fields,visible,initial,stillCollapsed)=>{
         if(initial||visible){
-          pending.sequence++;pending.cancel?.();pending.cancel=null;
+          const hadPostGuard=!!pending.postCancel;
+          pending.sequence++;pending.cancel?.();pending.cancel=null;pending.postCancel?.();pending.postCancel=null;
           fields.forEach((field)=>field.hidden=!visible);
-          if(!initial&&visible)refreshBaseline();
+          if(!initial&&visible&&!hadPostGuard)refreshBaseline();
           return;
         }
         if(pending.cancel||fields.every((field)=>field.hidden))return;
@@ -339,6 +369,8 @@
         pending.cancel=deferProjectSettingsCollapse(settingsForm,viewport,baseline,()=>sequence===pending.sequence&&stillCollapsed(),()=>{
           fields.forEach((field)=>field.hidden=true);
           pending.cancel=null;
+        },()=>{
+          pending.postCancel=guardProjectSettingsPostCollapseRootDrift(settingsForm,viewport,baseline,()=>sequence===pending.sequence&&stillCollapsed(),()=>{if(sequence===pending.sequence)pending.postCancel=null});
         });
       };
       const sync=(initial=false)=>{
