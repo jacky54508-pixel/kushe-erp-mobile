@@ -1,4 +1,20 @@
 /* Scoped fixes for the customer/project module only. */
+@media (max-width: 820px) {
+  body[data-route="projects"] .page-frame,
+  body[data-route="customers"] .page-frame {
+    position: fixed;
+    inset: 0;
+    width: auto;
+    height: auto;
+    min-height: 0;
+    margin-left: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
 .project-master-modal .project-setting-grid,
 #projectsView .project-billing-settings-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
