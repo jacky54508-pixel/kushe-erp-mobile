@@ -56,7 +56,6 @@
   function projectDesktopRows(rows){return rows.map((row)=>`<tr data-open-project="${esc(row.id)}"><td><b>${esc(row.name)}</b><small>${esc(row.customerName)}${row.address?`｜${esc(row.address)}`:''}</small></td><td>${statusBadge(row.status)}</td><td><span class="project-billing-condition">${esc(row.billingCondition)}</span></td><td class="num">${money(row.construction)}</td><td class="num">${money(row.billed)}</td><td class="num">${money(row.unbilled)}</td><td class="num">${money(row.outstanding)}</td><td class="num">${money(row.totalCost)}</td><td class="num"><b class="${row.profit<0?'negative':'positive'}">${money(row.profit)}</b><small>${row.margin.toFixed(1)}%</small></td><td><button class="commission-primary compact" type="button" data-project-detail="${esc(row.id)}">查看案場</button></td></tr>`).join('')||'<tr><td colspan="10" class="billing-empty">此篩選條件下沒有案場。</td></tr>'}
   function projectMobileCards(rows){return `<div class="project-mobile-list">${rows.map((row)=>`<article class="project-mobile-card"><header class="project-mobile-card-head"><div><h3>${esc(row.name)}</h3><p>${esc(row.customerName)}</p></div>${statusBadge(row.status)}</header>${row.address?`<p class="project-mobile-address">${esc(row.address)}</p>`:''}<p class="project-mobile-condition"><span>請款條件</span><strong>${esc(row.billingCondition)}</strong></p><dl class="project-mobile-financials"><div><dt>累計施工</dt><dd>${money(row.construction)}</dd></div><div><dt>已請款</dt><dd>${money(row.billed)}</dd></div><div><dt>待請款</dt><dd>${money(row.unbilled)}</dd></div><div><dt>未沖銷應收</dt><dd>${money(row.outstanding)}</dd></div><div><dt>總成本</dt><dd>${money(row.totalCost)}</dd></div></dl><div class="project-mobile-profit"><span>毛利</span><strong class="${row.profit<0?'negative':'positive'}">${money(row.profit)}</strong><small>${row.margin.toFixed(1)}%</small></div><button class="commission-primary project-mobile-action" type="button" data-project-detail="${esc(row.id)}">查看案場</button></article>`).join('')||'<p class="billing-empty project-mobile-empty">此篩選條件下沒有案場。</p>'}</div>`}
   function renderHome(){
-    projectViewportDiagnosticCleanup?.();
     if(!active)return;const data=state(),query=filters.query.toLocaleLowerCase('zh-Hant');
     const all=data.projects.map((project)=>({project,metrics:projectMetrics(project)}));
     const filtered=all.filter(({project})=>{if(filters.customer&&project.customer!==filters.customer)return false;if(filters.project&&project.id!==filters.project)return false;if(filters.status&&projectStatus(project)!==filters.status)return false;if(filters.year&&!String(project.startDate||project.createdAt||'').startsWith(filters.year))return false;return !query||`${project.name} ${customerName(project)} ${project.address||''} ${project.note||''}`.toLocaleLowerCase('zh-Hant').includes(query)}),rows=filtered.map(({project,metrics})=>buildProjectPresentation(project,metrics));
@@ -155,7 +154,6 @@
     });
   }
   function renderDetail(){
-    projectViewportDiagnosticCleanup?.();
     if(!active)return;hideProjectScrollbar();const project=projectById(selectedProjectId);if(!project){selectedProjectId='';return renderHome()}const metrics=projectMetrics(project),tabs=[['overview','總覽'],['daily','每日施工'],['billing','請款／收款'],['costs','材料／成本'],['people','員工／點工'],['settings','設定']];
     $('#projectsApp').innerHTML=`<section class="project-detail-head"><button class="project-back" id="backProjects" type="button"><i data-icon="arrow-left"></i>返回案場列表</button><div><span>${esc(customerName(project))}</span><h1>${esc(project.name)}</h1><p>${statusBadge(projectStatus(project))}${project.address?`<em>${esc(project.address)}</em>`:''}</p></div><div class="project-row-actions"><button class="commission-secondary" id="editCurrentProject" type="button">編輯案場</button><button class="commission-secondary danger" id="deleteCurrentProject" type="button">刪除案場</button></div></section><section class="commission-kpis project-detail-kpis">${detailKpis(metrics)}</section><nav class="project-tabs" aria-label="案場資料分類">${tabs.map(([key,label])=>`<button type="button" data-project-tab="${key}" class="${detailTab===key?'is-active':''}">${label}</button>`).join('')}</nav><div id="projectTabContent"></div>`;
     $('#backProjects').onclick=()=>{selectedProjectId='';renderHome()};$('#editCurrentProject').onclick=()=>openProjectForm(project.id);$('#deleteCurrentProject').onclick=(event)=>deleteProjectFromDetail(project,event.currentTarget);$$('[data-project-tab]').forEach((button)=>button.onclick=()=>{detailTab=button.dataset.projectTab;renderDetail()});const kpiTargets=new Set(['overview','daily','billing','costs','people']),openKpiTab=(card)=>{const target=card.dataset.projectKpiTab;if(!kpiTargets.has(target))return;if(target!==detailTab){detailTab=target;renderDetail()}scrollProjectDetailTabsIntoView();};$$('[data-project-kpi-tab]').forEach((card)=>{card.onclick=()=>openKpiTab(card);card.onkeydown=(event)=>{if(event.key!=='Enter'&&event.key!==' ')return;if(event.key===' ')event.preventDefault();openKpiTab(card)}});renderTab(project,metrics);window.KusheIcons?.render($('#projectsApp'));
@@ -241,71 +239,54 @@
     return `<section class="commission-panel project-tab-panel"><header class="project-section-title"><div><h2>員工／點工與業績</h2><p>直接讀取每日施工、出勤點工及抽成紀錄；不另建人工成本資料。</p></div></header><div class="commission-table-wrap project-people-desktop"><table class="commission-table project-detail-table"><thead><tr><th>日期</th><th>員工</th><th>來源</th><th>計薪方式</th><th class="num">點工薪資</th><th class="num">未稅業績</th><th class="num">抽成</th></tr></thead><tbody>${desktopRows}${legacyEmpty?'<tr><td colspan="7" class="billing-empty">此案場尚無可歸屬的員工／點工資料。</td></tr>':''}</tbody></table></div><div class="project-people-mobile-list">${mobileCards}${legacyEmpty?'<p class="project-people-mobile-empty">此案場尚無可歸屬的員工／點工資料。</p>':''}</div></section>`;
   }
   function settingsTab(project){const hasRetention=['5','10','custom'].includes(project.defaultRetentionMode),invoice=invoiceDefault(project),rate=retentionRateValue(project),rateOptions=retentionRateOptions(),pricing=project.defaultPricingMode||'',retentionBase=project.defaultRetentionBase==='preTax'?'preTax':'taxIncluded';return `<section class="commission-panel project-billing-settings"><header class="project-section-title"><div><div class="project-settings-title-line"><h2>請款／報價設定</h2><span class="project-billing-summary-badge">${esc(billingCondition(project))}</span></div><p>只作為未來新報價與新請款單預設；單張修改不會回寫案場主檔。</p></div></header><form id="projectBillingSettingsForm"><div class="project-billing-settings-grid"><section class="project-billing-setting-block"><h3>預設計價方式</h3><fieldset><legend class="sr-only">預設計價方式</legend>${[['actual','實做實算'],['lump_sum','總價承攬'],['mixed','混合計價']].map(([value,label])=>`<label><input type="radio" name="defaultPricingMode" value="${value}" ${pricing===value?'checked':''}> ${label}</label>`).join('')}</fieldset></section><section class="project-billing-setting-block"><h3>保留款</h3><fieldset><legend class="sr-only">保留款設定</legend><label><input type="radio" name="retentionChoice" value="none" ${hasRetention?'':'checked'}> 無保留款</label><label><input type="radio" name="retentionChoice" value="has" ${hasRetention?'checked':''}> 有保留款</label></fieldset><label class="project-conditional-field" id="detailRetentionRate"><span>保留比例 (%)</span><span class="project-rate-combobox"><input name="defaultRetentionRate" type="number" inputmode="decimal" min="0" max="100" step="any" list="projectRetentionRateOptions" value="${hasRetention?esc(formatRate(rate)):''}" autocomplete="off"><i aria-hidden="true">%</i></span><datalist id="projectRetentionRateOptions">${rateOptions.map((value)=>`<option value="${esc(formatRate(value))}">${esc(formatRate(value))}%</option>`).join('')}</datalist></label><fieldset class="project-conditional-field" id="detailRetentionBase"><legend>保留款計算基準</legend><label><input type="radio" name="defaultRetentionBase" value="preTax" ${retentionBase==='preTax'?'checked':''}> 未稅金額</label><label><input type="radio" name="defaultRetentionBase" value="taxIncluded" ${retentionBase==='taxIncluded'?'checked':''}> 含稅金額</label></fieldset></section><section class="project-billing-setting-block"><h3>發票</h3><fieldset><legend class="sr-only">發票預設</legend><label><input type="radio" name="defaultInvoiceChoice" value="no_invoice" ${invoice==='no_invoice'?'checked':''}> 不開發票</label><label><input type="radio" name="defaultInvoiceChoice" value="invoice_required" ${invoice==='invoice_required'?'checked':''}> 需要開發票</label></fieldset><label class="project-conditional-field" id="detailTaxMode"><span>稅務方式</span><select name="defaultTaxMode"><option value="未稅" ${project.defaultTaxMode!=='含稅'?'selected':''}>未稅</option><option value="含稅" ${project.defaultTaxMode==='含稅'?'selected':''}>含稅</option></select></label></section></div><div class="project-billing-settings-note">總價項目依進度請款；實做實算項目依施工數量 × 確認單價。歷史報價、請款與應收資料不受影響。</div><footer><button class="commission-primary" type="submit">儲存請款／報價設定</button></footer></form></section><section class="commission-panel project-settings-summary"><header class="project-section-title"><div><h2>案場基本設定</h2><p>客戶、工程日期、狀態與合約資訊。</p></div><button class="commission-secondary" id="editProjectSettings" type="button">編輯案場資料</button></header><div class="project-settings-grid"><article><span>客戶</span><strong>${esc(customerName(project))}</strong></article><article><span>工程狀態</span><strong>${esc(projectStatus(project))}</strong></article><article><span>預設計價方式</span><strong>${esc({actual:'實做實算',lump_sum:'總價承攬',mixed:'混合計價'}[pricing]||'未設定')}</strong></article><article><span>預設保留款</span><strong>${esc(retentionLabel(project))}</strong></article><article><span>保留款計算基準</span><strong>${hasRetention?(retentionBase==='preTax'?'未稅金額':'含稅金額'):'—'}</strong></article><article><span>發票預設</span><strong>${esc(invoiceLabel(invoice))}</strong></article><article><span>稅務方式</span><strong>${invoice==='invoice_required'?esc(project.defaultTaxMode==='含稅'?'含稅':'未稅'):'—'}</strong></article><article><span>合約／預估金額</span><strong>${money(project.contractAmount)}</strong></article></div></section><section class="commission-panel project-merge-zone"><header class="project-section-title"><div><h2>重複案場處理</h2><p>僅在同一客戶誤建重複案場時使用；執行前會完整預覽關聯與衝突。</p></div><button class="commission-secondary danger" id="openProjectMerge" type="button">合併重複案場</button></header></section>`}
-  let projectViewportDiagnosticCleanup=null;
-  function setupProjectViewportDiagnostic(settingsForm){
-    projectViewportDiagnosticCleanup?.();
-    if(!settingsForm||!settingsForm.isConnected)return;
-    const panel=document.createElement('pre');
-    panel.id='projectViewportDiagnostic';
-    panel.setAttribute('aria-hidden','true');
-    Object.assign(panel.style,{position:'fixed',top:'6px',right:'6px',zIndex:'2147483647',pointerEvents:'none',margin:'0',padding:'6px',boxSizing:'border-box',maxWidth:'46vw',maxHeight:'48vh',overflow:'hidden',background:'rgba(0,0,0,.82)',color:'white',fontFamily:'monospace',fontSize:'10px',lineHeight:'1.25',whiteSpace:'pre'});
-    document.body.appendChild(panel);
-    const viewport=window.visualViewport,history=[],timers=new Map(),subscriptions=[];
-    let stopped=false;
-    const cleanup=()=>{
-      if(stopped)return;
-      stopped=true;
-      subscriptions.forEach(([target,event,handler])=>target.removeEventListener(event,handler));
-      timers.forEach((timer)=>clearTimeout(timer));timers.clear();
-      panel.remove();
-      if(projectViewportDiagnosticCleanup===cleanup)projectViewportDiagnosticCleanup=null;
-    };
-    projectViewportDiagnosticCleanup=cleanup;
-    const snapshot=(event)=>{
-      if(stopped)return;
-      if(!settingsForm.isConnected){cleanup();return}
-      const frame=$('.page-frame'),view=$('#projectsView'),shell=$('.app-shell'),root=document.documentElement,body=document.body,focused=document.activeElement;
-      const maxScroll=frame?Math.max(0,frame.scrollHeight-frame.clientHeight):null;
-      const sample={event,time:new Date().toISOString(),innerHeight:window.innerHeight,innerWidth:window.innerWidth,documentClientHeight:root.clientHeight,documentScrollHeight:root.scrollHeight,visualViewportHeight:viewport?.height??null,visualViewportWidth:viewport?.width??null,visualViewportOffsetTop:viewport?.offsetTop??null,visualViewportOffsetLeft:viewport?.offsetLeft??null,visualViewportPageTop:viewport?.pageTop??null,visualViewportPageLeft:viewport?.pageLeft??null,visualViewportScale:viewport?.scale??null,pageFrameClientHeight:frame?.clientHeight??null,pageFrameOffsetHeight:frame?.offsetHeight??null,pageFrameScrollHeight:frame?.scrollHeight??null,pageFrameScrollTop:frame?.scrollTop??null,projectsViewClientHeight:view?.clientHeight??null,projectsViewScrollHeight:view?.scrollHeight??null,bodyClientHeight:body.clientHeight,bodyScrollHeight:body.scrollHeight,appShellClientHeight:shell?.clientHeight??null,appShellScrollHeight:shell?.scrollHeight??null,activeTag:focused?.tagName??null,activeName:focused?.name??null,activeType:focused?.type??null,retentionChoice:settingsForm.elements.retentionChoice.value,defaultInvoiceChoice:settingsForm.elements.defaultInvoiceChoice.value,retentionRateHidden:$('#detailRetentionRate',settingsForm)?.hidden??null,retentionBaseHidden:$('#detailRetentionBase',settingsForm)?.hidden??null,taxModeHidden:$('#detailTaxMode',settingsForm)?.hidden??null,pageFrameMaxScroll:maxScroll,pageFrameScrollExcess:frame?Math.max(0,frame.scrollTop-maxScroll):null,visualViewportBottom:viewport?viewport.offsetTop+viewport.height:null,innerVsVisualHeightGap:viewport?window.innerHeight-viewport.height:null,documentVsFrameHeightGap:frame?root.clientHeight-frame.clientHeight:null};
-      history.push(sample);if(history.length>10)history.shift();
-      const value=(v)=>v===null?'n/a':typeof v==='number'?String(Math.round(v*100)/100):String(v);
-      const row=(label,...values)=>label+' '+values.map(value).join('/');
-      panel.textContent=[event+' '+sample.time.slice(11,23),row('win H/W',sample.innerHeight,sample.innerWidth),row('doc C/S',sample.documentClientHeight,sample.documentScrollHeight),row('vv H/W',sample.visualViewportHeight,sample.visualViewportWidth),row('vv off T/L',sample.visualViewportOffsetTop,sample.visualViewportOffsetLeft),row('vv page T/L',sample.visualViewportPageTop,sample.visualViewportPageLeft),row('vv scale',sample.visualViewportScale),row('frame C/O',sample.pageFrameClientHeight,sample.pageFrameOffsetHeight),row('frame S/T',sample.pageFrameScrollHeight,sample.pageFrameScrollTop),row('view C/S',sample.projectsViewClientHeight,sample.projectsViewScrollHeight),row('body C/S',sample.bodyClientHeight,sample.bodyScrollHeight),row('shell C/S',sample.appShellClientHeight,sample.appShellScrollHeight),row('focus',sample.activeTag,sample.activeType),row('name',sample.activeName),row('ret',sample.retentionChoice),row('invoice',sample.defaultInvoiceChoice),row('hidden R/B/T',sample.retentionRateHidden,sample.retentionBaseHidden,sample.taxModeHidden),row('max/excess',sample.pageFrameMaxScroll,sample.pageFrameScrollExcess),row('vv bottom',sample.visualViewportBottom),row('gap win/doc',sample.innerVsVisualHeightGap,sample.documentVsFrameHeightGap),'history: event time','win/vvH/off/frameC/S/T/max',...history.map((h)=>h.event+' '+h.time.slice(14,23)+'\n'+[h.innerHeight,h.visualViewportHeight,h.visualViewportOffsetTop,h.pageFrameClientHeight,h.pageFrameScrollHeight,h.pageFrameScrollTop,h.pageFrameMaxScroll].map(value).join('/'))].join('\n');
-      return sample;
-    };
-    const observe=(target,event,label)=>{
-      const handler=()=>{
-        const sample=snapshot(label);if(!sample)return;
-        console.debug('[P18-4B-3E-3 viewport]',sample);
-        timers.forEach((timer)=>clearTimeout(timer));timers.clear();
-        [100,300,600,1000].forEach((delay)=>{timers.set(delay,setTimeout(()=>{timers.delete(delay);snapshot(label+'+'+delay)},delay))});
-      };
-      target.addEventListener(event,handler);subscriptions.push([target,event,handler]);
-    };
-    observe(window,'resize','win.resize');
-    if(viewport){observe(viewport,'resize','vv.resize');observe(viewport,'scroll','vv.scroll')}
-    observe(settingsForm,'focusin','focusin');observe(settingsForm,'focusout','focusout');observe(settingsForm,'change','change');
-    snapshot('setup');
-  }
   function clampProjectSettingsScroll(){
     const frame=$('.page-frame');
     if(!frame)return;
     const maxScroll=Math.max(0,frame.scrollHeight-frame.clientHeight);
     if(frame.scrollTop>maxScroll)frame.scrollTop=maxScroll;
   }
+  function recoverProjectSettingsRootViewport(viewport,baseline,isCurrent,done){
+    let stopped=false,attempts=0,firstFrame=0,secondFrame=0,retry=0,deadline=0;
+    const ready=()=>viewport&&baseline&&viewport.height>=baseline.height-32&&Math.abs(viewport.offsetTop-baseline.offsetTop)<=32;
+    const cleanup=()=>{stopped=true;clearTimeout(retry);clearTimeout(deadline);cancelAnimationFrame(firstFrame);cancelAnimationFrame(secondFrame)};
+    const finish=(success)=>{cleanup();done(success)};
+    const attempt=()=>{
+      if(stopped)return;
+      if(!isCurrent()||!ready()){finish(false);return}
+      if(Math.abs(viewport.pageTop-baseline.pageTop)<=12){finish(true);return}
+      if(attempts>=3){finish(false);return}
+      attempts++;
+      const frame=$('.page-frame'),frameScrollTop=frame?.scrollTop;
+      window.scrollTo(baseline.scrollX,baseline.scrollY);
+      if(frame&&frame.scrollTop!==frameScrollTop)frame.scrollTop=frameScrollTop;
+      firstFrame=requestAnimationFrame(()=>{
+        secondFrame=requestAnimationFrame(()=>{
+          if(stopped)return;
+          if(!isCurrent()||!ready()){finish(false);return}
+          if(frame&&frame.scrollTop!==frameScrollTop)frame.scrollTop=frameScrollTop;
+          if(Math.abs(viewport.pageTop-baseline.pageTop)<=12){finish(true);return}
+          if(attempts>=3){finish(false);return}
+          retry=setTimeout(attempt,75);
+        });
+      });
+    };
+    deadline=setTimeout(()=>finish(false),450);
+    attempt();
+    return cleanup;
+  }
   function deferProjectSettingsCollapse(form,viewport,baseline,isCurrent,collapse){
-    let stopped=false,checking=false,firstFrame=0,secondFrame=0,poll=0,deadline=0;
+    let stopped=false,checking=false,firstFrame=0,secondFrame=0,poll=0,deadline=0,rootCancel=null;
     const recovered=()=>!viewport||(viewport.height>=baseline.height-32&&Math.abs(viewport.offsetTop-baseline.offsetTop)<=32);
     const cleanup=()=>{
       stopped=true;
-      clearInterval(poll);clearTimeout(deadline);
+      clearInterval(poll);clearTimeout(deadline);rootCancel?.();
       cancelAnimationFrame(firstFrame);cancelAnimationFrame(secondFrame);
       viewport?.removeEventListener('resize',check);viewport?.removeEventListener('scroll',check);
     };
     const check=()=>{
       if(stopped)return;
       if(!form.isConnected||!isCurrent()){cleanup();return}
-      if(checking||!recovered())return;
+      if(checking||rootCancel||!recovered())return;
       checking=true;
       firstFrame=requestAnimationFrame(()=>{
         secondFrame=requestAnimationFrame(()=>{
@@ -313,7 +294,14 @@
           if(stopped)return;
           if(!form.isConnected||!isCurrent()){cleanup();return}
           if(!recovered())return;
-          cleanup();collapse();clampProjectSettingsScroll();
+          const complete=()=>{
+            if(stopped||!form.isConnected||!isCurrent()||!recovered())return;
+            if(viewport&&Math.abs(viewport.pageTop-baseline.pageTop)>12)return;
+            cleanup();collapse();clampProjectSettingsScroll();
+          };
+          if(viewport&&Math.abs(viewport.pageTop-baseline.pageTop)>12){
+            rootCancel=recoverProjectSettingsRootViewport(viewport,baseline,()=>!stopped&&form.isConnected&&isCurrent(),(success)=>{if(success)complete();else cleanup()});
+          }else complete();
         });
       });
     };
@@ -332,12 +320,12 @@
     $('#editProjectSettings')?.addEventListener('click',()=>openProjectForm(project.id));
     $('#openProjectMerge')?.addEventListener('click',()=>openProjectMerge(project));
     const settingsForm=$('#projectBillingSettingsForm');if(settingsForm){
-      const viewport=window.visualViewport,baseline=viewport?{height:viewport.height,offsetTop:viewport.offsetTop}:null;
+      const viewport=window.visualViewport,baseline=viewport?{height:viewport.height,offsetTop:viewport.offsetTop,pageTop:viewport.pageTop,pageLeft:viewport.pageLeft,scrollX:window.scrollX,scrollY:window.scrollY}:null;
       const retentionPending={sequence:0,cancel:null},taxPending={sequence:0,cancel:null};
       const refreshBaseline=()=>{
         const activeElement=document.activeElement;
         const editing=activeElement&&settingsForm.contains(activeElement)&&['INPUT','SELECT','TEXTAREA'].includes(activeElement.tagName)&&activeElement.type!=='radio';
-        if(viewport&&!editing&&viewport.height>=baseline.height&&Math.abs(viewport.offsetTop-baseline.offsetTop)<=32){baseline.height=viewport.height;baseline.offsetTop=viewport.offsetTop}
+        if(viewport&&!editing&&!retentionPending.cancel&&!taxPending.cancel&&viewport.height>=baseline.height&&Math.abs(viewport.offsetTop-baseline.offsetTop)<=32){baseline.height=viewport.height;baseline.offsetTop=viewport.offsetTop;baseline.pageTop=viewport.pageTop;baseline.pageLeft=viewport.pageLeft;baseline.scrollX=window.scrollX;baseline.scrollY=window.scrollY}
       };
       const syncGroup=(pending,fields,visible,initial,stillCollapsed)=>{
         if(initial||visible){
@@ -361,7 +349,6 @@
       $$('[name="retentionChoice"],[name="defaultInvoiceChoice"]',settingsForm).forEach((input)=>input.onchange=()=>sync(false));
       sync(true);
       settingsForm.onsubmit=async(event)=>{event.preventDefault();const button=event.submitter;button.disabled=true;try{const values={...project,...Object.fromEntries(new FormData(settingsForm))},has=values.retentionChoice==='has',rate=Number(values.defaultRetentionRate);if(has&&(!Number.isFinite(rate)||rate<0||rate>100))throw new Error('保留比例必須介於 0～100%');values.defaultRetentionMode=has?'custom':'none';values.defaultRetentionRate=has?rate:0;values.defaultRetentionBase=has&&values.defaultRetentionBase==='preTax'?'preTax':'taxIncluded';await store.saveProject(values,project.id);window.KushePhase1.toast('案場請款預設已儲存');renderDetail()}catch(error){button.disabled=false;window.KushePhase1.toast(error.message)}}}
-    if(settingsForm)setupProjectViewportDiagnostic(settingsForm);
     $('#projectCreateBilling')?.addEventListener('click',()=>{const row=store.unbilledWork({project:project.id})[0];if(!row)return window.KushePhase1.toast('此案場目前沒有未請款施工');window.KusheBilling.startDraft(row,{month:''})});
     $('#addProjectMaterial')?.addEventListener('click',()=>openMaterialForm(project.id));$('#addProjectCost')?.addEventListener('click',()=>openCostForm(project.id));
     $$('[data-edit-material]').forEach((button)=>button.onclick=()=>openMaterialForm(project.id,button.dataset.editMaterial));$$('[data-delete-material]').forEach((button)=>button.onclick=async()=>{if(!confirm('確定刪除這筆材料使用紀錄？'))return;try{await store.deleteMaterialUsage(button.dataset.deleteMaterial);renderDetail();window.KushePhase1.toast('材料使用與未付款應付已同步更新')}catch(error){window.KushePhase1.toast(error.message)}});
@@ -370,7 +357,7 @@
   function openMaterialForm(projectId,id=''){const data=state(),row=data.materialUsages.find((item)=>item.id===id)||{},material=data.materials.find((item)=>item.id===(row.material||''))||{},modal=overlay(`<section class="erp-detail-card project-master-modal" role="dialog" aria-modal="true"><header><div><span>案場材料／成本</span><h2>${id?'編輯材料使用':'新增材料使用'}</h2><p>材料只輸入一次，將同步案場成本與廠商應付來源。</p></div><button type="button" data-close-detail aria-label="關閉">×</button></header><form id="materialUsageForm"><div class="erp-detail-body"><div class="project-form-grid"><label><span>日期</span><input name="date" type="date" value="${esc(row.date||today())}" required></label><label><span>材料</span><select name="material" required>${optionRows(data.materials,row.material,'請選擇既有材料')}</select></label><label><span>廠商</span><select name="vendor" required>${optionRows(data.vendors,row.vendor||material.vendor,'請選擇廠商')}</select></label><label><span>單位</span><input id="materialUnit" value="${esc(row.unit||material.unit||'')}" disabled></label><label><span>規格／型號</span><input id="materialModel" value="${esc(row.model||material.model||'')}" disabled></label><label><span>數量</span><input name="quantity" type="number" min="0.01" step="0.01" value="${store.num(row.quantity)||1}" required></label><label><span>單價</span><input name="unitPrice" type="number" min="0" step="1" value="${store.num(row.unitPrice??material.unitPrice)}" required></label><label><span>小計</span><input id="materialSubtotal" value="${money(row.amount)}" disabled></label><label class="wide"><span>備註</span><textarea name="note" rows="3">${esc(row.note||'')}</textarea></label></div></div><footer><button type="button" class="commission-secondary" data-close-detail>取消</button><button type="submit" class="commission-primary">儲存材料使用</button></footer></form></section>`);const form=$('#materialUsageForm',modal.node),syncMaterial=()=>{const item=data.materials.find((value)=>value.id===form.elements.material.value)||{};form.elements.vendor.value=item.vendor||form.elements.vendor.value;$('#materialUnit',modal.node).value=item.unit||'';$('#materialModel',modal.node).value=item.model||'';if(!id)form.elements.unitPrice.value=store.num(item.unitPrice);syncTotal()},syncTotal=()=>{$('#materialSubtotal',modal.node).value=money(store.num(form.elements.quantity.value)*store.num(form.elements.unitPrice.value))};form.elements.material.onchange=syncMaterial;form.elements.quantity.oninput=syncTotal;form.elements.unitPrice.oninput=syncTotal;syncTotal();form.onsubmit=async(event)=>{event.preventDefault();const button=event.submitter;button.disabled=true;try{await store.saveMaterialUsage({...Object.fromEntries(new FormData(form)),project:projectId},id);modal.close();renderDetail();window.KushePhase1.toast('材料成本與廠商應付已同步更新')}catch(error){button.disabled=false;window.KushePhase1.toast(error.message)}}}
   function openCostForm(projectId,id=''){const data=state(),row=data.projectCosts.find((item)=>item.id===id)||{},modal=overlay(`<section class="erp-detail-card project-master-modal" role="dialog" aria-modal="true"><header><div><span>案場其他成本</span><h2>${id?'編輯其他成本':'新增其他成本'}</h2><p>可選擇是否同步產生新版應付帳款來源。</p></div><button type="button" data-close-detail aria-label="關閉">×</button></header><form id="projectCostForm"><div class="erp-detail-body"><div class="project-form-grid"><label><span>日期</span><input name="date" type="date" value="${esc(row.date||today())}" required></label><label><span>類別</span><select name="category">${['運費','停車','機具','外包','其他工程費用'].map((value)=>`<option ${row.category===value?'selected':''}>${value}</option>`).join('')}</select></label><label class="wide"><span>說明</span><input name="description" value="${esc(row.description||'')}" required></label><label><span>金額</span><input name="amount" type="number" min="1" step="1" value="${store.num(row.amount)}" required></label><label><span>既有廠商／收款人</span><select name="vendor">${optionRows(data.vendors,row.vendor,'不指定')}</select></label><label><span>新收款人名稱</span><input name="payeeName" value="${esc(row.vendorName||'')}"></label><label class="cost-payable-toggle"><input name="createPayable" type="checkbox" ${row.createPayable?'checked':''}><span>同步產生／更新應付帳款</span></label><label class="wide"><span>備註</span><textarea name="note" rows="3">${esc(row.note||'')}</textarea></label></div></div><footer><button type="button" class="commission-secondary" data-close-detail>取消</button><button type="submit" class="commission-primary">儲存其他成本</button></footer></form></section>`);$('#projectCostForm',modal.node).onsubmit=async(event)=>{event.preventDefault();const button=event.submitter;button.disabled=true;try{const values=Object.fromEntries(new FormData(event.target));values.project=projectId;values.createPayable=event.target.elements.createPayable.checked;await store.saveProjectCost(values,id);modal.close();renderDetail();window.KushePhase1.toast('案場成本已儲存並完成必要串聯')}catch(error){button.disabled=false;window.KushePhase1.toast(error.message)}}}
   async function activate(options={}){active=true;if(!ready){await store.load();ready=true}if(options.customer){projectSearchTargetId='';customerManagerPending=true;customerManagerTargetId=String(options.customerId||'');selectedProjectId='';renderHome();return}if(options.projectId){const requestedId=String(options.projectId),project=projectById(requestedId);if(project){projectSearchTargetId=String(project.id);openProject(project.id);return}projectSearchTargetId='';selectedProjectId='';renderHome();return}if(projectSearchTargetId&&String(selectedProjectId)===String(projectSearchTargetId))selectedProjectId='';projectSearchTargetId='';selectedProjectId?renderDetail():renderHome()}
-  function deactivate(){projectViewportDiagnosticCleanup?.();active=false;if(projectSearchTargetId&&String(selectedProjectId)===String(projectSearchTargetId))selectedProjectId='';projectSearchTargetId='';hideProjectScrollbar()}
+  function deactivate(){active=false;if(projectSearchTargetId&&String(selectedProjectId)===String(projectSearchTargetId))selectedProjectId='';projectSearchTargetId='';hideProjectScrollbar()}
   window.addEventListener('kushe:data-updated',()=>{if(active)selectedProjectId?renderDetail():renderHome()});
   window.KusheProjects={activate,deactivate,render:()=>selectedProjectId?renderDetail():renderHome(),openProject};
 }());
