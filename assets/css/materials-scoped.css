@@ -31,6 +31,12 @@ body[data-route="materials"] #materialsApp .materials-mobile-list {
   body[data-route="materials"] #materialsApp .material-mobile-actions button:focus-visible { outline: 3px solid #73a5eb; outline-offset: 2px; }
   body[data-route="materials"] #materialsApp .materials-mobile-empty { margin: 0; padding: 24px 16px; border: 1px solid #dfe7f0; border-radius: 12px; background: #fff; color: #66758d; text-align: center; }
   body[data-route="materials"] .materials-master-modal { max-width: 100%; min-width: 0; box-sizing: border-box; }
+  /* Leave room for the existing overlay padding; only the form body scrolls. */
+  body[data-route="materials"] .materials-master-modal { max-height: calc(100vh - 48px); max-height: calc(100dvh - 48px); }
+  body[data-route="materials"] .materials-master-modal #materialMasterForm { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: hidden; }
+  body[data-route="materials"] .materials-master-modal .erp-detail-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
+  body[data-route="materials"] .materials-master-modal > header,
+  body[data-route="materials"] .materials-master-modal #materialMasterForm > footer { flex: 0 0 auto; }
   body[data-route="materials"] .materials-master-modal .project-form-grid,
   body[data-route="materials"] .materials-master-modal .project-form-grid label { min-width: 0; }
   body[data-route="materials"] .materials-master-modal :is(input, select, textarea) { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
@@ -40,6 +46,7 @@ body[data-route="materials"] #materialsApp .materials-mobile-list {
 }
 
 @media (max-width: 620px) {
+  body[data-route="materials"] .materials-master-modal { max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); }
   body[data-route="materials"] .materials-master-modal .project-form-grid { grid-template-columns: minmax(0, 1fr); }
   body[data-route="materials"] .materials-master-modal .project-form-grid .wide { grid-column: auto; }
 }
