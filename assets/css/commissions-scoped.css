@@ -1,0 +1,24 @@
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-list { display: none; }
+
+@media (max-width: 820px) {
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-desktop-table { display: none; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-list { display: grid; gap: 12px; padding: 12px; min-width: 0; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-card { width: 100%; max-width: 100%; min-width: 0; padding: 16px; border: 1px solid #dfe7f0; border-radius: 12px; background: #fff; overflow-wrap: anywhere; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-card>header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-card>header>* { min-width: 0; white-space: normal; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-card>header .commission-status { max-width: 55%; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-primary { display: grid; gap: 6px; margin-top: 16px; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-primary>strong { font-size: 18px; color: #173f6d; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-primary>b { font-size: 14px; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-card :is(dt,.attendance-mobile-primary>span,.attendance-mobile-source>span:first-child) { font-size: 12px; color: #64758a; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-card dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 16px 0; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-card :is(dl>div,dd) { min-width: 0; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-card dd { margin: 5px 0 0; font-weight: 750; font-size: 14px; font-variant-numeric: tabular-nums; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-card .attendance-mobile-amounts { padding: 12px; border-radius: 9px; background: #f2f7fd; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-amounts dd { font-size: 18px; color: #173f6d; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-source { display: grid; justify-items: start; gap: 8px; min-width: 0; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-source :is(small,.workforce-source-badge) { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-card>footer { margin-top: 16px; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-card>footer button { width: 100%; min-height: 44px; border: 1px solid #ccd9e4; background: #f5f8fb; font-size: 13px; white-space: normal; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .attendance-mobile-empty { padding: 24px 12px; text-align: center; color: #64758a; overflow-wrap: anywhere; }
+}
