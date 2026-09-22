@@ -54,3 +54,11 @@
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-mobile-card button { min-height: 44px; padding: 10px 14px; border: 1px solid #ccd9e4; border-radius: 7px; background: #f5f8fb; }
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-mobile-empty { padding: 24px 12px; color: #64758a; text-align: center; }
 }
+
+/* P18-5D-2C Billing status and counts only; existing layouts stay unchanged. */
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-billing-status { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-billing-status.billing-partial { color: #805400; background: #fff3cd; }
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-billing-status.billing-review { color: #9b2837; background: #fce8eb; }
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-billing-counts { display: block; margin-top: 6px; min-width: 0; max-width: 100%; font-size: 12px; line-height: 1.5; color: #64758a; white-space: normal; overflow-wrap: anywhere; }
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-desktop-table .daily-billing-counts { width: 160px; }
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-billing-lock { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
