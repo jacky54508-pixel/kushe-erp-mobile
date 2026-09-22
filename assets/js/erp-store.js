@@ -572,11 +572,16 @@
       if (log.billable === undefined) log.billable = billable;
       if (billable && !log.billingStatus) log.billingStatus = log.billingId ? '已請款' : '未請款';
       if (!log.billingId) log.billingId = '';
+      const logBillingIds = [...new Set([...(Array.isArray(log.billingIds) ? log.billingIds : []), log.billingId].filter((id) => typeof id === 'string' && id.trim()))];
+      const uniqueLogBillingId = logBillingIds.length === 1 ? logBillingIds[0] : '';
+      const legacyWholeLogBilled = billable && log.billingStatus === '已請款' && Boolean(uniqueLogBillingId);
       (log.items || []).forEach((item) => {
         if (!item.workItemId) item.workItemId = uid();
         if (item.billable === undefined) item.billable = billable;
-        if (item.billable && !item.billingStatus) item.billingStatus = log.billingId ? '已請款' : '未請款';
-        if (!item.billingId) item.billingId = log.billingId || '';
+        // A partial log ID is not evidence that every item has been billed.
+        // Preserve explicit status/ID conflicts for a separate historical audit.
+        if (item.billable && !item.billingStatus) item.billingStatus = item.billingId || legacyWholeLogBilled ? '已請款' : '未請款';
+        if (!item.billingId) item.billingId = item.billingStatus === '已請款' ? uniqueLogBillingId : '';
         if (!item.taxMode) item.taxMode = '未稅';
         if (item.inputPrice === undefined) item.inputPrice = num(item.price);
         if (item.untaxedSubtotal === undefined) item.untaxedSubtotal = num(item.qty) * num(item.price);
