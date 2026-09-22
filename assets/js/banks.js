@@ -19,6 +19,7 @@
   let selectedMonth = businessMonth();
   let activeBankView = 'ledger';
   let reconciliationSearchTimer = null;
+  let reconciliationSearchComposing = false;
   let reconciliationNormalOpen = false;
   const reconciliationFilters = { month: '', status: 'all', direction: 'all', source: 'all', keyword: '' };
   const RECONCILIATION_STATUSES = {
@@ -1024,18 +1025,40 @@
       render();
       app.querySelector('[data-bank-reconciliation-normal-toggle]')?.focus();
     });
-    app.addEventListener('input', (event) => {
-      const filter = event.target.closest('[data-bank-reconciliation-filter="keyword"]');
-      if (!filter) return;
-      const cursor = filter.selectionStart;
-      reconciliationFilters.keyword = filter.value;
+    const scheduleReconciliationKeywordSearch = (filter) => {
+      const value = filter.value;
+      if (value === reconciliationFilters.keyword) return;
+      const cursor = filter.selectionStart ?? value.length;
+      reconciliationFilters.keyword = value;
       clearTimeout(reconciliationSearchTimer);
       reconciliationSearchTimer = setTimeout(() => {
+        reconciliationSearchTimer = null;
         render();
         const replacement = app.querySelector('[data-bank-reconciliation-filter="keyword"]');
         replacement?.focus();
-        replacement?.setSelectionRange(cursor, cursor);
+        if (replacement) {
+          const position = Math.min(cursor, replacement.value.length);
+          replacement.setSelectionRange(position, position);
+        }
       }, 120);
+    };
+    app.addEventListener('compositionstart', (event) => {
+      const filter = event.target.closest('[data-bank-reconciliation-filter="keyword"]');
+      if (!filter) return;
+      reconciliationSearchComposing = true;
+      clearTimeout(reconciliationSearchTimer);
+      reconciliationSearchTimer = null;
+    });
+    app.addEventListener('compositionend', (event) => {
+      const filter = event.target.closest('[data-bank-reconciliation-filter="keyword"]');
+      if (!filter) return;
+      reconciliationSearchComposing = false;
+      scheduleReconciliationKeywordSearch(filter);
+    });
+    app.addEventListener('input', (event) => {
+      const filter = event.target.closest('[data-bank-reconciliation-filter="keyword"]');
+      if (!filter || reconciliationSearchComposing || event.isComposing) return;
+      scheduleReconciliationKeywordSearch(filter);
     });
   }
 
