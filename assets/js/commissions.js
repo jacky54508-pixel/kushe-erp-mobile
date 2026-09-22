@@ -13,6 +13,9 @@
   let quickProjectSaveActive = false;
   let dailySubmitInFlight = false;
   let dailyEditorActive = false;
+  let dailyDetailActive = false;
+  let dailyDetailNeedsRefresh = false;
+  let dailyDetailContext = null;
 
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const money = (value) => new Intl.NumberFormat('zh-TW', { style:'currency', currency:'TWD', maximumFractionDigits:0 }).format(Number(value) || 0);
@@ -113,11 +116,7 @@
       return !query || `${employee} ${project} ${row.sourceNo || ''} ${row.note || ''} ${row.workMode || ''}`.toLocaleLowerCase('zh-Hant').includes(query);
     }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
   }
-  function dailyBatches(state) {
-    const groups = new Map();
-    (state.dailyLogs || []).forEach((log) => { const key=log.batchId||log.id; if(!groups.has(key))groups.set(key,[]); groups.get(key).push(log); });
-    const query = filters.query.trim().toLocaleLowerCase('zh-Hant');
-    return [...groups.entries()].map(([batchId,logs]) => {
+  function buildDailyBatch(state,batchId,logs) {
       const projectGroups=new Map();logs.forEach((log)=>{const key=log.groupId||log.id;if(!projectGroups.has(key))projectGroups.set(key,[]);projectGroups.get(key).push(log)});
       let untaxed=0,gross=0,itemCount=0,billingAmount=0;const projects=[],items=[];
       projectGroups.forEach((members)=>{const first=members[0]||{};projects.push(label(state,'projects',first.project,first.projectName||'—'));const seen=new Set();(first.items||[]).forEach((item,index)=>{const key=item.workItemId||`${first.groupId||first.id}:${index}`;if(seen.has(key))return;seen.add(key);const value=number(item.untaxedSubtotal)||number(item.qty)*number(item.price),shown=number(item.subtotal)||(item.taxMode==='含稅'?store.grossFromUntaxed(value):value);untaxed+=value;gross+=shown;itemCount+=1;if(item.billable!==false&&first.billable!==false&&!first.noInvoice&&(item.billingStatus||first.billingStatus||'未請款')==='未請款'&&!item.billingId&&!first.billingId)billingAmount+=value;items.push(item.item||'')})});
@@ -125,6 +124,17 @@
       const statuses=logs.map((log)=>log.billingStatus||(log.billingId?'已請款':log.billable===false||log.noInvoice?'':'未請款')).filter(Boolean);
       const billingStatus=statuses.includes('已請款')?'已請款':statuses.includes('草稿中')?'草稿中':statuses.includes('未請款')?'未請款':'不需請款';
       return {batchId,logs,date:logs[0]?.date||'',employees,projects:[...new Set(projects)],items,untaxed,gross,itemCount,billingAmount,billingStatus,commission:logs.reduce((sum,log)=>sum+number(log.commission),0),work:logs.reduce((sum,log)=>sum+store.dailyWorkAmount(log),0),note:logs[0]?.note||''};
+  }
+  function dailyBatchById(state,batchId) {
+    const logs=(state.dailyLogs||[]).filter((log)=>(log.batchId||log.id)===batchId);
+    return logs.length?buildDailyBatch(state,batchId,logs):null;
+  }
+  function dailyBatches(state) {
+    const groups = new Map();
+    (state.dailyLogs || []).forEach((log) => { const key=log.batchId||log.id; if(!groups.has(key))groups.set(key,[]); groups.get(key).push(log); });
+    const query = filters.query.trim().toLocaleLowerCase('zh-Hant');
+    return [...groups.entries()].map(([batchId,logs]) => {
+      return buildDailyBatch(state,batchId,logs);
     }).filter((batch)=>{
       if(filters.month&&!batch.date.startsWith(filters.month))return false;
       if(filters.employee&&!batch.logs.some((log)=>log.employee===filters.employee))return false;
@@ -132,8 +142,60 @@
       return !query||`${batch.employees.join(' ')} ${batch.projects.join(' ')} ${batch.items.join(' ')} ${batch.note}`.toLocaleLowerCase('zh-Hant').includes(query);
     }).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
   }
+  function dailyActions(batch) {
+    const monthPaidLocked=batch.logs.some((log)=>store.payrollHistoryLock(log.employee,log.date).locked),paidDeleteLocked=batch.logs.some((log)=>store.dailyLogPayrollDeleteLock(log).locked),billingLocked=batch.logs.some((log)=>log.billingId||(log.billingStatus&&log.billingStatus!=='未請款')),actions=paidDeleteLocked?'<span class="commission-status is-settled" title="此紀錄已納入已付款薪資，為保留歷史帳務不可修改或刪除。">已付款鎖定</span>':billingLocked?'<span class="commission-status billing-done" title="此紀錄已進入請款流程，不可修改或刪除。">已請款鎖定</span>':monthPaidLocked?`<div class="commission-row-actions"><span class="commission-status is-settled" title="同月份已有薪資付款，為避免新增薪資來源不可編輯。">編輯鎖定</span><button type="button" data-daily-delete="${esc(batch.batchId)}">刪除</button></div>`:`<div class="commission-row-actions"><button type="button" data-daily-edit="${esc(batch.batchId)}">編輯</button><button type="button" data-daily-delete="${esc(batch.batchId)}">刪除</button></div>`;
+    return `<button type="button" data-daily-view="${esc(batch.batchId)}">查看內容</button>${actions}`;
+  }
   function dailySection(state,batches) {
-    return `<section class="commission-panel daily-work-panel"><header><div><h2>每日作業</h2><p>沿用既有每日施工流程；抽成、點工與待請款仍由同一筆來源串聯。</p></div></header><div class="commission-table-wrap"><table class="commission-table daily-work-table"><thead><tr><th>日期</th><th>員工</th><th>客戶／案場</th><th>施工項目</th><th class="num">未稅施工額</th><th class="num">抽成</th><th class="num">點工薪資</th><th>請款狀態</th><th>操作</th></tr></thead><tbody>${batches.map((batch)=>{const monthPaidLocked=batch.logs.some((log)=>store.payrollHistoryLock(log.employee,log.date).locked),paidDeleteLocked=batch.logs.some((log)=>store.dailyLogPayrollDeleteLock(log).locked),billingLocked=batch.logs.some((log)=>log.billingId||(log.billingStatus&&log.billingStatus!=='未請款')),actions=paidDeleteLocked?'<span class="commission-status is-settled" title="此紀錄已納入已付款薪資，為保留歷史帳務不可修改或刪除。">已付款鎖定</span>':billingLocked?'<span class="commission-status billing-done" title="此紀錄已進入請款流程，不可修改或刪除。">已請款鎖定</span>':monthPaidLocked?`<div class="commission-row-actions"><span class="commission-status is-settled" title="同月份已有薪資付款，為避免新增薪資來源不可編輯。">編輯鎖定</span><button type="button" data-daily-delete="${esc(batch.batchId)}">刪除</button></div>`:`<div class="commission-row-actions"><button type="button" data-daily-edit="${esc(batch.batchId)}">編輯</button><button type="button" data-daily-delete="${esc(batch.batchId)}">刪除</button></div>`;return `<tr data-daily-batch="${esc(batch.batchId)}"><td>${esc(batch.date)}</td><td><b>${esc(batch.employees.join('、'))}</b></td><td><span class="daily-project-list">${batch.projects.map(esc).join('<br>')}</span></td><td><span class="commission-source">${esc(batch.items.filter(Boolean).slice(0,3).join('、')||'純點工')}${batch.itemCount>3?` 等 ${batch.itemCount} 項`:''}</span></td><td class="num"><b>${money(batch.untaxed)}</b><small>${batch.itemCount} 筆</small></td><td class="num">${money(batch.commission)}</td><td class="num">${money(batch.work)}</td><td><span class="commission-status billing-${batch.billingStatus==='未請款'?'open':batch.billingStatus==='草稿中'?'draft':batch.billingStatus==='已請款'?'done':'none'}">${esc(batch.billingStatus)}</span>${batch.billingAmount>0?`<small>${money(batch.billingAmount)}</small>`:''}</td><td>${actions}</td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="9">此篩選條件下沒有每日作業紀錄。</td></tr>'}</tbody></table></div></section>`;
+    return `<section class="commission-panel daily-work-panel"><header><div><h2>每日作業</h2><p>沿用既有每日施工流程；抽成、點工與待請款仍由同一筆來源串聯。</p></div></header><div class="commission-table-wrap daily-desktop-table"><table class="commission-table daily-work-table"><thead><tr><th>日期</th><th>員工</th><th>客戶／案場</th><th>施工項目</th><th class="num">未稅施工額</th><th class="num">抽成</th><th class="num">點工薪資</th><th>請款狀態</th><th>操作</th></tr></thead><tbody>${batches.map((batch)=>{const actions=dailyActions(batch);return `<tr data-daily-batch="${esc(batch.batchId)}"><td>${esc(batch.date)}</td><td><b>${esc(batch.employees.join('、'))}</b></td><td><span class="daily-project-list">${batch.projects.map(esc).join('<br>')}</span></td><td><span class="commission-source">${esc(batch.items.filter(Boolean).slice(0,3).join('、')||'純點工')}${batch.itemCount>3?` 等 ${batch.itemCount} 項`:''}</span></td><td class="num"><b>${money(batch.untaxed)}</b><small>${batch.itemCount} 筆</small></td><td class="num">${money(batch.commission)}</td><td class="num">${money(batch.work)}</td><td><span class="commission-status billing-${batch.billingStatus==='未請款'?'open':batch.billingStatus==='草稿中'?'draft':batch.billingStatus==='已請款'?'done':'none'}">${esc(batch.billingStatus)}</span>${batch.billingAmount>0?`<small>${money(batch.billingAmount)}</small>`:''}</td><td>${actions}</td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="9">此篩選條件下沒有每日作業紀錄。</td></tr>'}</tbody></table></div><div class="daily-mobile-list" aria-label="每日作業清單">${dailyMobileCards(batches)}</div></section>`;
+  }
+  function dailyMobileCards(batches) {
+    return batches.map((batch)=>`<article class="daily-mobile-card" data-daily-card="${esc(batch.batchId)}"><header><strong>${esc(batch.date)}</strong><span class="commission-status">${esc(batch.billingStatus)}</span></header><h3>${esc(batch.employees.join('、'))}</h3><p>${esc(batch.projects.join('、'))}</p><p>${esc(batch.items.filter(Boolean).slice(0,3).join('、')||'純點工')}${batch.itemCount>3?` 等 ${batch.itemCount} 項`:''}</p><small>${batch.itemCount} 筆</small><dl>${dailyDetailField('未稅施工額',batch.untaxed,true)}${dailyDetailField('抽成',batch.commission,true)}${dailyDetailField('點工薪資',batch.work,true)}${batch.billingAmount>0?dailyDetailField('可請款金額',batch.billingAmount,true):''}</dl><footer>${dailyActions(batch)}</footer></article>`).join('')||'<p class="daily-mobile-empty">此篩選條件下沒有每日作業紀錄。</p>';
+  }
+  function dailyDetailField(title,value,isMoney=false) {
+    const text=value===null||value===undefined||value===''?'—':isMoney?money(value):typeof value==='boolean'?(value?'是':'否'):value;
+    return `<div><dt>${esc(title)}</dt><dd>${esc(text)}</dd></div>`;
+  }
+  function dailyDetailGroups(batch) {
+    // Match the batch builder: first log per source group, group-local item IDs.
+    const groups=new Map();
+    batch.logs.forEach((log)=>{const key=log.groupId||log.id;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(log)});
+    return [...groups.entries()].map(([id,logs])=>{
+      const first=logs[0],seen=new Set(),items=[];
+      (first.items||[]).forEach((item,index)=>{const key=item.workItemId||`${first.groupId||first.id}:${index}`;if(seen.has(key))return;seen.add(key);items.push(item)});
+      return {id,first,items};
+    });
+  }
+  function dailyDetailItem(item) {
+    const field=dailyDetailField;
+    const source=item.sourceType==='quotation'?'報價來源':item.sourceType==='manual'?'手動施工':item.sourceType||'未標示來源';
+    return `<article class="daily-detail-item"><h5>${esc(item.item||item.itemName||'未命名施工項目')}</h5><dl>${field('單位',item.unit)}${field('數量',item.qty)}${field('單價',item.price,true)}${field('輸入單價',item.inputPrice,true)}${field('來源單價',item.unitPrice,true)}${field('未稅小計',item.untaxedSubtotal,true)}${field('小計',item.subtotal,true)}${field('稅別',item.taxMode)}${field('可請款',item.billable)}${field('請款狀態',item.billingStatus)}${field('不需請款',item.noInvoice)}${field('來源',source)}${field('報價單號',item.quotationNo)}${field('計價方式',item.pricingType)}${field('整筆金額',item.lumpSumAmount,true)}</dl>${item.note?`<p>備註：${esc(item.note)}</p>`:''}<details><summary>技術資訊</summary><dl>${field('施工項目 ID',item.workItemId)}${field('報價 ID',item.quotationId??item.quoteId)}${field('報價明細 ID',item.quotationLineId??item.quoteLineId)}${field('請款 ID',item.billingId)}</dl></details></article>`;
+  }
+  function openDailyDetail(batchId,trigger=document.activeElement) {
+    const state=store.getState(),batch=dailyBatchById(state,batchId);
+    if(!batch)return window.KushePhase1?.toast('找不到對應的每日作業來源');
+    const layer=$('#commissionDrawerLayer');if(!layer)return;
+    if(!dailyDetailActive)dailyDetailContext={trigger,x:window.scrollX,y:window.scrollY};
+    dailyDetailActive=true;
+    const field=dailyDetailField;
+    const workforce=batch.logs.map((log)=>`<article class="daily-detail-worker"><h4>${esc(label(state,'employees',log.employee,log.employeeName||'—'))}</h4><dl>${field('案場',label(state,'projects',log.project,log.projectName||'—'))}${field('點工類型',log.workMode==='hourly'?'時薪':log.workMode==='daily'?'日薪':'不計點工')}${field('點工數量',log.workQty)}${field('點工單價',log.workRate,true)}${field('點工金額',store.dailyWorkAmount(log),true)}${field('業績',log.performance,true)}${field('抽成比例',log.rate===null||log.rate===undefined?'—':log.rate+'%')}${field('抽成',log.commission,true)}</dl>${log.note?`<p>備註：${esc(log.note)}</p>`:''}</article>`).join('');
+    const projects=dailyDetailGroups(batch).map(({id,first,items})=>{
+      const houses=new Map();items.forEach((item)=>{const house=item.house||'未指定戶別';if(!houses.has(house))houses.set(house,[]);houses.get(house).push(item)});
+      return `<section class="daily-detail-project" data-detail-group="${esc(id)}"><h3>${esc(label(state,'projects',first.project,first.projectName||'—'))}</h3><dl>${field('客戶',label(state,'customers',first.customer,first.customerName||'—'))}${field('請款狀態',first.billingStatus)}${field('請款 ID',first.billingId)}${field('可請款',first.billable)}${field('不需請款',first.noInvoice)}</dl>${[...houses.entries()].map(([house,rows])=>`<section class="daily-detail-house"><h4>${esc(house)}</h4>${rows.map(dailyDetailItem).join('')}</section>`).join('')||'<p>此來源群組沒有施工項目。</p>'}</section>`;
+    }).join('');
+    layer.hidden=false;layer.innerHTML=`<div class="commission-drawer-backdrop" data-detail-close></div><aside class="commission-drawer daily-readonly-detail" role="dialog" aria-modal="true" aria-labelledby="dailyDetailTitle"><header><div><h2 id="dailyDetailTitle">每日作業內容</h2><p>${esc(batch.date)} · ${esc(batch.billingStatus)}</p></div><button type="button" data-detail-close aria-label="關閉每日作業內容">關閉</button></header><div class="daily-detail-body"><p>${esc(batch.employees.join('、'))}</p><dl class="daily-detail-summary">${field('未稅施工額',batch.untaxed,true)}${field('施工總額',batch.gross,true)}${field('抽成',batch.commission,true)}${field('點工薪資',batch.work,true)}${field('可請款金額',batch.billingAmount,true)}</dl><section><h3>員工作業</h3>${workforce}</section><section><h3>施工明細</h3>${projects}</section></div><footer><button type="button" data-detail-close>關閉</button></footer></aside>`;
+    layer.classList.add('is-open');
+    $$('[data-detail-close]',layer).forEach((button)=>button.addEventListener('click',closeDailyDetail));
+    layer.onkeydown=(event)=>{if(event.key==='Escape'){event.preventDefault();closeDailyDetail()}else if(event.key==='Tab'){const targets=$$('button,summary',layer),first=targets[0],last=targets[targets.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}}};
+    $('button',layer).focus({preventScroll:true});
+  }
+  function closeDailyDetail() {
+    if(!dailyDetailActive)return;
+    const context=dailyDetailContext,refresh=dailyDetailNeedsRefresh;
+    dailyDetailActive=false;dailyDetailNeedsRefresh=false;dailyDetailContext=null;
+    const layer=$('#commissionDrawerLayer');if(layer){layer.onkeydown=null;layer.classList.remove('is-open');layer.hidden=true;layer.innerHTML=''}
+    if(refresh&&active)render();
+    if(context){if(context.trigger?.isConnected)context.trigger.focus({preventScroll:true});window.scrollTo(context.x,context.y)}
   }
   function todayProjectsSection(state) {
     const query = filters.query.trim().toLocaleLowerCase('zh-Hant'), groups = new Map();
@@ -192,6 +254,7 @@
     return `${todayProjectsSection(state)}${dailySection(state,batches)}`;
   }
   function render() {
+    if(dailyDetailActive){dailyDetailNeedsRefresh=true;return}
     if (!active) return;
     const state = store.getState();
     const rows = rowsFor(state);
@@ -243,16 +306,16 @@
     $$('[data-sort]').forEach((button) => button.addEventListener('click', () => { const key = button.dataset.sort; filters.direction = filters.sort === key && filters.direction === 'desc' ? 'asc' : 'desc'; filters.sort = key; render(); }));
     $$('[data-edit]').forEach((button) => button.addEventListener('click', () => openDrawer(button.dataset.edit)));
     $$('[data-delete]').forEach((button) => button.addEventListener('click', () => remove(button.dataset.delete)));
+    $$('[data-daily-view]').forEach((button)=>button.addEventListener('click',()=>openDailyDetail(button.dataset.dailyView,button)));
     $$('[data-daily-edit]').forEach((button) => button.addEventListener('click', () => openDailyDrawer(button.dataset.dailyEdit)));
     $$('[data-daily-delete]').forEach((button) => button.addEventListener('click', () => removeDaily(button.dataset.dailyDelete)));
-    $$('[data-view-daily-source]').forEach((button)=>button.addEventListener('click',()=>showDailySource(button.dataset.viewDailySource)));
+    $$('[data-view-daily-source]').forEach((button)=>button.addEventListener('click',()=>showDailySource(button.dataset.viewDailySource,button)));
     $$('[data-view-payroll]').forEach((button)=>button.addEventListener('click',()=>{window.location.hash='#payroll'}));
   }
-  function showDailySource(sourceId) {
+  function showDailySource(sourceId,trigger=document.activeElement) {
     const log=(store.getState().dailyLogs||[]).find((row)=>row.id===sourceId);
     if(!log)return window.KushePhase1?.toast('找不到對應的每日作業來源');
-    activeTab='daily';filters.month=String(log.date||'').slice(0,7);filters.employee='';filters.project='';filters.query='';render();
-    requestAnimationFrame(()=>{const target=$$('[data-daily-batch]').find((row)=>row.dataset.dailyBatch===(log.batchId||log.id));target?.scrollIntoView({block:'center'});target?.classList.add('is-highlighted');window.setTimeout(()=>target?.classList.remove('is-highlighted'),1800)});
+    openDailyDetail(log.batchId||log.id,trigger);
   }
   function openDailyDrawerLegacy(batchId='') {
     const state=store.getState(),logs=batchId?(state.dailyLogs||[]).filter((log)=>(log.batchId||log.id)===batchId):[];
@@ -469,8 +532,8 @@
   function closeDrawer() {
     if(dailySubmitInFlight)return;
     const wasDaily=dailyEditorActive;dailyEditorActive=false;
-    const layer=$('#commissionDrawerLayer');layer.classList.remove('is-open');
-    window.setTimeout(()=>{if(dailyEditorActive)return;layer.hidden=true;layer.innerHTML='';if(wasDaily&&active&&layer.isConnected)render()},180);
+    const layer=$('#commissionDrawerLayer'),closingContent=layer.firstElementChild;layer.classList.remove('is-open');
+    window.setTimeout(()=>{if(dailyEditorActive||dailyDetailActive||layer.firstElementChild!==closingContent)return;layer.hidden=true;layer.innerHTML='';if(wasDaily&&active&&layer.isConnected)render()},180);
   }
   async function submit(event) {
     event.preventDefault();
@@ -493,7 +556,7 @@
     if (options.route === 'attendance') activeTab = 'attendance';
     render();
   }
-  function deactivate() { active = false; dailyEditorActive = false; }
+  function deactivate() { active = false; closeDailyDetail(); dailyDetailNeedsRefresh=false; dailyDetailContext=null; dailyEditorActive = false; }
   window.addEventListener('kushe:data-updated', () => { if (active && !quickProjectSaveActive && !dailySubmitInFlight && !dailyEditorActive) render(); });
   window.KusheCommissions = { activate, deactivate, render };
 }());
