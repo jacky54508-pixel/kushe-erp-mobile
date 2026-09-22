@@ -523,6 +523,26 @@
     </nav>`;
   }
 
+  function renderLedgerMobileCards(view) {
+    if (!view.rows.length) return '<p class="bank-ledger-mobile-empty">此月份尚無銀行交易。</p>';
+    return view.rows.map(({ row, bank, direction }) => {
+      const running = view.runningBalances.get(String(row.id || ''));
+      const directionText = direction === 'in' ? '收入' : direction === 'out' ? '支出' : '無法辨識';
+      const directionClass = direction === 'in' ? 'is-income' : direction === 'out' ? 'is-expense' : 'is-unknown';
+      return `<article class="bank-ledger-mobile-card" data-bank-transaction-id="${esc(row.id)}">
+        <header class="bank-ledger-mobile-head"><div><span>日期</span><strong>${esc(row.date || '—')}</strong></div><span class="bank-direction ${directionClass}">${esc(directionText)}</span></header>
+        <div class="bank-ledger-mobile-primary"><div><span>來源</span><strong>${esc(sourceLabel(row))}</strong></div><div class="bank-counterparty"><span>對象／案場</span>${counterpartyLabel(row)}</div></div>
+        <div class="bank-ledger-mobile-description"><span>說明</span><p>${esc(descriptionLabel(row))}</p></div>
+        <div class="bank-ledger-mobile-amounts">
+          <div><span>收入</span><strong class="bank-income-amount">${direction === 'in' ? money(row.amount) : '—'}</strong></div>
+          <div><span>支出</span><strong class="bank-expense-amount">${direction === 'out' ? money(row.amount) : '—'}</strong></div>
+          <div class="is-balance"><span>交易後餘額</span><strong class="bank-running-balance">${running === null || running === undefined ? '—' : money(running)}</strong></div>
+        </div>
+        <footer><span>帳戶</span><strong>${esc(bankName(bank))}</strong></footer>
+      </article>`;
+    }).join('');
+  }
+
   function renderLedger(state) {
     const view = bankMonthView(state, selectedMonth);
     return `<section class="commission-panel bank-month-panel">
@@ -538,10 +558,11 @@
     ${renderSummary(view)}
     <section class="commission-panel billing-list-panel bank-ledger-panel">
       <header class="project-section-title"><div><h2>${esc(monthLabel(selectedMonth))}交易明細</h2><p>共 ${view.rows.length} 筆；交易後餘額依日期、建立時間及系統編號穩定計算。</p></div></header>
-      <div class="commission-table-wrap bank-ledger-scroll"><table class="commission-table bank-ledger-table">
+      <div class="commission-table-wrap bank-ledger-scroll bank-ledger-desktop"><table class="commission-table bank-ledger-table">
         <thead><tr><th>日期</th><th>收／支</th><th>來源</th><th>對象／案場</th><th>說明</th><th class="num">收入</th><th class="num">支出</th><th class="num">交易後餘額</th><th>帳戶</th></tr></thead>
         <tbody>${renderRows(view)}</tbody>
       </table></div>
+      <div class="bank-ledger-mobile-list" aria-label="銀行交易清單">${renderLedgerMobileCards(view)}</div>
     </section>`;
   }
 
