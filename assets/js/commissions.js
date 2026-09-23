@@ -405,7 +405,7 @@
     $$('[data-daily-edit]').forEach((button) => button.addEventListener('click', () => openDailyDrawer(button.dataset.dailyEdit)));
     $$('[data-daily-delete]').forEach((button) => button.addEventListener('click', () => removeDaily(button.dataset.dailyDelete)));
     $$('[data-view-daily-source]').forEach((button)=>button.addEventListener('click',()=>showDailySource(button.dataset.viewDailySource,button)));
-    $$('[data-view-payroll]').forEach((button)=>button.addEventListener('click',()=>{window.location.hash='#payroll'}));
+    $$('[data-view-payroll]').forEach((button)=>button.addEventListener('click',()=>{window.KushePayroll?.prepareNavigationTarget({employeeId:button.dataset.viewPayroll,month:filters.month});window.location.hash='#payroll'}));
   }
   function showDailySource(sourceId,trigger=document.activeElement) {
     const log=(store.getState().dailyLogs||[]).find((row)=>row.id===sourceId);

@@ -6,6 +6,7 @@
   const today=(date=new Date())=>{const parts=Object.fromEntries(businessDateFormatter.formatToParts(date).map((part)=>[part.type,part.value]));return `${parts.year}-${parts.month}-${parts.day}`};
   const money=(value)=>`$${new Intl.NumberFormat('zh-TW',{maximumFractionDigits:0}).format(Math.round(store.num(value)))}`;
   let active=false,ready=false,expanded='';
+  let pendingNavigationTarget=null,activationToken=0,navigationFrame=null;
   const bankName=(id,state)=>state.banks.find((row)=>row.id===id)?.name||'未指定';
   function closeModal(){document.querySelector('.erp-detail-overlay')?.remove()}
   function groups(){return store.monthlyPayrollGroups()}
@@ -60,8 +61,50 @@
     $$('[data-salary-delete]').forEach((button)=>button.onclick=async()=>{if(!window.confirm('確定刪除此薪資付款？銀行支出會同步沖回。'))return;try{await store.deleteSalaryPayment(button.dataset.salaryDelete);render();window.KushePhase1.toast('薪資付款已刪除，銀行餘額已還原')}catch(error){window.KushePhase1.toast(error.message||String(error))}});
     window.KusheIcons?.render($('#payrollApp'));
   }
-  async function activate(){active=true;if(!ready){await store.load();ready=true}render()}
-  function deactivate(){active=false;closeModal()}
+  function cancelNavigationFrame(){
+    if(navigationFrame!==null){window.cancelAnimationFrame(navigationFrame);navigationFrame=null;}
+  }
+  function prepareNavigationTarget(context={}){
+    const employeeId=String(context?.employeeId??'').trim(),month=String(context?.month??'').trim();
+    pendingNavigationTarget={employeeId,month,valid:Boolean(employeeId)&&/^\d{4}-(0[1-9]|1[0-2])$/.test(month)};
+  }
+  function scheduleNavigationScroll(groupKey,token){
+    navigationFrame=window.requestAnimationFrame(()=>{
+      navigationFrame=null;
+      if(!active||token!==activationToken||document.body.dataset.route!=='payroll')return;
+      const root=$('#payrollApp');
+      const button=root&&$$('[data-salary-expand]',root).find((node)=>node.dataset.salaryExpand===groupKey);
+      const row=button?.closest('tr');
+      if(!row?.isConnected)return;
+      // Scroll the main row, not the far-right action button; preserve horizontal context.
+      const horizontal=[];
+      for(let node=row.parentElement;node;node=node.parentElement)horizontal.push([node,node.scrollLeft]);
+      const left=window.scrollX;
+      row.scrollIntoView({block:'start',behavior:'auto'});
+      horizontal.forEach(([node,scrollLeft])=>{if(node.scrollLeft!==scrollLeft)node.scrollLeft=scrollLeft;});
+      if(window.scrollX!==left)window.scrollTo({left,top:window.scrollY,behavior:'auto'});
+    });
+  }
+  async function activate(){
+    const target=pendingNavigationTarget;pendingNavigationTarget=null;
+    const token=++activationToken;cancelNavigationFrame();active=true;
+    if(!ready){await store.load();ready=true;}
+    if(!active||token!==activationToken)return;
+    if(!target){render();return;}
+    if(document.body.dataset.route!=='payroll')return;
+    expanded='';
+    let message='',groupKey='';
+    if(!target.valid)message='薪資定位資訊無效';
+    else{
+      const matches=groups().filter((group)=>group.employeeId===target.employeeId&&String(group.month||'').slice(0,7)===target.month);
+      if(matches.length===1){groupKey=matches[0].key;expanded=groupKey;}
+      else message=matches.length?'薪資資料匹配不唯一，請人工確認':'此員工此月份尚未建立薪資資料';
+    }
+    render();
+    if(message)window.KushePhase1.toast(message);
+    else scheduleNavigationScroll(groupKey,token);
+  }
+  function deactivate(){active=false;pendingNavigationTarget=null;activationToken+=1;cancelNavigationFrame();closeModal();}
   window.addEventListener('kushe:data-updated',()=>{if(active)render()});
-  window.KushePayroll={activate,deactivate,render};
+  window.KushePayroll={activate,deactivate,render,prepareNavigationTarget};
 }());
