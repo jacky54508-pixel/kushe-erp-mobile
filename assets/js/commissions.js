@@ -8,6 +8,8 @@
   let active = false;
   let activeTab = 'daily';
   let editingId = null;
+  let manualDrawerActive = false;
+  let manualViewportCleanup = null;
   let editingDailyBatch = '';
   let dailyLineSequence = 0;
   let quickProjectSaveActive = false;
@@ -596,11 +598,47 @@
     }
   }
   async function removeDaily(batchId){const batch=dailyBatches(store.getState()).find((row)=>row.batchId===batchId);if(!batch||!window.confirm(`確定刪除 ${batch.date} 的每日施工紀錄？抽成與點工薪資會同步重算。`))return;try{await store.deleteDailyBatch(batchId);render();window.KushePhase1?.toast('每日施工已刪除，薪資與待請款已同步重算')}catch(error){window.KushePhase1?.toast(error.message)}}
+  function stopManualDrawerViewport() {
+    manualDrawerActive=false;
+    if(manualViewportCleanup){manualViewportCleanup();manualViewportCleanup=null;}
+    const layer=$('#commissionDrawerLayer');
+    if(layer?.dataset.drawerMode==='manual')delete layer.dataset.drawerMode;
+  }
+  function startManualDrawerViewport(layer) {
+    manualDrawerActive=true;
+    layer.dataset.drawerMode='manual';
+    const viewport=window.visualViewport,form=$('#commissionForm',layer);
+    let frame=null,disposed=false;
+    const clear=()=>{layer.style.removeProperty('--manual-drawer-vv-height');layer.style.removeProperty('--manual-drawer-vv-top');};
+    const sync=()=>{
+      frame=null;
+      if(disposed||!manualDrawerActive||!layer.isConnected||$('#commissionForm',layer)!==form||layer.dataset.drawerMode!=='manual')return;
+      if(!window.matchMedia('(max-width: 820px)').matches||!viewport){clear();return;}
+      if(Number.isFinite(viewport.height)&&viewport.height>0&&Number.isFinite(viewport.offsetTop)){
+        layer.style.setProperty('--manual-drawer-vv-height',viewport.height+'px');
+        layer.style.setProperty('--manual-drawer-vv-top',Math.max(0,viewport.offsetTop)+'px');
+      }else clear();
+    };
+    const schedule=()=>{if(!disposed&&frame===null)frame=window.requestAnimationFrame(sync);};
+    viewport?.addEventListener('resize',schedule);
+    viewport?.addEventListener('scroll',schedule);
+    window.addEventListener('resize',schedule);
+    manualViewportCleanup=()=>{
+      disposed=true;
+      viewport?.removeEventListener('resize',schedule);
+      viewport?.removeEventListener('scroll',schedule);
+      window.removeEventListener('resize',schedule);
+      if(frame!==null)window.cancelAnimationFrame(frame);
+      frame=null;clear();
+    };
+    schedule();
+  }
   function openDrawer(id = null) {
     const state = store.getState();
     const row = id ? state.commissions.find((item) => item.id === id) : null;
     if(row&&store.payrollHistoryLock(row.employee,row.date).locked)return window.KushePhase1?.toast('此抽成紀錄已納入已付款薪資，為保留歷史帳務不可修改或刪除。');
     if(row?.sourceType==='daily-log')return window.KushePhase1?.toast('每日施工衍生抽成必須由每日施工來源調整。');
+    stopManualDrawerViewport();
     editingId = row?.id || null;
     const gross = row ? grossOf(state, row) : 0;
     const layer = $('#commissionDrawerLayer');
@@ -636,9 +674,11 @@
     form.addEventListener('submit', submit);
     $$('.commission-drawer-backdrop,.commission-drawer-close,[data-cancel]', layer).forEach((button) => button.addEventListener('click', closeDrawer));
     calc();
+    startManualDrawerViewport(layer);
   }
   function closeDrawer() {
     if(dailySubmitInFlight)return;
+    if(manualDrawerActive||$('#commissionDrawerLayer')?.dataset.drawerMode==='manual')stopManualDrawerViewport();
     const wasDaily=dailyEditorActive;dailyEditorActive=false;
     const layer=$('#commissionDrawerLayer'),closingContent=layer.firstElementChild;layer.classList.remove('is-open');
     window.setTimeout(()=>{if(dailyEditorActive||dailyDetailActive||layer.firstElementChild!==closingContent)return;layer.hidden=true;layer.innerHTML='';if(wasDaily&&active&&layer.isConnected)render()},180);
@@ -664,7 +704,7 @@
     if (options.route === 'attendance') activeTab = 'attendance';
     render();
   }
-  function deactivate() { active = false; closeDailyDetail(); dailyDetailNeedsRefresh=false; dailyDetailContext=null; dailyEditorActive = false; }
-  window.addEventListener('kushe:data-updated', () => { if (active && !quickProjectSaveActive && !dailySubmitInFlight && !dailyEditorActive) render(); });
+  function deactivate() { active = false; stopManualDrawerViewport(); closeDailyDetail(); dailyDetailNeedsRefresh=false; dailyDetailContext=null; dailyEditorActive = false; }
+  window.addEventListener('kushe:data-updated', () => { if (active && !quickProjectSaveActive && !dailySubmitInFlight && !dailyEditorActive && !manualDrawerActive) render(); });
   window.KusheCommissions = { activate, deactivate, render };
 }());
