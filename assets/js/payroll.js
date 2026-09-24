@@ -49,10 +49,29 @@
     if(!group.history.length)return '<p class="receipt-history-empty">尚無付款紀錄</p>';
     return `<table><thead><tr><th>付款日期</th><th class="num">本次付款</th><th>銀行帳戶</th><th>付款方式</th><th class="num">手續費</th><th class="num">實際扣款</th><th>備註</th><th>操作</th></tr></thead><tbody>${group.history.map((payment)=>`<tr><td>${esc(payment.date||'—')}</td><td class="num">${money(payment.amount)}</td><td>${esc(bankName(payment.bankAccountId||payment.bankId,state))}</td><td>${esc(payment.paymentMethod||'銀行轉帳')}</td><td class="num">${money(payment.fee)}</td><td class="num">${money(payment.actualDebit??payment.amount)}</td><td>${esc(payment.note||'—')}</td><td>${payment.readOnly?'<span class="commission-status is-settled">歷史付款（唯讀）</span>':`<button class="commission-link" type="button" data-salary-edit="${esc(payment.id)}">編輯</button> <button class="commission-link" type="button" data-salary-delete="${esc(payment.id)}">刪除</button>`}</td></tr>`).join('')}</tbody></table>`;
   }
+  function payrollGroupActions(group,presentation,mobile=false){
+    const {open,adjustmentLocked}=presentation;
+    return `${adjustmentLocked?'<span class="commission-status settled" title="請先刪除／沖回薪資付款後再調整">薪資調整鎖定</span>':`<button class="commission-secondary compact" type="button" data-salary-adjust="${esc(group.key)}">薪資調整</button>`}${presentation.canPay?`<button class="commission-primary compact" type="button" data-salary-pay="${esc(group.key)}">付款</button>`:''}<button class="commission-secondary compact" type="button" data-salary-pdf="${esc(group.key)}">薪資單 PDF</button><button class="receivable-expand" type="button" data-salary-expand="${esc(group.key)}" aria-expanded="${open}"><span>${mobile?(open?'收合':'查看明細'):(open?'⌃':'⌄')}</span></button>`;
+  }
+  function payrollMobileFields(fields){
+    return '<dl class="payroll-mobile-fields">'+fields.map(([label,value])=>'<div><dt>'+label+'</dt><dd>'+value+'</dd></div>').join('')+'</dl>';
+  }
+  function sourceMobileCards(group){
+    if(!group.sources.length)return '<p class="receipt-history-empty">尚無可追溯的薪資來源明細</p>';
+    return '<div class="payroll-source-list">'+group.sources.map((source)=>'<article class="payroll-source-card">'+payrollMobileFields([['日期',esc(source.date||'—')],['類型',esc(source.type||'—')],['案場',esc(source.projectName||'—')],['內容',esc(source.content||'—')],['數量／比例',esc(source.quantityLabel||'—')],['單價／基準',esc(source.rateLabel||'—')],['金額',money(source.amount)]])+'</article>').join('')+'</div>';
+  }
+  function paymentMobileCards(group,state){
+    if(!group.history.length)return '<p class="receipt-history-empty">尚無付款紀錄</p>';
+    return '<div class="payroll-payment-list">'+group.history.map((payment)=>'<article class="payroll-payment-card">'+payrollMobileFields([['付款日期',esc(payment.date||'—')],['本次付款',money(payment.amount)],['銀行帳戶',esc(bankName(payment.bankAccountId||payment.bankId,state))],['付款方式',esc(payment.paymentMethod||'銀行轉帳')],['手續費',money(payment.fee)],['實際扣款',money(payment.actualDebit??payment.amount)],['備註',esc(payment.note||'—')]])+'<div class="payroll-mobile-actions" aria-label="操作">'+(payment.readOnly?'<span class="commission-status is-settled">歷史付款（唯讀）</span>':'<button class="commission-link" type="button" data-salary-edit="'+esc(payment.id)+'">編輯</button> <button class="commission-link" type="button" data-salary-delete="'+esc(payment.id)+'">刪除</button>')+'</div></article>').join('')+'</div>';
+  }
+  function payrollMobileCards(rows,presentations,state){
+    return '<div class="payroll-mobile-list">'+(rows.map((group)=>{const presentation=presentations.get(group);return '<article class="payroll-mobile-card"><header><div><p>'+esc(group.month||'—')+'</p><h2>'+esc(group.employeeName)+'</h2>'+(group.history.length?'<span class="receipt-count-badge">'+group.history.length+' 次付款</span>':'')+'</div><span class="commission-status '+presentation.statusClass+'">'+esc(group.status)+'</span></header>'+payrollMobileFields([['薪資總額',money(group.total)],['已付',money(group.paid)],['未付',money(group.outstanding)]])+'<div class="payroll-mobile-actions">'+payrollGroupActions(group,presentation,true)+'</div>'+(presentation.open?'<section class="payroll-mobile-detail"><h3>薪資來源明細</h3>'+sourceMobileCards(group)+'<h3>薪資付款紀錄</h3>'+paymentMobileCards(group,state)+'</section>':'')+'</article>'}).join('')||'<p class="billing-empty">目前沒有薪資紀錄。</p>')+'</div>';
+  }
   function render(){
     if(!active)return;
     const state=store.getState(),rows=groups();
-    $('#payrollApp').innerHTML=`<section class="commissions-heading"><div><h1>薪資管理</h1><p>依員工與月份彙總既有薪資來源，並沿用分次付款與銀行支出。</p></div></section><section class="commission-panel billing-list-panel"><div class="commission-table-wrap"><table class="commission-table"><thead><tr><th>月份</th><th>員工</th><th class="num">薪資總額</th><th class="num">已付</th><th class="num">未付</th><th>付款狀態</th><th>操作</th></tr></thead><tbody>${rows.map((group)=>{const open=expanded===group.key,adjustmentLocked=group.paid>0||group.hasVerifiedPayment;return `<tr><td>${esc(group.month||'—')}</td><td><b>${esc(group.employeeName)}</b>${group.history.length?`<span class="receipt-count-badge">${group.history.length} 次付款</span>`:''}</td><td class="num"><b>${money(group.total)}</b></td><td class="num">${money(group.paid)}</td><td class="num"><b>${money(group.outstanding)}</b></td><td><span class="commission-status ${group.status==='已付清'?'settled':group.status==='部分付款'?'partial':''}">${group.status}</span></td><td><div class="receivable-actions">${adjustmentLocked?'<span class="commission-status settled" title="請先刪除／沖回薪資付款後再調整">薪資調整鎖定</span>':`<button class="commission-secondary compact" type="button" data-salary-adjust="${esc(group.key)}">薪資調整</button>`}${group.outstanding>0?`<button class="commission-primary compact" type="button" data-salary-pay="${esc(group.key)}">付款</button>`:''}<button class="commission-secondary compact" type="button" data-salary-pdf="${esc(group.key)}">薪資單 PDF</button><button class="receivable-expand" type="button" data-salary-expand="${esc(group.key)}" aria-expanded="${open}"><span>${open?'⌃':'⌄'}</span></button></div></td></tr>${open?`<tr class="receipt-history-row"><td colspan="7"><section class="receipt-history"><h3>薪資來源明細</h3>${sourceTable(group)}<h3>薪資付款紀錄</h3>${paymentTable(group,state)}</section></td></tr>`:''}`}).join('')||'<tr><td colspan="7" class="billing-empty">目前沒有薪資紀錄。</td></tr>'}</tbody></table></div></section>`;
+    const presentations=new Map(rows.map((group)=>[group,{open:expanded===group.key,adjustmentLocked:group.paid>0||group.hasVerifiedPayment,canPay:group.outstanding>0,statusClass:group.status==='已付清'?'settled':group.status==='部分付款'?'partial':''}]));
+    $('#payrollApp').innerHTML=`<section class="commissions-heading"><div><h1>薪資管理</h1><p>依員工與月份彙總既有薪資來源，並沿用分次付款與銀行支出。</p></div></section><section class="commission-panel billing-list-panel"><div class="commission-table-wrap payroll-desktop-table"><table class="commission-table"><thead><tr><th>月份</th><th>員工</th><th class="num">薪資總額</th><th class="num">已付</th><th class="num">未付</th><th>付款狀態</th><th>操作</th></tr></thead><tbody>${rows.map((group)=>{const presentation=presentations.get(group),{open}=presentation;return `<tr><td>${esc(group.month||'—')}</td><td><b>${esc(group.employeeName)}</b>${group.history.length?`<span class="receipt-count-badge">${group.history.length} 次付款</span>`:''}</td><td class="num"><b>${money(group.total)}</b></td><td class="num">${money(group.paid)}</td><td class="num"><b>${money(group.outstanding)}</b></td><td><span class="commission-status ${presentation.statusClass}">${group.status}</span></td><td><div class="receivable-actions">${payrollGroupActions(group,presentation)}</div></td></tr>${open?`<tr class="receipt-history-row"><td colspan="7"><section class="receipt-history"><h3>薪資來源明細</h3>${sourceTable(group)}<h3>薪資付款紀錄</h3>${paymentTable(group,state)}</section></td></tr>`:''}`}).join('')||'<tr><td colspan="7" class="billing-empty">目前沒有薪資紀錄。</td></tr>'}</tbody></table></div>${payrollMobileCards(rows,presentations,state)}</section>`;
     $$('[data-salary-adjust]').forEach((button)=>button.onclick=()=>openAdjustments(button.dataset.salaryAdjust));
     $$('[data-salary-pay]').forEach((button)=>button.onclick=()=>openPayment(button.dataset.salaryPay));
     $$('[data-salary-pdf]').forEach((button)=>button.onclick=()=>{const group=groupFor(button.dataset.salaryPdf);if(group)window.KushePayrollPrint?.open(group)});
@@ -73,16 +92,15 @@
       navigationFrame=null;
       if(!active||token!==activationToken||document.body.dataset.route!=='payroll')return;
       const root=$('#payrollApp');
-      const button=root&&$$('[data-salary-expand]',root).find((node)=>node.dataset.salaryExpand===groupKey);
-      const row=button?.closest('tr');
-      if(!row?.isConnected)return;
-      // Scroll the main row, not the far-right action button; preserve horizontal context.
-      const horizontal=[];
-      for(let node=row.parentElement;node;node=node.parentElement)horizontal.push([node,node.scrollLeft]);
-      const left=window.scrollX;
-      row.scrollIntoView({block:'start',behavior:'auto'});
-      horizontal.forEach(([node,scrollLeft])=>{if(node.scrollLeft!==scrollLeft)node.scrollLeft=scrollLeft;});
-      if(window.scrollX!==left)window.scrollTo({left,top:window.scrollY,behavior:'auto'});
+      const visible=(node)=>Boolean(node?.isConnected&&node.getClientRects().length);
+      const button=root&&$$('[data-salary-expand]',root).find((node)=>node.dataset.salaryExpand===groupKey&&visible(node));
+      const target=button?.closest('.payroll-mobile-card, tr');
+      const frame=target?.closest('.page-frame');
+      if(!visible(target)||!frame)return;
+      // Measure the shell obstruction; only adjust its vertical scrolling position.
+      const frameRect=frame.getBoundingClientRect(),topbar=$('.topbar');
+      const desiredTop=Math.max(frameRect.top,topbar?.getBoundingClientRect().bottom??frameRect.top)+12;
+      frame.scrollTop+=target.getBoundingClientRect().top-desiredTop;
     });
   }
   async function activate(){
