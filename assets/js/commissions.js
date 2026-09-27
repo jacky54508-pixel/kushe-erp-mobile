@@ -9,6 +9,9 @@
   let activeTab = 'daily';
   let editingId = null;
   let manualDrawerActive = false;
+  let manualSubmitInFlight = false;
+  let manualDrawerGeneration = 0;
+  let manualRefreshPending = false;
   let manualViewportCleanup = null;
   let editingDailyBatch = '';
   let dailyLineSequence = 0;
@@ -634,11 +637,13 @@
     schedule();
   }
   function openDrawer(id = null) {
+    if(manualSubmitInFlight)return window.KushePhase1?.toast('業績儲存中，請稍候');
     const state = store.getState();
     const row = id ? state.commissions.find((item) => item.id === id) : null;
     if(row&&store.payrollHistoryLock(row.employee,row.date).locked)return window.KushePhase1?.toast('此抽成紀錄已納入已付款薪資，為保留歷史帳務不可修改或刪除。');
     if(row?.sourceType==='daily-log')return window.KushePhase1?.toast('每日施工衍生抽成必須由每日施工來源調整。');
     stopManualDrawerViewport();
+    manualDrawerGeneration += 1;
     editingId = row?.id || null;
     const gross = row ? grossOf(state, row) : 0;
     const layer = $('#commissionDrawerLayer');
@@ -678,20 +683,86 @@
   }
   function closeDrawer() {
     if(dailySubmitInFlight)return;
+    const wasManual=$('#commissionDrawerLayer')?.dataset.drawerMode==='manual';
+    if(manualSubmitInFlight&&wasManual)return;
     if(manualDrawerActive||$('#commissionDrawerLayer')?.dataset.drawerMode==='manual')stopManualDrawerViewport();
     const wasDaily=dailyEditorActive;dailyEditorActive=false;
     const layer=$('#commissionDrawerLayer'),closingContent=layer.firstElementChild;layer.classList.remove('is-open');
-    window.setTimeout(()=>{if(dailyEditorActive||dailyDetailActive||layer.firstElementChild!==closingContent)return;layer.hidden=true;layer.innerHTML='';if(wasDaily&&active&&layer.isConnected)render()},180);
+    window.setTimeout(()=>{if(dailyEditorActive||dailyDetailActive||layer.firstElementChild!==closingContent)return;layer.hidden=true;layer.innerHTML='';if(wasDaily&&active&&layer.isConnected)render();else if(wasManual&&layer.isConnected)refreshManualPresentation()},180);
+  }
+  function refreshManualPresentation() {
+    if(!manualRefreshPending||!active||manualDrawerActive||dailyEditorActive||dailyDetailActive||manualSubmitInFlight)return;
+    render();
+    manualRefreshPending=false;
+  }
+  function showManualCommittedWarning(result) {
+    try {
+      if(window.KusheRecovery?.showResult){window.KusheRecovery.showResult(result);return;}
+    } catch (_) { /* A notification failure must never reopen a committed submission. */ }
+    try{window.KushePhase1?.toast('業績已儲存，但畫面通知異常，請關閉後重新開啟；請勿重送。');}catch(_){}
   }
   async function submit(event) {
     event.preventDefault();
     const form = event.currentTarget;
-    const values = Object.fromEntries(new FormData(form));
-    const button = $('button[type="submit"]', form); button.disabled = true; button.textContent = '儲存中…';
+    if(manualSubmitInFlight||form.dataset.committed==='true'||form.dataset.submitLocked==='true')return;
+    const submittedForm=form,submissionGeneration=manualDrawerGeneration,submissionEditingId=editingId;
+    const submittedLayer=$('#commissionDrawerLayer'),submittedContent=submittedLayer?.firstElementChild;
+    const isCurrent=()=>active&&manualDrawerActive&&submittedForm.isConnected&&
+      $('#commissionDrawerLayer')===submittedLayer&&submittedLayer?.dataset.drawerMode==='manual'&&
+      submittedLayer.firstElementChild===submittedContent&&$('#commissionForm',submittedLayer)===submittedForm&&
+      submissionGeneration===manualDrawerGeneration;
+    if(!isCurrent())return;
+    manualSubmitInFlight=true;
+    let button,enabledControls=[],enabledCloseControls=[],result;
     try {
-      await store.saveCommission(values, editingId);
-      closeDrawer(); render(); window.KushePhase1?.toast('業績已自動儲存，薪資連動已同步');
-    } catch (error) { button.disabled = false; button.textContent = '儲存業績'; window.KushePhase1?.toast(`儲存失敗：${error.message}`); }
+      // Capture the unchanged business payload before disabling any controls.
+      try {
+        const values = Object.fromEntries(new FormData(form));
+        button = $('button[type="submit"]', form);
+        enabledControls=$$('input,select,textarea,button',submittedForm).filter(control=>!control.disabled);
+        enabledCloseControls=$$('.commission-drawer-backdrop,.commission-drawer-close,[data-cancel]',submittedLayer).filter(control=>!control.disabled);
+        enabledControls.forEach(control=>{control.disabled=true});
+        enabledCloseControls.forEach(control=>{control.disabled=true});
+        button.textContent='儲存中…';
+        await store.saveCommission(values, submissionEditingId);
+      } catch(error) {
+        if(error.transactionStatus==='RECOVERY_REQUIRED'){
+          submittedForm.dataset.submitLocked='true';
+          if(button){button.disabled=true;button.textContent='狀態待核對，請勿重送';}
+          enabledCloseControls.forEach(control=>{control.disabled=false});
+          try{
+            if(window.KusheRecovery?.showResult)window.KusheRecovery.showResult(error);
+            else window.KushePhase1?.toast('狀態待核對，請勿重送');
+          }catch(_){}
+        }else{
+          enabledControls.forEach(control=>{control.disabled=false});
+          enabledCloseControls.forEach(control=>{control.disabled=false});
+          if(button)button.textContent='儲存業績';
+          try{window.KushePhase1?.toast(`儲存失敗：${error.message}`);}catch(_){}
+        }
+        return;
+      }
+      // The Store has resolved: errors below are presentation errors, never save failures.
+      submittedForm.dataset.committed='true';
+      try {
+        result=store.getLastStoreTransactionResult?.();
+        manualSubmitInFlight=false;
+        if(isCurrent()){
+          closeDrawer();
+          render();
+          manualRefreshPending=false;
+        }else{
+          manualRefreshPending=true;
+        }
+        if(result?.status==='COMMITTED_WITH_NOTIFICATION_WARNING')showManualCommittedWarning(result);
+        else window.KushePhase1?.toast('業績已自動儲存，薪資連動已同步');
+      }catch(error){
+        manualRefreshPending=true;
+        showManualCommittedWarning({status:'COMMITTED_WITH_NOTIFICATION_WARNING',operationId:result?.operationId||'',notificationWarnings:[String(error?.message||error)]});
+      }
+    } finally {
+      manualSubmitInFlight=false;
+    }
   }
   async function remove(id) {
     const state = store.getState(); const row = state.commissions.find((item) => item.id === id);
@@ -703,6 +774,7 @@
     if (!ready) { await store.load(); filters.month = monthNow(); ready = true; }
     if (options.route === 'attendance') activeTab = 'attendance';
     render();
+    if(!manualDrawerActive&&!dailyDetailActive&&!dailyEditorActive)manualRefreshPending=false;
   }
   function deactivate() { active = false; stopManualDrawerViewport(); closeDailyDetail(); dailyDetailNeedsRefresh=false; dailyDetailContext=null; dailyEditorActive = false; }
   window.addEventListener('kushe:data-updated', () => { if (active && !quickProjectSaveActive && !dailySubmitInFlight && !dailyEditorActive && !manualDrawerActive) render(); });
