@@ -610,29 +610,75 @@
   }
   function startDailyDrawerViewport(layer) {
     layer.dataset.drawerMode='daily';
+    layer.style.removeProperty('--daily-drawer-vv-top');
     const viewport=window.visualViewport,form=$('#dailyWorkForm',layer);
-    let frame=null,disposed=false;
+    let frame=null,recoveryFrame=null,settleTimer=null,focusedTarget=null,disposed=false;
+    const ownsDrawer=()=>!disposed&&dailyEditorActive&&layer.isConnected&&$('#dailyWorkForm',layer)===form&&layer.dataset.drawerMode==='daily';
+    const current=()=>ownsDrawer()&&window.matchMedia('(max-width: 820px)').matches;
     const clear=()=>{layer.style.removeProperty('--daily-drawer-vv-height');layer.style.removeProperty('--daily-drawer-vv-top');};
     const sync=()=>{
       frame=null;
-      if(disposed||!dailyEditorActive||!layer.isConnected||$('#dailyWorkForm',layer)!==form||layer.dataset.drawerMode!=='daily')return;
-      if(!window.matchMedia('(max-width: 820px)').matches||!viewport){clear();return;}
-      if(Number.isFinite(viewport.height)&&viewport.height>0&&Number.isFinite(viewport.offsetTop)){
-        layer.style.setProperty('--daily-drawer-vv-height',viewport.height+'px');
-        layer.style.setProperty('--daily-drawer-vv-top',Math.max(0,viewport.offsetTop)+'px');
-      }else clear();
+      if(!ownsDrawer())return;
+      if(!current()||!viewport){clear();return;}
+      if(Number.isFinite(viewport.height)&&viewport.height>0)layer.style.setProperty('--daily-drawer-vv-height',viewport.height+'px');
+      else clear();
     };
-    const schedule=()=>{if(!disposed&&frame===null)frame=window.requestAnimationFrame(sync);};
+    const scrollRegion=target=>{
+      if(!target||target.closest('.daily-quick-project-layer'))return null;
+      const batch=$('#dailyHouseBatchLayer',layer),quick=$('#dailyQuickProjectLayer',layer);
+      if(quick&&!quick.hidden)return null;
+      if(batch?.contains(target))return !batch.hidden&&target.matches('textarea')?target.closest('.daily-house-batch-card>label'):null;
+      if(batch&&!batch.hidden)return null;
+      return form.contains(target)&&target.matches('input:not([type="hidden"]):not([type="checkbox"]):not([type="button"]):not([type="submit"]),select,textarea')?$('.daily-drawer-body',form):null;
+    };
+    const recover=()=>{
+      if(!current()||!focusedTarget?.isConnected||document.activeElement!==focusedTarget)return;
+      const container=scrollRegion(focusedTarget);
+      if(!container||!container.isConnected||!focusedTarget.getClientRects().length)return;
+      const targetRect=focusedTarget.getBoundingClientRect(),regionRect=container.getBoundingClientRect();
+      const margin=Math.min(16,Math.max(0,(container.clientHeight-targetRect.height)/2));
+      const top=regionRect.top+container.clientTop+margin,bottom=regionRect.top+container.clientTop+container.clientHeight-margin;
+      // Oversized controls reveal their start without alternating between both edges.
+      const targetBottom=targetRect.top+Math.min(targetRect.height,bottom-top);
+      const delta=targetRect.top<top?targetRect.top-top:targetBottom>bottom?targetBottom-bottom:0;
+      if(Math.abs(delta)<1)return;
+      const max=Math.max(0,container.scrollHeight-container.clientHeight);
+      container.scrollTop=Math.max(0,Math.min(max,container.scrollTop+delta));
+    };
+    const cancelRecovery=()=>{
+      if(recoveryFrame!==null)window.cancelAnimationFrame(recoveryFrame);
+      if(settleTimer!==null)window.clearTimeout(settleTimer);
+      recoveryFrame=null;settleTimer=null;
+    };
+    const scheduleRecovery=()=>{
+      cancelRecovery();
+      if(!current()||!focusedTarget)return;
+      recoveryFrame=window.requestAnimationFrame(()=>{
+        recoveryFrame=null;
+        if(!current())return;
+        recoveryFrame=window.requestAnimationFrame(()=>{recoveryFrame=null;recover();});
+      });
+      settleTimer=window.setTimeout(()=>{settleTimer=null;recover();},300);
+    };
+    const schedule=()=>{
+      if(disposed)return;
+      if(frame===null)frame=window.requestAnimationFrame(sync);
+      scheduleRecovery();
+    };
+    const onFocus=event=>{
+      focusedTarget=scrollRegion(event.target)?event.target:null;
+      scheduleRecovery();
+    };
     viewport?.addEventListener('resize',schedule);
-    viewport?.addEventListener('scroll',schedule);
     window.addEventListener('resize',schedule);
+    layer.addEventListener('focusin',onFocus);
     dailyViewportCleanup=()=>{
       disposed=true;
       viewport?.removeEventListener('resize',schedule);
-      viewport?.removeEventListener('scroll',schedule);
       window.removeEventListener('resize',schedule);
+      layer.removeEventListener('focusin',onFocus);
       if(frame!==null)window.cancelAnimationFrame(frame);
-      frame=null;clear();
+      frame=null;cancelRecovery();focusedTarget=null;clear();
       if(layer.dataset.drawerMode==='daily')delete layer.dataset.drawerMode;
     };
     sync();
