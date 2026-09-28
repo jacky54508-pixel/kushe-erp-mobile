@@ -615,12 +615,15 @@
     let frame=null,recoveryFrame=null,settleTimer=null,focusedTarget=null,disposed=false;
     const ownsDrawer=()=>!disposed&&dailyEditorActive&&layer.isConnected&&$('#dailyWorkForm',layer)===form&&layer.dataset.drawerMode==='daily';
     const current=()=>ownsDrawer()&&window.matchMedia('(max-width: 820px)').matches;
-    const clear=()=>{layer.style.removeProperty('--daily-drawer-vv-height');layer.style.removeProperty('--daily-drawer-vv-top');};
+    const clear=()=>{layer.style.removeProperty('--daily-drawer-vv-height');layer.style.removeProperty('--daily-drawer-vv-y');layer.style.removeProperty('--daily-drawer-vv-top');};
     const sync=()=>{
       frame=null;
       if(!ownsDrawer())return;
       if(!current()||!viewport){clear();return;}
-      if(Number.isFinite(viewport.height)&&viewport.height>0)layer.style.setProperty('--daily-drawer-vv-height',viewport.height+'px');
+      if(Number.isFinite(viewport.height)&&viewport.height>0&&Number.isFinite(viewport.offsetTop)){
+        layer.style.setProperty('--daily-drawer-vv-height',viewport.height+'px');
+        layer.style.setProperty('--daily-drawer-vv-y',Math.max(0,viewport.offsetTop)+'px');
+      }
       else clear();
     };
     const scrollRegion=target=>{
@@ -660,9 +663,10 @@
       });
       settleTimer=window.setTimeout(()=>{settleTimer=null;recover();},300);
     };
+    const scheduleGeometry=()=>{if(!disposed&&frame===null)frame=window.requestAnimationFrame(sync);};
     const schedule=()=>{
       if(disposed)return;
-      if(frame===null)frame=window.requestAnimationFrame(sync);
+      scheduleGeometry();
       scheduleRecovery();
     };
     const onFocus=event=>{
@@ -670,11 +674,13 @@
       scheduleRecovery();
     };
     viewport?.addEventListener('resize',schedule);
+    viewport?.addEventListener('scroll',scheduleGeometry);
     window.addEventListener('resize',schedule);
     layer.addEventListener('focusin',onFocus);
     dailyViewportCleanup=()=>{
       disposed=true;
       viewport?.removeEventListener('resize',schedule);
+      viewport?.removeEventListener('scroll',scheduleGeometry);
       window.removeEventListener('resize',schedule);
       layer.removeEventListener('focusin',onFocus);
       if(frame!==null)window.cancelAnimationFrame(frame);
