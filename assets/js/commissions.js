@@ -16,6 +16,8 @@
   let editingDailyBatch = '';
   let dailyLineSequence = 0;
   let quickProjectSaveActive = false;
+  let quickProjectGeneration = 0;
+  let quickProjectSubmission = null;
   let dailySubmitInFlight = false;
   let dailyEditorActive = false;
   let dailyViewportCleanup = null;
@@ -449,6 +451,7 @@
     $('#addDailyLine',layer).onclick=()=>{body.insertAdjacentHTML('beforeend',lineHtml({project:'',item:'',unit:'式',qty:1,inputPrice:0,taxMode:'未稅',billable:true,workItemId:''}));bindLines();calc()};bindLines();$$('input[name="dailyEmployees"],select[name="workMode"],input[name="workQty"],input[name="workRate"],input[name="commissionEnabled"]',form).forEach((input)=>{input.oninput=calc;input.onchange=calc});form.onsubmit=submitDaily;$$('.commission-drawer-backdrop,.commission-drawer-close,[data-cancel]',layer).forEach((button)=>button.addEventListener('click',closeDrawer));calc();
   }
   function openDailyDrawer(batchId='') {
+    if(quickProjectSaveActive){window.KushePhase1?.toast('案場新增中，請稍候');return}
     let state=store.getState();
     const logs=batchId?(state.dailyLogs||[]).filter(log=>(log.batchId||log.id)===batchId):[];
     if(logs.some(log=>log.billingId||(log.billingStatus&&log.billingStatus!=='未請款')))return window.KushePhase1?.toast('已進入請款流程的施工紀錄不可直接修改');
@@ -472,7 +475,7 @@
     const quoteLabel=item=>item.sourceType==='manual'?`${item.item}｜${money(item.price)}/${item.unit||'式'}｜案場歷史`:item.pricingType==='lump_sum'?`${item.item}｜總價 ${money(item.lumpSumAmount)}｜${item.quotationNo||'已確認報價'}`:`${item.item}｜${money(item.price)}/${item.unit||'式'}｜${item.quotationNo||'已確認報價'}`;
     const choiceOptions=(line)=>{const selected=line.quotationId&&line.quotationLineId?JSON.stringify([String(line.quotationId),String(line.quotationLineId)]):line.sourceType==='manual'?'manual':'',choices=lineChoices(line.project);return `<option value="">請選擇報價品項</option><option value="manual" ${selected==='manual'?'selected':''}>手動施工／無報價來源</option>${selected&&selected!=='manual'&&!choices.some(item=>choiceKey(item)===selected)?`<option value="${esc(selected)}" selected>原報價來源（需重新核對）</option>`:''}${choices.map((item,index)=>`<option value="${esc(choiceKey(item))}" ${choiceKey(item)===selected?'selected':''}>${esc(quoteLabel(item))}${item.house?'｜'+esc(item.house):''}｜項次 ${index+1}</option>`).join('')}`};
     const lineHtml=line=>{const quoted=line.sourceType==='quotation'||Boolean(line.quotationId&&line.quotationLineId);return `<tr class="daily-line" data-work-item-id="${esc(line.workItemId||'')}" data-item-name="${esc(line.item||'')}" data-source-type="${esc(line.sourceType||'')}" data-quotation-id="${esc(line.quotationId||'')}" data-quotation-line-id="${esc(line.quotationLineId||'')}" data-quotation-no="${esc(line.quotationNo||'')}" data-pricing-type="${esc(line.pricingType||'actual')}" data-lump-sum-amount="${number(line.lumpSumAmount)}"><td class="daily-line-context" hidden><select class="daily-line-project">${projectOptions(line.project)}</select></td><td class="daily-line-context" hidden><input class="daily-line-house" value="${esc(line.house||'')}"></td><td class="daily-cell-item" data-mobile-label="施工項目"><select class="daily-line-choice" aria-label="正式報價品項／手動施工">${choiceOptions(line)}</select><input aria-label="施工品項名稱" class="daily-line-item" value="${esc(line.item||'')}" placeholder="手動施工品項" ${quoted?'readonly':''}><small class="daily-quote-hint"></small></td><td class="daily-cell-unit" data-mobile-label="單位"><input aria-label="單位" class="daily-line-unit" value="${esc(line.unit||'式')}" ${quoted?'readonly':''}></td><td class="daily-cell-qty" data-mobile-label="數量"><input aria-label="數量" class="daily-line-qty" type="number" min="0" step="0.01" value="${esc(line.qty??'')}"></td><td class="daily-cell-tax" data-mobile-label="稅別"><select aria-label="稅別" class="daily-line-tax" ${quoted?'disabled':''}><option value="未稅" ${line.taxMode!=='含稅'?'selected':''}>未稅</option><option value="含稅" ${line.taxMode==='含稅'?'selected':''}>含稅</option></select></td><td class="daily-cell-price" data-mobile-label="單價"><input aria-label="單價" class="daily-line-price" type="number" min="0" step="0.01" value="${number(line.inputPrice)}" ${quoted?'readonly':''}></td><td class="num daily-cell-total" data-mobile-label="小計"><b class="daily-line-total">$0</b><small class="daily-line-untaxed">未稅 $0</small></td><td class="daily-cell-purpose" data-mobile-label="用途"><label class="daily-billable"><input type="checkbox" ${line.billable!==false?'checked':''} ${line.pricingType==='lump_sum'?'disabled':''}><span>列入待請款</span></label></td><td class="daily-cell-actions" data-mobile-label="操作"><div class="daily-line-actions"><button type="button" class="daily-line-clone">複製</button><button type="button" class="daily-line-remove">刪除此施工項目</button></div></td></tr>`};
-    layer.innerHTML=`<button class="commission-drawer-backdrop" type="button" aria-label="關閉"></button><aside class="commission-drawer daily-drawer" role="dialog" aria-modal="true" aria-labelledby="dailyDrawerTitle"><header><div><small>每日施工、薪資與待請款共用資料</small><h2 id="dailyDrawerTitle">${batchId?'編輯':'新增'}每日施工紀錄</h2></div><button class="commission-drawer-close" type="button" aria-label="關閉">×</button></header><form id="dailyWorkForm" class="daily-house-editor"><div class="commission-drawer-body daily-drawer-body"><div class="daily-form-grid full"><label><span>日期 *</span><input name="date" type="date" value="${esc(first.date||today())}" required></label><label class="daily-wide"><span>備註／工作內容</span><input name="note" value="${esc(first.note||'')}" placeholder="現場說明或施工備註"></label></div><section class="daily-form-section full"><div class="daily-section-title"><div><h3>員工</h3><p>可複選；同一員工同一天可前往多個案場。</p></div></div><div class="daily-employee-grid">${employeeChoices}</div></section><section class="daily-form-section full"><div class="daily-section-title"><div><h3>案場與施工項目</h3><p>選案場後可搜尋該案場所有已確認報價項目；報價單價會保存為施工快照。</p></div><button type="button" class="commission-secondary" id="addDailyLine">＋ 新增另一案場</button></div><div id="dailyLines" class="daily-house-groups"></div><div class="daily-total-bar"><span>施工含稅／輸入合計 <b id="dailyGrossTotal">$0</b></span><span>未稅施工合計 <b id="dailyUntaxedTotal">$0</b></span><span>預估抽成 <b id="dailyCommissionTotal">$0</b></span><span>待請款施工 <b id="dailyBillingTotal">$0</b></span></div></section><section class="daily-form-section full"><div class="daily-section-title"><div><h3>計薪方式</h3><p>可只計抽成、只計點工，或同時使用；日薪同員工同日只計一次。</p></div></div><div class="daily-pay-grid"><label class="daily-check"><input name="commissionEnabled" type="checkbox" ${commissionEnabled?'checked':''}><span>業績抽成（依未稅業績）</span></label><label><span>點工方式</span><select name="workMode"><option value="none" ${!workLog.workMode||workLog.workMode==='none'?'selected':''}>不計點工</option><option value="daily" ${workLog.workMode==='daily'?'selected':''}>日薪</option><option value="hourly" ${workLog.workMode==='hourly'?'selected':''}>時薪</option></select></label><label><span>點工天數／時數</span><input name="workQty" type="number" min="0" step="0.5" value="${number(workLog.workQty)}"></label><label><span>日薪／時薪單價</span><input name="workRate" type="number" min="0" step="1" value="${number(workLog.workRate)}"></label><div class="daily-work-preview"><span>每位員工點工薪資</span><b id="dailyWorkTotal">$0</b></div></div></section></div><footer><button class="commission-secondary" type="button" data-cancel>取消</button><button class="commission-primary" type="submit">儲存每日施工</button></footer></form></aside><div class="daily-house-batch-layer" id="dailyHouseBatchLayer" hidden><button class="daily-house-batch-backdrop" type="button" data-daily-house-batch-cancel aria-label="關閉批次新增戶別"></button><section class="daily-house-batch-card" role="dialog" aria-modal="true" aria-labelledby="dailyHouseBatchTitle"><header><div><small>以目前整戶施工項目為範本</small><h3 id="dailyHouseBatchTitle">批次複製整戶</h3></div><button type="button" data-daily-house-batch-cancel aria-label="關閉">×</button></header><label><span>戶別清單</span><textarea id="dailyHouseBatchInput" rows="7" placeholder="2A&#10;2B&#10;2C&#10;2D"></textarea><small>每行一戶，也支援逗號、頓號或分號分隔；重複戶別會自動略過。</small></label><footer><button class="commission-secondary" type="button" data-daily-house-batch-cancel>取消</button><button class="commission-primary" id="confirmDailyHouseBatch" type="button">建立戶別</button></footer></section></div><div class="daily-house-batch-layer daily-quick-project-layer" id="dailyQuickProjectLayer" hidden><button class="daily-house-batch-backdrop" type="button" data-daily-quick-project-cancel aria-label="取消新增案場"></button><form class="daily-house-batch-card daily-quick-project-card" id="dailyQuickProjectForm" role="dialog" aria-modal="true" aria-labelledby="dailyQuickProjectTitle"><header><div><small>每日施工快速建立正式主檔</small><h3 id="dailyQuickProjectTitle">新增案場</h3></div><button type="button" data-daily-quick-project-cancel aria-label="關閉">×</button></header><label><span>所屬客戶 *</span><select name="customer" required>${customerOptions()}</select></label><label><span>案場名稱 *</span><input name="name" autocomplete="off" required></label><label><span>工程地址（選填）</span><input name="address" autocomplete="street-address"></label><footer><button class="commission-secondary" type="button" data-daily-quick-project-cancel>取消</button><button class="commission-primary" type="submit">新增並使用</button></footer></form></div>`;
+    layer.innerHTML=`<button class="commission-drawer-backdrop" type="button" aria-label="關閉"></button><aside class="commission-drawer daily-drawer" role="dialog" aria-modal="true" aria-labelledby="dailyDrawerTitle"><header><div><small>每日施工、薪資與待請款共用資料</small><h2 id="dailyDrawerTitle">${batchId?'編輯':'新增'}每日施工紀錄</h2></div><button class="commission-drawer-close" type="button" aria-label="關閉">×</button></header><form id="dailyWorkForm" class="daily-house-editor"><div class="commission-drawer-body daily-drawer-body"><div class="daily-form-grid full"><label><span>日期 *</span><input name="date" type="date" value="${esc(first.date||today())}" required></label><label class="daily-wide"><span>備註／工作內容</span><input name="note" value="${esc(first.note||'')}" placeholder="現場說明或施工備註"></label></div><section class="daily-form-section full"><div class="daily-section-title"><div><h3>員工</h3><p>可複選；同一員工同一天可前往多個案場。</p></div></div><div class="daily-employee-grid">${employeeChoices}</div></section><section class="daily-form-section full"><div class="daily-section-title"><div><h3>案場與施工項目</h3><p>選案場後可搜尋該案場所有已確認報價項目；報價單價會保存為施工快照。</p></div><button type="button" class="commission-secondary" id="addDailyLine">＋ 新增另一案場</button></div><div id="dailyLines" class="daily-house-groups"></div><div class="daily-total-bar"><span>施工含稅／輸入合計 <b id="dailyGrossTotal">$0</b></span><span>未稅施工合計 <b id="dailyUntaxedTotal">$0</b></span><span>預估抽成 <b id="dailyCommissionTotal">$0</b></span><span>待請款施工 <b id="dailyBillingTotal">$0</b></span></div></section><section class="daily-form-section full"><div class="daily-section-title"><div><h3>計薪方式</h3><p>可只計抽成、只計點工，或同時使用；日薪同員工同日只計一次。</p></div></div><div class="daily-pay-grid"><label class="daily-check"><input name="commissionEnabled" type="checkbox" ${commissionEnabled?'checked':''}><span>業績抽成（依未稅業績）</span></label><label><span>點工方式</span><select name="workMode"><option value="none" ${!workLog.workMode||workLog.workMode==='none'?'selected':''}>不計點工</option><option value="daily" ${workLog.workMode==='daily'?'selected':''}>日薪</option><option value="hourly" ${workLog.workMode==='hourly'?'selected':''}>時薪</option></select></label><label><span>點工天數／時數</span><input name="workQty" type="number" min="0" step="0.5" value="${number(workLog.workQty)}"></label><label><span>日薪／時薪單價</span><input name="workRate" type="number" min="0" step="1" value="${number(workLog.workRate)}"></label><div class="daily-work-preview"><span>每位員工點工薪資</span><b id="dailyWorkTotal">$0</b></div></div></section></div><footer><button class="commission-secondary" type="button" data-cancel>取消</button><button class="commission-primary" type="submit">儲存每日施工</button></footer></form></aside><div class="daily-house-batch-layer" id="dailyHouseBatchLayer" hidden><button class="daily-house-batch-backdrop" type="button" data-daily-house-batch-cancel aria-label="關閉批次新增戶別"></button><section class="daily-house-batch-card" role="dialog" aria-modal="true" aria-labelledby="dailyHouseBatchTitle"><header><div><small>以目前整戶施工項目為範本</small><h3 id="dailyHouseBatchTitle">批次複製整戶</h3></div><button type="button" data-daily-house-batch-cancel aria-label="關閉">×</button></header><label><span>戶別清單</span><textarea id="dailyHouseBatchInput" rows="7" placeholder="2A&#10;2B&#10;2C&#10;2D"></textarea><small>每行一戶，也支援逗號、頓號或分號分隔；重複戶別會自動略過。</small></label><footer><button class="commission-secondary" type="button" data-daily-house-batch-cancel>取消</button><button class="commission-primary" id="confirmDailyHouseBatch" type="button">建立戶別</button></footer></section></div><div class="daily-house-batch-layer daily-quick-project-layer" id="dailyQuickProjectLayer" hidden><button class="daily-house-batch-backdrop" type="button" data-daily-quick-project-cancel aria-label="取消新增案場"></button><form class="daily-house-batch-card daily-quick-project-card" id="dailyQuickProjectForm" role="dialog" aria-modal="true" aria-labelledby="dailyQuickProjectTitle"><header><div><small>每日施工快速建立正式主檔</small><h3 id="dailyQuickProjectTitle">新增案場</h3></div><button type="button" data-daily-quick-project-cancel aria-label="關閉">×</button></header><div class="daily-quick-project-body"><label><span>所屬客戶 *</span><select name="customer" required>${customerOptions()}</select></label><label><span>案場名稱 *</span><input name="name" autocomplete="off" required></label><label><span>工程地址（選填）</span><input name="address" autocomplete="street-address"></label></div><footer><button class="commission-secondary" type="button" data-daily-quick-project-cancel>取消</button><button class="commission-primary" type="submit">新增並使用</button></footer></form></div>`;
     layer.hidden=false;requestAnimationFrame(()=>layer.classList.add('is-open'));
     const form=$('#dailyWorkForm',layer),body=$('#dailyLines',layer),batchLayer=$('#dailyHouseBatchLayer',layer),batchInput=$('#dailyHouseBatchInput',layer),quickProjectLayer=$('#dailyQuickProjectLayer',layer),quickProjectForm=$('#dailyQuickProjectForm',layer);
     form.noValidate=true;
@@ -528,27 +531,80 @@
     };
     const quickProjectCustomer=group=>{const currentState=store.getState(),current=currentState.projects.find(project=>String(project.id)===String(groupProject(group)));if(current?.customer)return String(current.customer);const ids=new Set($$('.daily-house-project',body).map(select=>currentState.projects.find(project=>String(project.id)===String(select.value))?.customer).filter(Boolean).map(String));return ids.size===1?[...ids][0]:''};
     const refreshProjectDropdowns=()=>{state=store.getState();$$('select.daily-house-project,select.daily-line-project',body).forEach(select=>{const value=select.value;select.innerHTML=projectOptions(value);select.value=value})};
-    const selectProjectForGroup=(group,project)=>{refreshProjectDropdowns();if(!group||!body.contains(group))return false;const select=projectInput(group);select.value=String(project.id);return select.onchange?.()!==false};
-    const closeQuickProject=()=>{const button=$('button[type="submit"]',quickProjectForm);quickProjectLayer.hidden=true;quickProjectTargetGroup=null;quickProjectForm.reset();button.disabled=false;button.textContent='新增並使用'};
+    let quickProjectLockedControls=[];
+    const quickTargetCurrent=group=>active&&dailyEditorActive&&layer.isConnected&&layer.dataset.drawerMode==='daily'&&$('#commissionDrawerLayer')===layer&&$('#dailyWorkForm',layer)===form&&$('#dailyLines',form)===body&&group?.isConnected&&body.contains(group)&&group.matches('.daily-project-block');
+    const selectProjectForGroup=(group,project)=>{if(!quickTargetCurrent(group))return false;refreshProjectDropdowns();const select=projectInput(group);select.value=String(project.id);return select.onchange?.()!==false};
+    const closeQuickProject=()=>{if(quickProjectSaveActive)return false;const button=$('button[type="submit"]',quickProjectForm);quickProjectLayer.hidden=true;quickProjectTargetGroup=null;quickProjectForm.reset();if(quickProjectForm.dataset.committed!=='true'&&quickProjectForm.dataset.submitLocked!=='true'){button.disabled=false;button.textContent='新增並使用'}return true};
     const openQuickProject=(group)=>{
-      quickProjectTargetGroup=group;quickProjectForm.reset();quickProjectForm.elements.customer.value=quickProjectCustomer(group);quickProjectLayer.hidden=false;
-      requestAnimationFrame(()=>{const target=quickProjectForm.elements.customer.value?quickProjectForm.elements.name:quickProjectForm.elements.customer;target.focus()});
+      if(quickProjectSaveActive){window.KushePhase1?.toast('案場新增中，請稍候');return}
+      const generation=++quickProjectGeneration;
+      // A new modal session may reuse controls; the completed session stays locked until now.
+      quickProjectLockedControls.forEach(control=>{control.disabled=false});quickProjectLockedControls=[];
+      $('button[type="submit"]',quickProjectForm).textContent='新增並使用';
+      quickProjectTargetGroup=group;quickProjectForm.reset();delete quickProjectForm.dataset.completed;delete quickProjectForm.dataset.committed;delete quickProjectForm.dataset.submitLocked;quickProjectForm.elements.customer.value=quickProjectCustomer(group);quickProjectLayer.hidden=false;
+      requestAnimationFrame(()=>{if(generation!==quickProjectGeneration||!quickProjectForm.isConnected||quickProjectLayer.hidden||$('#dailyQuickProjectForm',layer)!==quickProjectForm)return;const target=quickProjectForm.elements.customer.value?quickProjectForm.elements.name:quickProjectForm.elements.customer;target.focus()});
+    };
+    const quickCommittedWarning=result=>{
+      try{if(window.KusheRecovery?.showResult){window.KusheRecovery.showResult(result);return}}catch(error){console.error('Quick project notification',error)}
+      try{window.KushePhase1?.toast(result.message||'案場已新增，但目前每日施工畫面已變更，請重新開啟後選用。')}catch(error){console.error('Quick project notification',error)}
     };
     $$('[data-daily-quick-project-cancel]',quickProjectLayer).forEach((button)=>button.onclick=()=>{if(!quickProjectSaveActive)closeQuickProject()});
     quickProjectLayer.onkeydown=(event)=>{if(event.key==='Escape'&&!quickProjectSaveActive){event.preventDefault();closeQuickProject()}};
     quickProjectForm.onsubmit=async(event)=>{
       event.preventDefault();
-      const customer=quickProjectForm.elements.customer.value,name=quickProjectForm.elements.name.value.trim(),address=quickProjectForm.elements.address.value.trim(),targetGroup=quickProjectTargetGroup;
-      if(!customer||!name){window.KushePhase1?.toast('請選擇所屬客戶並輸入案場名稱');return}
-      const existing=store.getState().projects.find((project)=>String(project.customer)===String(customer)&&normalizedProjectName(project.name)===normalizedProjectName(name));
-      if(existing){closeQuickProject();selectProjectForGroup(targetGroup,existing);window.KushePhase1?.toast('此客戶已有同名案場，已直接選用既有案場');return}
-      const button=event.submitter||$('button[type="submit"]',quickProjectForm);button.disabled=true;button.textContent='新增中…';
+      const submittedForm=event.currentTarget;
+      if(quickProjectSaveActive||submittedForm.dataset.completed==='true'||submittedForm.dataset.committed==='true'||submittedForm.dataset.submitLocked==='true')return;
+      const submissionGeneration=quickProjectGeneration,submissionTargetGroup=quickProjectTargetGroup,submittedLayer=quickProjectLayer;
+      const current=()=>active&&dailyEditorActive&&layer.isConnected&&layer.dataset.drawerMode==='daily'&&$('#commissionDrawerLayer')===layer&&$('#dailyWorkForm',layer)===form&&submittedLayer.isConnected&&!submittedLayer.hidden&&$('#dailyQuickProjectLayer',layer)===submittedLayer&&$('#dailyQuickProjectForm',layer)===submittedForm&&submittedForm.isConnected&&submissionGeneration===quickProjectGeneration&&quickProjectTargetGroup===submissionTargetGroup;
+      if(!current()||!quickTargetCurrent(submissionTargetGroup))return;
+      const operation={};quickProjectSubmission=operation;quickProjectSaveActive=true;
+      const release=()=>{if(quickProjectSubmission===operation){quickProjectSubmission=null;quickProjectSaveActive=false}};
+      const button=$('button[type="submit"]',submittedForm);
+      let enabledControls=[];
+      const restoreAfterSaveFailure=()=>enabledControls.forEach(control=>{control.disabled=false});
+      let project;
       try{
-        quickProjectSaveActive=true;
-        const project=await store.saveProject({name,customer,address,status:'進行中'});
-        closeQuickProject();selectProjectForGroup(targetGroup,project);window.KushePhase1?.toast('案場已新增並選用，完成施工內容後再儲存每日施工');
-      }catch(error){button.disabled=false;button.textContent='新增並使用';window.KushePhase1?.toast(`新增案場失敗：${error.message}`)}
-      finally{quickProjectSaveActive=false}
+        const customer=submittedForm.elements.customer.value,name=submittedForm.elements.name.value.trim(),address=submittedForm.elements.address.value.trim();
+        if(!customer||!name){window.KushePhase1?.toast('請選擇所屬客戶並輸入案場名稱');return}
+        const existing=store.getState().projects.find((project)=>String(project.customer)===String(customer)&&normalizedProjectName(project.name)===normalizedProjectName(name));
+        if(existing){
+          if(current()&&quickTargetCurrent(submissionTargetGroup)){
+            submittedForm.dataset.completed='true';release();
+            closeQuickProject();
+            if(selectProjectForGroup(submissionTargetGroup,existing))window.KushePhase1?.toast('此客戶已有同名案場，已直接選用既有案場');
+          }
+          return;
+        }
+        enabledControls=$$('input,select,textarea,button',submittedLayer).filter(control=>!control.disabled);
+        quickProjectLockedControls=enabledControls;
+        enabledControls.forEach(control=>{control.disabled=true});button.textContent='新增中…';
+        project=await store.saveProject({name,customer,address,status:'進行中'});
+      }catch(error){
+        release();
+        if(error.transactionStatus==='RECOVERY_REQUIRED'){
+          submittedForm.dataset.submitLocked='true';button.disabled=true;button.textContent='狀態待核對，請勿重送';
+          quickCommittedWarning(error);
+        }else{
+          restoreAfterSaveFailure();
+          button.textContent='新增並使用';
+          window.KushePhase1?.toast(`新增案場失敗：${error.message}`);
+        }
+        return;
+      }finally{
+        release();
+      }
+      // A resolved writer is durable; presentation errors must never become save failures.
+      submittedForm.dataset.committed='true';
+      try{
+        const result=store.getLastStoreTransactionResult?.();
+        if(!current()||!quickTargetCurrent(submissionTargetGroup))throw new Error('Quick project target changed');
+        closeQuickProject();
+        if(!selectProjectForGroup(submissionTargetGroup,project))throw new Error('Quick project apply rejected');
+        if(result?.status==='COMMITTED_WITH_NOTIFICATION_WARNING')quickCommittedWarning(result);
+        else window.KushePhase1?.toast('案場已新增並選用，完成施工內容後再儲存每日施工');
+      }catch(error){
+        quickCommittedWarning({status:'COMMITTED_WITH_NOTIFICATION_WARNING',message:'案場已新增，但目前每日施工畫面已變更，請重新開啟後選用。',notificationWarnings:[String(error.message||error)]});
+      }
     };
     const initialGroups=new Map();lines.forEach((line,index)=>{const key=groupKey(line.project,line.house);if(!initialGroups.has(key))initialGroups.set(key,[]);initialGroups.get(key).push({...line,draftOrder:index})});draftSequence=lines.length;
     initialGroups.forEach(groupLines=>createGroup(groupLines[0].project,groupLines[0].house,groupLines));
@@ -770,6 +826,7 @@
     startManualDrawerViewport(layer);
   }
   function closeDrawer() {
+    if(quickProjectSaveActive&&$('#dailyQuickProjectLayer')&&!$('#dailyQuickProjectLayer').hidden)return;
     if(dailySubmitInFlight)return;
     const wasManual=$('#commissionDrawerLayer')?.dataset.drawerMode==='manual';
     if(manualSubmitInFlight&&wasManual)return;
