@@ -1165,3 +1165,27 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+
+/* P19-1 Employee replenishment accountability. */
+#projectsView .project-material-employee {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: #e9f3ff;
+  color: #075bd8;
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+#projectsView .project-material-employee.is-missing {
+  background: #fff3df;
+  color: #a9680d;
+}
+@media (max-width: 620px) {
+  #projectsView .project-material-mobile-meta > .is-employee { grid-column: 1 / -1; }
+  #projectsView .project-material-mobile-meta > .is-employee dd { margin-top: 7px; }
+  #projectsView #materialUsageForm .project-form-grid { grid-template-columns: minmax(0,1fr); }
+}

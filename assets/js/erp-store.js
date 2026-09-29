@@ -4493,7 +4493,7 @@
   function employeeUsage(id) {
     const employeeId=String(id||''),sameEmployee=(row)=>String(row?.employee||row?.employeeId||'')===employeeId;
     const payrollRows=state.payroll.filter(sameEmployee),payrollIds=new Set(payrollRows.map((row)=>String(row.id)));
-    const counts={dailyLogs:state.dailyLogs.filter(sameEmployee).length,attendance:state.attendance.filter(sameEmployee).length,commissions:state.commissions.filter(sameEmployee).length,payroll:payrollRows.length,salaryPayments:state.salaryPayments.filter((row)=>sameEmployee(row)||payrollIds.has(String(row.payrollId||''))).length,bankTransactions:state.bankTransactions.filter(sameEmployee).length,calendar:(state.calendar||[]).filter(sameEmployee).length};
+    const counts={dailyLogs:state.dailyLogs.filter(sameEmployee).length,attendance:state.attendance.filter(sameEmployee).length,commissions:state.commissions.filter(sameEmployee).length,materialUsages:state.materialUsages.filter(sameEmployee).length,payroll:payrollRows.length,salaryPayments:state.salaryPayments.filter((row)=>sameEmployee(row)||payrollIds.has(String(row.payrollId||''))).length,bankTransactions:state.bankTransactions.filter(sameEmployee).length,calendar:(state.calendar||[]).filter(sameEmployee).length};
     return {...counts,used:Object.values(counts).some((count)=>count>0)};
   }
   async function saveEmployee(values, id = '') {
@@ -4511,7 +4511,7 @@
   }
   async function deleteEmployee(id) {
     requireStoreTransactionDraft(); const row=state.employees.find((item)=>String(item.id)===String(id)); if(!row)return false;
-    if(employeeUsage(id).used)throw new Error('此員工已有出勤、抽成、薪資或銀行歷史，請改為離職／停用，不可直接刪除');
+    if(employeeUsage(id).used)throw new Error('此員工已有出勤、抽成、補料、薪資或銀行歷史，請改為離職／停用，不可直接刪除');
     state.employees=state.employees.filter((item)=>item!==row); persist(`刪除員工 ${row.name||''}`); return true;
   }
   async function saveMaterial(values, id = '') {
@@ -4533,14 +4533,14 @@
   }
   async function saveMaterialUsage(values, id = '') {
     requireStoreTransactionDraft();
-    const project=state.projects.find((row)=>row.id===values.project),material=state.materials.find((row)=>row.id===values.material),vendor=state.vendors.find((row)=>row.id===(values.vendor||material?.vendor));
-    const quantity=num(values.quantity),unitPrice=num(values.unitPrice);
-    if(!project)throw new Error('找不到案場'); if(!material)throw new Error('請選擇既有材料'); if(!vendor)throw new Error('請選擇材料廠商'); if(quantity<=0)throw new Error('數量必須大於 0'); if(unitPrice<0)throw new Error('單價不可小於 0');
-    const now=new Date().toISOString(),existing=state.materialUsages.find((row)=>row.id===id),oldPayable=payableForUsage(existing);
+    const existing=state.materialUsages.find((row)=>row.id===id),project=state.projects.find((row)=>row.id===values.project),material=state.materials.find((row)=>row.id===values.material),vendor=state.vendors.find((row)=>row.id===(values.vendor||material?.vendor));
+    const employeeId=String(values.employee||existing?.employee||''),employee=state.employees.find((row)=>String(row.id)===employeeId),quantity=num(values.quantity),unitPrice=num(values.unitPrice);
+    if(!project)throw new Error('找不到案場'); if(!material)throw new Error('請選擇既有材料'); if(!vendor)throw new Error('請選擇材料廠商'); if(!existing&&!employee)throw new Error('請選擇補料員工'); if(existing?.employee&&!employee)throw new Error('原補料員工不存在，請重新選擇員工'); if(quantity<=0)throw new Error('數量必須大於 0'); if(unitPrice<0)throw new Error('單價不可小於 0');
+    const now=new Date().toISOString(),oldPayable=payableForUsage(existing);
     if(existing&&payableLocked(oldPayable))throw new Error('此材料來源的應付已付款，不能直接修改；請先以正式帳務方式處理');
     const row=existing||{id:uid(),createdAt:now,status:'未付'};
     if(existing&&oldPayable){oldPayable.usageIds=(oldPayable.usageIds||[]).filter((usageId)=>String(usageId)!==String(existing.id));}
-    Object.assign(row,{date:values.date||businessDate(new Date(now)),project:project.id,projectName:project.name,material:material.id,materialName:material.name||'',vendor:vendor.id,vendorName:vendor.name||'',quantity,unitPrice,amount:Math.round(quantity*unitPrice),unit:material.unit||'',model:material.model||'',note:clean(values.note),updatedAt:now,payableId:''});
+    Object.assign(row,{date:values.date||businessDate(new Date(now)),employee:employee?.id||row.employee||'',employeeName:employee?.name||row.employeeName||'',project:project.id,projectName:project.name,material:material.id,materialName:material.name||'',vendor:vendor.id,vendorName:vendor.name||'',quantity,unitPrice,amount:Math.round(quantity*unitPrice),unit:material.unit||'',model:material.model||'',note:clean(values.note),updatedAt:now,payableId:''});
     if(!existing)state.materialUsages.unshift(row);
     if(oldPayable)syncMaterialPayable(oldPayable); assignMaterialUsage(row);
     persist(`${id?'修改':'新增'}案場材料 ${project.name}`); return row;
