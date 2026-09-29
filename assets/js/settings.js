@@ -98,14 +98,14 @@
 
         <div class="settings-side">
           <article class="commission-panel settings-card">
-            <header class="settings-card-head"><div><span class="settings-icon" aria-hidden="true"><i data-icon="shield-check"></i></span><div><h2>帳戶安全</h2><p>登入由 Supabase Auth 管理，不保存 ERP 登入密碼。</p></div></div></header>
+            <header class="settings-card-head"><div><span class="settings-icon" aria-hidden="true"><i data-icon="lock"></i></span><div><h2>帳戶安全</h2><p>登入由 Supabase Auth 管理，不保存 ERP 登入密碼。</p></div></div></header>
             <dl class="settings-kv"><div><dt>目前登入 Email</dt><dd>${esc(user.email || '—')}</dd></div><div><dt>登入方式</dt><dd>Supabase Auth</dd></div></dl>
             <footer class="settings-actions"><button class="commission-secondary" id="settingsPassword" type="button">變更密碼</button></footer>
           </article>
 
           <article class="commission-panel settings-card">
-            <header class="settings-card-head"><div><span class="settings-icon" aria-hidden="true"><i data-icon="cloud"></i></span><div><h2>同步與備份</h2><p>沿用目前安全 Cloud Sync；偵測衝突時不會強制覆蓋。</p></div></div></header>
-            <dl class="settings-kv"><div><dt>自動同步</dt><dd>${esc(auto.message || '正在確認…')}</dd></div><div><dt>本機快照</dt><dd>${esc(businessStamp(data.meta?.updatedAt))}</dd></div></dl>
+            <header class="settings-card-head"><div><span class="settings-icon" aria-hidden="true"><i data-icon="arrow-down-to-line"></i></span><div><h2>同步與備份</h2><p>沿用目前安全 Cloud Sync；偵測衝突時不會強制覆蓋。</p></div></div></header>
+            <dl class="settings-kv"><div><dt>自動同步</dt><dd>${esc(auto.message || '正在確認…')}</dd></div><div><dt>ERP 資料更新</dt><dd>${esc(businessStamp(data.meta?.updatedAt))}</dd></div></dl>
             <div class="settings-button-grid">
               <button class="commission-primary" id="settingsCloud" type="button">開啟雲端同步</button>
               <button class="commission-secondary" id="settingsBackup" type="button">下載安全 JSON 備份</button>
