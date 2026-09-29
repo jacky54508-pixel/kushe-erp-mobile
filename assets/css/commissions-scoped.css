@@ -190,3 +190,8 @@
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] .daily-quick-project-layer .daily-quick-project-card>footer { flex: 0 0 auto; min-width: 0; padding: 12px 14px max(12px,env(safe-area-inset-bottom)); }
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] .daily-quick-project-layer .daily-quick-project-card>footer button { flex: 1 1 0; min-width: 0; min-height: 44px; white-space: normal; overflow-wrap: anywhere; }
 }
+
+/* P18-5D-7: mobile search input only. */
+@media (max-width:820px) {
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionQueryFilter { font-size:16px; min-height:44px; box-sizing:border-box; width:100%; min-width:0; max-width:100%; }
+}

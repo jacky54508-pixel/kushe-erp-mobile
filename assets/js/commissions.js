@@ -4,6 +4,10 @@
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
   const store = window.KuSheERPStore;
   const filters = { month: '', employee: '', project: '', query: '', sort: 'date', direction: 'desc' };
+  let searchTimer = 0;
+  let searchComposing = false;
+  let searchRenderPending = false;
+  let searchLifecycleGeneration = 0;
   let ready = false;
   let active = false;
   let activeTab = 'daily';
@@ -369,9 +373,53 @@
     if(activeTab==='summary')return summarySection(state,attendanceRows,commissionRows);
     return `${todayProjectsSection(state)}${dailySection(state,batches)}`;
   }
-  function render() {
-    if(dailyDetailActive){dailyDetailNeedsRefresh=true;return}
+  function cancelSearchTimer() {
+    window.clearTimeout(searchTimer);
+    searchTimer = 0;
+  }
+  function scheduleSearchRefresh() {
+    cancelSearchTimer();
+    const generation = searchLifecycleGeneration;
+    searchTimer = window.setTimeout(() => {
+      searchTimer = 0;
+      if (!active || generation !== searchLifecycleGeneration) return;
+      if (searchComposing) { searchRenderPending = true; return; }
+      refreshWorkforceResults();
+    }, 180);
+  }
+  function commitSearchForAction() {
+    cancelSearchTimer();
+    const input = $('#commissionQueryFilter');
+    if (input) filters.query = input.value;
+    searchComposing = false;
+  }
+  function refreshWorkforceResults() {
+    cancelSearchTimer();
     if (!active) return;
+    if (dailyDetailActive) { dailyDetailNeedsRefresh = true; searchRenderPending = true; return; }
+    if (searchComposing || dailyEditorActive || manualDrawerActive || quickProjectSaveActive || dailySubmitInFlight) {
+      searchRenderPending = true;
+      return;
+    }
+    const root = $('#commissionsApp'), panel = $('.workforce-tab-panel', root);
+    if (!panel) { render(); return; }
+    const view = workforceSnapshot();
+    const {state, rows, batches, attendanceRows} = view;
+    $('.workforce-kpis', root).outerHTML = workforceKpis(view);
+    panel.innerHTML = tabContent(state, batches, attendanceRows, rows);
+    // Keep the filter shell and focused search node continuously connected.
+    $('#commissionEmployeeFilter').innerHTML = options(state.employees, filters.employee, '全部員工');
+    $('#commissionProjectFilter').innerHTML = options(state.projects, filters.project, '全部案場');
+    $$('[data-workforce-tab]').forEach((button) => {
+      const selected = button.dataset.workforceTab === activeTab;
+      button.setAttribute('aria-selected', String(selected));
+      button.classList.toggle('is-active', selected);
+    });
+    searchRenderPending = false;
+    bindWorkforcePanel();
+    window.KusheIcons?.render(panel);
+  }
+  function workforceSnapshot() {
     const state = store.getState();
     const rows = rowsFor(state);
     const batches = dailyBatches(state);
@@ -383,18 +431,32 @@
     const unpaidPayrollEmployees=new Set(unpaidPayrollRows.map(employeeIdOf).filter(Boolean));
     const todayEmployees = new Set([...(state.dailyLogs||[]),...(state.attendance||[])].filter((row)=>String(row.date||'')===today()&&(!filters.employee||employeeIdOf(row)===filters.employee)&&(!filters.project||projectIdOf(row)===filters.project)).map(employeeIdOf).filter(Boolean));
     const monthProjects = new Set([...batches.flatMap((batch)=>batch.logs),...attendanceRows].map(projectIdOf).filter(Boolean));
-    $('#commissionsApp').innerHTML = `
-      <section class="commissions-heading workforce-heading">
-        <div><h1>出勤／業績管理</h1><p>整合每日作業、點工薪資、員工業績與抽成結算</p></div>
-        <div class="workforce-heading-actions"><button class="commission-secondary" id="manualCommission" type="button">新增手動抽成</button><button class="commission-primary" id="addCommission" type="button">＋ 新增每日作業</button></div>
-      </section>
-      <section class="commission-kpis workforce-kpis" aria-label="出勤與業績統計摘要">
+    return {state, rows, batches, attendanceRows, totalWork, totalCommission, unpaidPayrollRows, unpaidPayrollEmployees, todayEmployees, monthProjects};
+  }
+  function workforceKpis(view) {
+    const {totalWork, totalCommission, unpaidPayrollRows, unpaidPayrollEmployees, todayEmployees, monthProjects} = view;
+    return `<section class="commission-kpis workforce-kpis" aria-label="出勤與業績統計摘要">
         <article><span>今日作業人數</span><strong>${todayEmployees.size} 人</strong><small>依實際作業與出勤員工去重</small></article>
         <article><span>本月點工薪資</span><strong>${money(totalWork)}</strong><small>依正式點工薪資來源</small></article>
         <article><span>本月抽成</span><strong>${money(totalCommission)}</strong><small>依正式抽成來源</small></article>
         <article class="is-warning"><span>未付款薪資</span><strong>${unpaidPayrollEmployees.size} 人</strong><small>尚有 ${unpaidPayrollRows.length} 筆薪資待付款</small></article>
         <article class="is-success"><span>本月作業案場</span><strong>${monthProjects.size} 處</strong><small>依實際作業來源去重</small></article>
+      </section>`;
+  }
+  function render() {
+    if(dailyDetailActive){dailyDetailNeedsRefresh=true;return}
+    if (!active) return;
+    cancelSearchTimer();
+    if (searchComposing) { searchRenderPending = true; return; }
+    const view = workforceSnapshot();
+    const {state, rows, batches, attendanceRows} = view;
+    searchRenderPending = false;
+    $('#commissionsApp').innerHTML = `
+      <section class="commissions-heading workforce-heading">
+        <div><h1>出勤／業績管理</h1><p>整合每日作業、點工薪資、員工業績與抽成結算</p></div>
+        <div class="workforce-heading-actions"><button class="commission-secondary" id="manualCommission" type="button">新增手動抽成</button><button class="commission-primary" id="addCommission" type="button">＋ 新增每日作業</button></div>
       </section>
+      ${workforceKpis(view)}
       <section class="commission-panel commission-filters workforce-filters" aria-label="共用搜尋與篩選">
         <div class="commission-filter-grid workforce-filter-grid">
           <label><span>月份</span><input id="commissionMonthFilter" type="month" value="${esc(filters.month)}"></label>
@@ -413,20 +475,57 @@
   function bind() {
     $('#addCommission')?.addEventListener('click', () => openDailyDrawer());
     $('#manualCommission')?.addEventListener('click', () => openDrawer());
-    $('#commissionMonthFilter').addEventListener('change', (event) => { filters.month = event.target.value; render(); });
-    $('#commissionEmployeeFilter').addEventListener('change', (event) => { filters.employee = event.target.value; render(); });
-    $('#commissionProjectFilter').addEventListener('change', (event) => { filters.project = event.target.value; render(); });
-    $('#commissionQueryFilter').addEventListener('input', (event) => { filters.query = event.target.value; window.clearTimeout(bind.searchTimer); bind.searchTimer = window.setTimeout(render, 180); });
-    $('#commissionClearFilters').addEventListener('click', () => { Object.assign(filters, {month:monthNow(),employee:'',project:'',query:''}); render(); });
-    $$('[data-workforce-tab]').forEach((button)=>button.addEventListener('click',()=>{activeTab=button.dataset.workforceTab;render()}));
-    $$('[data-sort]').forEach((button) => button.addEventListener('click', () => { const key = button.dataset.sort; filters.direction = filters.sort === key && filters.direction === 'desc' ? 'asc' : 'desc'; filters.sort = key; render(); }));
-    $$('[data-edit]').forEach((button) => button.addEventListener('click', () => openDrawer(button.dataset.edit)));
-    $$('[data-delete]').forEach((button) => button.addEventListener('click', () => remove(button.dataset.delete)));
-    $$('[data-daily-view]').forEach((button)=>button.addEventListener('click',()=>openDailyDetail(button.dataset.dailyView,button)));
-    $$('[data-daily-edit]').forEach((button) => button.addEventListener('click', () => openDailyDrawer(button.dataset.dailyEdit)));
-    $$('[data-daily-delete]').forEach((button) => button.addEventListener('click', () => removeDaily(button.dataset.dailyDelete)));
-    $$('[data-view-daily-source]').forEach((button)=>button.addEventListener('click',()=>showDailySource(button.dataset.viewDailySource,button)));
-    $$('[data-view-payroll]').forEach((button)=>button.addEventListener('click',()=>{window.KushePayroll?.prepareNavigationTarget({employeeId:button.dataset.viewPayroll,month:filters.month});window.location.hash='#payroll'}));
+    $('#commissionMonthFilter').addEventListener('change', (event) => { commitSearchForAction(); filters.month = event.target.value; refreshWorkforceResults(); });
+    $('#commissionEmployeeFilter').addEventListener('change', (event) => { commitSearchForAction(); filters.employee = event.target.value; refreshWorkforceResults(); });
+    $('#commissionProjectFilter').addEventListener('change', (event) => { commitSearchForAction(); filters.project = event.target.value; refreshWorkforceResults(); });
+    const search = $('#commissionQueryFilter');
+    const currentSearch = (input) => active && input.isConnected && input === $('#commissionQueryFilter');
+    search.addEventListener('compositionstart', (event) => {
+      if (!currentSearch(event.currentTarget)) return;
+      searchComposing = true;
+      cancelSearchTimer();
+    });
+    search.addEventListener('input', (event) => {
+      if (!currentSearch(event.currentTarget)) return;
+      if (searchComposing || event.isComposing) {
+        searchComposing = true;
+        searchRenderPending = true;
+        cancelSearchTimer();
+        return;
+      }
+      filters.query = event.currentTarget.value;
+      scheduleSearchRefresh();
+    });
+    search.addEventListener('compositionend', (event) => {
+      if (!currentSearch(event.currentTarget)) return;
+      // A filter action can finish the internal session before this event arrives.
+      if (!searchComposing) { event.currentTarget.value = filters.query; return; }
+      searchComposing = false;
+      filters.query = event.currentTarget.value;
+      scheduleSearchRefresh();
+    });
+    $('#commissionClearFilters').addEventListener('click', () => {
+      commitSearchForAction();
+      Object.assign(filters, {month:monthNow(),employee:'',project:'',query:''});
+      $('#commissionMonthFilter').value = filters.month;
+      $('#commissionEmployeeFilter').value = '';
+      $('#commissionProjectFilter').value = '';
+      search.value = '';
+      refreshWorkforceResults();
+    });
+    $$('[data-workforce-tab]').forEach((button)=>button.addEventListener('click',()=>{commitSearchForAction();activeTab=button.dataset.workforceTab;refreshWorkforceResults()}));
+    bindWorkforcePanel();
+  }
+  function bindWorkforcePanel() {
+    const panel = $('.workforce-tab-panel', $('#commissionsApp'));
+    $$('[data-sort]', panel).forEach((button) => button.addEventListener('click', () => { commitSearchForAction(); const key = button.dataset.sort; filters.direction = filters.sort === key && filters.direction === 'desc' ? 'asc' : 'desc'; filters.sort = key; refreshWorkforceResults(); }));
+    $$('[data-edit]', panel).forEach((button) => button.addEventListener('click', () => openDrawer(button.dataset.edit)));
+    $$('[data-delete]', panel).forEach((button) => button.addEventListener('click', () => remove(button.dataset.delete)));
+    $$('[data-daily-view]', panel).forEach((button)=>button.addEventListener('click',()=>openDailyDetail(button.dataset.dailyView,button)));
+    $$('[data-daily-edit]', panel).forEach((button) => button.addEventListener('click', () => openDailyDrawer(button.dataset.dailyEdit)));
+    $$('[data-daily-delete]', panel).forEach((button) => button.addEventListener('click', () => removeDaily(button.dataset.dailyDelete)));
+    $$('[data-view-daily-source]', panel).forEach((button)=>button.addEventListener('click',()=>showDailySource(button.dataset.viewDailySource,button)));
+    $$('[data-view-payroll]', panel).forEach((button)=>button.addEventListener('click',()=>{window.KushePayroll?.prepareNavigationTarget({employeeId:button.dataset.viewPayroll,month:filters.month});window.location.hash='#payroll'}));
   }
   function showDailySource(sourceId,trigger=document.activeElement) {
     const log=(store.getState().dailyLogs||[]).find((row)=>row.id===sourceId);
@@ -916,13 +1015,23 @@
     try{await store.deleteCommission(id);render();window.KushePhase1?.toast('業績已刪除，薪資連動已重算')}catch(error){window.KushePhase1?.toast(error.message)}
   }
   async function activate(options = {}) {
+    cancelSearchTimer();
+    searchLifecycleGeneration += 1;
+    searchComposing = false;
+    searchRenderPending = false;
     active = true;
     if (!ready) { await store.load(); filters.month = monthNow(); ready = true; }
     if (options.route === 'attendance') activeTab = 'attendance';
     render();
     if(!manualDrawerActive&&!dailyDetailActive&&!dailyEditorActive)manualRefreshPending=false;
   }
-  function deactivate() { active = false; stopDailyDrawerViewport(); stopManualDrawerViewport(); closeDailyDetail(); dailyDetailNeedsRefresh=false; dailyDetailContext=null; dailyEditorActive = false; }
-  window.addEventListener('kushe:data-updated', () => { if (active && !quickProjectSaveActive && !dailySubmitInFlight && !dailyEditorActive && !manualDrawerActive) render(); });
+  function deactivate() {
+    cancelSearchTimer();
+    searchLifecycleGeneration += 1;
+    searchComposing = false;
+    searchRenderPending = false;
+    active = false; stopDailyDrawerViewport(); stopManualDrawerViewport(); closeDailyDetail(); dailyDetailNeedsRefresh=false; dailyDetailContext=null; dailyEditorActive = false;
+  }
+  window.addEventListener('kushe:data-updated', () => { if (active && !quickProjectSaveActive && !dailySubmitInFlight && !dailyEditorActive && !manualDrawerActive) refreshWorkforceResults(); });
   window.KusheCommissions = { activate, deactivate, render };
 }());
