@@ -206,6 +206,7 @@
     const isMaterials = route === 'materials';
     const isEmployees = route === 'employees';
     const isPayroll = route === 'payroll';
+    const isReports = route === 'reports';
     const isProjects = route === 'projects' || route === 'customers';
     const isQuotations = route === 'quotations';
     $('#dashboard').hidden = !isDashboard;
@@ -220,14 +221,16 @@
     $('#materialsView').hidden = !isMaterials;
     $('#employeesView').hidden = !isEmployees;
     $('#payrollView').hidden = !isPayroll;
+    $('#reportsView').hidden = !isReports;
     $('#projectsView').hidden = !isProjects;
     $('#quotationsView').hidden = !isQuotations;
-    $('#moduleView').hidden = isDashboard || isCommissions || isUnbilledWork || isBillings || isBillingDraft || isReceivables || isPayables || isBanks || isInvoices || isMaterials || isEmployees || isPayroll || isProjects || isQuotations;
+    $('#moduleView').hidden = isDashboard || isCommissions || isUnbilledWork || isBillings || isBillingDraft || isReceivables || isPayables || isBanks || isInvoices || isMaterials || isEmployees || isPayroll || isReports || isProjects || isQuotations;
     if (!isBanks) window.KusheBanks?.deactivate();
     if (!isInvoices) window.KusheInvoices?.deactivate();
     if (!isMaterials) window.KusheMaterials?.deactivate();
     if (!isEmployees) window.KusheEmployees?.deactivate();
     if (!isPayroll) window.KushePayroll?.deactivate();
+    if (!isReports) window.KusheReports?.deactivate();
     document.body.dataset.route = route;
     $$('.nav-item[data-module]').forEach((node) => {
       const navRoute = node.dataset.module;
@@ -280,6 +283,9 @@
     } else if (isPayroll) {
       window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();window.KusheBanks?.deactivate();
       window.KushePayroll?.activate();document.title = '酷舍 ERP｜薪資管理';
+    } else if (isReports) {
+      window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();window.KusheBanks?.deactivate();
+      window.KusheReports?.activate();document.title = '酷舍 ERP｜統計報表';
     } else if (!isDashboard) {
       window.KusheCommissions?.deactivate();
       window.KusheUnbilledWork?.deactivate();

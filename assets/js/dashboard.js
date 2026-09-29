@@ -202,7 +202,7 @@
     const allAR = sum(data.receivables, arAmount);
     const allReceived = sum(data.receivables, paidAR);
 
-    const projects = data.projects.map((project) => {
+    const projectRows = data.projects.map((project) => {
       const id = text(project.id);
       const bills = data.billings.filter((row) => projectId(row) === id);
       const ars = data.receivables.filter((row) => projectId(row) === id);
@@ -221,7 +221,8 @@
       const profit = billed - totalCost;
       const margin = billed ? profit / billed * 100 : 0;
       return { id, name: text(project.name) || '—', customer: entityName(maps.customers, text(project.customer), project.customerName), billed, received, outstanding, material, labor, other, customerDeduction, totalCost, profit, margin, status: text(project.status) || '進行中', activity: billed + received + outstanding + totalCost };
-    }).filter((row) => row.activity > 0).sort((a, b) => b.billed - a.billed || b.activity - a.activity).slice(0, 6);
+    }).filter((row) => row.activity > 0).sort((a, b) => b.billed - a.billed || b.activity - a.activity);
+    const projects = projectRows.slice(0, 6);
 
     const today = businessDate();
     const overdue = openAR.filter((row) => { const due = businessDateValue(row.dueDate); return due && due < today; });
@@ -257,7 +258,7 @@
       }, structureTotal, structurePaid, structureOpen,
       collectionRate: structureTotal ? structurePaid / structureTotal * 100 : 0,
       recoveryRate: allAR ? Math.min(100, allReceived / allAR * 100) : 0,
-      projects, attentions, payrollTotal, payrollPaid, payrollOpen: Math.max(0, payrollTotal - payrollPaid)
+      projects, reportProjects: projectRows, attentions, payrollTotal, payrollPaid, payrollOpen: Math.max(0, payrollTotal - payrollPaid)
     };
   }
 
@@ -358,5 +359,10 @@
     document.querySelectorAll('#trendRange [data-range]').forEach((button)=>button.addEventListener('click',()=>{document.querySelectorAll('#trendRange button').forEach((b)=>b.classList.remove('is-active'));button.classList.add('is-active');activeRange=Number(button.dataset.range);renderChart()}));
   }
   function init() { setupChart(); refresh(); window.addEventListener('focus', refresh); document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()}); window.addEventListener('storage', refresh); window.addEventListener('kushe:data-updated', refresh); setInterval(()=>{if(!document.hidden)refresh()},10000); }
-  window.KusheDashboard = { init, refresh, render, getState: () => activeVm };
+  function readSnapshot(month = businessMonth()) {
+    const value = String(month || '');
+    const selected = /^\d{4}-\d{2}$/.test(value) ? value : businessMonth();
+    return derive(window.KuSheLegacyData.refresh(), selected);
+  }
+  window.KusheDashboard = { init, refresh, render, readSnapshot, getState: () => activeVm };
 }());
