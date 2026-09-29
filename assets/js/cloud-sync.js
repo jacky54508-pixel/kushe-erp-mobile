@@ -1280,6 +1280,7 @@
         try { downloadLocalBackup(durableLocal.data, fileName); }
         catch (error) { clearRestoreBackupMarker(); throw error; }
         currentStatus = { ...preflight, backupReady: true, message: STATUS_TEXT.RESTORE_BACKUP_READY };
+        render(currentStatus);
         return publicStatus();
       }
 
