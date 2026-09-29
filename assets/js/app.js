@@ -191,7 +191,7 @@
     return route === 'dashboard' || config.moduleLabels?.[route] ? route : 'dashboard';
   }
   function currentHashRoute() { return validRoute(decodeURIComponent(window.location.hash.slice(1))); }
-  function renderRoute(module) {
+  function renderRoute(module, options = {}) {
     const route = validRoute(module);
     ui.route = route;
     const isDashboard = route === 'dashboard';
@@ -206,6 +206,8 @@
     const isMaterials = route === 'materials';
     const isEmployees = route === 'employees';
     const isPayroll = route === 'payroll';
+    const isReports = route === 'reports';
+    const isSettings = route === 'settings';
     const isProjects = route === 'projects' || route === 'customers';
     const isQuotations = route === 'quotations';
     $('#dashboard').hidden = !isDashboard;
@@ -220,14 +222,18 @@
     $('#materialsView').hidden = !isMaterials;
     $('#employeesView').hidden = !isEmployees;
     $('#payrollView').hidden = !isPayroll;
+    $('#reportsView').hidden = !isReports;
+    $('#settingsView').hidden = !isSettings;
     $('#projectsView').hidden = !isProjects;
     $('#quotationsView').hidden = !isQuotations;
-    $('#moduleView').hidden = isDashboard || isCommissions || isUnbilledWork || isBillings || isBillingDraft || isReceivables || isPayables || isBanks || isInvoices || isMaterials || isEmployees || isPayroll || isProjects || isQuotations;
+    $('#moduleView').hidden = isDashboard || isCommissions || isUnbilledWork || isBillings || isBillingDraft || isReceivables || isPayables || isBanks || isInvoices || isMaterials || isEmployees || isPayroll || isReports || isSettings || isProjects || isQuotations;
     if (!isBanks) window.KusheBanks?.deactivate();
     if (!isInvoices) window.KusheInvoices?.deactivate();
     if (!isMaterials) window.KusheMaterials?.deactivate();
     if (!isEmployees) window.KusheEmployees?.deactivate();
     if (!isPayroll) window.KushePayroll?.deactivate();
+    if (!isReports) window.KusheReports?.deactivate();
+    if (!isSettings) window.KusheSettings?.deactivate();
     document.body.dataset.route = route;
     $$('.nav-item[data-module]').forEach((node) => {
       const navRoute = node.dataset.module;
@@ -239,7 +245,7 @@
     if (!isQuotations) window.KusheQuotations?.deactivate();
     if (isProjects) {
       window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();window.KusheBanks?.deactivate();
-      window.KusheProjects?.activate({customer:route==='customers'});document.title = '酷舍 ERP｜客戶／案場';
+      window.KusheProjects?.activate({customer:route==='customers',customerId:route==='customers'?(options.customerId||''):'',projectId:route==='projects'?(options.projectId||''):''});document.title = '酷舍 ERP｜客戶／案場';
     } else if (isQuotations) {
       window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();window.KusheBanks?.deactivate();
       window.KusheQuotations?.activate();document.title = '酷舍 ERP－報價單管理';
@@ -280,6 +286,12 @@
     } else if (isPayroll) {
       window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();window.KusheBanks?.deactivate();
       window.KushePayroll?.activate();document.title = '酷舍 ERP｜薪資管理';
+    } else if (isReports) {
+      window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();window.KusheBanks?.deactivate();
+      window.KusheReports?.activate();document.title = '酷舍 ERP｜統計報表';
+    } else if (isSettings) {
+      window.KusheCommissions?.deactivate();window.KusheUnbilledWork?.deactivate();window.KusheBilling?.deactivate();window.KusheBilling?.deactivateDraft();window.KusheReceivables?.deactivate();window.KushePayables?.deactivate();window.KusheBanks?.deactivate();
+      window.KusheSettings?.activate();document.title = '酷舍 ERP｜系統設定';
     } else if (!isDashboard) {
       window.KusheCommissions?.deactivate();
       window.KusheUnbilledWork?.deactivate();
@@ -302,7 +314,7 @@
     const route = validRoute(module);
     if (!options.replace && currentHashRoute() !== route) history.pushState({ route }, '', `#${route}`);
     else if (options.replace) history.replaceState({ route }, '', `#${route}`);
-    renderRoute(route);
+    renderRoute(route, options);
     ui.mobileOpen = false;
     setShell();
     closePopovers();
@@ -340,18 +352,18 @@
     $('#periodMode').addEventListener('change',(event)=>{const range=event.target.value==='year'?'3':event.target.value==='quarter'?'4':'12';$(`#trendRange [data-range="${range}"]`)?.click()});
   }
   function searchItems() {
-    const data=window.KuSheLegacyData.getState(); const labels=config.moduleLabels||{};
+    const data=window.KuSheERPStore?.getState?.()||{}; const labels=config.moduleLabels||{};
     const modules=Object.entries(labels).filter(([key])=>key!=='dashboard'&&key!=='billing-draft').map(([module,label])=>({module,label,sub:'功能模組'}));
-    const projects=(data.projects||[]).map((row)=>({module:'projects',label:row.name||'—',sub:'案場'}));
-    const customers=(data.customers||[]).map((row)=>({module:'customers',label:row.name||'—',sub:'客戶'}));
+    const projects=(data.projects||[]).map((row)=>({module:'projects',label:row.name||'—',sub:'案場',targetId:row.id}));
+    const customers=(data.customers||[]).map((row)=>({module:'customers',label:row.name||'—',sub:'客戶',targetId:row.id}));
     const docs=[]; (data.billings||[]).forEach((row)=>docs.push({module:'billings',label:row.number||row.sourceNo||'—',sub:row.projectName||'請款單'}));
     (data.receivables||[]).forEach((row)=>{if(row.invoiceNo||row.sourceNo)docs.push({module:'receivables',label:row.invoiceNo||row.sourceNo,sub:row.projectName||'應收帳款'})});
     return [...modules,...projects,...customers,...docs].filter((row)=>row.label&&row.label!=='—');
   }
   function setupSearch() {
-    const input=$('#globalSearch'),popover=$('#searchPopover');
-    function render(){const term=input.value.trim().toLocaleLowerCase('zh-Hant');const rows=searchItems().filter((row)=>!term||`${row.label} ${row.sub}`.toLocaleLowerCase('zh-Hant').includes(term)).slice(0,8);popover.innerHTML=rows.length?rows.map((row)=>`<button class="search-result" type="button" data-search-module="${row.module}"><span><b>${escapeText(row.label)}</b><small>　${escapeText(row.sub)}</small></span><span>→</span></button>`).join(''):'<div class="popover-empty">找不到相符資料</div>';popover.classList.add('is-open');$$('[data-search-module]',popover).forEach((button)=>button.addEventListener('click',()=>navigate(button.dataset.searchModule)))}
-    input.addEventListener('focus',render);input.addEventListener('input',render);input.addEventListener('keydown',(event)=>{if(event.key==='Escape'){popover.classList.remove('is-open');input.blur()}if(event.key==='Enter')$('[data-search-module]',popover)?.click()});
+    const input=$('#globalSearch'),clear=$('#globalSearchClear'),popover=$('#searchPopover'),syncClear=()=>{clear.hidden=!input.value};
+    function render(){const term=input.value.trim().toLocaleLowerCase('zh-Hant');const rows=searchItems().filter((row)=>!term||`${row.label} ${row.sub}`.toLocaleLowerCase('zh-Hant').includes(term));syncClear();popover.innerHTML=rows.length?rows.map((row)=>`<button class="search-result" type="button" data-search-module="${row.module}"${row.targetId?` data-search-target-id="${escapeText(row.targetId)}"`:''}><span><b>${escapeText(row.label)}</b><small>　${escapeText(row.sub)}</small></span><span>→</span></button>`).join(''):'<div class="popover-empty">找不到相符資料</div>';popover.classList.add('is-open');$$('[data-search-module]',popover).forEach((button)=>button.addEventListener('click',()=>{const module=button.dataset.searchModule,targetId=button.dataset.searchTargetId||'',options=module==='customers'&&targetId?{customerId:targetId}:module==='projects'&&targetId?{projectId:targetId}:{};navigate(module,options)}))}
+    input.addEventListener('focus',render);input.addEventListener('input',render);input.addEventListener('keydown',(event)=>{if(event.key==='Escape'){popover.classList.remove('is-open');input.blur()}if(event.key==='Enter'){event.preventDefault();const results=$$('[data-search-module]',popover);if(results.length===1)results[0].click()}});clear.addEventListener('click',()=>{input.value='';render();input.focus()});syncClear();
     document.addEventListener('keydown',(event)=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){event.preventDefault();input.focus();input.select()}});
   }
   function escapeText(value){return String(value??'').replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]))}

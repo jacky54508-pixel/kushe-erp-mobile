@@ -1,0 +1,61 @@
+/* P18-5E-2 Settings: company profile, account security, cloud sync and safe local backup. */
+:is(body[data-route="settings"]) #settingsApp { min-width:0; }
+:is(body[data-route="settings"]) #settingsApp .settings-heading { align-items:center; }
+:is(body[data-route="settings"]) #settingsApp .settings-readonly-badge { flex:0 0 auto; padding:7px 10px; border:1px solid #dfe7f0; border-radius:999px; background:#fff; color:#64758a; font-size:10.5px; font-weight:800; }
+:is(body[data-route="settings"]) #settingsApp .settings-layout { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(320px,.85fr); gap:14px; align-items:start; }
+:is(body[data-route="settings"]) #settingsApp .settings-side { display:grid; gap:14px; min-width:0; }
+:is(body[data-route="settings"]) #settingsApp .settings-card { min-width:0; overflow:hidden; }
+:is(body[data-route="settings"]) #settingsApp .settings-card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; padding:17px; border-bottom:1px solid #e7edf4; }
+:is(body[data-route="settings"]) #settingsApp .settings-card-head>div { display:flex; align-items:flex-start; gap:11px; min-width:0; }
+:is(body[data-route="settings"]) #settingsApp .settings-card-head h2 { margin:0 0 4px; color:#0a386f; font-size:16px; }
+:is(body[data-route="settings"]) #settingsApp .settings-card-head p { margin:0; color:#718197; font-size:11px; line-height:1.5; }
+:is(body[data-route="settings"]) #settingsApp .settings-icon { width:35px; height:35px; flex:0 0 35px; display:grid; place-items:center; border-radius:10px; background:#edf4fd; color:#0a5dc7; }
+:is(body[data-route="settings"]) #settingsApp .settings-icon svg { width:18px; height:18px; }
+:is(body[data-route="settings"]) #settingsApp .settings-status-pill { flex:0 0 auto; padding:5px 9px; border-radius:999px; background:#eaf8f1; color:#087856; font-size:10px; font-weight:850; }
+:is(body[data-route="settings"]) #settingsApp .settings-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; padding:18px; }
+:is(body[data-route="settings"]) #settingsApp .settings-form-grid label { display:grid; gap:6px; min-width:0; }
+:is(body[data-route="settings"]) #settingsApp .settings-form-grid label>span { color:#53667d; font-size:11.5px; font-weight:850; }
+:is(body[data-route="settings"]) #settingsApp .settings-form-grid input { width:100%; min-width:0; height:42px; border:1px solid #d7e1ec; border-radius:9px; background:#fff; padding:0 11px; font:inherit; font-size:13px; outline:0; }
+:is(body[data-route="settings"]) #settingsApp .settings-form-grid input:focus { border-color:#73a5eb; box-shadow:0 0 0 3px rgba(7,91,216,.1); }
+:is(body[data-route="settings"]) #settingsApp .settings-wide { grid-column:1/-1; }
+:is(body[data-route="settings"]) #settingsApp .settings-tax-note { margin:0 18px; padding:12px 13px; border-radius:9px; background:#fff7e8; color:#8a5b16; font-size:11px; line-height:1.55; }
+:is(body[data-route="settings"]) #settingsApp .settings-actions { display:flex; justify-content:flex-end; gap:9px; padding:16px 18px 18px; }
+:is(body[data-route="settings"]) #settingsApp .settings-kv { display:grid; gap:0; margin:0; padding:8px 17px 2px; }
+:is(body[data-route="settings"]) #settingsApp .settings-kv>div { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; padding:11px 0; border-bottom:1px solid #edf1f6; }
+:is(body[data-route="settings"]) #settingsApp .settings-kv>div:last-child { border-bottom:0; }
+:is(body[data-route="settings"]) #settingsApp .settings-kv dt { color:#65758b; font-size:11px; font-weight:800; }
+:is(body[data-route="settings"]) #settingsApp .settings-kv dd { margin:0; max-width:65%; color:#173f6d; font-size:12px; font-weight:800; text-align:right; overflow-wrap:anywhere; }
+:is(body[data-route="settings"]) #settingsApp .settings-button-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; padding:14px 17px 6px; }
+:is(body[data-route="settings"]) #settingsApp .settings-button-grid button { width:100%; }
+:is(body[data-route="settings"]) #settingsApp .settings-caption { margin:0; padding:6px 17px 17px; color:#73849a; font-size:10.5px; line-height:1.55; }
+:is(body[data-route="settings"]) #settingsApp .settings-stats { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding:15px 17px 8px; }
+:is(body[data-route="settings"]) #settingsApp .settings-stats article { padding:13px; border:1px solid #e1e8f1; border-radius:10px; background:#f8fbfe; }
+:is(body[data-route="settings"]) #settingsApp .settings-stats span { display:block; color:#65758b; font-size:10.5px; font-weight:800; }
+:is(body[data-route="settings"]) #settingsApp .settings-stats strong { display:inline-block; margin-top:5px; color:#0a386f; font-size:22px; }
+:is(body[data-route="settings"]) #settingsApp .settings-stats small { margin-left:4px; color:#718197; font-size:10px; }
+:is(body[data-route="settings"]) #settingsApp .settings-tags { display:flex; flex-wrap:wrap; gap:6px; padding:6px 17px 0; }
+:is(body[data-route="settings"]) #settingsApp .settings-tags span { padding:5px 8px; border-radius:999px; background:#edf3fa; color:#536d88; font-size:10px; font-weight:750; }
+@media (max-width: 1100px) {
+  :is(body[data-route="settings"]) #settingsApp .settings-layout { grid-template-columns:minmax(0,1fr); }
+}
+@media (max-width: 820px) {
+  :is(body[data-route="settings"]) #settingsApp .settings-heading { display:grid; gap:12px; align-items:stretch; }
+  :is(body[data-route="settings"]) #settingsApp .settings-readonly-badge { justify-self:start; }
+  :is(body[data-route="settings"]) #settingsApp .settings-form-grid { grid-template-columns:minmax(0,1fr); padding:14px; }
+  :is(body[data-route="settings"]) #settingsApp .settings-wide { grid-column:auto; }
+  :is(body[data-route="settings"]) #settingsApp .settings-form-grid input { min-height:44px; font-size:16px; }
+  :is(body[data-route="settings"]) #settingsApp .settings-tax-note { margin:0 14px; }
+  :is(body[data-route="settings"]) #settingsApp .settings-actions { padding:14px; }
+  :is(body[data-route="settings"]) #settingsApp .settings-actions button { flex:1 1 auto; }
+  :is(body[data-route="settings"]) #settingsApp .settings-button-grid { grid-template-columns:minmax(0,1fr); padding:12px 14px 5px; }
+  :is(body[data-route="settings"]) #settingsApp .settings-caption { padding:6px 14px 14px; }
+  :is(body[data-route="settings"]) #settingsApp .settings-kv { padding:7px 14px 2px; }
+  :is(body[data-route="settings"]) #settingsApp .settings-card-head { padding:14px; }
+  :is(body[data-route="settings"]) #settingsApp .settings-stats { padding:13px 14px 7px; }
+  :is(body[data-route="settings"]) #settingsApp .settings-tags { padding:5px 14px 0; }
+}
+@media (max-width: 520px) {
+  :is(body[data-route="settings"]) #settingsApp .settings-stats { grid-template-columns:minmax(0,1fr); }
+  :is(body[data-route="settings"]) #settingsApp .settings-kv>div { display:grid; gap:5px; }
+  :is(body[data-route="settings"]) #settingsApp .settings-kv dd { max-width:none; text-align:left; }
+}

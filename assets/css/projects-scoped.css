@@ -1,4 +1,20 @@
 /* Scoped fixes for the customer/project module only. */
+@media (max-width: 820px) {
+  body[data-route="projects"] .page-frame,
+  body[data-route="customers"] .page-frame {
+    position: fixed;
+    inset: 0;
+    width: auto;
+    height: auto;
+    min-height: 0;
+    margin-left: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
 .project-master-modal .project-setting-grid,
 #projectsView .project-billing-settings-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -38,9 +54,1114 @@
   margin-top: 14px;
 }
 
+.customer-manager-modal .customer-manager-search {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.customer-manager-modal .customer-manager-search span {
+  color: #63748a;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.customer-manager-modal .customer-manager-search input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding: 0 11px;
+  border: 1px solid #d7e1ec;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.customer-manager-modal .customer-mobile-list {
+  display: none;
+}
+
+#projectsView .project-mobile-list {
+  display: none;
+}
+
+#projectsView .project-daily-mobile-list {
+  display: none;
+}
+
+#projectsView .project-billing-mobile-list {
+  display: none;
+}
+
+#projectsView .project-material-mobile-list,
+#projectsView .project-cost-mobile-list,
+#projectsView .project-deduction-mobile-list {
+  display: none;
+}
+
+#projectsView .project-kpis [data-project-home-kpi-action] {
+  cursor: pointer;
+}
+
+#projectsView .project-kpis [data-project-home-kpi-action]:hover {
+  box-shadow: 0 8px 20px rgba(24, 62, 101, 0.13);
+}
+
+#projectsView .project-kpis [data-project-home-kpi-action]:focus-visible {
+  outline: 3px solid rgba(7, 91, 216, 0.38);
+  outline-offset: 2px;
+}
+
+#projectsView .project-kpis [data-project-home-kpi-action]:active {
+  opacity: 0.82;
+}
+
+#projectsView .project-detail-kpis [data-project-kpi-tab] {
+  cursor: pointer;
+}
+
+#projectsView .project-detail-kpis [data-project-kpi-tab]:hover {
+  box-shadow: 0 8px 20px rgba(24, 62, 101, 0.13);
+}
+
+#projectsView .project-detail-kpis [data-project-kpi-tab]:focus-visible {
+  outline: 3px solid rgba(7, 91, 216, 0.38);
+  outline-offset: 2px;
+}
+
+#projectsView .project-detail-kpis [data-project-kpi-tab]:active {
+  opacity: 0.82;
+}
+
 @media (max-width: 900px) {
   .project-master-modal .project-setting-grid,
   #projectsView .project-billing-settings-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  #projectsView .project-material-desktop,
+  #projectsView .project-cost-desktop,
+  #projectsView .project-deduction-desktop {
+    display: none;
+  }
+
+  #projectsView .project-material-mobile-list,
+  #projectsView .project-cost-mobile-list,
+  #projectsView .project-deduction-mobile-list {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 10px;
+    padding: 12px;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-material-mobile-card,
+  #projectsView .project-cost-mobile-card,
+  #projectsView .project-deduction-mobile-card {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 11px;
+    padding: 13px;
+    border: 1px solid #dce5ee;
+    border-radius: 12px;
+    background: #fff;
+    box-sizing: border-box;
+  }
+
+  #projectsView :is(.project-material-mobile-card, .project-cost-mobile-card, .project-deduction-mobile-card) header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  #projectsView :is(.project-material-mobile-card, .project-cost-mobile-card, .project-deduction-mobile-card) header > div,
+  #projectsView :is(.project-material-mobile-card, .project-cost-mobile-card, .project-deduction-mobile-card) :is(h3, p, span, strong, dl, div, dt, dd) {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #projectsView :is(.project-material-mobile-card, .project-cost-mobile-card, .project-deduction-mobile-card) header > div > span,
+  #projectsView :is(.project-material-mobile-card, .project-cost-mobile-card, .project-deduction-mobile-card) dt,
+  #projectsView .project-deduction-mobile-note > span {
+    color: #718197;
+    font-size: 9px;
+    font-weight: 800;
+  }
+
+  #projectsView :is(.project-material-mobile-card, .project-cost-mobile-card, .project-deduction-mobile-card) h3 {
+    margin: 4px 0 0;
+    color: #173f6d;
+    font-size: 15px;
+    line-height: 1.4;
+  }
+
+  #projectsView :is(.project-material-mobile-meta, .project-material-mobile-amounts, .project-cost-mobile-meta, .project-cost-mobile-amounts, .project-deduction-mobile-meta, .project-deduction-mobile-amounts) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    margin: 0;
+  }
+
+  #projectsView :is(.project-material-mobile-meta, .project-material-mobile-amounts, .project-cost-mobile-meta, .project-cost-mobile-amounts, .project-deduction-mobile-meta, .project-deduction-mobile-amounts) > div {
+    min-width: 0;
+    max-width: 100%;
+    padding: 9px;
+    border-radius: 8px;
+    background: #f6f9fc;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-cost-mobile-meta > div:last-child,
+  #projectsView :is(.project-cost-mobile-amounts, .project-deduction-mobile-amounts) > div {
+    grid-column: 1 / -1;
+  }
+
+  #projectsView :is(.project-material-mobile-card, .project-cost-mobile-card, .project-deduction-mobile-card) dd {
+    margin: 5px 0 0;
+    color: #173f6d;
+    font-size: 12px;
+    font-weight: 850;
+    line-height: 1.35;
+  }
+
+  #projectsView :is(.project-material-mobile-amounts, .project-cost-mobile-amounts, .project-deduction-mobile-amounts) dd {
+    font-size: 14px;
+  }
+
+  #projectsView :is(.project-material-mobile-card, .project-cost-mobile-card, .project-deduction-mobile-card) :is(h3, p, span, strong, dt, dd) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  #projectsView :is(.project-material-mobile-card, .project-cost-mobile-card) > .project-row-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  #projectsView :is(.project-material-mobile-card, .project-cost-mobile-card) > .project-row-actions button,
+  #projectsView .project-cost-actions button {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    white-space: normal;
+  }
+
+  #projectsView .project-cost-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    min-width: 0;
+  }
+
+  #projectsView .project-deduction-mobile-note {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+    padding: 9px;
+    border-radius: 8px;
+    background: #f6f9fc;
+  }
+
+  #projectsView :is(.project-material-mobile-empty, .project-cost-mobile-empty, .project-deduction-mobile-empty) {
+    margin: 0;
+    padding: 24px 14px;
+    color: #748499;
+    text-align: center;
+  }
+
+  #projectsView .project-billing-desktop {
+    display: none;
+  }
+
+  #projectsView .project-billing-mobile-list {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 10px;
+    padding: 12px;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-billing-mobile-card {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 11px;
+    padding: 13px;
+    border: 1px solid #dce5ee;
+    border-radius: 12px;
+    background: #fff;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-billing-mobile-card header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  #projectsView .project-billing-mobile-card header > div,
+  #projectsView .project-billing-mobile-card :is(h3, span, dl, div, dt, dd) {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #projectsView .project-billing-mobile-card header > div > span,
+  #projectsView .project-billing-mobile-card dt {
+    color: #718197;
+    font-size: 9px;
+    font-weight: 800;
+  }
+
+  #projectsView .project-billing-mobile-card h3 {
+    margin: 4px 0 0;
+    color: #173f6d;
+    font-size: 15px;
+    line-height: 1.4;
+  }
+
+  #projectsView .project-billing-mobile-meta,
+  #projectsView .project-billing-mobile-amounts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    margin: 0;
+  }
+
+  #projectsView .project-billing-mobile-meta div,
+  #projectsView .project-billing-mobile-amounts div {
+    min-width: 0;
+    max-width: 100%;
+    padding: 9px;
+    border-radius: 8px;
+    background: #f6f9fc;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-billing-mobile-card dd {
+    margin: 5px 0 0;
+    color: #173f6d;
+    font-size: 12px;
+    font-weight: 850;
+    line-height: 1.35;
+  }
+
+  #projectsView .project-billing-mobile-amounts dd {
+    font-size: 14px;
+  }
+
+  #projectsView .project-billing-mobile-card :is(h3, span, dt, dd) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  #projectsView .project-billing-mobile-empty {
+    margin: 0;
+    padding: 24px 14px;
+    color: #748499;
+    text-align: center;
+  }
+
+  #projectsView .project-daily-desktop {
+    display: none;
+  }
+
+  #projectsView .project-daily-mobile-list {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 10px;
+    padding: 12px;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-daily-card {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 11px;
+    padding: 13px;
+    border: 1px solid #dce5ee;
+    border-radius: 12px;
+    background: #fff;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-daily-card header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  #projectsView .project-daily-card header > div,
+  #projectsView .project-daily-card :is(h3, p, span, strong, dl, div, dt, dd) {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #projectsView .project-daily-card header > div > span,
+  #projectsView .project-daily-card dt,
+  #projectsView .project-daily-employee > span {
+    color: #718197;
+    font-size: 9px;
+    font-weight: 800;
+  }
+
+  #projectsView .project-daily-card h3 {
+    margin: 4px 0 0;
+    color: #173f6d;
+    font-size: 15px;
+    line-height: 1.4;
+  }
+
+  #projectsView .project-daily-employee {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+  }
+
+  #projectsView .project-daily-employee strong {
+    color: #315573;
+    font-size: 11px;
+  }
+
+  #projectsView .project-daily-meta,
+  #projectsView .project-daily-amounts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    margin: 0;
+  }
+
+  #projectsView .project-daily-meta div,
+  #projectsView .project-daily-amounts div {
+    padding: 9px;
+    border-radius: 8px;
+    background: #f6f9fc;
+  }
+
+  #projectsView .project-daily-meta div:last-child {
+    grid-column: 1 / -1;
+  }
+
+  #projectsView .project-daily-card dd {
+    margin: 5px 0 0;
+    color: #173f6d;
+    font-size: 12px;
+    font-weight: 850;
+    line-height: 1.35;
+  }
+
+  #projectsView .project-daily-amounts dd {
+    font-size: 14px;
+  }
+
+  #projectsView .project-daily-card :is(h3, p, span, strong, dt, dd) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  #projectsView .project-daily-empty {
+    margin: 0;
+    padding: 24px 14px;
+    color: #748499;
+    text-align: center;
+  }
+
+  #projectsView .project-detail-head {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-back {
+    width: fit-content;
+    max-width: 100%;
+    min-height: 44px;
+    justify-self: start;
+    white-space: normal;
+  }
+
+  #projectsView .project-detail-head > div {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #projectsView .project-detail-head > div > span,
+  #projectsView .project-detail-head h1,
+  #projectsView .project-detail-head em {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  #projectsView .project-detail-head p {
+    min-width: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+
+  #projectsView .project-detail-head > .project-row-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #projectsView .project-detail-head > .project-row-actions button {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    white-space: normal;
+  }
+
+  #projectsView .project-detail-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #projectsView .project-detail-kpis article,
+  #projectsView .project-detail-kpis span,
+  #projectsView .project-detail-kpis strong {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  #projectsView .project-tabs button {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    height: auto;
+    white-space: normal;
+  }
+
+  #projectsView .project-overview-grid,
+  #projectsView .project-overview-grid.recent {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #projectsView .project-overview-grid > *,
+  #projectsView .project-progress-card,
+  #projectsView .project-profit-card,
+  #projectsView .project-mini-list {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  #projectsView .project-overview-grid .project-section-title {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  #projectsView .project-overview-grid .project-section-title > div,
+  #projectsView .project-overview-grid .project-section-title :is(h2, p, strong),
+  #projectsView .project-finance-bars > div,
+  #projectsView .project-finance-bars :is(span, b),
+  #projectsView .project-cost-breakdown div,
+  #projectsView .project-cost-breakdown :is(dt, dd),
+  #projectsView .project-profit-card :is(h2, strong, span, p),
+  #projectsView .project-mini-list > header,
+  #projectsView .project-mini-list > div,
+  #projectsView .project-mini-list > div :is(span, b, strong) {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-finance-bars {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #projectsView .project-cost-breakdown {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #projectsView .project-mini-list > header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  #projectsView .project-mini-list > div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+    gap: 8px;
+  }
+
+  #projectsView #projectsApp,
+  #projectsView .project-list-panel,
+  #projectsView .project-filter-grid,
+  #projectsView .project-filter-grid label,
+  #projectsView .project-filter-grid :is(select, input) {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-filter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #projectsView .project-desktop-list {
+    display: none;
+  }
+
+  #projectsView .project-mobile-list {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 10px;
+    padding: 12px;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-mobile-card {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 11px;
+    padding: 13px;
+    border: 1px solid #dce5ee;
+    border-radius: 12px;
+    background: #fff;
+    box-sizing: border-box;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-mobile-card-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+  }
+
+  #projectsView .project-mobile-card-head > div {
+    min-width: 0;
+  }
+
+  #projectsView .project-mobile-card-head h3 {
+    margin: 0;
+    color: #0b3b70;
+    font-size: 16px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-mobile-card-head p,
+  #projectsView .project-mobile-address {
+    margin: 4px 0 0;
+    color: #687b91;
+    font-size: 11px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-mobile-condition {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: baseline;
+    gap: 8px;
+    margin: 0;
+    padding: 9px 10px;
+    border-radius: 8px;
+    background: #edf4ff;
+  }
+
+  #projectsView .project-mobile-condition span {
+    color: #64778d;
+    font-size: 10px;
+    font-weight: 800;
+  }
+
+  #projectsView .project-mobile-condition strong {
+    min-width: 0;
+    color: #245b96;
+    font-size: 11px;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-mobile-financials {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    margin: 0;
+  }
+
+  #projectsView .project-mobile-financials div {
+    min-width: 0;
+    padding: 9px;
+    border-radius: 8px;
+    background: #f6f9fc;
+  }
+
+  #projectsView .project-mobile-financials dt {
+    color: #718197;
+    font-size: 9px;
+    font-weight: 800;
+  }
+
+  #projectsView .project-mobile-financials dd {
+    margin: 5px 0 0;
+    color: #173f6d;
+    font-size: 12px;
+    font-weight: 850;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-mobile-profit {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    padding: 10px;
+    border-top: 1px solid #e4ebf3;
+  }
+
+  #projectsView .project-mobile-profit span,
+  #projectsView .project-mobile-profit small {
+    color: #687b91;
+    font-size: 10px;
+    font-weight: 800;
+  }
+
+  #projectsView .project-mobile-profit strong {
+    min-width: 0;
+    font-size: 15px;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-mobile-action {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+  }
+
+  #projectsView .project-mobile-empty {
+    margin: 0;
+    padding: 24px 14px;
+  }
+
+  .project-sticky-scrollbar {
+    display: none !important;
+  }
+
+  .customer-manager-modal,
+  .customer-master-form-modal {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+
+  .customer-manager-modal .erp-detail-body,
+  .customer-master-form-modal .erp-detail-body {
+    min-width: 0;
+    padding: 14px;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .customer-manager-modal .customer-desktop-list {
+    display: none;
+  }
+
+  .customer-manager-modal .customer-mobile-list {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    gap: 10px;
+  }
+
+  .customer-manager-modal .customer-mobile-card {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    gap: 10px;
+    padding: 13px;
+    border: 1px solid #dce5ee;
+    border-radius: 12px;
+    background: #fff;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-manager-modal .customer-mobile-card h3 {
+    margin: 0;
+    color: #173f6d;
+    font-size: 15px;
+  }
+
+  .customer-manager-modal .customer-mobile-card header span {
+    display: block;
+    margin-top: 4px;
+    color: #6d7e92;
+    font-size: 10px;
+  }
+
+  .customer-manager-modal .customer-mobile-meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    margin: 0;
+  }
+
+  .customer-manager-modal .customer-mobile-meta div {
+    min-width: 0;
+    padding: 8px;
+    border-radius: 8px;
+    background: #f6f9fc;
+  }
+
+  .customer-manager-modal .customer-mobile-meta dt {
+    color: #718197;
+    font-size: 9px;
+    font-weight: 800;
+  }
+
+  .customer-manager-modal .customer-mobile-meta dd {
+    margin: 4px 0 0;
+    color: #294c6d;
+    font-size: 11px;
+    font-weight: 750;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-manager-modal .customer-mobile-projects {
+    display: grid;
+    gap: 7px;
+    min-width: 0;
+  }
+
+  .customer-manager-modal .customer-mobile-projects strong {
+    color: #315573;
+    font-size: 10px;
+  }
+
+  .customer-manager-modal .customer-mobile-projects div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .customer-manager-modal .customer-mobile-projects span {
+    max-width: 100%;
+    padding: 4px 7px;
+    border-radius: 99px;
+    background: #edf4fb;
+    color: #315b82;
+    font-size: 9px;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-manager-modal .customer-mobile-note {
+    margin: 0;
+    padding: 9px;
+    border-radius: 8px;
+    background: #fff9ec;
+    color: #6d6049;
+    font-size: 10px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .customer-manager-modal .customer-mobile-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .customer-manager-modal .customer-mobile-actions button {
+    width: 100%;
+    min-width: 0;
+    min-height: 42px;
+    border: 1px solid #d4dfeb;
+    border-radius: 8px;
+    background: #f7fafe;
+    color: #31516f;
+    font-weight: 800;
+  }
+
+  .customer-manager-modal .customer-mobile-actions button:last-child {
+    color: #b9473c;
+  }
+
+  .customer-manager-modal > footer,
+  .customer-master-form-modal form > footer {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 12px 14px;
+  }
+
+  .customer-manager-modal > footer button,
+  .customer-master-form-modal form > footer button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .customer-master-form-modal .project-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .customer-master-form-modal .project-form-grid .wide {
+    grid-column: auto;
+  }
+
+  .customer-master-form-modal .project-form-grid :is(input, textarea) {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+#projectsView .project-people-mobile-list {
+  display: none;
+}
+
+@media (max-width: 620px) {
+  #projectsView .project-people-desktop {
+    display: none;
+  }
+
+  #projectsView .project-people-mobile-list {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px;
+  }
+
+  #projectsView .project-people-mobile-list,
+  #projectsView .project-people-mobile-card {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-people-mobile-card {
+    padding: 14px;
+    border: 1px solid #dfe7f0;
+    border-radius: 12px;
+    background: #fff;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-people-mobile-card header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+  }
+
+  #projectsView .project-people-mobile-card h3 {
+    margin: 0;
+    color: #0a386f;
+    font-size: 14px;
+  }
+
+  #projectsView .project-people-mobile-card header span {
+    color: #63748a;
+    font-size: 11px;
+  }
+
+  #projectsView .project-people-mobile-meta,
+  #projectsView .project-people-mobile-amounts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin: 14px 0 0;
+  }
+
+  #projectsView .project-people-mobile-amounts > div:last-child {
+    grid-column: 1 / -1;
+  }
+
+  #projectsView .project-people-mobile-card dl > div {
+    min-width: 0;
+  }
+
+  #projectsView .project-people-mobile-card dt {
+    color: #63748a;
+    font-size: 10px;
+  }
+
+  #projectsView .project-people-mobile-card dd {
+    margin: 4px 0 0;
+    color: #294c6d;
+    font-size: 12px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-people-mobile-empty {
+    margin: 0;
+    padding: 16px;
+    color: #748499;
+    overflow-wrap: anywhere;
+  }
+}
+
+#projectsView #detailRetentionRate[hidden],
+#projectsView #detailRetentionBase[hidden],
+#projectsView #detailTaxMode[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 620px) {
+  #projectsView .project-billing-settings > .project-section-title,
+  #projectsView .project-settings-summary > .project-section-title,
+  #projectsView .project-merge-zone > .project-section-title {
+    flex-direction: column;
+    align-items: stretch;
+    min-width: 0;
+  }
+
+  #projectsView .project-billing-settings > .project-section-title > div,
+  #projectsView .project-settings-summary > .project-section-title > div,
+  #projectsView .project-merge-zone > .project-section-title > div {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-settings-title-line {
+    width: 100%;
+    min-width: 0;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  #projectsView .project-billing-summary-badge {
+    white-space: normal;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-billing-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #projectsView .project-billing-settings-grid,
+  #projectsView .project-billing-setting-block,
+  #projectsView .project-billing-setting-block fieldset,
+  #projectsView .project-settings-summary,
+  #projectsView .project-settings-grid,
+  #projectsView .project-settings-grid article {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-billing-setting-block fieldset {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  #projectsView .project-billing-setting-block label {
+    white-space: normal;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-billing-settings input,
+  #projectsView .project-billing-settings select,
+  #projectsView .project-billing-settings .project-rate-combobox {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  #projectsView .project-billing-settings input:not([type="radio"]),
+  #projectsView .project-billing-settings select,
+  #projectsView .project-billing-settings .project-rate-combobox {
+    width: 100%;
+  }
+
+  #projectsView .project-billing-settings input[type="radio"] {
+    flex: 0 0 auto;
+    width: auto;
+  }
+
+  #projectsView .project-billing-settings footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #projectsView .project-billing-settings footer button,
+  #projectsView .project-settings-summary #editProjectSettings,
+  #projectsView .project-merge-zone #openProjectMerge {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #projectsView .project-settings-grid span,
+  #projectsView .project-settings-grid strong {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  #projectsView .project-billing-settings-note {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 360px) {
+  #projectsView .project-detail-kpis,
+  #projectsView .project-cost-breakdown {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

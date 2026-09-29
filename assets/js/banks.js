@@ -19,6 +19,7 @@
   let selectedMonth = businessMonth();
   let activeBankView = 'ledger';
   let reconciliationSearchTimer = null;
+  let reconciliationSearchComposing = false;
   let reconciliationNormalOpen = false;
   const reconciliationFilters = { month: '', status: 'all', direction: 'all', source: 'all', keyword: '' };
   const RECONCILIATION_STATUSES = {
@@ -523,6 +524,26 @@
     </nav>`;
   }
 
+  function renderLedgerMobileCards(view) {
+    if (!view.rows.length) return '<p class="bank-ledger-mobile-empty">此月份尚無銀行交易。</p>';
+    return view.rows.map(({ row, bank, direction }) => {
+      const running = view.runningBalances.get(String(row.id || ''));
+      const directionText = direction === 'in' ? '收入' : direction === 'out' ? '支出' : '無法辨識';
+      const directionClass = direction === 'in' ? 'is-income' : direction === 'out' ? 'is-expense' : 'is-unknown';
+      return `<article class="bank-ledger-mobile-card" data-bank-transaction-id="${esc(row.id)}">
+        <header class="bank-ledger-mobile-head"><div><span>日期</span><strong>${esc(row.date || '—')}</strong></div><span class="bank-direction ${directionClass}">${esc(directionText)}</span></header>
+        <div class="bank-ledger-mobile-primary"><div><span>來源</span><strong>${esc(sourceLabel(row))}</strong></div><div class="bank-counterparty"><span>對象／案場</span>${counterpartyLabel(row)}</div></div>
+        <div class="bank-ledger-mobile-description"><span>說明</span><p>${esc(descriptionLabel(row))}</p></div>
+        <div class="bank-ledger-mobile-amounts">
+          <div><span>收入</span><strong class="bank-income-amount">${direction === 'in' ? money(row.amount) : '—'}</strong></div>
+          <div><span>支出</span><strong class="bank-expense-amount">${direction === 'out' ? money(row.amount) : '—'}</strong></div>
+          <div class="is-balance"><span>交易後餘額</span><strong class="bank-running-balance">${running === null || running === undefined ? '—' : money(running)}</strong></div>
+        </div>
+        <footer><span>帳戶</span><strong>${esc(bankName(bank))}</strong></footer>
+      </article>`;
+    }).join('');
+  }
+
   function renderLedger(state) {
     const view = bankMonthView(state, selectedMonth);
     return `<section class="commission-panel bank-month-panel">
@@ -538,10 +559,11 @@
     ${renderSummary(view)}
     <section class="commission-panel billing-list-panel bank-ledger-panel">
       <header class="project-section-title"><div><h2>${esc(monthLabel(selectedMonth))}交易明細</h2><p>共 ${view.rows.length} 筆；交易後餘額依日期、建立時間及系統編號穩定計算。</p></div></header>
-      <div class="commission-table-wrap bank-ledger-scroll"><table class="commission-table bank-ledger-table">
+      <div class="commission-table-wrap bank-ledger-scroll bank-ledger-desktop"><table class="commission-table bank-ledger-table">
         <thead><tr><th>日期</th><th>收／支</th><th>來源</th><th>對象／案場</th><th>說明</th><th class="num">收入</th><th class="num">支出</th><th class="num">交易後餘額</th><th>帳戶</th></tr></thead>
         <tbody>${renderRows(view)}</tbody>
       </table></div>
+      <div class="bank-ledger-mobile-list" aria-label="銀行交易清單">${renderLedgerMobileCards(view)}</div>
     </section>`;
   }
 
@@ -816,14 +838,56 @@
     return display.rows.map((row) => row.type === 'history-group' ? renderHistoryGroupRows(row) : renderReconciliationItemRow(row.item)).join('');
   }
 
+  function renderReconciliationMobileFields(item) {
+    return `<header class="bank-reconciliation-mobile-head"><div><span>日期</span><strong>${esc(item.date || '—')}</strong></div>${reconciliationStatusMarkup(item)}</header>
+      <section class="bank-reconciliation-mobile-party"><span>對象</span><strong>${esc(item.party || '—')}</strong>${item.project ? `<small>案場：${esc(item.project)}</small>` : ''}${item.sourceNo ? `<small>單號：${esc(item.sourceNo)}</small>` : ''}</section>
+      <section class="bank-reconciliation-mobile-purpose">${reconciliationPurposeMarkup(item)}</section>
+      <section class="bank-reconciliation-mobile-amounts">
+        <div><span>帳務金額</span><strong>${item.accountingAmount === null ? '—' : money(item.accountingAmount)}</strong></div>
+        <div><span>銀行金額</span><strong>${item.bankAmount === null ? '—' : money(item.bankAmount)}</strong></div>
+        <div><span>差額</span><strong>${reconciliationDifference(item.difference)}</strong></div>
+      </section>`;
+  }
+
+  function renderHistoryGroupMobileCard(group) {
+    const item = group.item;
+    const count = group.items.length;
+    const target = `${group.id}-mobile`;
+    return `<article class="bank-reconciliation-mobile-card is-${esc(item.statusGroup)}" data-reconciliation-status="${esc(item.status)}" data-reconciliation-source="${esc(item.sourceKind)}" data-bank-history-group-count="${count}">
+      ${renderReconciliationMobileFields(item)}
+      <div class="bank-reconciliation-mobile-group-summary"><strong>${esc(reconciliationResultText(item))}</strong><p>共 ${count} 筆歷史付款紀錄；僅供查帳，不影響銀行餘額。</p>
+        <button type="button" data-bank-history-group-toggle="${esc(target)}" data-bank-history-group-count="${count}" aria-expanded="false" aria-controls="${esc(target)}-detail"><span data-bank-history-group-label>查看 ${count} 筆</span></button>
+      </div>
+      <div class="bank-reconciliation-mobile-group-detail" id="${esc(target)}-detail" data-bank-history-group-detail="${esc(target)}" hidden>
+        ${group.items.map((original) => `<section class="bank-reconciliation-mobile-original">
+          <dl><div><dt>原日期</dt><dd>${esc(original.date || '—')}</dd></div><div><dt>原對象</dt><dd>${esc(original.party || '—')}</dd></div>${original.project ? `<div><dt>原案場</dt><dd>${esc(original.project)}</dd></div>` : ''}<div><dt>原來源單號</dt><dd>${esc(original.sourceNo || '—')}</dd></div><div><dt>原帳務金額</dt><dd>${original.accountingAmount === null ? '—' : money(original.accountingAmount)}</dd></div></dl>
+          ${reconciliationTechnicalInfo(original)}
+        </section>`).join('')}
+      </div>
+    </article>`;
+  }
+
+  function renderReconciliationMobileCards(display) {
+    if (!display.rows.length) return '<p class="bank-reconciliation-mobile-empty">沒有符合目前篩選條件的對帳資料。</p>';
+    return display.rows.map((row) => {
+      if (row.type === 'history-group') return renderHistoryGroupMobileCard(row);
+      const item = row.item;
+      return `<article class="bank-reconciliation-mobile-card is-${esc(item.statusGroup)}" data-reconciliation-status="${esc(item.status)}" data-reconciliation-source="${esc(item.sourceKind)}">
+        ${renderReconciliationMobileFields(item)}
+        <section class="bank-reconciliation-mobile-result">${reconciliationResultMarkup(item)}</section>
+      </article>`;
+    }).join('');
+  }
+
   function renderReconciliationTable(items, options = {}) {
     const display = reconciliationDisplayModel(items);
     return `<section class="commission-panel billing-list-panel bank-reconciliation-panel ${esc(options.className || '')}" data-history-record-count="${display.historyRecordCount}" data-history-group-count="${display.historyGroupCount}" data-display-row-count="${display.rows.length}">
       <header class="project-section-title"><div><h2>${esc(options.title || '對帳資料')}</h2>${options.note ? `<p>${esc(options.note)}</p>` : ''}</div>${options.countLabel ? `<strong class="bank-reconciliation-section-count">${esc(options.countLabel)}</strong>` : ''}</header>
-      <div class="commission-table-wrap bank-reconciliation-scroll"><table class="commission-table bank-reconciliation-table bank-reconciliation-overview-table">
+      <div class="commission-table-wrap bank-reconciliation-scroll bank-reconciliation-desktop"><table class="commission-table bank-reconciliation-table bank-reconciliation-overview-table">
         <thead><tr><th>日期</th><th>對象</th><th>用途</th><th class="num">帳務金額</th><th class="num">銀行金額</th><th>核對結果</th></tr></thead>
         <tbody>${renderReconciliationRows(display)}</tbody>
       </table></div>
+      <div class="bank-reconciliation-mobile-list" aria-label="銀行對帳清單">${renderReconciliationMobileCards(display)}</div>
     </section>`;
   }
 
@@ -961,18 +1025,40 @@
       render();
       app.querySelector('[data-bank-reconciliation-normal-toggle]')?.focus();
     });
-    app.addEventListener('input', (event) => {
-      const filter = event.target.closest('[data-bank-reconciliation-filter="keyword"]');
-      if (!filter) return;
-      const cursor = filter.selectionStart;
-      reconciliationFilters.keyword = filter.value;
+    const scheduleReconciliationKeywordSearch = (filter) => {
+      const value = filter.value;
+      if (value === reconciliationFilters.keyword) return;
+      const cursor = filter.selectionStart ?? value.length;
+      reconciliationFilters.keyword = value;
       clearTimeout(reconciliationSearchTimer);
       reconciliationSearchTimer = setTimeout(() => {
+        reconciliationSearchTimer = null;
         render();
         const replacement = app.querySelector('[data-bank-reconciliation-filter="keyword"]');
         replacement?.focus();
-        replacement?.setSelectionRange(cursor, cursor);
+        if (replacement) {
+          const position = Math.min(cursor, replacement.value.length);
+          replacement.setSelectionRange(position, position);
+        }
       }, 120);
+    };
+    app.addEventListener('compositionstart', (event) => {
+      const filter = event.target.closest('[data-bank-reconciliation-filter="keyword"]');
+      if (!filter) return;
+      reconciliationSearchComposing = true;
+      clearTimeout(reconciliationSearchTimer);
+      reconciliationSearchTimer = null;
+    });
+    app.addEventListener('compositionend', (event) => {
+      const filter = event.target.closest('[data-bank-reconciliation-filter="keyword"]');
+      if (!filter) return;
+      reconciliationSearchComposing = false;
+      scheduleReconciliationKeywordSearch(filter);
+    });
+    app.addEventListener('input', (event) => {
+      const filter = event.target.closest('[data-bank-reconciliation-filter="keyword"]');
+      if (!filter || reconciliationSearchComposing || event.isComposing) return;
+      scheduleReconciliationKeywordSearch(filter);
     });
   }
 

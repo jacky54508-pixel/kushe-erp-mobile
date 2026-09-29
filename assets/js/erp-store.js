@@ -572,11 +572,16 @@
       if (log.billable === undefined) log.billable = billable;
       if (billable && !log.billingStatus) log.billingStatus = log.billingId ? '已請款' : '未請款';
       if (!log.billingId) log.billingId = '';
+      const logBillingIds = [...new Set([...(Array.isArray(log.billingIds) ? log.billingIds : []), log.billingId].filter((id) => typeof id === 'string' && id.trim()))];
+      const uniqueLogBillingId = logBillingIds.length === 1 ? logBillingIds[0] : '';
+      const legacyWholeLogBilled = billable && log.billingStatus === '已請款' && Boolean(uniqueLogBillingId);
       (log.items || []).forEach((item) => {
         if (!item.workItemId) item.workItemId = uid();
         if (item.billable === undefined) item.billable = billable;
-        if (item.billable && !item.billingStatus) item.billingStatus = log.billingId ? '已請款' : '未請款';
-        if (!item.billingId) item.billingId = log.billingId || '';
+        // A partial log ID is not evidence that every item has been billed.
+        // Preserve explicit status/ID conflicts for a separate historical audit.
+        if (item.billable && !item.billingStatus) item.billingStatus = item.billingId || legacyWholeLogBilled ? '已請款' : '未請款';
+        if (!item.billingId) item.billingId = item.billingStatus === '已請款' ? uniqueLogBillingId : '';
         if (!item.taxMode) item.taxMode = '未稅';
         if (item.inputPrice === undefined) item.inputPrice = num(item.price);
         if (item.untaxedSubtotal === undefined) item.untaxedSubtotal = num(item.qty) * num(item.price);
@@ -4968,7 +4973,208 @@
       }
     });
   }
+  // P18-5D-2E-1: exact-target evidence only. This API never applies a repair.
+  const DAILY_BILLING_LINK_PREVIEW_TARGET = Object.freeze({
+    billingId:'mtwl9yrl49nyac',billingNo:'B20260911-001',sourceType:'daily-work',
+    projectId:'ms4p5hzpgfim9y',date:'2026-09-11',
+    dirtyCanonical:30,dirtyPhysical:53,remainingAmount:36600,
+    batches:Object.freeze([
+      Object.freeze({batchId:'mtvsnsexdgag8s',groupId:'mtvsnsexdgag8s:ms4p5hzpgfim9y',logIds:Object.freeze(['mtwl78j7s8uhka','mtwl78j7wrhkj4']),canonicalItems:83,cleanBilled:60,dirtyCanonical:23,dirtyPhysical:46,remainingAmount:22200}),
+      Object.freeze({batchId:'mtvtms94cicu92',groupId:'mtvtms94cicu92:ms4p5hzpgfim9y',logIds:Object.freeze(['mtvtms95uh47y1']),canonicalItems:8,cleanBilled:1,dirtyCanonical:7,dirtyPhysical:7,remainingAmount:14400})
+    ])
+  });
+  function dailyBillingLinkRepairResult() {
+    const target=DAILY_BILLING_LINK_PREVIEW_TARGET;
+    return {safeToRepair:false,billingId:target.billingId,billingNo:target.billingNo,affectedBatchCount:0,batches:[],dirtyCanonicalTotal:0,dirtyPhysicalCopyTotal:0,expectedRemainingAmountTotal:0,unexpectedDirtyCount:0,unexpectedDirtySources:[],blockers:[]};
+  }
+  function dailyBillingLinkRepairPreview() {
+    const result=dailyBillingLinkRepairResult();
+    // Public preview never observes a transaction draft or starts storage work.
+    if(arguments.length){result.blockers.push({code:'ARGUMENTS_NOT_ALLOWED'});return result;}
+    if(!publishedState||storeRecoveryBlocked||receiptWritesBlocked||activeStoreTransaction||activeStoreWriters||queuedStoreWriters){result.blockers.push({code:'PUBLISHED_STATE_NOT_READY'});return result;}
+    return dailyBillingLinkRepairPlan(publishedState).preview;
+  }
+  // Pure, private evidence gate shared by preview and the transaction writer.
+  function dailyBillingLinkRepairPlan(snapshot) {
+    const target=DAILY_BILLING_LINK_PREVIEW_TARGET,result=dailyBillingLinkRepairResult(),targets=[];
+    const block=(code,evidence={})=>result.blockers.push({code,...evidence});
+    if(!Array.isArray(snapshot.dailyLogs)||!Array.isArray(snapshot.billings)){block('INVALID_STATE_COLLECTIONS');return {preview:result,targets};}
+    const validRecord=(value)=>value&&typeof value==='object'&&!Array.isArray(value);
+    const emptyNo=(value)=>value===undefined||value===null||value==='';
+    const amount=(item)=>num(item.untaxedSubtotal)||num(item.qty)*num(item.price);
+    const eligible=(log,item)=>item.billable!==false&&log.billable!==false&&!log.noInvoice&&item.pricingType!=='lump_sum';
+    const billingRows=[];
+    for(const billing of snapshot.billings){
+      if(!validRecord(billing)||typeof billing.id!=='string'||!billing.id||(billing.sourceItemRefs!==undefined&&!Array.isArray(billing.sourceItemRefs))||(billing.lines!==undefined&&!Array.isArray(billing.lines))){block('INVALID_BILLING_STRUCTURE');return {preview:result,targets};}
+      if((billing.lines||[]).some((line)=>!validRecord(line)||(line.sourceRefs!==undefined&&!Array.isArray(line.sourceRefs)))){block('INVALID_BILLING_LINE_REFS',{billingId:billing.id});return {preview:result,targets};}
+      const unique=new Map();
+      for(const ref of billingSourceRefs(billing)){
+        if(!validRecord(ref)){block('INVALID_SOURCE_REF',{billingId:billing.id});return {preview:result,targets};}
+        const hasIndex=ref.sourceItemIndex!==undefined&&ref.sourceItemIndex!==null;
+        if((hasIndex&&(!Number.isInteger(Number(ref.sourceItemIndex))||Number(ref.sourceItemIndex)<0))||(!hasIndex&&!ref.workItemId)){block('INVALID_SOURCE_REF_IDENTITY',{billingId:billing.id});return {preview:result,targets};}
+        // Same Billing + same Store matching semantics counts once, even in both ref arrays.
+        const key=JSON.stringify([ref.sourceGroupKey||'',hasIndex?['index',num(ref.sourceItemIndex)]:['workItemId',ref.workItemId]]);
+        if(!unique.has(key))unique.set(key,ref);
+      }
+      billingRows.push({billing,refs:[...unique.values()]});
+    }
+    const byId=billingRows.filter(({billing})=>billing.id===target.billingId),byNo=billingRows.filter(({billing})=>billing.number===target.billingNo);
+    if(byId.length!==1||byNo.length!==1||byId[0]!==byNo[0])block('BILLING_IDENTITY_MISMATCH',{idMatches:byId.length,numberMatches:byNo.length});
+    else if(byId[0].billing.sourceType!==target.sourceType||byId[0].billing.project!==target.projectId)block('BILLING_SOURCE_OR_PROJECT_MISMATCH');
+    const matching=(log,item,index)=>billingRows.filter(({refs})=>refs.some((ref)=>sourceMatches(ref,log,item,index)));
+    const batchGroups=new Map(),logIds=new Set(),groupOwners=new Map();
+    let globalPhysical=0;
+    const physicalDirty=[];
+    for(const log of snapshot.dailyLogs){
+      if(!validRecord(log)||typeof log.id!=='string'||!log.id||!Array.isArray(log.items)||log.items.some((item)=>!validRecord(item))){block('INVALID_DAILY_STRUCTURE');return {preview:result,targets};}
+      if(logIds.has(log.id))block('DUPLICATE_LOG_ID',{logId:log.id});
+      logIds.add(log.id);
+      const batchId=log.batchId||log.id,groupId=log.groupId||log.id;
+      if(!batchGroups.has(batchId))batchGroups.set(batchId,new Map());
+      const groups=batchGroups.get(batchId);
+      if(!groups.has(groupId))groups.set(groupId,[]);
+      groups.get(groupId).push(log);
+      if(!groupOwners.has(groupId))groupOwners.set(groupId,new Set());
+      groupOwners.get(groupId).add(batchId);
+      log.items.forEach((item,index)=>{
+        if(item.billingStatus==='未請款'&&item.billingId&&!matching(log,item,index).length){globalPhysical+=1;physicalDirty.push({batchId,groupId,index,workItemId:item.workItemId||''});}
+      });
+    }
+    const globalDirty=[];
+    for(const [batchId,groups] of batchGroups){
+      const spec=target.batches.find((row)=>row.batchId===batchId);
+      const row={batchId,logCount:0,canonicalItemCount:0,cleanBilledCount:0,dirtyCanonicalCount:0,dirtyPhysicalCopyCount:0,expectedRemainingAmount:0};
+      const membersAll=[...groups.values()].flat();row.logCount=membersAll.length;
+      if(spec){
+        result.affectedBatchCount+=1;
+        const ids=membersAll.map((log)=>log.id).sort();
+        if(JSON.stringify(ids)!==JSON.stringify([...spec.logIds].sort()))block('TARGET_LOG_IDS_MISMATCH',{batchId});
+        if(groups.size!==1||!groups.has(spec.groupId)||groupOwners.get(spec.groupId)?.size!==1)block('TARGET_GROUP_MISMATCH',{batchId});
+        if(membersAll.some((log)=>log.date!==target.date||log.project!==target.projectId||log.groupId!==spec.groupId))block('TARGET_DATE_PROJECT_GROUP_MISMATCH',{batchId});
+        if(membersAll.some((log)=>!log.employee)||new Set(membersAll.map((log)=>log.employee)).size!==spec.logIds.length)block('TARGET_EMPLOYEE_COPIES_MISMATCH',{batchId});
+      }
+      for(const [groupId,members] of groups){
+        const first=members[0],seen=new Set();
+        if(spec&&members.some((log)=>log.items.length!==first.items.length))block('COPY_ITEM_COUNT_MISMATCH',{batchId,groupId});
+        first.items.forEach((item,index)=>{
+          const key=item.workItemId||`${first.groupId||first.id}:${index}`;
+          if(seen.has(key)){if(spec)block('DUPLICATE_CANONICAL_ID',{batchId,groupId,index});return;}
+          seen.add(key);row.canonicalItemCount+=1;
+          const hits=matching(first,item,index),isGlobalDirty=item.billingStatus==='未請款'&&Boolean(item.billingId)&&hits.length===0;
+          if(isGlobalDirty)globalDirty.push({batchId,groupId,index,workItemId:item.workItemId||''});
+          if(!spec)return;
+          const evidence={batchId,groupId,index,workItemId:item.workItemId||''};
+          const copies=members.map((log)=>({log,item:log.items[index]}));
+          const copyParity=Boolean(item.workItemId)&&copies.every((copy)=>copy.item&&copy.item.workItemId===item.workItemId&&copy.item.billingStatus===item.billingStatus&&copy.item.billingId===item.billingId&&(emptyNo(copy.item.billingNo)?'':copy.item.billingNo)===(emptyNo(item.billingNo)?'':item.billingNo)&&eligible(copy.log,copy.item)===eligible(first,item)&&amount(copy.item)===amount(item));
+          if(!copyParity)block('COPY_PARITY_MISMATCH',evidence);
+          const clean=copies.every((copy)=>copy.item&&eligible(copy.log,copy.item)&&copy.item.billingStatus==='已請款'&&copy.item.billingId===target.billingId&&(()=>{const matches=matching(copy.log,copy.item,index);return matches.length===1&&matches[0].billing.id===target.billingId;})());
+          const dirty=copies.every((copy)=>copy.item&&eligible(copy.log,copy.item)&&copy.item.billingStatus==='未請款'&&copy.item.billingId===target.billingId&&emptyNo(copy.item.billingNo)&&matching(copy.log,copy.item,index).length===0);
+          if(clean)row.cleanBilledCount+=1;
+          else if(dirty){copies.forEach((copy)=>targets.push({...evidence,logId:copy.log.id}));row.dirtyCanonicalCount+=1;row.dirtyPhysicalCopyCount+=copies.length;row.expectedRemainingAmount+=amount(item);}
+          else block('ITEM_EVIDENCE_MISMATCH',evidence);
+        });
+      }
+      if(spec){
+        result.batches.push(row);
+        const checks={logCount:spec.logIds.length,canonicalItemCount:spec.canonicalItems,cleanBilledCount:spec.cleanBilled,dirtyCanonicalCount:spec.dirtyCanonical,dirtyPhysicalCopyCount:spec.dirtyPhysical,expectedRemainingAmount:spec.remainingAmount};
+        Object.entries(checks).forEach(([field,expected])=>{if(row[field]!==expected)block('TARGET_COUNT_OR_AMOUNT_MISMATCH',{batchId,field,expected,actual:row[field]});});
+        result.dirtyCanonicalTotal+=row.dirtyCanonicalCount;result.dirtyPhysicalCopyTotal+=row.dirtyPhysicalCopyCount;result.expectedRemainingAmountTotal+=row.expectedRemainingAmount;
+      }
+    }
+    target.batches.forEach((spec)=>{if(!batchGroups.has(spec.batchId))block('TARGET_BATCH_MISSING',{batchId:spec.batchId});});
+    const isTarget=(entry)=>target.batches.some((spec)=>spec.batchId===entry.batchId&&spec.groupId===entry.groupId);
+    const unexpected=new Map();
+    [...globalDirty,...physicalDirty].filter((entry)=>!isTarget(entry)).forEach((entry)=>{const key=JSON.stringify([entry.batchId,entry.groupId,entry.workItemId||entry.index]);if(!unexpected.has(key))unexpected.set(key,entry);});
+    result.unexpectedDirtyCount=unexpected.size;result.unexpectedDirtySources=[...unexpected.values()];
+    if(unexpected.size)block('EXTRA_DIRTY_SOURCE',{count:unexpected.size});
+    if(globalDirty.length!==target.dirtyCanonical||globalPhysical!==target.dirtyPhysical)block('GLOBAL_DIRTY_SCOPE_MISMATCH',{canonical:globalDirty.length,physical:globalPhysical});
+    if(result.affectedBatchCount!==2||result.dirtyCanonicalTotal!==target.dirtyCanonical||result.dirtyPhysicalCopyTotal!==target.dirtyPhysical||result.expectedRemainingAmountTotal!==target.remainingAmount)block('TOTAL_EVIDENCE_MISMATCH');
+    result.safeToRepair=result.blockers.length===0;
+    return {preview:result,targets};
+  }
+  function repairDailyBillingLinks(confirmation) {
+    const draft=requireStoreTransactionDraft();
+    const fail=(code)=>{throw storeError('每日施工請款連結修復核對失敗，未提交資料',code);};
+    if(arguments.length!==1||confirmation!=='P18-5D-2E-2|B20260911-001|30|53|36600')fail('BILLING_REPAIR_CONFIRMATION_REQUIRED');
+    const target=DAILY_BILLING_LINK_PREVIEW_TARGET,plan=dailyBillingLinkRepairPlan(draft),preview=plan.preview;
+    if(!preview.safeToRepair||preview.blockers.length||plan.targets.length!==target.dirtyPhysical)fail('BILLING_REPAIR_FRESH_GATE_FAILED');
+    // An exact expected clone protects every other collection, log, item field and timestamp.
+    // Nothing from this clone is published; it is used only for the pre-persist fingerprint.
+    const expected=storeStateClone(draft),targetKeys=new Set();
+    for(const entry of plan.targets){
+      const key=JSON.stringify([entry.logId,entry.index]);
+      if(targetKeys.has(key))fail('BILLING_REPAIR_DUPLICATE_TARGET');
+      targetKeys.add(key);
+      const log=draft.dailyLogs.find((row)=>row.id===entry.logId),item=log?.items[entry.index];
+      if(!log||(log.batchId||log.id)!==entry.batchId||(log.groupId||log.id)!==entry.groupId||!item||item.workItemId!==entry.workItemId||item.billingStatus!=='未請款'||item.billingId!==target.billingId)fail('BILLING_REPAIR_TARGET_CHANGED');
+      expected.dailyLogs.find((row)=>row.id===entry.logId).items[entry.index].billingId='';
+    }
+    const targetLogIds=target.batches.flatMap((spec)=>spec.logIds);
+    for(const logId of targetLogIds){
+      const log=expected.dailyLogs.find((row)=>row.id===logId);
+      log.billingIds=[target.billingId];log.billingId=target.billingId;log.billingNo=target.billingNo;log.billingStatus='未請款';
+    }
+    const expectedFingerprint=storeStateFingerprint(expected);
+    let changed=0;
+    for(const entry of plan.targets){
+      draft.dailyLogs.find((row)=>row.id===entry.logId).items[entry.index].billingId='';changed+=1;
+    }
+    for(const logId of targetLogIds)syncLogBillingState(draft.dailyLogs.find((row)=>row.id===logId),false);
+    if(changed!==target.dirtyPhysical||storeStateFingerprint(draft)!==expectedFingerprint)fail('BILLING_REPAIR_PROTECTED_DATA_CHANGED');
+    // Re-scan all physical items, including non-first employee copies, with Store ref semantics.
+    const hasRef=(log,item,index)=>draft.billings.some((billing)=>billingSourceRefs(billing).some((ref)=>sourceMatches(ref,log,item,index)));
+    const globalDirty=draft.dailyLogs.reduce((count,log)=>count+(log.items||[]).filter((item,index)=>item.billingStatus==='未請款'&&item.billingId&&!hasRef(log,item,index)).length,0);
+    if(globalDirty!==0)fail('BILLING_REPAIR_POST_DIRTY');
+    let postUnbilledCount=0,postUnbilledAmount=0;
+    const work=unbilledWork().flatMap((row)=>row.details);
+    for(const spec of target.batches){
+      const logs=draft.dailyLogs.filter((log)=>spec.logIds.includes(log.id)),first=logs[0];
+      const billed=first.items.filter((item,index)=>item.billingStatus==='已請款'&&item.billingId===target.billingId&&hasRef(first,item,index));
+      const unbilled=first.items.filter((item,index)=>item.billingStatus==='未請款'&&item.billingId===''&&!hasRef(first,item,index));
+      const amount=unbilled.reduce((sum,item)=>sum+(num(item.untaxedSubtotal)||num(item.qty)*num(item.price)),0);
+      if(billed.length!==spec.cleanBilled||unbilled.length!==spec.dirtyCanonical||amount!==spec.remainingAmount)fail('BILLING_REPAIR_POST_BATCH');
+      const details=work.filter((row)=>row.sourceType==='daily-work'&&row.pricingType==='actual'&&row.sourceGroupKey===spec.groupId);
+      const positions=new Set(details.map((row)=>row.sourceItemIndex));
+      if(details.length!==spec.dirtyCanonical||positions.size!==details.length||details.reduce((sum,row)=>sum+num(row.subtotal),0)!==spec.remainingAmount||details.some((row)=>!plan.targets.some((entry)=>entry.groupId===row.sourceGroupKey&&entry.index===row.sourceItemIndex&&entry.workItemId===row.workItemId)))fail('BILLING_REPAIR_POST_UNBILLED_WORK');
+      postUnbilledCount+=unbilled.length;postUnbilledAmount+=amount;
+    }
+    // Include all post-audit readers in the mutation boundary as well.
+    if(postUnbilledCount!==target.dirtyCanonical||postUnbilledAmount!==target.remainingAmount||storeStateFingerprint(draft)!==expectedFingerprint)fail('BILLING_REPAIR_POST_PROTECTION');
+    persist('修復每日施工請款連結 B20260911-001',{billingId:target.billingId,billingNo:target.billingNo,batchIds:target.batches.map((spec)=>spec.batchId),dirtyCanonical:target.dirtyCanonical,dirtyPhysical:target.dirtyPhysical,restoredRemainingAmount:target.remainingAmount});
+    return {repaired:true,billingId:target.billingId,billingNo:target.billingNo,affectedBatchCount:2,repairedCanonicalCount:target.dirtyCanonical,repairedPhysicalCount:changed,restoredRemainingAmount:postUnbilledAmount,postDirtyCount:globalDirty,postUnbilledCount,postUnbilledAmount};
+  }
+  function saveSystemSettings(values = {}) {
+    requireStoreTransactionDraft();
+    if (!state.settings || typeof state.settings !== 'object' || Array.isArray(state.settings)) state.settings = {};
+    const rate = Number(values.defaultTax);
+    if (!Number.isFinite(rate) || rate <= 0 || rate > 100) throw new Error('預設稅率必須大於 0 且不超過 100%。');
+    const next = {
+      company: clean(values.company),
+      taxId: clean(values.taxId),
+      owner: clean(values.owner),
+      phone: clean(values.phone),
+      address: clean(values.address),
+      defaultTax: Math.round(rate * 100) / 100
+    };
+    const previous = {
+      company: clean(state.settings.company),
+      taxId: clean(state.settings.taxId),
+      owner: clean(state.settings.owner),
+      phone: clean(state.settings.phone),
+      address: clean(state.settings.address),
+      defaultTax: num(state.settings.defaultTax) || 5
+    };
+    const changed = Object.keys(next).some((key) => key === 'defaultTax'
+      ? num(next[key]) !== num(previous[key])
+      : next[key] !== previous[key]);
+    if (!changed) return { changed:false, settings:{...previous}, defaultTaxChanged:false };
+    Object.assign(state.settings, next);
+    const defaultTaxChanged = num(next.defaultTax) !== num(previous.defaultTax);
+    persist('更新系統設定', { fields:Object.keys(next), defaultTaxChanged });
+    return { changed:true, settings:{...next}, defaultTaxChanged };
+  }
   const STORE_WRITER_NAMES=new Set([
+    'repairDailyBillingLinks','saveSystemSettings',
     'saveQuotationUnitPreset','saveQuotationPublicNotePreset','deleteQuotationPublicNotePreset',
     'saveCommission','deleteCommission','saveDailyBatch','deleteDailyBatch','saveInvoice','createBilling','updateBilling','deleteBilling',
     'addReceipt','updateReceipt','deleteReceipt','addRetentionReceipt','updateRetentionReceipt','deleteRetentionReceipt','deleteReceivableAccounting',
@@ -4986,7 +5192,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
