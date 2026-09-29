@@ -5143,8 +5143,38 @@
     persist('修復每日施工請款連結 B20260911-001',{billingId:target.billingId,billingNo:target.billingNo,batchIds:target.batches.map((spec)=>spec.batchId),dirtyCanonical:target.dirtyCanonical,dirtyPhysical:target.dirtyPhysical,restoredRemainingAmount:target.remainingAmount});
     return {repaired:true,billingId:target.billingId,billingNo:target.billingNo,affectedBatchCount:2,repairedCanonicalCount:target.dirtyCanonical,repairedPhysicalCount:changed,restoredRemainingAmount:postUnbilledAmount,postDirtyCount:globalDirty,postUnbilledCount,postUnbilledAmount};
   }
+  function saveSystemSettings(values = {}) {
+    requireStoreTransactionDraft();
+    if (!state.settings || typeof state.settings !== 'object' || Array.isArray(state.settings)) state.settings = {};
+    const rate = Number(values.defaultTax);
+    if (!Number.isFinite(rate) || rate <= 0 || rate > 100) throw new Error('預設稅率必須大於 0 且不超過 100%。');
+    const next = {
+      company: clean(values.company),
+      taxId: clean(values.taxId),
+      owner: clean(values.owner),
+      phone: clean(values.phone),
+      address: clean(values.address),
+      defaultTax: Math.round(rate * 100) / 100
+    };
+    const previous = {
+      company: clean(state.settings.company),
+      taxId: clean(state.settings.taxId),
+      owner: clean(state.settings.owner),
+      phone: clean(state.settings.phone),
+      address: clean(state.settings.address),
+      defaultTax: num(state.settings.defaultTax) || 5
+    };
+    const changed = Object.keys(next).some((key) => key === 'defaultTax'
+      ? num(next[key]) !== num(previous[key])
+      : next[key] !== previous[key]);
+    if (!changed) return { changed:false, settings:{...previous}, defaultTaxChanged:false };
+    Object.assign(state.settings, next);
+    const defaultTaxChanged = num(next.defaultTax) !== num(previous.defaultTax);
+    persist('更新系統設定', { fields:Object.keys(next), defaultTaxChanged });
+    return { changed:true, settings:{...next}, defaultTaxChanged };
+  }
   const STORE_WRITER_NAMES=new Set([
-    'repairDailyBillingLinks',
+    'repairDailyBillingLinks','saveSystemSettings',
     'saveQuotationUnitPreset','saveQuotationPublicNotePreset','deleteQuotationPublicNotePreset',
     'saveCommission','deleteCommission','saveDailyBatch','deleteDailyBatch','saveInvoice','createBilling','updateBilling','deleteBilling',
     'addReceipt','updateReceipt','deleteReceipt','addRetentionReceipt','updateRetentionReceipt','deleteRetentionReceipt','deleteReceivableAccounting',
@@ -5162,7 +5192,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,

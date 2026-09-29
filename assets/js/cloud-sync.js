@@ -294,7 +294,7 @@
   let editorLease = false;
   let editorCommitFloor = '';
   const USER_COMMIT_OPERATIONS = new Set([
-    'saveQuotationUnitPreset','saveQuotationPublicNotePreset','deleteQuotationPublicNotePreset',
+    'saveSystemSettings','saveQuotationUnitPreset','saveQuotationPublicNotePreset','deleteQuotationPublicNotePreset',
     'saveCommission','deleteCommission','saveDailyBatch','deleteDailyBatch','saveInvoice','createBilling','updateBilling','deleteBilling',
     'addReceipt','updateReceipt','deleteReceipt','addRetentionReceipt','updateRetentionReceipt','deleteRetentionReceipt','deleteReceivableAccounting',
     'savePayable','deletePayable','addPayablePayment','updatePayablePayment','deletePayablePayment',
