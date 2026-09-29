@@ -116,7 +116,7 @@
           <article class="commission-panel settings-card">
             <header class="settings-card-head"><div><span class="settings-icon" aria-hidden="true"><i data-icon="file-text"></i></span><div><h2>報價預設值</h2><p>共用單位與常用對外備註由報價單模組維護。</p></div></div></header>
             <div class="settings-stats"><article><span>單位範本</span><strong>${units.length}</strong><small>筆</small></article><article><span>常用對外備註</span><strong>${notes.length}</strong><small>筆</small></article></div>
-            <div class="settings-tags">${units.slice(0,8).map((unit)=>`<span>${esc(unit)}</span>`).join('') || '<span>尚無單位範本</span>'}</div>
+            <div class="settings-tags">${units.map((unit)=>`<span>${esc(unit)}</span>`).join('') || '<span>尚無單位範本</span>'}</div>
             <footer class="settings-actions"><button class="commission-secondary" id="settingsQuotation" type="button">前往報價單管理</button></footer>
           </article>
         </div>
