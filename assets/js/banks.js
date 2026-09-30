@@ -29,7 +29,8 @@
     mismatch: { label: '金額不一致', group: 'abnormal' },
     duplicate: { label: '疑似重複入帳', group: 'abnormal' },
     'history-normal': { label: '歷史資料－金額正常', group: 'normal' },
-    'history-pending': { label: '歷史紀錄', group: 'attention' }
+    'history-pending': { label: '歷史紀錄', group: 'attention' },
+    'employee-cash-pending': { label: '員工保管中', group: 'attention' }
   };
 
   function calendarMonth(date) {
@@ -222,6 +223,10 @@
 
   function sourceReconciliationItem(state, row, kind) {
     const legacy = row?.legacy === true;
+    if(kind==='receipt'&&row?.collectionType==='employee_cash'&&row?.handoverStatus==='pending'){
+      const context=sourceContext(state,row,kind,null),employee=collection(state,'employees').find((item)=>cleanId(item.id)===cleanId(row.collectorEmployeeId)),collector=employee?.name||row.collectorEmployeeName||'未指定員工';
+      return finishReconciliationItem({id:`source:${kind}:${cleanId(row.id)}`,date:row.date||'',status:'employee-cash-pending',direction:'in',sourceKind:kind,sourceLabel:'員工現金代收',party:context.party,project:context.project,sourceNo:context.sourceNo,accountingAmount:store.receiptCashAmount?store.receiptCashAmount(row):store.num(row.cashAmount??row.amount),bankAmount:null,difference:null,description:`${collector} 代收現金，目前仍待繳回公司；這筆尚未產生銀行交易，屬正常待辦狀態。`,transactionIds:[],sourceId:cleanId(row.id),rawSourceType:'employee_cash_pending'});
+    }
     const matches = sourceTransactions(state, row, kind);
     const expected = sourceBankAmount(row, kind);
     const bankTotal = matches.reduce((sum, transaction) => sum + transactionAmount(transaction), 0);
