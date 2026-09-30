@@ -1232,3 +1232,39 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
   #receivablesApp .receivable-table>thead>tr>th:nth-child(2){width:17%}
   #receivablesApp .receivable-table>thead>tr>th:nth-child(4){width:14%}
 }
+
+/* P19-2A-6 align receivable action buttons into stable columns. */
+#receivablesApp .receivable-table>thead>tr>th:nth-child(7){width:22%}
+#receivablesApp .receivable-actions{
+  display:grid!important;
+  grid-template-columns:64px 84px 104px;
+  grid-auto-rows:36px;
+  align-items:center;
+  justify-content:end;
+  gap:7px;
+  width:273px;
+  max-width:100%;
+  margin-left:auto;
+  white-space:normal;
+}
+#receivablesApp .receivable-actions>button{
+  box-sizing:border-box!important;
+  width:100%!important;
+  min-width:0!important;
+  height:36px!important;
+  min-height:36px!important;
+  margin:0!important;
+  padding:0 7px!important;
+  border-radius:8px;
+  font-size:10px;
+  font-weight:850;
+  line-height:1.15;
+  white-space:nowrap;
+}
+#receivablesApp .receivable-action-collect{grid-column:1;min-width:0!important}
+#receivablesApp .receivable-action-retention{grid-column:2;min-width:0!important}
+#receivablesApp .receivable-action-delete{grid-column:3;min-width:0!important}
+@media(max-width:1180px){
+  #receivablesApp .receivable-table>thead>tr>th:nth-child(7){width:24%}
+  #receivablesApp .receivable-actions{grid-template-columns:60px 80px 100px;width:254px;gap:7px}
+}
