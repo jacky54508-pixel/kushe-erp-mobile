@@ -628,7 +628,7 @@
     return result;
   };
   // P19-2A-3: employee cash collection visibility and management view.
-  const employeeCashFilters={month:'',employee:'',project:'',status:'pending',query:''};
+  const employeeCashFilters={month:'',employee:'',project:'',status:'',query:''};
   const employeeCashStatus=(receipt)=>receipt?.handoverStatus==='completed'?'completed':'pending';
   const employeeCashStatusLabel=(receipt)=>employeeCashStatus(receipt)==='completed'?'已繳回':'待繳回';
   function employeeCashReceiptRows(state=store.getState()){
@@ -697,9 +697,9 @@
     $('#employeeCashProject',panel).onchange=(event)=>{employeeCashFilters.project=event.target.value;renderReceivables()};
     $('#employeeCashStatus',panel).onchange=(event)=>{employeeCashFilters.status=event.target.value;renderReceivables()};
     $('#employeeCashQuery',panel).oninput=(event)=>{employeeCashFilters.query=event.target.value;renderReceivables()};
-    $('#employeeCashClear',panel).onclick=()=>{Object.assign(employeeCashFilters,{month:'',employee:'',project:'',status:'pending',query:''});renderReceivables()};
-    $('[data-employee-cash-handover]',panel).forEach((button)=>button.onclick=()=>openEmployeeCashHandover(button.dataset.employeeCashHandover));
-    $('[data-employee-cash-cancel]',panel).forEach((button)=>button.onclick=()=>cancelEmployeeCashHandoverAction(button.dataset.employeeCashCancel));
+    $('#employeeCashClear',panel).onclick=()=>{Object.assign(employeeCashFilters,{month:'',employee:'',project:'',status:'',query:''});renderReceivables()};
+    $$('[data-employee-cash-handover]',panel).forEach((button)=>button.onclick=()=>openEmployeeCashHandover(button.dataset.employeeCashHandover));
+    $$('[data-employee-cash-cancel]',panel).forEach((button)=>button.onclick=()=>cancelEmployeeCashHandoverAction(button.dataset.employeeCashCancel));
   }
   const renderReceivablesBeforeEmployeeCashManagement=renderReceivables;
   renderReceivables=function(){
