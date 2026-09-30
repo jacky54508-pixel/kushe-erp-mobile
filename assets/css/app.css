@@ -1345,3 +1345,9 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
   #receivablesApp .receivable-action-primary-row{grid-template-columns:68px 86px}
   #receivablesApp .receivable-action-retention-empty{width:86px}
 }
+
+/* P19-2A-8 expand detail only from explicit button. */
+#receivablesApp .receivable-main-row{cursor:default}
+#receivablesApp .receivable-main-row:hover{background:#fff}
+#receivablesApp .receivable-main-row.is-expanded{background:#f4f8fd}
+#receivablesApp .receivable-detail-link{cursor:pointer}
