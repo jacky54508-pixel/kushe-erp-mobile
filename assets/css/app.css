@@ -1137,3 +1137,47 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 .search-result>span:first-child{min-width:0;overflow-wrap:anywhere}
 .search-result b,.search-result small{white-space:normal;overflow-wrap:anywhere}
 @media(max-width:820px){.global-search{min-width:0}.global-search kbd{flex:0 0 auto}.search-popover{max-height:min(55dvh,420px)}}
+
+/* P19-2A-3 employee cash collection management. */
+#receivablesApp .receivable-table>thead>tr>th:nth-child(2),
+#receivablesApp .receivable-table>tbody>.receivable-main-row>td:nth-child(2){position:static!important;left:auto!important;z-index:auto!important;box-shadow:none!important}
+#receivablesApp .employee-cash-inline-summary{display:block;max-width:100%;margin-top:2px;padding:4px 7px;border-radius:7px;background:#fff7e7;color:#8b5a09;font-size:9px;font-weight:850;line-height:1.35;white-space:normal;overflow-wrap:anywhere}
+#receivablesApp .employee-cash-mobile-summary{display:grid;gap:4px;padding:10px 11px;border:1px solid #f0d6a7;border-radius:9px;background:#fff9ee}
+#receivablesApp .employee-cash-mobile-summary span{color:#8a651f;font-size:10px;font-weight:800}
+#receivablesApp .employee-cash-mobile-summary strong{color:#704600;font-size:12px;overflow-wrap:anywhere}
+#receivablesApp .employee-cash-panel{padding:0;overflow:hidden}
+#receivablesApp .employee-cash-heading{padding:18px 20px;border-bottom:1px solid #e6edf4}
+#receivablesApp .employee-cash-heading h2{margin:0 0 4px;color:#173f6b;font-size:17px}
+#receivablesApp .employee-cash-heading p{margin:0;color:#708198;font-size:11px}
+#receivablesApp .employee-cash-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:16px 20px 0}
+#receivablesApp .employee-cash-kpis article{padding:14px 16px;border:1px solid #dfe7f0;border-radius:11px;background:#f8fbff}
+#receivablesApp .employee-cash-kpis span{display:block;color:#65768b;font-size:10px;font-weight:800}
+#receivablesApp .employee-cash-kpis strong{display:block;margin-top:6px;color:#0c477f;font-size:22px;font-weight:900}
+#receivablesApp .employee-cash-filters{display:grid;grid-template-columns:150px minmax(150px,1fr) minmax(180px,1.2fr) 140px minmax(220px,1.4fr) auto;gap:10px;align-items:end;padding:16px 20px}
+#receivablesApp .employee-cash-filters label{display:grid;gap:6px;min-width:0}
+#receivablesApp .employee-cash-filters label>span{color:#63758a;font-size:10px;font-weight:800}
+#receivablesApp .employee-cash-filters input,#receivablesApp .employee-cash-filters select{width:100%;min-width:0;height:38px;border:1px solid #d7e1ec;border-radius:8px;padding:0 9px;background:#fff}
+#receivablesApp .employee-cash-table-wrap{max-width:100%;overflow-x:auto}
+#receivablesApp .employee-cash-table{min-width:960px}
+#receivablesApp .employee-cash-table td small{display:block;margin-top:3px;color:#75869b}
+#receivablesApp .employee-cash-status{display:inline-flex;align-items:center;justify-content:center;min-height:26px;padding:4px 9px;border-radius:99px;font-size:10px;font-weight:850}
+#receivablesApp .employee-cash-status.is-pending{background:#fff0d8;color:#a75c04}
+#receivablesApp .employee-cash-status.is-completed{background:#e6f7ee;color:#08784e}
+#receivablesApp .employee-cash-mobile-list{display:none}
+@media(max-width:1100px){#receivablesApp .employee-cash-filters{grid-template-columns:repeat(3,minmax(0,1fr))}#receivablesApp .employee-cash-search{grid-column:span 2}}
+@media(max-width:620px){
+  #receivablesApp .employee-cash-kpis{grid-template-columns:1fr;padding:12px}
+  #receivablesApp .employee-cash-filters{grid-template-columns:1fr;padding:12px}
+  #receivablesApp .employee-cash-search{grid-column:auto}
+  #receivablesApp .employee-cash-table-wrap{display:none}
+  #receivablesApp .employee-cash-mobile-list{display:grid;gap:10px;padding:12px}
+  #receivablesApp .employee-cash-mobile-card{display:grid;gap:10px;padding:13px;border:1px solid #dce6ef;border-radius:11px;background:#fff}
+  #receivablesApp .employee-cash-mobile-card>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+  #receivablesApp .employee-cash-mobile-card header span{color:#76879a;font-size:10px}
+  #receivablesApp .employee-cash-mobile-card h3{margin:3px 0 0;color:#173f6a;font-size:14px}
+  #receivablesApp .employee-cash-mobile-card header>strong{color:#0a4c87;font-size:16px}
+  #receivablesApp .employee-cash-mobile-card dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0}
+  #receivablesApp .employee-cash-mobile-card dl>div{padding:8px;border-radius:8px;background:#f5f8fb}
+  #receivablesApp .employee-cash-mobile-card dt{color:#718297;font-size:9px}
+  #receivablesApp .employee-cash-mobile-card dd{margin:3px 0 0;color:#274b6d;font-size:11px;font-weight:750;overflow-wrap:anywhere}
+}
