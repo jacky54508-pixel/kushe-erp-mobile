@@ -70,6 +70,7 @@
     if (!host) return;
     const data = state(), s = data.settings || {}, user = window.KusheAuthGate?.user?.() || {};
     const auto = window.KusheCloudSync?.autoStatus?.() || {};
+    const device = window.KusheCloudSync?.deviceSecurityStatus?.() || {mode:'temporary',trusted:false,explicit:false};
     const units = Array.isArray(s.quotationUnitPresets) ? s.quotationUnitPresets.filter(Boolean) : [];
     const notes = Array.isArray(s.quotationPublicNotePresets) ? s.quotationPublicNotePresets : [];
     const defaultTax = store.num(s.defaultTax) || 5;
@@ -103,6 +104,16 @@
             <footer class="settings-actions"><button class="commission-secondary" id="settingsPassword" type="button">變更密碼</button></footer>
           </article>
 
+          <article class="commission-panel settings-card settings-device-security">
+            <header class="settings-card-head"><div><span class="settings-icon" aria-hidden="true"><i data-icon="shield-check"></i></span><div><h2>此裝置資料模式</h2><p>新裝置預設不信任；只有公司信任裝置才允許自動雲端同步與後續自動載入。</p></div></div><span class="settings-device-pill ${device.trusted?'is-trusted':'is-temporary'}">${device.trusted?'公司信任裝置':'臨時／未信任裝置'}</span></header>
+            <dl class="settings-kv">
+              <div><dt>自動 Cloud → Local</dt><dd>${device.trusted?'允許（仍受版本與衝突保護）':'禁止'}</dd></div>
+              <div><dt>裝置信任</dt><dd>${device.explicit?'已明確設定':'尚未設定，安全預設為臨時裝置'}</dd></div>
+            </dl>
+            <p class="settings-device-warning">${device.trusted?'此裝置可保留 ERP 本機快取。若是公司手機／辦公室電腦可維持此模式。':'目前已阻止自動把雲端 ERP 資料下載到此裝置。完整「臨時裝置不落地」模式會在下一階段啟用。'}</p>
+            <footer class="settings-actions"><button class="${device.trusted?'commission-secondary':'commission-primary'}" id="settingsDeviceTrust" type="button">${device.trusted?'取消公司信任':'設為公司信任裝置'}</button></footer>
+          </article>
+
           <article class="commission-panel settings-card">
             <header class="settings-card-head"><div><span class="settings-icon" aria-hidden="true"><i data-icon="arrow-down-to-line"></i></span><div><h2>同步與備份</h2><p>沿用目前安全 Cloud Sync；偵測衝突時不會強制覆蓋。</p></div></div></header>
             <dl class="settings-kv"><div><dt>自動同步</dt><dd>${esc(auto.message || '正在確認…')}</dd></div><div><dt>ERP 資料更新</dt><dd>${esc(businessStamp(data.meta?.updatedAt))}</dd></div></dl>
@@ -124,11 +135,27 @@
 
     $('#settingsSave',host)?.addEventListener('click', save);
     $('#settingsPassword',host)?.addEventListener('click', () => document.getElementById('changePasswordButton')?.click());
+    $('#settingsDeviceTrust',host)?.addEventListener('click', () => changeDeviceTrust(device.trusted?'temporary':'trusted'));
     $('#settingsCloud',host)?.addEventListener('click', () => window.KusheCloudSync?.open?.());
     $('#settingsBackup',host)?.addEventListener('click', downloadBackup);
     $('#settingsQuotation',host)?.addEventListener('click', () => window.KushePhase1?.navigate?.('quotations'));
     window.KusheIcons?.render(host);
     setBusy(false);
+  }
+
+  function changeDeviceTrust(mode) {
+    const trusted=mode==='trusted';
+    const message=trusted
+      ? '確定將這台裝置設為「公司信任裝置」嗎？\n\n只有公司持有、受你控制的手機或電腦才應啟用。啟用後允許安全自動同步與後續自動載入雲端資料。'
+      : '確定取消這台裝置的公司信任嗎？\n\n取消後會立即停止自動同步與自動雲端下載，但不會刪除這台裝置已經存在的 ERP 本機資料。';
+    if(!window.confirm(message))return;
+    try {
+      window.KusheCloudSync?.setDeviceMode?.(trusted?'trusted':'temporary');
+      window.KushePhase1?.toast?.(trusted?'已設為公司信任裝置':'已取消公司信任，自動同步已停止');
+      render();
+    } catch (error) {
+      window.KushePhase1?.toast?.(error?.message||'裝置信任設定失敗');
+    }
   }
 
   async function save() {
@@ -190,6 +217,7 @@
   function deactivate() { active = false; }
 
   window.addEventListener('kushe:data-updated', () => { if (active) render(); });
+  window.addEventListener('kushe:device-trust-changed', () => { if (active) render(); });
   window.addEventListener('storage', () => { if (active) render(); });
   window.KusheSettings = Object.freeze({ activate, deactivate, render });
 }());

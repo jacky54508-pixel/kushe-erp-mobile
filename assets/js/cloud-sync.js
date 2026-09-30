@@ -18,6 +18,8 @@
   const AUTO_APPLY_FENCE_VERSION = 2;
   const RESTORE_BACKUP_MARKER_KEY = 'kushe_erp_restore_backup_handoff_v1';
   const RESTORE_BACKUP_MARKER_TTL_MS = 30 * 60 * 1000;
+  const DEVICE_TRUST_KEY = 'kushe_erp_device_trust_v1';
+  const DEVICE_TRUST_SCHEMA = 'kushe-device-trust-v1';
   const AUTO_DEBOUNCE_MS = 8000;
   const AUTO_ONLINE_RETRY_MS = 3000;
   const SETTINGS_CREDENTIAL_KEYS = new Set([
@@ -31,6 +33,7 @@
     AUTH_REQUIRED: '登入狀態已失效，請重新登入。',
     AUTH_CHANGED: '登入帳號已變更，請重新檢查並確認雲端操作。',
     PRINCIPAL_UNBOUND: '本機資料尚未確認屬於目前帳號，請手動核對雲端同步。',
+    DEVICE_TRUST_REQUIRED: '此裝置尚未設為公司信任裝置，已停止自動雲端下載與自動同步。',
     REMOTE_EMPTY: '雲端尚無資料，可手動上傳本機備份。',
     SYNCED: '本機與雲端一致。',
     LOCAL_NEWER: '本機資料時間較新。系統不會自動覆蓋；若確認雲端才是正確版本，可手動以雲端覆蓋本機。',
@@ -56,6 +59,7 @@
   };
   const AUTO_STATUS_TEXT = {
     PRINCIPAL_UNBOUND: '帳號同步基準未綁定，需要手動核對',
+    DEVICE_TRUST_REQUIRED: '臨時／未信任裝置：自動同步已停止',
     STOPPED: '未啟用',
     CHECKING: '正在確認安全同步基準',
     ARMED: '已啟用',
@@ -96,6 +100,49 @@
   function observedPrincipal() {
     const gate = window.KusheAuthGate;
     return gate?.session()?.access_token ? String(gate.user()?.id || '') : '';
+  }
+
+  function readDeviceTrustRecord(userId = observedPrincipal()) {
+    try {
+      const raw=window.localStorage.getItem(DEVICE_TRUST_KEY);
+      if(!raw)return null;
+      const value=JSON.parse(raw);
+      if(!value||typeof value!=='object'||Array.isArray(value)
+        ||value.schema!==DEVICE_TRUST_SCHEMA||value.version!==1
+        ||!['trusted','temporary'].includes(value.mode)
+        ||typeof value.userId!=='string'||!value.userId
+        ||typeof value.updatedAt!=='string'||!Number.isFinite(Date.parse(value.updatedAt)))return null;
+      if(userId&&value.userId!==userId)return null;
+      return {schema:value.schema,version:1,mode:value.mode,userId:value.userId,updatedAt:value.updatedAt};
+    } catch (_) { return null; }
+  }
+
+  function deviceSecurityStatus() {
+    const record=readDeviceTrustRecord(observedPrincipal());
+    return {
+      mode:record?.mode==='trusted'?'trusted':'temporary',
+      trusted:record?.mode==='trusted',
+      explicit:Boolean(record),
+      updatedAt:record?.updatedAt||''
+    };
+  }
+
+  function deviceAllowsAutomaticSync() {
+    return deviceSecurityStatus().trusted;
+  }
+
+  function setDeviceMode(mode) {
+    const next=mode==='trusted'?'trusted':'temporary',userId=observedPrincipal();
+    if(!userId)throw new CloudSyncError('AUTH_REQUIRED');
+    const record={schema:DEVICE_TRUST_SCHEMA,version:1,mode:next,userId,updatedAt:new Date().toISOString()};
+    const encoded=JSON.stringify(record);
+    window.localStorage.setItem(DEVICE_TRUST_KEY,encoded);
+    if(window.localStorage.getItem(DEVICE_TRUST_KEY)!==encoded)throw new CloudSyncError('VERIFY_FAILED');
+    stopAutoBackup();
+    window.dispatchEvent(new CustomEvent('kushe:device-trust-changed',{detail:{mode:next,trusted:next==='trusted'}}));
+    if(next==='trusted')void startAutoBackup().catch(()=>{});
+    else setAutoState('DEVICE_TRUST_REQUIRED',{pending:false,armed:false});
+    return deviceSecurityStatus();
   }
 
   function observePrincipal() {
@@ -164,6 +211,7 @@
   function cloudVisible() { return document.visibilityState === 'visible'; }
   function reconcileFromCloud(reason) {
     if (!['STARTUP','AUTH_READY','VISIBILITY','FOCUS','ONLINE','POLL'].includes(reason)) return Promise.resolve({code:'CANCELLED'});
+    if (!deviceAllowsAutomaticSync()) return Promise.resolve({code:'DEVICE_TRUST_REQUIRED',eligibleApply:false});
     if (!cloudEventsEnabled || !cloudVisible() || !observedPrincipal()) return Promise.resolve({code:'AUTH_REQUIRED',eligibleApply:false});
     if (reason === 'POLL' && navigator.onLine === false) return Promise.resolve({code:'NETWORK_ERROR',eligibleApply:false});
     if (cloudRequest) return cloudRequest.promise;
@@ -466,6 +514,7 @@
   async function safeApplyOperation(lifecycleGuard = () => true) {
     let invalidated=false,shell=null,priorInert=false,applyStage='PREPARE';
     try {
+      if(!deviceAllowsAutomaticSync())return {code:'DEVICE_TRUST_REQUIRED',eligibleApply:false};
       const auth=await authContext(),store=window.KuSheERPStore;
       if (!store?.remoteApplyReadiness || !store?.applyRemoteSnapshot) throw new CloudSyncError('STORE_BUSY');
       const baseline=readBaseline(auth.user.id),row=await readRemote(auth);
@@ -1699,6 +1748,10 @@
       }
       const checked = await inspectCore();
       if (!activeAutoRun(generation)) return autoStatus();
+      if (!deviceAllowsAutomaticSync()) {
+        autoArmed=false;
+        return setAutoState('DEVICE_TRUST_REQUIRED',{pending:false,armed:false});
+      }
       if (!readBaseline(checked.auth.user.id)) {
         if (await recoverSameStateBaseline(checked, generation)) return autoStatus();
         if (await recoverLegacyRestoreBaseline(checked, generation)) return autoStatus();
@@ -1938,6 +1991,7 @@
 
   window.KusheCloudSync = Object.freeze({
     inspect, uploadLocal, restoreRemote, status: publicStatus, open, close,
-    startAutoBackup, stopAutoBackup, autoStatus, setSyncOrigin, editorReadiness, decideRemote, safeApplyRemote, reconcileFromCloud
+    startAutoBackup, stopAutoBackup, autoStatus, setSyncOrigin, editorReadiness, decideRemote, safeApplyRemote, reconcileFromCloud,
+    deviceSecurityStatus, setDeviceMode
   });
 }());
