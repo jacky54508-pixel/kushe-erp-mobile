@@ -48,18 +48,30 @@
   async function startAuthenticatedApp() {
     setAuthView(true);
     setLoginMessage();
-    try{await window.KuSheERPStore.load();await window.KuSheERPStore.readCommittedSnapshot()}
+    const device=window.KusheCloudSync?.deviceSecurityStatus?.()||{trusted:false};
+    try{
+      if(device.trusted){
+        window.KuSheERPStore?.clearEphemeralSession?.();
+        await window.KuSheERPStore.load();await window.KuSheERPStore.readCommittedSnapshot();
+      }else{
+        await window.KusheCloudSync?.bootstrapTemporarySession?.();
+      }
+    }
     catch(error){
       window.KusheCloudSync?.stopAutoBackup?.();
-      window.KusheRecovery?.showResult({status:'RECOVERY_REQUIRED',operationId:error.operationId||'',message:error.message});
-      await window.KusheRecovery?.open();
+      setAuthView(false);
+      setLoginMessage(device.trusted?'ERP 本機資料安全檢查未通過，請使用恢復工具核對。':'無法安全載入公司雲端資料，未在此裝置保存 ERP 業務資料。',true);
+      if(device.trusted){
+        window.KusheRecovery?.showResult({status:'RECOVERY_REQUIRED',operationId:error.operationId||'',message:error.message});
+        await window.KusheRecovery?.open();
+      }
       return;
     }
     if (!initialized) {
       init();
       initialized = true;
     }
-    try { void Promise.resolve(window.KusheCloudSync?.startAutoBackup?.()).catch(() => {}); } catch (_) {}
+    if(device.trusted)try { void Promise.resolve(window.KusheCloudSync?.startAutoBackup?.()).catch(() => {}); } catch (_) {}
   }
   async function handleLogout() {
     if($('#recoveryModal'))$('#recoveryModal').hidden=true;
@@ -67,6 +79,7 @@
     closePopovers();
     window.KusheCloudSync?.stopAutoBackup?.();
     window.KusheCloudSync?.close();
+    window.KuSheERPStore?.clearEphemeralSession?.();
     closeChangePasswordModal(true);
     try { await window.KusheAuthGate?.logout(); } catch (_) {}
     setAuthView(false);

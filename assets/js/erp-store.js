@@ -13,6 +13,9 @@
   const STORE_JOURNAL_SCHEMA = 'kushe-store-transaction-v1';
   const STORE_JOURNAL_MAX_BYTES = 32 * 1024 * 1024;
   const STORE_LOCK_NAME = `${DB_NAME}:business-persist`;
+  const DEVICE_TRUST_KEY = 'kushe_erp_device_trust_v1';
+  const DEVICE_TRUST_SCHEMA = 'kushe-device-trust-v1';
+  let ephemeralSession = null;
   let state = null;
   let publishedState = null;
   let db = null;
@@ -40,6 +43,26 @@
   }
   let storeLoadPromise = null;
   let lastStoreTransactionResult = null;
+
+  function storeCurrentUserId() {
+    const gate=window.KusheAuthGate;
+    return gate?.session?.()?.access_token ? String(gate.user?.()?.id||'') : '';
+  }
+  function storeTrustedForCurrentUser() {
+    const userId=storeCurrentUserId();
+    if(!userId)return false;
+    try{
+      const value=JSON.parse(localStorage.getItem(DEVICE_TRUST_KEY)||'null');
+      return Boolean(value&&value.schema===DEVICE_TRUST_SCHEMA&&value.version===1&&value.mode==='trusted'&&value.userId===userId);
+    }catch(_){return false}
+  }
+  function isEphemeralMode() {
+    return Boolean(ephemeralSession?.active&&ephemeralSession.userId&&ephemeralSession.userId===storeCurrentUserId()&&!storeTrustedForCurrentUser());
+  }
+  function ephemeralBaseline() {
+    if(!isEphemeralMode()||!publishedState)return '';
+    return 'memory:'+storeFingerprintDigest(storeStateFingerprint(publishedState));
+  }
 
   const num = (value) => Number(value) || 0;
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -2355,6 +2378,52 @@
       throw primaryError;
     }
   }
+  async function executeEphemeralStoreTransaction(operationType,writer,args,operationId=`store-${uid()}`) {
+    if(!isEphemeralMode()||!publishedState)throw storeError('臨時裝置記憶體工作階段尚未就緒','EPHEMERAL_SESSION_NOT_READY');
+    const cloud=window.KusheCloudSync;
+    if(typeof cloud?.commitTemporarySnapshot!=='function')throw storeError('臨時裝置雲端提交服務尚未就緒','EPHEMERAL_CLOUD_UNAVAILABLE');
+    const startedAt=new Date().toISOString(),before=publishedState,beforeFingerprint=storeStateFingerprint(before),beforeRevision=storeRevisionOf(before);
+    let draft=storeStateClone(before),writerResult,writerPending;
+    const transaction={operationId,operationType,startedAt,action:'',auditDetails:null,persistenceRequested:false};
+    try{
+      activeStoreTransaction=transaction;state=draft;
+      try{writerPending=writer(...args)}finally{state=publishedState;activeStoreTransaction=null}
+      writerResult=await writerPending;
+      const changed=storeStateFingerprint(draft)!==beforeFingerprint;
+      if(changed&&!transaction.persistenceRequested)throw storeError(`${operationType} 修改資料但未宣告提交，已停止操作`,'STORE_UNDECLARED_MUTATION');
+      if(!changed){recordStoreTransaction('COMMITTED',{operationId,operationType,code:'STORE_NO_CHANGE',message:'資料未變更，無需寫入',noChange:true,revisionId:beforeRevision.id});return writerResult}
+      if(!transaction.action)throw storeError('臨時裝置修改缺少正式提交動作','STORE_UNDECLARED_MUTATION');
+      const now=new Date().toISOString(),revision={sequence:beforeRevision.sequence+1,id:`store-${uid()}`,parentId:beforeRevision.id,operationId,committedAt:now};
+      if(!draft.meta||typeof draft.meta!=='object'||Array.isArray(draft.meta))draft.meta={};
+      if(!Array.isArray(draft.audit))draft.audit=[];
+      draft.meta.updatedAt=now;draft.meta.businessSnapshotRevision=revision;
+      if(transaction.action){
+        const entry={id:uid(),time:now,action:transaction.action};
+        if(transaction.auditDetails&&typeof transaction.auditDetails==='object'&&!Array.isArray(transaction.auditDetails))Object.assign(entry,transaction.auditDetails);
+        draft.audit.unshift(entry);draft.audit=draft.audit.slice(0,300);
+      }
+      let serial;
+      try{serial=JSON.parse(JSON.stringify(draft))}catch(cause){throw storeError('臨時裝置業務快照無法安全序列化','STORE_SNAPSHOT_NOT_JSON_SAFE',{cause})}
+      if(storeStateFingerprint(serial)!==storeStateFingerprint(draft))throw storeError('臨時裝置快照不是可完整驗證的 JSON','STORE_SNAPSHOT_NOT_JSON_SAFE');
+      const portable=portableStoreSnapshot(serial);
+      const committed=await cloud.commitTemporarySnapshot(portable,{userId:ephemeralSession.userId,operationId,operationType,expectedMemoryBaseline:ephemeralBaseline()});
+      if(!committed?.data)throw storeError('雲端未回傳可驗證提交結果','EPHEMERAL_CLOUD_VERIFY_FAILED');
+      const verified=validateReplacementSnapshot(committed.data);
+      if(storeStateFingerprint(verified)!==storeStateFingerprint(portable))throw storeError('雲端驗證內容與本次修改不同','EPHEMERAL_CLOUD_VERIFY_FAILED');
+      publishedState=freezeStoreState(verified);state=publishedState;
+      settledStateFingerprint=storeStateFingerprint(publishedState);lastSettledMemoryFingerprint=receiptStateFingerprint(publishedState);
+      ephemeralSession={...ephemeralSession,remoteSyncVersion:committed.syncVersion,remoteUpdatedAt:committed.updatedAt,remoteFingerprint:committed.fingerprint,memoryBaseline:ephemeralBaseline()};
+      const warnings=[];
+      try{dispatchStoreUpdated({action:transaction.action,operationId,revisionId:revision.id,syncOrigin:'TEMPORARY_CLOUD_COMMIT'})}catch(error){warnings.push(error)}
+      recordStoreTransaction(warnings.length?'COMMITTED_WITH_NOTIFICATION_WARNING':'COMMITTED',{operationId,operationType,revisionId:revision.id,notificationWarnings:warnings.map((error)=>String(error?.message||error)),ephemeral:true});
+      return writerResult;
+    }catch(error){
+      state=publishedState;activeStoreTransaction=null;
+      if(error?.transactionStatus)throw error;
+      throwStoreTransaction(error,storeTransactionStatusForError(error),operationId);
+    }
+  }
+
   async function executeStoreTransaction(operationType,writer,args,operationId=`store-${uid()}`) {
     const startedAt=new Date().toISOString();let checkpoint=null,draft=null,writerResult,writerPending,transaction={operationId,operationType,startedAt,action:'',auditDetails:null,persistenceRequested:false};
     try{
@@ -2374,6 +2443,7 @@
     }
   }
   function runStoreWriter(operationType,writer,args) {
+    if(isEphemeralMode())return enqueueStoreWriter(()=>executeEphemeralStoreTransaction(operationType,writer,args));
     const execute=async()=>{
       const operationId=`store-${uid()}`;
       try{await load()}catch(error){
@@ -4848,7 +4918,28 @@
     delete result.localCommitToken;delete result.recoveryMarker;delete result.transactionJournal;
     return result;
   }
+  async function loadEphemeralSnapshot(value,options={}) {
+    const userId=storeCurrentUserId();
+    if(!userId||!options.userId||String(options.userId)!==userId)throw storeError('臨時裝置登入帳號驗證失敗','EPHEMERAL_PRINCIPAL_MISMATCH');
+    if(storeTrustedForCurrentUser())throw storeError('公司信任裝置不可進入臨時記憶體模式','EPHEMERAL_MODE_REJECTED');
+    const candidate=validateReplacementSnapshot(value);
+    publishedState=freezeStoreState(candidate);state=publishedState;storeLoadPromise=null;storeRecoveryBlocked=null;receiptWritesBlocked=null;
+    settledStateFingerprint=storeStateFingerprint(candidate);lastSettledMemoryFingerprint=receiptStateFingerprint(candidate);
+    ephemeralSession={active:true,userId,remoteSyncVersion:options.syncVersion??null,remoteUpdatedAt:String(options.updatedAt||''),remoteFingerprint:String(options.fingerprint||''),memoryBaseline:''};
+    ephemeralSession.memoryBaseline=ephemeralBaseline();
+    return publishedState;
+  }
+  function clearEphemeralSession() {
+    if(!ephemeralSession)return false;
+    ephemeralSession=null;publishedState=null;state=null;storeLoadPromise=null;settledStateFingerprint='';lastSettledMemoryFingerprint='';
+    return true;
+  }
+
   async function readCommittedSnapshot() {
+    if(isEphemeralMode()){
+      if(!publishedState)throw storeError('臨時裝置記憶體工作階段尚未載入','EPHEMERAL_SESSION_NOT_READY');
+      return freezeStoreState({data:portableStoreSnapshot(publishedState),baseline:ephemeralBaseline(),revision:storeRevisionOf(publishedState),ephemeral:true});
+    }
     if(!db)db=await openDB();
     return coordinatedStorage('readCommittedSnapshot',async()=>{
       const observation=await readStorageObservation();assertObservationCommitted(observation);
@@ -4873,6 +4964,12 @@
     const epoch = storeWriterEpoch;
     const busy = () => activeStoreWriters || queuedStoreWriters || activeStoreTransaction || persistenceInFlight || storeLoadPromise;
     if (busy()) return freezeStoreState({safe:false,code:'STORE_BUSY'});
+    if(isEphemeralMode()){
+      const baseline=ephemeralBaseline();
+      if(!publishedState)return freezeStoreState({safe:false,code:'STORE_NOT_READY'});
+      if(expectedBaseline&&expectedBaseline!==baseline)return freezeStoreState({safe:false,code:'STALE_STORE_STATE'});
+      return freezeStoreState({safe:true,code:'EPHEMERAL_MEMORY_READY',data:portableStoreSnapshot(publishedState),baseline,revision:storeRevisionOf(publishedState),ephemeral:true});
+    }
     // Never initialize storage or run load/recovery from this read-only gate.
     if (!db || !publishedState || storeRecoveryBlocked || receiptWritesBlocked) return freezeStoreState({safe:false,code:'STORE_NOT_READY'});
     try {
@@ -5316,6 +5413,7 @@
     getState:()=>publishedState,
     storeTransactionDiagnostic,
     readCommittedSnapshot,remoteApplyReadiness,legacyBootstrapEvidence,applyRemoteSnapshot,replaceSnapshot,recoveryPreview,recoverStore,
+    loadEphemeralSnapshot,clearEphemeralSession,isEphemeralMode,
     getLastStoreTransactionResult:()=>lastStoreTransactionResult,
     persist:()=>Promise.reject(storeError('直接 persist 已停用；請使用正式 Store 寫入 API','DIRECT_PERSIST_FORBIDDEN'))
   };

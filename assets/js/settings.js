@@ -62,6 +62,8 @@
     host.querySelectorAll('button,input').forEach((node) => { node.disabled = busy; });
     const save = $('#settingsSave',host);
     if (save) save.textContent = busy ? '儲存中…' : '儲存公司設定';
+    const backup=$('#settingsBackup',host),device=window.KusheCloudSync?.deviceSecurityStatus?.();
+    if(backup&&!device?.trusted)backup.disabled=true;
   }
 
   function render() {
@@ -119,9 +121,9 @@
             <dl class="settings-kv"><div><dt>自動同步</dt><dd>${esc(auto.message || '正在確認…')}</dd></div><div><dt>ERP 資料更新</dt><dd>${esc(businessStamp(data.meta?.updatedAt))}</dd></div></dl>
             <div class="settings-button-grid">
               <button class="commission-primary" id="settingsCloud" type="button">開啟雲端同步</button>
-              <button class="commission-secondary" id="settingsBackup" type="button">下載安全 JSON 備份</button>
+              <button class="commission-secondary" id="settingsBackup" type="button" ${device.trusted?'':'disabled title="臨時裝置禁止下載完整 ERP 業務快照"'}>下載安全 JSON 備份</button>
             </div>
-            <p class="settings-caption">JSON 備份包含已提交的 ERP 業務資料與非敏感設定，不包含登入／雲端憑證。</p>
+            <p class="settings-caption">${device.trusted?'JSON 備份包含已提交的 ERP 業務資料與非敏感設定，不包含登入／雲端憑證。':'臨時裝置使用 Cloud-only 模式：查詢與修改資料不寫入此裝置的 ERP 本機快取，且禁止下載完整 JSON 業務快照。'}</p>
           </article>
 
           <article class="commission-panel settings-card">
