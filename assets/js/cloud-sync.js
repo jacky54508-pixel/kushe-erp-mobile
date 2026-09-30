@@ -43,6 +43,7 @@
     UNKNOWN_CONFLICT: '資料版本無法安全判定，已停止同步。',
     SECRET_BLOCKED: '偵測到未清除的憑證欄位，已停止同步。',
     RACE_BLOCKED: '雲端資料剛剛已更新，為避免覆蓋已停止同步。',
+    TRUSTED_PRIORITY_AVAILABLE: '雲端最後更新來自臨時裝置，且與此公司信任裝置從同一版本分叉。已停止自動同步，等待公司信任裝置確認處置。',
     VERIFY_FAILED: '雲端驗證失敗，請停止操作。',
     CAS_RESPONSE_INVALID: '雲端版本回應無法驗證，已停止同步。',
     SERVER_ERROR: '雲端服務回應錯誤，已停止同步。',
@@ -71,6 +72,7 @@
     MANUAL_REQUIRED: '需要手動同步',
     CONFLICT: '偵測到衝突，已停止',
     RACE_BLOCKED: '雲端版本已變更，已停止',
+    TRUSTED_PRIORITY_AVAILABLE: '臨時裝置與公司資料衝突，等待信任裝置確認',
     SECRET_BLOCKED: '安全檢查未通過，已停止',
     SERVER_ERROR: '雲端回應無法驗證，已停止',
     AUTH_REQUIRED: '未登入'
@@ -862,7 +864,7 @@
   }
 
   function remotePath(userId) {
-    return `/rest/v1/erp_states?select=data%2Cupdated_at%2Csync_version&user_id=eq.${encodeURIComponent(userId)}&limit=1`;
+    return `/rest/v1/erp_states?select=data%2Cupdated_at%2Csync_version%2Clast_writer_mode%2Clast_base_sync_version&user_id=eq.${encodeURIComponent(userId)}&limit=1`;
   }
 
   async function readRemote(auth, options = {}) {
@@ -889,24 +891,42 @@
     return left === null || right === null ? left === right : String(serverSyncVersion(left)) === String(serverSyncVersion(right));
   }
 
+  function optionalSyncVersion(value) {
+    return value === null || value === undefined ? null : serverSyncVersion(value);
+  }
+
+  function writerModeForCurrentDevice() {
+    return deviceAllowsAutomaticSync() ? 'trusted' : 'temporary';
+  }
+
   async function casWrite(auth, expectedSyncVersion, data, options = {}) {
     const expected = expectedSyncVersion === null ? null : serverSyncVersion(expectedSyncVersion);
-    const rows = await request('/rest/v1/rpc/erp_state_cas_write', auth, {
+    const writerMode = writerModeForCurrentDevice();
+    const rows = await request('/rest/v1/rpc/erp_state_cas_write_v2', auth, {
       method: 'POST', cas: true, signal: options.signal,
-      body: { expected_sync_version: expected, new_data: data }
+      body: { expected_sync_version: expected, new_data: data, writer_mode: writerMode }
     });
     if (!Array.isArray(rows) || rows.length !== 1) throw new CloudSyncError('CAS_RESPONSE_INVALID');
     const result = rows[0];
-    if (result?.status === 'CONFLICT' && result.sync_version === null && result.updated_at === null) {
-      return { status: 'CONFLICT', syncVersion: null, updatedAt: null };
+    if (result?.status === 'CONFLICT') {
+      const currentVersion=optionalSyncVersion(result.sync_version);
+      const currentBase=optionalSyncVersion(result.last_base_sync_version);
+      const currentMode=['trusted','temporary','legacy'].includes(result.last_writer_mode)?result.last_writer_mode:null;
+      const currentUpdatedAt=typeof result.updated_at==='string'&&Number.isFinite(Date.parse(result.updated_at))?result.updated_at:null;
+      if(currentVersion!==null&&!currentUpdatedAt)throw new CloudSyncError('CAS_RESPONSE_INVALID');
+      return {status:'CONFLICT',syncVersion:currentVersion,updatedAt:currentUpdatedAt,lastWriterMode:currentMode,lastBaseSyncVersion:currentBase};
     }
     if (result?.status !== 'APPLIED') throw new CloudSyncError('CAS_RESPONSE_INVALID');
     const syncVersion = serverSyncVersion(result.sync_version);
+    const returnedMode=result.last_writer_mode;
+    const returnedBase=optionalSyncVersion(result.last_base_sync_version);
     if (BigInt(syncVersion) !== (expected === null ? 1n : BigInt(expected) + 1n)
-      || typeof result.updated_at !== 'string' || !Number.isFinite(Date.parse(result.updated_at))) {
+      || typeof result.updated_at !== 'string' || !Number.isFinite(Date.parse(result.updated_at))
+      || returnedMode!==writerMode
+      || (expected===null ? returnedBase!==null : !sameSyncVersion(returnedBase,expected))) {
       throw new CloudSyncError('CAS_RESPONSE_INVALID');
     }
-    return { status: 'APPLIED', syncVersion, updatedAt: result.updated_at };
+    return { status: 'APPLIED', syncVersion, updatedAt: result.updated_at, lastWriterMode:returnedMode, lastBaseSyncVersion:returnedBase };
   }
 
   function matchesAppliedVersion(row, applied) {
@@ -920,13 +940,32 @@
     return error?.code || 'ERROR';
   }
 
-  function pauseAutoForConflict() {
+  function trustedPriorityEligible(remoteVersion,lastWriterMode,lastBaseSyncVersion,expectedBase) {
+    if(!deviceAllowsAutomaticSync()||expectedBase===null||expectedBase===undefined
+      ||lastWriterMode!=='temporary'||lastBaseSyncVersion===null||remoteVersion===null)return false;
+    try {
+      const base=serverSyncVersion(expectedBase),remote=serverSyncVersion(remoteVersion),writerBase=serverSyncVersion(lastBaseSyncVersion);
+      return sameSyncVersion(base,writerBase)&&BigInt(remote)===BigInt(base)+1n;
+    } catch (_) { return false; }
+  }
+
+  function trustedPriorityFromRow(row,expectedBase) {
+    return Boolean(row)&&trustedPriorityEligible(row.sync_version,row.last_writer_mode,row.last_base_sync_version,expectedBase);
+  }
+
+  function trustedPriorityFromCas(result,expectedBase) {
+    return Boolean(result)&&result.status==='CONFLICT'
+      &&trustedPriorityEligible(result.syncVersion,result.lastWriterMode,result.lastBaseSyncVersion,expectedBase);
+  }
+
+  function pauseAutoForConflict(options={}) {
     clearAutoTimer();
     clearOnlineTimer();
     autoArmed = false;
     autoRetryMode = '';
     autoPendingVerification = null;
-    return setAutoState('CONFLICT', { pending: false, armed: false });
+    const code=options.trustedPriority?'TRUSTED_PRIORITY_AVAILABLE':'CONFLICT';
+    return setAutoState(code, { pending: false, armed: false });
   }
 
   // Ordinary reads never delete persisted bookkeeping, including during auth transitions.
@@ -1018,7 +1057,7 @@
   }
 
   function classified(code, auth, local, remote, row, canUpload = false, canRestore = false) {
-    return { code, message: STATUS_TEXT[code], canUpload, canRestore, auth, local, remote, remoteExists: Boolean(row), syncVersion: row ? row.sync_version : null, remoteUpdatedAt: String(row?.updated_at || '') };
+    return { code, message: STATUS_TEXT[code], canUpload, canRestore, auth, local, remote, remoteExists: Boolean(row), syncVersion: row ? row.sync_version : null, remoteUpdatedAt: String(row?.updated_at || ''), remoteWriterMode:row?.last_writer_mode||null, remoteBaseSyncVersion:row?.last_base_sync_version??null };
   }
 
   function classify(auth, local, remote, row) {
@@ -1061,7 +1100,9 @@
       localScore: Number(value.local?.score) || 0,
       remoteScore: Number(value.remote?.score) || 0,
       localFingerprint: shortFingerprint(value.local?.fingerprint),
-      remoteFingerprint: shortFingerprint(value.remote?.fingerprint)
+      remoteFingerprint: shortFingerprint(value.remote?.fingerprint),
+      remoteWriterMode: value.remoteWriterMode || '',
+      remoteBaseSyncVersion: value.remoteBaseSyncVersion ?? null
     });
   }
 
@@ -1582,8 +1623,9 @@
       const currentAuth=await revalidatePrincipal(preflight.auth);
       const applied = await casWrite(currentAuth, expectedSyncVersion, preflight.local.data);
       if (applied.status === 'CONFLICT') {
-        pauseAutoForConflict();
-        currentStatus = failure('RACE_BLOCKED');
+        const priority=trustedPriorityFromCas(applied,expectedSyncVersion);
+        pauseAutoForConflict({trustedPriority:priority});
+        currentStatus = failure(priority?'TRUSTED_PRIORITY_AVAILABLE':'RACE_BLOCKED');
         return publicStatus();
       }
 
@@ -1964,7 +2006,8 @@
       if (!activeAutoRun(generation)) return autoStatus();
       if (!baselineMatchesRemote(baseline, firstRow, firstRemote)) {
         autoArmed = false;
-        return setAutoState('CONFLICT', { pending: false, armed: false });
+        const priority=trustedPriorityFromRow(firstRow,baseline.syncVersion);
+        return setAutoState(priority?'TRUSTED_PRIORITY_AVAILABLE':'CONFLICT', { pending: false, armed: false });
       }
       if (local.fingerprint === baseline.localFingerprint) {
         return setAutoState('ARMED', { pending: false, armed: true });
@@ -1977,13 +2020,15 @@
       if (!activeAutoRun(generation)) return autoStatus();
       if (!sameObservation(firstObservation, raceObservation) || !baselineMatchesRemote(baseline, raceRow, raceRemote)) {
         autoArmed = false;
-        return setAutoState('RACE_BLOCKED', { pending: false, armed: false });
+        const priority=trustedPriorityFromRow(raceRow,baseline.syncVersion);
+        return setAutoState(priority?'TRUSTED_PRIORITY_AVAILABLE':'RACE_BLOCKED', { pending: false, armed: false });
       }
 
       const currentLocal=await readLocal();
       if(currentLocal.storeBaseline!==local.storeBaseline)throw new CloudSyncError('RACE_BLOCKED');
-      const applied = await casWrite(auth, remoteWriteState(raceRow).syncVersion, local.data, { signal: autoController.signal });
-      if (applied.status === 'CONFLICT') return pauseAutoForConflict();
+      const expectedWriteVersion=remoteWriteState(raceRow).syncVersion;
+      const applied = await casWrite(auth, expectedWriteVersion, local.data, { signal: autoController.signal });
+      if (applied.status === 'CONFLICT') return pauseAutoForConflict({trustedPriority:trustedPriorityFromCas(applied,expectedWriteVersion)});
       autoPendingVerification = { userId: auth.user.id, localFingerprint: local.fingerprint, syncVersion: applied.syncVersion, updatedAt: applied.updatedAt };
       if (!activeAutoRun(generation)) return autoStatus();
 
