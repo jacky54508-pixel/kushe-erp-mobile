@@ -5,6 +5,7 @@
   const SESSION_KEY = config.authSessionStorageKey || 'kushe_erp_supabase_auth_v1';
   let authGeneration = 0;
   let activeValidation = null;
+  let activeCompanyContext = null;
 
   // Persistent Auth sessions from earlier releases are intentionally discarded.
   try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
@@ -60,6 +61,7 @@
 
   function clearSession() {
     authGeneration += 1;
+    activeCompanyContext = null;
     try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
     try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
   }
@@ -176,8 +178,77 @@
     const next = normalizeSession(payload);
     next.user = await verifiedUser(next.access_token);
     if (storedUser(payload?.user)?.id !== next.user.id) throw new AuthRequestError(0, 'principal_mismatch');
+    activeCompanyContext = null;
     saveSession(next);
     return next.user;
+  }
+
+  async function resolveCompanyContext() {
+    const current = readSession();
+    const userId = String(current?.user?.id || '').trim();
+    const token = String(current?.access_token || '').trim();
+    if (!userId || !token) throw new AuthRequestError(401, 'invalid_session');
+
+    const memberships = await requestJson(
+      '/rest/v1/company_members?select=company_id,user_id,employee_id,role,status&user_id=eq.' + encodeURIComponent(userId) + '&order=created_at.asc',
+      { token }
+    );
+    if (!Array.isArray(memberships)) throw new AuthRequestError(403, 'company_membership_invalid');
+    const ownRows = memberships.filter((row) => String(row?.user_id || '') === userId);
+    const activeRows = ownRows.filter((row) => String(row?.status || '') === 'active');
+    if (!ownRows.length) throw new AuthRequestError(403, 'company_membership_missing');
+    if (!activeRows.length) throw new AuthRequestError(403, 'company_membership_inactive');
+    if (activeRows.length !== 1) throw new AuthRequestError(409, 'company_membership_ambiguous');
+
+    const membership = activeRows[0];
+    const companyId = String(membership.company_id || '').trim();
+    const role = String(membership.role || '').trim();
+    if (!companyId || !['owner','admin','accounting','employee'].includes(role)) {
+      throw new AuthRequestError(403, 'company_membership_invalid');
+    }
+
+    const companies = await requestJson(
+      '/rest/v1/companies?select=id,name,owner_user_id&id=eq.' + encodeURIComponent(companyId) + '&limit=2',
+      { token }
+    );
+    if (!Array.isArray(companies) || companies.length !== 1 || String(companies[0]?.id || '') !== companyId) {
+      throw new AuthRequestError(403, 'company_unavailable');
+    }
+
+    const states = await requestJson(
+      '/rest/v1/erp_company_states?select=company_id,sync_version,updated_at,last_writer_mode,last_base_sync_version&company_id=eq.' + encodeURIComponent(companyId) + '&limit=2',
+      { token }
+    );
+    if (!Array.isArray(states) || states.length !== 1 || String(states[0]?.company_id || '') !== companyId) {
+      throw new AuthRequestError(403, 'company_state_unavailable');
+    }
+
+    if (String(readSession()?.user?.id || '') !== userId) throw new AuthRequestError(409, 'principal_mismatch');
+    activeCompanyContext = Object.freeze({
+      companyId,
+      companyName: String(companies[0]?.name || ''),
+      ownerUserId: String(companies[0]?.owner_user_id || ''),
+      userId,
+      employeeId: String(membership.employee_id || ''),
+      role,
+      status: 'active',
+      shadowVerified: true,
+      companyState: Object.freeze({
+        syncVersion: Number(states[0]?.sync_version) || 0,
+        updatedAt: String(states[0]?.updated_at || ''),
+        lastWriterMode: String(states[0]?.last_writer_mode || ''),
+        lastBaseSyncVersion: Number(states[0]?.last_base_sync_version) || 0
+      })
+    });
+    return activeCompanyContext;
+  }
+
+  function companyContext() {
+    if (!activeCompanyContext) return null;
+    return {
+      ...activeCompanyContext,
+      companyState: activeCompanyContext.companyState ? { ...activeCompanyContext.companyState } : null
+    };
   }
 
   async function changePassword(currentPassword, newPassword) {
@@ -250,5 +321,5 @@
     return session()?.user || null;
   }
 
-  window.KusheAuthGate = Object.freeze({ requireAuth, login, changePassword, logout, session, user });
+  window.KusheAuthGate = Object.freeze({ requireAuth, login, resolveCompanyContext, companyContext, changePassword, logout, session, user });
 }());

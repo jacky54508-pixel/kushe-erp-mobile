@@ -46,7 +46,26 @@
     if (message) setLoginMessage(message);
   }
   async function startAuthenticatedApp() {
-    setAuthView(true);
+    setAuthView(false);
+    setLoginMessage('正在確認公司身分與權限…');
+    try {
+      if (!window.KusheAuthGate?.resolveCompanyContext) throw new Error('Company context unavailable');
+      await window.KusheAuthGate.resolveCompanyContext();
+    } catch (error) {
+      window.KusheCloudSync?.stopAutoBackup?.();
+      window.KuSheERPStore?.clearEphemeralSession?.();
+      const messages = {
+        company_membership_missing: '此帳號尚未加入任何公司，無法進入 ERP。',
+        company_membership_inactive: '此帳號的公司權限已停用，無法進入 ERP。',
+        company_membership_ambiguous: '此帳號目前綁定多個啟用中的公司，請由管理者先確認公司歸屬。',
+        company_membership_invalid: '此帳號的公司權限資料不完整，無法進入 ERP。',
+        company_unavailable: '無法驗證此帳號所屬公司，請由管理者檢查公司設定。',
+        company_state_unavailable: '無法驗證公司 ERP 資料權限，尚未載入任何業務資料。'
+      };
+      setLoginMessage(messages[error?.code] || '公司身分驗證失敗，尚未載入任何 ERP 業務資料。', true);
+      return false;
+    }
+
     setLoginMessage();
     const device=window.KusheCloudSync?.deviceSecurityStatus?.()||{trusted:false};
     try{
@@ -65,13 +84,15 @@
         window.KusheRecovery?.showResult({status:'RECOVERY_REQUIRED',operationId:error.operationId||'',message:error.message});
         await window.KusheRecovery?.open();
       }
-      return;
+      return false;
     }
+    setAuthView(true);
     if (!initialized) {
       init();
       initialized = true;
     }
     if(device.trusted)try { void Promise.resolve(window.KusheCloudSync?.startAutoBackup?.()).catch(() => {}); } catch (_) {}
+    return true;
   }
   async function handleLogout() {
     if($('#recoveryModal'))$('#recoveryModal').hidden=true;
