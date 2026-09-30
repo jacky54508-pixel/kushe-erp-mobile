@@ -227,6 +227,7 @@
       const context=sourceContext(state,row,kind,null),employee=collection(state,'employees').find((item)=>cleanId(item.id)===cleanId(row.collectorEmployeeId)),collector=employee?.name||row.collectorEmployeeName||'未指定員工';
       return finishReconciliationItem({id:`source:${kind}:${cleanId(row.id)}`,date:row.date||'',status:'employee-cash-pending',direction:'in',sourceKind:kind,sourceLabel:'員工現金代收',party:context.party,project:context.project,sourceNo:context.sourceNo,accountingAmount:store.receiptCashAmount?store.receiptCashAmount(row):store.num(row.cashAmount??row.amount),bankAmount:null,difference:null,description:`${collector} 代收現金，目前仍待繳回公司；這筆尚未產生銀行交易，屬正常待辦狀態。`,transactionIds:[],sourceId:cleanId(row.id),rawSourceType:'employee_cash_pending'});
     }
+    const employeeCashCompleted=kind==='receipt'&&row?.collectionType==='employee_cash'&&row?.handoverStatus==='completed',employee=employeeCashCompleted?collection(state,'employees').find((item)=>cleanId(item.id)===cleanId(row.collectorEmployeeId)):null,collector=employee?.name||row?.collectorEmployeeName||'未指定員工';
     const matches = sourceTransactions(state, row, kind);
     const expected = sourceBankAmount(row, kind);
     const bankTotal = matches.reduce((sum, transaction) => sum + transactionAmount(transaction), 0);
@@ -245,14 +246,14 @@
       status,
       direction: sourceDirection(kind),
       sourceKind: legacy ? 'history' : kind,
-      sourceLabel: reconciliationSourceLabel(kind, legacy),
+      sourceLabel: employeeCashCompleted ? '員工代收繳回' : reconciliationSourceLabel(kind, legacy),
       party: context.party,
       project: context.project,
       sourceNo: context.sourceNo,
       accountingAmount: expected,
       bankAmount: matches.length ? bankTotal : null,
       difference: matches.length ? bankTotal - expected : null,
-      description: linkMismatch ? '銀行有這筆交易，但目前無法確認它對應哪筆帳務，請人工確認。' : reconciliationDescription(status, row, kind, matches.length, matches.length ? bankTotal - expected : null),
+      description: linkMismatch ? '銀行有這筆交易，但目前無法確認它對應哪筆帳務，請人工確認。' : employeeCashCompleted&&status==='normal' ? `${collector} 代收款已於 ${row.handedOverAt||transaction?.date||'—'} 繳回公司並完成入帳。` : reconciliationDescription(status, row, kind, matches.length, matches.length ? bankTotal - expected : null),
       transactionIds: matches.map((transactionRow) => cleanId(transactionRow.id)),
       sourceId: cleanId(row.id),
       rawSourceType: transaction?.sourceType || (legacy ? 'legacy-payment-summary' : kind)
