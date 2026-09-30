@@ -50,7 +50,14 @@
     setLoginMessage('正在確認公司身分與權限…');
     try {
       if (!window.KusheAuthGate?.resolveCompanyContext) throw new Error('Company context unavailable');
-      await window.KusheAuthGate.resolveCompanyContext();
+      const companyContext = await window.KusheAuthGate.resolveCompanyContext();
+      if (!companyContext?.legacySourceUserId || companyContext.userId !== companyContext.legacySourceUserId) {
+        window.KusheCloudSync?.stopAutoBackup?.();
+        window.KusheCloudSync?.close?.();
+        window.KuSheERPStore?.clearEphemeralSession?.();
+        setLoginMessage('公司身分驗證成功；多帳號共用資料尚未啟用，未載入 ERP 業務資料。', true);
+        return false;
+      }
     } catch (error) {
       window.KusheCloudSync?.stopAutoBackup?.();
       window.KuSheERPStore?.clearEphemeralSession?.();

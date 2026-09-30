@@ -208,7 +208,7 @@
     }
 
     const companies = await requestJson(
-      '/rest/v1/companies?select=id,name,owner_user_id&id=eq.' + encodeURIComponent(companyId) + '&limit=2',
+      '/rest/v1/companies?select=id,name,owner_user_id,legacy_source_user_id&id=eq.' + encodeURIComponent(companyId) + '&limit=2',
       { token }
     );
     if (!Array.isArray(companies) || companies.length !== 1 || String(companies[0]?.id || '') !== companyId) {
@@ -228,6 +228,7 @@
       companyId,
       companyName: String(companies[0]?.name || ''),
       ownerUserId: String(companies[0]?.owner_user_id || ''),
+      legacySourceUserId: String(companies[0]?.legacy_source_user_id || ''),
       userId,
       employeeId: String(membership.employee_id || ''),
       role,
