@@ -237,6 +237,7 @@
     temporarySessionBaseline={userId:auth.user.id,syncVersion:serverSyncVersion(raceRow.sync_version),updatedAt:String(raceRow.updated_at||''),fingerprint:raceRemote.fingerprint};
     currentStatus=classified('TEMPORARY_CLOUD_ONLY',auth,memoryInfo,raceRemote,raceRow,false,false);
     setAutoState('DEVICE_TRUST_REQUIRED',{pending:false,armed:false,message:'臨時裝置：雲端即時模式（本機不落地）'});
+    startCloudEvents();
     return {code:'TEMPORARY_CLOUD_ONLY',syncVersion:temporarySessionBaseline.syncVersion,remoteFingerprint:raceRemote.fingerprint,localFingerprint:memoryInfo.fingerprint};
   }
 
@@ -267,9 +268,45 @@
     return {data:verified.data,syncVersion:temporarySessionBaseline.syncVersion,updatedAt:temporarySessionBaseline.updatedAt,fingerprint:temporarySessionBaseline.fingerprint};
   }
 
+  async function refreshTemporaryFromCloud(reason) {
+    if(deviceAllowsAutomaticSync())return {code:'TRUSTED_DEVICE'};
+    if(!['STARTUP','AUTH_READY','VISIBILITY','FOCUS','ONLINE','POLL'].includes(reason))return {code:'CANCELLED'};
+    if(!temporarySessionBaseline||!observedPrincipal())return {code:'PRINCIPAL_UNBOUND'};
+    if(reason==='POLL'&&navigator.onLine===false)return {code:'NETWORK_ERROR'};
+    const editor=editorReadiness();
+    if(!editor.safe)return {code:'EDITOR_DIRTY'};
+    const auth=await authContext(),store=window.KuSheERPStore;
+    if(!store?.isEphemeralMode?.()||!store?.loadEphemeralSnapshot)throw new CloudSyncError('STORE_BUSY');
+    const before=await store.readCommittedSnapshot();
+    const beforeInfo=await snapshotInfo(before.data);
+    if(beforeInfo.fingerprint!==temporarySessionBaseline.fingerprint)throw new CloudSyncError('RACE_BLOCKED');
+    const firstRow=await readRemote(auth),firstRemote=firstRow?await validateRemoteSnapshot(firstRow.data,firstRow.updated_at):null;
+    if(!firstRow||!firstRemote)throw new CloudSyncError('REMOTE_EMPTY');
+    if(sameSyncVersion(firstRow.sync_version,temporarySessionBaseline.syncVersion)
+      &&String(firstRow.updated_at||'')===temporarySessionBaseline.updatedAt
+      &&firstRemote.fingerprint===temporarySessionBaseline.fingerprint)return {code:'SYNCED'};
+    const currentAuth=await revalidatePrincipal(auth),raceRow=await readRemote(currentAuth),raceRemote=raceRow?await validateRemoteSnapshot(raceRow.data,raceRow.updated_at):null;
+    if(!raceRow||!raceRemote||!sameSyncVersion(firstRow.sync_version,raceRow.sync_version)
+      ||String(firstRow.updated_at||'')!==String(raceRow.updated_at||'')
+      ||firstRemote.fingerprint!==raceRemote.fingerprint)throw new CloudSyncError('RACE_BLOCKED');
+    const editorAfter=editorReadiness();
+    if(!editorAfter.safe||editorAfter.generation!==editor.generation)return {code:'EDITOR_DIRTY'};
+    const currentMemory=await store.readCommittedSnapshot();
+    const currentInfo=await snapshotInfo(currentMemory.data);
+    if(currentInfo.fingerprint!==temporarySessionBaseline.fingerprint
+      ||currentMemory.baseline!==before.baseline)throw new CloudSyncError('RACE_BLOCKED');
+    await store.loadEphemeralSnapshot(raceRemote.data,{userId:auth.user.id,syncVersion:serverSyncVersion(raceRow.sync_version),updatedAt:String(raceRow.updated_at||''),fingerprint:raceRemote.fingerprint});
+    const applied=await store.readCommittedSnapshot(),appliedInfo=await snapshotInfo(applied.data);
+    if(appliedInfo.fingerprint!==raceRemote.fingerprint)throw new CloudSyncError('VERIFY_FAILED');
+    temporarySessionBaseline={userId:auth.user.id,syncVersion:serverSyncVersion(raceRow.sync_version),updatedAt:String(raceRow.updated_at||''),fingerprint:raceRemote.fingerprint};
+    currentStatus=classified('TEMPORARY_CLOUD_ONLY',auth,appliedInfo,raceRemote,raceRow,false,false);
+    try{window.dispatchEvent(new CustomEvent('kushe:data-updated',{detail:{action:'temporary-cloud-refresh',syncOrigin:'REMOTE_APPLY'}}))}catch(_){}
+    return {code:'REMOTE_APPLIED',syncVersion:temporarySessionBaseline.syncVersion,remoteFingerprint:raceRemote.fingerprint,localFingerprint:appliedInfo.fingerprint};
+  }
+
   function reconcileFromCloud(reason) {
     if (!['STARTUP','AUTH_READY','VISIBILITY','FOCUS','ONLINE','POLL'].includes(reason)) return Promise.resolve({code:'CANCELLED'});
-    if (!deviceAllowsAutomaticSync()) return Promise.resolve({code:'DEVICE_TRUST_REQUIRED',eligibleApply:false});
+    if (!deviceAllowsAutomaticSync()) return refreshTemporaryFromCloud(reason).catch((error)=>({code:writeFailureCode(error)||'ERROR'}));
     if (!cloudEventsEnabled || !cloudVisible() || !observedPrincipal()) return Promise.resolve({code:'AUTH_REQUIRED',eligibleApply:false});
     if (reason === 'POLL' && navigator.onLine === false) return Promise.resolve({code:'NETWORK_ERROR',eligibleApply:false});
     if (cloudRequest) return cloudRequest.promise;
@@ -2054,6 +2091,6 @@
   window.KusheCloudSync = Object.freeze({
     inspect, uploadLocal, restoreRemote, status: publicStatus, open, close,
     startAutoBackup, stopAutoBackup, autoStatus, setSyncOrigin, editorReadiness, decideRemote, safeApplyRemote, reconcileFromCloud,
-    deviceSecurityStatus, setDeviceMode, bootstrapTemporarySession, commitTemporarySnapshot
+    deviceSecurityStatus, setDeviceMode, bootstrapTemporarySession, commitTemporarySnapshot, refreshTemporaryFromCloud
   });
 }());
