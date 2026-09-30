@@ -3202,6 +3202,7 @@
   function receiptMutationPlan(receipt) {
     const stored=strictStoredReceiptPlan(receipt),cashAmount=stored.cashAmount,matches=linkedBankTransactionCandidates(receipt,['receipt','receivable_receipt']).candidates;
     const identityMatches=state.bankTransactions.filter((row)=>String(row.receiptId||'')===String(receipt.id||'')||String(row.sourceId||'')===String(receipt.id||''));
+    if(stored.collectionType==='employee_cash'){if(hasAccountingValue(receipt,'bankTransactionId')||hasAccountingValue(receipt,'bankId')||hasAccountingValue(receipt,'bankAccountId')||matches.length||identityMatches.length)throw new Error('待繳回員工代收款不應有銀行帳戶或銀行流水，已停止操作');return {transaction:null,bank:null,amount:0}}
     if(cashAmount===0){if(hasAccountingValue(receipt,'bankTransactionId')||matches.length||identityMatches.length)throw new Error('零現金客戶扣款不應有銀行流水指標或實體流水，已停止操作');return {transaction:null,bank:null,amount:0}}
     const transaction=strictExistingBankTransaction(receipt,['receipt','receivable_receipt'],'一般收款'),receiptBank=strictBankReference(receipt,'一般收款'),transactionBank=strictBankReference(transaction,'一般收款銀行流水');
     if(identityMatches.some((row)=>row!==transaction))throw new Error('一般收款有多筆或錯誤來源的銀行流水，已停止操作');
@@ -3264,9 +3265,28 @@
     if(hasAccount&&hasBank&&account!==bank)throw new Error('bankAccountId 與 bankId 不一致，已停止收款');
     return hasAccount?account:hasBank?bank:String(fallback||'').trim();
   }
+  const employeeCashCollectionType = 'employee_cash';
+  const isEmployeeCashReceipt = (receipt) => String(receipt?.collectionType||'')===employeeCashCollectionType;
+  function receiptCollectionPlan(values, existingReceipt = null) {
+    const existingType=existingReceipt?String(existingReceipt.collectionType||'bank'):'';
+    const requested=hasDefinedReceiptInput(values,'collectionType')?String(values.collectionType||'bank'):existingType||'bank';
+    const collectionType=requested===employeeCashCollectionType?employeeCashCollectionType:'bank';
+    if(existingReceipt&&existingType&&collectionType!==existingType)throw new Error('既有收款不可直接切換員工代收／銀行收款，請刪除後重新建立');
+    if(collectionType!=='employee_cash')return {collectionType:'bank',collectorEmployeeId:'',collectorEmployeeName:'',collectedAt:'',handoverStatus:''};
+    const employeeId=String(hasDefinedReceiptInput(values,'collectorEmployeeId')?values.collectorEmployeeId:existingReceipt?.collectorEmployeeId||'').trim();
+    const employeeMatches=state.employees.filter((row)=>String(row.id||'')===employeeId);
+    if(employeeMatches.length!==1)throw new Error(employeeMatches.length?'代收員工資料不唯一':'請選擇有效的代收員工');
+    const employee=employeeMatches[0],employeeName=String(employee.name||'').trim();
+    if(!employeeName)throw new Error('代收員工姓名不可空白');
+    if(existingReceipt?.collectorEmployeeName&&String(existingReceipt.collectorEmployeeName)!==employeeName)throw new Error('既有代收員工姓名與員工主檔不一致，已停止操作');
+    const collectedAt=String(hasDefinedReceiptInput(values,'collectedAt')?values.collectedAt:existingReceipt?.collectedAt||values.date||existingReceipt?.date||businessDate()).trim();
+    const handoverStatus=String(existingReceipt?.handoverStatus||values.handoverStatus||'pending');
+    if(handoverStatus!=='pending')throw new Error('P19-2A 只支援待繳回員工代收款');
+    return {collectionType,collectorEmployeeId:employee.id,collectorEmployeeName:employeeName,collectedAt,handoverStatus:'pending'};
+  }
   function strictStoredReceiptPlan(receipt) {
     if(!receipt||typeof receipt!=='object'||Array.isArray(receipt))throw new Error('既有收款資料格式不正確');
-    const cashAmount=receiptCashInput(receipt),fee=receiptFeeInput(receipt,0),feePayer=receipt.feePayer===undefined?'company':String(receipt.feePayer);
+    const collection=receiptCollectionPlan(receipt,receipt),cashAmount=receiptCashInput(receipt),fee=receiptFeeInput(receipt,0),feePayer=receipt.feePayer===undefined?'company':String(receipt.feePayer);
     if(!['company','counterparty'].includes(feePayer))throw new Error('既有收款手續費負擔方式不正確');
     let deductions;
     if(hasOwn(receipt,'deductions'))deductions=normalizeCustomerDeductions(receipt.deductions);
@@ -3277,29 +3297,34 @@
     if(hasOwn(receipt,'settlementAmount')&&strictReceiptMoney(receipt.settlementAmount,'既有沖銷應收')!==settlementAmount)throw new Error('既有沖銷應收與現金、扣款明細不一致');
     if(settlementAmount<=0)throw new Error('既有收款沖銷金額必須大於 0');
     if(cashAmount===0&&fee>0)throw new Error('既有零匯款收款不可有銀行手續費');
+    if(collection.collectionType==='employee_cash'&&cashAmount<=0)throw new Error('員工現金代收金額必須大於 0');
+    if(collection.collectionType==='employee_cash'&&fee>0)throw new Error('員工現金代收尚未繳回，不可填寫銀行手續費');
     if(feePayer==='company'&&fee>cashAmount)throw new Error('既有公司負擔手續費高於實際匯款');
-    const netAmount=feePayer==='company'?cashAmount-fee:cashAmount;
+    const netAmount=collection.collectionType==='employee_cash'?0:feePayer==='company'?cashAmount-fee:cashAmount;
     if(hasOwn(receipt,'netAmount')&&strictReceiptMoney(receipt.netAmount,'既有銀行實際入帳')!==netAmount)throw new Error('既有銀行實際入帳與現金、手續費不一致');
-    const bankId=receiptBankInput(receipt);
+    const bankId=collection.collectionType==='employee_cash'?'':receiptBankInput(receipt);
+    if(collection.collectionType==='employee_cash'&&receiptBankInput(receipt))throw new Error('待繳回員工代收款不可指定銀行帳戶');
     if(cashAmount===0&&bankId)throw new Error('既有零現金扣款不應保留銀行帳戶');
-    return {cashAmount,fee,feePayer,netAmount,deductions,deductionAmount,settlementAmount,bankId,date:String(receipt.date||'').trim(),paymentMethod:String(receipt.paymentMethod||'銀行轉帳'),note:String(receipt.note||'')};
+    return {cashAmount,fee,feePayer,netAmount,deductions,deductionAmount,settlementAmount,bankId,date:String(receipt.date||'').trim(),paymentMethod:String(receipt.paymentMethod||'銀行轉帳'),note:String(receipt.note||''),...collection};
   }
   function receiptInputPlan(values, existingReceipt) {
     if(!values||typeof values!=='object'||Array.isArray(values))throw new Error('收款資料格式不正確');
-    const existingPlan=existingReceipt?strictStoredReceiptPlan(existingReceipt):null,cashAmount=receiptCashInput(values,existingPlan?.cashAmount),fee=receiptFeeInput(values,existingPlan?.fee),payerProvided=hasDefinedReceiptInput(values,'feePayer'),feePayer=payerProvided?String(values.feePayer):existingPlan?.feePayer||'company';
+    const existingPlan=existingReceipt?strictStoredReceiptPlan(existingReceipt):null,collection=receiptCollectionPlan(values,existingReceipt),cashAmount=receiptCashInput(values,existingPlan?.cashAmount),fee=receiptFeeInput(values,existingPlan?.fee),payerProvided=hasDefinedReceiptInput(values,'feePayer'),feePayer=payerProvided?String(values.feePayer):existingPlan?.feePayer||'company';
     if(!['company','counterparty'].includes(feePayer))throw new Error('手續費負擔方式不正確');
     const deductions=values.deductions===undefined&&existingPlan?normalizeCustomerDeductions(existingPlan.deductions):normalizeCustomerDeductions(values.deductions),deductionAmount=safeReceiptMoneySum(deductions.map((row)=>row.amount),'客戶扣款合計'),settlementAmount=safeReceiptMoneySum([cashAmount,deductionAmount],'本次沖銷應收');
     if(hasDefinedReceiptInput(values,'deductionAmount')&&strictReceiptMoney(values.deductionAmount,'客戶扣款合計')!==deductionAmount)throw new Error('客戶扣款合計必須由扣款明細計算');
     if(hasDefinedReceiptInput(values,'settlementAmount')&&strictReceiptMoney(values.settlementAmount,'本次沖銷應收')!==settlementAmount)throw new Error('本次沖銷應收必須等於實際匯款加客戶扣款');
     if(settlementAmount<=0)throw new Error('本次實際匯款與客戶扣款合計必須大於 0');
     if(cashAmount===0&&fee>0)throw new Error('零匯款收款不可填寫銀行手續費');
+    if(collection.collectionType==='employee_cash'&&cashAmount<=0)throw new Error('員工現金代收金額必須大於 0');
+    if(collection.collectionType==='employee_cash'&&fee>0)throw new Error('員工現金代收尚未繳回，不可填寫銀行手續費');
     if(feePayer==='company'&&fee>cashAmount)throw new Error('公司負擔的手續費不可高於本次實際匯款');
-    const bankId=cashAmount>0?receiptBankInput(values,existingPlan?.bankId):'',date=String(values.date||existingPlan?.date||businessDate()).trim(),paymentMethod=String(values.paymentMethod||existingPlan?.paymentMethod||'銀行轉帳'),note=values.note===undefined?String(existingPlan?.note||''):String(values.note||''),netAmount=feePayer==='company'?cashAmount-fee:cashAmount;
+    const bankId=collection.collectionType==='employee_cash'?'':cashAmount>0?receiptBankInput(values,existingPlan?.bankId):'',date=String(values.date||existingPlan?.date||businessDate()).trim(),paymentMethod=collection.collectionType==='employee_cash'?'員工現金代收':String(values.paymentMethod||existingPlan?.paymentMethod||'銀行轉帳'),note=values.note===undefined?String(existingPlan?.note||''):String(values.note||''),netAmount=collection.collectionType==='employee_cash'?0:feePayer==='company'?cashAmount-fee:cashAmount;
     if(hasDefinedReceiptInput(values,'netAmount')&&strictReceiptMoney(values.netAmount,'銀行實際入帳')!==netAmount)throw new Error('銀行實際入帳必須由實際匯款與手續費計算');
-    return {cashAmount,fee,feePayer,netAmount,deductions,deductionAmount,settlementAmount,bankId,date,paymentMethod,note};
+    return {cashAmount,fee,feePayer,netAmount,deductions,deductionAmount,settlementAmount,bankId,date,paymentMethod,note,...collection};
   }
   function receiptIntentFingerprint(receivableId, plan) {
-    return JSON.stringify({receivableId:String(receivableId||''),date:plan.date,cashAmount:plan.cashAmount,fee:plan.fee,feePayer:plan.feePayer,netAmount:plan.netAmount,bankId:plan.bankId,paymentMethod:plan.paymentMethod,note:plan.note,deductions:plan.deductions.map((row)=>({category:row.category,amount:row.amount,note:row.note}))});
+    return JSON.stringify({receivableId:String(receivableId||''),date:plan.date,cashAmount:plan.cashAmount,fee:plan.fee,feePayer:plan.feePayer,netAmount:plan.netAmount,bankId:plan.bankId,paymentMethod:plan.paymentMethod,note:plan.note,collectionType:plan.collectionType,collectorEmployeeId:plan.collectorEmployeeId,collectedAt:plan.collectedAt,handoverStatus:plan.handoverStatus,deductions:plan.deductions.map((row)=>({category:row.category,amount:row.amount,note:row.note}))});
   }
   function storedReceiptIntentFingerprint(receipt) {
     return receiptIntentFingerprint(receipt.receivableId,strictStoredReceiptPlan(receipt));
@@ -3339,6 +3364,7 @@
   }
   function syncReceiptBankTransaction(receipt, ar, now, existingTransaction) {
     const bankId=String(receipt.bankAccountId||receipt.bankId||''),cashAmount=receiptCashAmount(receipt),existing=existingTransaction===undefined?receiptBankTransaction(receipt):existingTransaction;
+    if(isEmployeeCashReceipt(receipt)){if(existing)throw new Error('待繳回員工代收款已有銀行流水，已停止操作');receipt.bankId='';receipt.bankAccountId='';receipt.bankTransactionId='';receipt.netAmount=0;return null}
     if(existing){const previousBank=state.banks.find((row)=>row.id===(existing.bankAccountId||existing.bankId));adjustBankIncome(previousBank,-num(existing.amount),now)}
     if(cashAmount===0){if(existing)state.bankTransactions=state.bankTransactions.filter((row)=>row!==existing);receipt.bankId='';receipt.bankAccountId='';receipt.bankTransactionId='';receipt.netAmount=0;return null}
     const bank=state.banks.find((row)=>row.id===bankId);
@@ -3398,7 +3424,7 @@
         const error=new Error('相同 idempotencyKey 的收款內容不同，已停止重送');error.code='IDEMPOTENCY_CONFLICT';throw error;
       }
       const candidates=linkedBankTransactionCandidates(existing,['receipt','receivable_receipt']).candidates;
-      if(receiptCashAmount(existing)>0&&candidates.length===0){
+      if(existingPlan.collectionType!=='employee_cash'&&receiptCashAmount(existing)>0&&candidates.length===0){
         strictBankIncomeBaseline(existing.bankAccountId||existing.bankId);
         const now=new Date().toISOString();
         return executeReceiptMutationDraft(`補齊一般收款銀行交易 ${ar.sourceNo||''}`,()=>{const currentReceipt=state.receipts.find((row)=>String(row.id||'')===String(existing.id||'')),currentAr=state.receivables.find((row)=>String(row.id||'')===String(ar.id||''));syncReceiptBankTransaction(currentReceipt,currentAr,now);syncReceivableSummary(currentAr,now);return currentReceipt},(row)=>assertReceiptPostCondition(row,state.receivables.find((item)=>String(item.id||'')===String(ar.id||''))));
@@ -3410,8 +3436,8 @@
     const ar=arMatches[0],baseline=assertReceivableSettlementBaseline(ar),input=receiptInputPlan(values),outstanding=baseline.outstanding;
     if(input.deductionAmount>0)strictReceivableBillingRelation(ar);
     if(input.settlementAmount>outstanding)throw new Error('本次沖銷應收不可超過未收餘額');
-    if(input.cashAmount>0)strictBankReference({bankId:input.bankId},'新的收款銀行帳戶');
-    const now=new Date().toISOString(),receipt={id:uid(),idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:ar.billingId||'',date:input.date,amount:input.cashAmount,cashAmount:input.cashAmount,deductionAmount:input.deductionAmount,settlementAmount:input.settlementAmount,deductions:input.deductions,fee:input.fee,feePayer:input.feePayer,netAmount:input.netAmount,bankId:input.bankId,bankAccountId:input.bankId,paymentMethod:input.paymentMethod,note:input.note,requestFingerprint:receiptIntentFingerprint(ar.id,input),createdAt:now,updatedAt:now};
+    if(input.cashAmount>0&&input.collectionType!=='employee_cash')strictBankReference({bankId:input.bankId},'新的收款銀行帳戶');
+    const now=new Date().toISOString(),receipt={id:uid(),idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:ar.billingId||'',date:input.date,amount:input.cashAmount,cashAmount:input.cashAmount,deductionAmount:input.deductionAmount,settlementAmount:input.settlementAmount,deductions:input.deductions,fee:input.fee,feePayer:input.feePayer,netAmount:input.netAmount,bankId:input.bankId,bankAccountId:input.bankId,paymentMethod:input.paymentMethod,note:input.note,collectionType:input.collectionType,collectorEmployeeId:input.collectorEmployeeId,collectorEmployeeName:input.collectorEmployeeName,collectedAt:input.collectedAt,handoverStatus:input.handoverStatus,requestFingerprint:receiptIntentFingerprint(ar.id,input),createdAt:now,updatedAt:now};
     return executeReceiptMutationDraft(`新增分次收款 ${ar.sourceNo}`,()=>{const currentAr=state.receivables.find((row)=>String(row.id||'')===String(ar.id||''));state.receipts.unshift(receipt);syncReceiptBankTransaction(receipt,currentAr,now);syncReceivableSummary(currentAr,now);return receipt},(row)=>assertReceiptPostCondition(row,state.receivables.find((item)=>String(item.id||'')===String(ar.id||''))));
   }
   function updateReceipt(id, values = {}) { return queueReceiptMutation(()=>updateReceiptUnlocked(id,values)); }
@@ -3422,8 +3448,8 @@
     if(storedPlan.deductionAmount>0||input.deductionAmount>0)strictReceivableBillingRelation(ar,receipt);
     const otherReceived=receivableSettlementTruth(ar,receipt);
     if(otherReceived+input.settlementAmount>baseline.amount)throw new Error('本次沖銷應收不可超過本期剩餘應收');
-    if(input.cashAmount>0)strictBankReference({bankId:input.bankId},'新的收款銀行帳戶');receiptMutationPlan(receipt);const now=new Date().toISOString();
-    return executeReceiptMutationDraft(`修改應收收款 ${ar.sourceNo||''}`,()=>{const currentReceipt=state.receipts.find((row)=>String(row.id||'')===String(receipt.id||'')),currentAr=state.receivables.find((row)=>String(row.id||'')===String(ar.id||'')),currentPlan=receiptMutationPlan(currentReceipt);Object.assign(currentReceipt,{date:input.date,amount:input.cashAmount,cashAmount:input.cashAmount,deductionAmount:input.deductionAmount,settlementAmount:input.settlementAmount,deductions:input.deductions,fee:input.fee,feePayer:input.feePayer,netAmount:input.netAmount,bankId:input.bankId,bankAccountId:input.bankId,paymentMethod:input.paymentMethod,note:input.note,requestFingerprint:receiptIntentFingerprint(ar.id,input),updatedAt:now});syncReceiptBankTransaction(currentReceipt,currentAr,now,currentPlan.transaction);syncReceivableSummary(currentAr,now);return currentReceipt},(row)=>assertReceiptPostCondition(row,state.receivables.find((item)=>String(item.id||'')===String(ar.id||''))));
+    if(input.cashAmount>0&&input.collectionType!=='employee_cash')strictBankReference({bankId:input.bankId},'新的收款銀行帳戶');receiptMutationPlan(receipt);const now=new Date().toISOString();
+    return executeReceiptMutationDraft(`修改應收收款 ${ar.sourceNo||''}`,()=>{const currentReceipt=state.receipts.find((row)=>String(row.id||'')===String(receipt.id||'')),currentAr=state.receivables.find((row)=>String(row.id||'')===String(ar.id||'')),currentPlan=receiptMutationPlan(currentReceipt);Object.assign(currentReceipt,{date:input.date,amount:input.cashAmount,cashAmount:input.cashAmount,deductionAmount:input.deductionAmount,settlementAmount:input.settlementAmount,deductions:input.deductions,fee:input.fee,feePayer:input.feePayer,netAmount:input.netAmount,bankId:input.bankId,bankAccountId:input.bankId,paymentMethod:input.paymentMethod,note:input.note,collectionType:input.collectionType,collectorEmployeeId:input.collectorEmployeeId,collectorEmployeeName:input.collectorEmployeeName,collectedAt:input.collectedAt,handoverStatus:input.handoverStatus,requestFingerprint:receiptIntentFingerprint(ar.id,input),updatedAt:now});syncReceiptBankTransaction(currentReceipt,currentAr,now,currentPlan.transaction);syncReceivableSummary(currentAr,now);return currentReceipt},(row)=>assertReceiptPostCondition(row,state.receivables.find((item)=>String(item.id||'')===String(ar.id||''))));
   }
   function deleteReceipt(id, token) { return queueReceiptMutation(()=>deleteReceiptUnlocked(id,token)); }
   function deleteReceiptUnlocked(id, token) {
