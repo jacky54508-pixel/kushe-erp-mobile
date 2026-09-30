@@ -3516,6 +3516,32 @@
       receiptMutationPlan(row);
     });
   }
+  function cancelEmployeeCashHandover(receiptId) {
+    requireStoreTransactionDraft();
+    const receiptMatches=state.receipts.filter((row)=>String(row.id||'')===String(receiptId||''));if(receiptMatches.length!==1)throw new Error(receiptMatches.length?'員工代收紀錄編號不唯一，已停止撤銷':'找不到員工代收紀錄');
+    const receipt=receiptMatches[0],stored=strictStoredReceiptPlan(receipt);
+    if(stored.collectionType!=='employee_cash')throw new Error('只有員工現金代收可以撤銷繳回');
+    if(stored.handoverStatus!=='completed')throw new Error('此員工代收款目前不是已繳回狀態，禁止重複撤銷');
+    const arMatches=state.receivables.filter((row)=>String(row.id||'')===String(receipt.receivableId||''));if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止撤銷':'找不到對應應收帳款');
+    const ar=arMatches[0],beforeReceived=assertReceivableSettlementBaseline(ar).received,plan=receiptMutationPlan(receipt),now=new Date().toISOString();
+    if(!plan.transaction||!plan.bank||plan.amount!==stored.cashAmount)throw new Error('員工代收繳回銀行流水無法唯一驗證，已停止撤銷');
+    if(String(plan.transaction.id||'')!==String(receipt.handoverTransactionId||'')||String(plan.transaction.bankId||plan.transaction.bankAccountId||'')!==String(receipt.handoverBankId||''))throw new Error('員工代收繳回銀行流水與繳回欄位不一致，已停止撤銷');
+    return executeReceiptMutationDraft(`撤銷員工代收繳回 ${ar.sourceNo||''}`,()=>{
+      const currentReceipt=state.receipts.find((row)=>String(row.id||'')===String(receipt.id||'')),currentAr=state.receivables.find((row)=>String(row.id||'')===String(ar.id||'')),currentPlan=receiptMutationPlan(currentReceipt);
+      if(!currentPlan.transaction||!currentPlan.bank||currentPlan.amount!==stored.cashAmount)throw new Error('撤銷前銀行流水驗證失敗');
+      adjustBankIncome(currentPlan.bank,-currentPlan.amount,now);
+      state.bankTransactions=state.bankTransactions.filter((row)=>row!==currentPlan.transaction);
+      Object.assign(currentReceipt,{handoverStatus:'pending',handedOverAt:'',handoverBankId:'',handoverTransactionId:'',bankId:'',bankAccountId:'',bankTransactionId:'',netAmount:0,handoverNote:'',updatedAt:now});
+      if(assertReceivableSettlementBaseline(currentAr).received!==beforeReceived)throw new Error('撤銷員工代收繳回不可改變應收已沖銷金額');
+      receiptMutationPlan(currentReceipt);
+      return currentReceipt;
+    },(row)=>{
+      const currentAr=state.receivables.find((item)=>String(item.id||'')===String(ar.id||'')),next=strictStoredReceiptPlan(row);
+      if(next.handoverStatus!=='pending'||row.handedOverAt||row.handoverBankId||row.handoverTransactionId||row.bankId||row.bankAccountId||row.bankTransactionId||strictReceiptMoney(row.netAmount??0,'撤銷後銀行入帳金額')!==0)throw new Error('撤銷員工代收繳回 post-condition：繳回欄位未清空');
+      if(assertReceivableSettlementBaseline(currentAr).received!==beforeReceived)throw new Error('撤銷員工代收繳回 post-condition：應收沖銷金額被改變');
+      receiptMutationPlan(row);
+    });
+  }
   function addRetentionReceipt(values) {
     requireStoreTransactionDraft();
     const idempotencyKey=String(values.idempotencyKey||'').trim();
@@ -5270,7 +5296,7 @@
     'repairDailyBillingLinks','saveSystemSettings',
     'saveQuotationUnitPreset','saveQuotationPublicNotePreset','deleteQuotationPublicNotePreset',
     'saveCommission','deleteCommission','saveDailyBatch','deleteDailyBatch','saveInvoice','createBilling','updateBilling','deleteBilling',
-    'addReceipt','updateReceipt','deleteReceipt','completeEmployeeCashHandover','addRetentionReceipt','updateRetentionReceipt','deleteRetentionReceipt','deleteReceivableAccounting',
+    'addReceipt','updateReceipt','deleteReceipt','completeEmployeeCashHandover','cancelEmployeeCashHandover','addRetentionReceipt','updateRetentionReceipt','deleteRetentionReceipt','deleteReceivableAccounting',
     'savePayable','deletePayable','cleanupMaterialPayableTestData','repairMergedPayableHistory','addPayablePayment','updatePayablePayment','deletePayablePayment',
     'updatePayrollAdjustments','addSalaryPayment','updateSalaryPayment','deleteSalaryPayment','updateBillingInvoice',
     'saveCustomer','deleteCustomer','saveProject','deleteProject','mergeProject','saveEmployee','deleteEmployee','saveMaterial','deleteMaterial',
@@ -5285,7 +5311,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
