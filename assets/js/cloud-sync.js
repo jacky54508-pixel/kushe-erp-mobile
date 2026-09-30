@@ -499,13 +499,29 @@
       && ready.data?.audit?.[0]?.action === detail.action
       && store.getLastStoreTransactionResult()?.operationId === detail.operationId);
   }
+  async function isTemporaryUserCloudCommit(detail) {
+    if (detail?.syncOrigin !== 'TEMPORARY_CLOUD_COMMIT'
+      || !detail?.operationId || !detail?.revisionId) return false;
+    const store=window.KuSheERPStore,result=store?.getLastStoreTransactionResult?.();
+    if (!store?.isEphemeralMode?.() || !result
+      || !['COMMITTED','COMMITTED_WITH_NOTIFICATION_WARNING'].includes(result.status)
+      || !result.ephemeral || result.noChange
+      || result.operationId!==detail.operationId || result.revisionId!==detail.revisionId) return false;
+    const ready=await store.remoteApplyReadiness?.();
+    return Boolean(ready?.safe && ready.ephemeral
+      && ready.revision?.id===detail.revisionId
+      && ready.revision?.operationId===detail.operationId
+      && store.getLastStoreTransactionResult()?.operationId===detail.operationId);
+  }
   function handleEditorCommit(event) {
     if (syncOrigin === 'REMOTE_APPLY' || event?.detail?.syncOrigin === 'REMOTE_APPLY') return;
     const detail = {...event?.detail}, generation = editorGeneration;
     // Store records the completed transaction after synchronous notifications.
     window.setTimeout(async () => {
       try {
-        if (!await isTrustedUserDurableCommit(detail) || syncOrigin === 'REMOTE_APPLY'
+        const temporaryCommit=detail.syncOrigin==='TEMPORARY_CLOUD_COMMIT';
+        const verified=temporaryCommit ? await isTemporaryUserCloudCommit(detail) : await isTrustedUserDurableCommit(detail);
+        if (!verified || syncOrigin === 'REMOTE_APPLY'
           || generation !== editorGeneration || !editorSurfaceSafe()) return;
         editorTouched = false;
         editorCommitFloor = detail.operationId;
