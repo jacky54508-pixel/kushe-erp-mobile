@@ -59,3 +59,11 @@
   :is(body[data-route="settings"]) #settingsApp .settings-kv>div { display:grid; gap:5px; }
   :is(body[data-route="settings"]) #settingsApp .settings-kv dd { max-width:none; text-align:left; }
 }
+
+
+/* P19-3A-0 Device Trust Security Foundation */
+:is(body[data-route="settings"]) #settingsApp .settings-device-pill { flex:0 0 auto; padding:5px 9px; border-radius:999px; font-size:10px; font-weight:850; text-align:center; }
+:is(body[data-route="settings"]) #settingsApp .settings-device-pill.is-trusted { background:#e6f7ee; color:#08784e; }
+:is(body[data-route="settings"]) #settingsApp .settings-device-pill.is-temporary { background:#fff0d8; color:#9a5b08; }
+:is(body[data-route="settings"]) #settingsApp .settings-device-warning { margin:8px 17px 0; padding:11px 12px; border:1px solid #ead9b9; border-radius:9px; background:#fff9ee; color:#77531c; font-size:10.5px; line-height:1.55; }
+@media (max-width: 520px) { :is(body[data-route="settings"]) #settingsApp .settings-device-security .settings-card-head { display:grid; } :is(body[data-route="settings"]) #settingsApp .settings-device-pill { justify-self:start; } }

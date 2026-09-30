@@ -48,18 +48,30 @@
   async function startAuthenticatedApp() {
     setAuthView(true);
     setLoginMessage();
-    try{await window.KuSheERPStore.load();await window.KuSheERPStore.readCommittedSnapshot()}
+    const device=window.KusheCloudSync?.deviceSecurityStatus?.()||{trusted:false};
+    try{
+      if(device.trusted){
+        window.KuSheERPStore?.clearEphemeralSession?.();
+        await window.KuSheERPStore.load();await window.KuSheERPStore.readCommittedSnapshot();
+      }else{
+        await window.KusheCloudSync?.bootstrapTemporarySession?.();
+      }
+    }
     catch(error){
       window.KusheCloudSync?.stopAutoBackup?.();
-      window.KusheRecovery?.showResult({status:'RECOVERY_REQUIRED',operationId:error.operationId||'',message:error.message});
-      await window.KusheRecovery?.open();
+      setAuthView(false);
+      setLoginMessage(device.trusted?'ERP 本機資料安全檢查未通過，請使用恢復工具核對。':'無法安全載入公司雲端資料，未在此裝置保存 ERP 業務資料。',true);
+      if(device.trusted){
+        window.KusheRecovery?.showResult({status:'RECOVERY_REQUIRED',operationId:error.operationId||'',message:error.message});
+        await window.KusheRecovery?.open();
+      }
       return;
     }
     if (!initialized) {
       init();
       initialized = true;
     }
-    try { void Promise.resolve(window.KusheCloudSync?.startAutoBackup?.()).catch(() => {}); } catch (_) {}
+    if(device.trusted)try { void Promise.resolve(window.KusheCloudSync?.startAutoBackup?.()).catch(() => {}); } catch (_) {}
   }
   async function handleLogout() {
     if($('#recoveryModal'))$('#recoveryModal').hidden=true;
@@ -67,6 +79,7 @@
     closePopovers();
     window.KusheCloudSync?.stopAutoBackup?.();
     window.KusheCloudSync?.close();
+    window.KuSheERPStore?.clearEphemeralSession?.();
     closeChangePasswordModal(true);
     try { await window.KusheAuthGate?.logout(); } catch (_) {}
     setAuthView(false);
@@ -345,7 +358,7 @@
     (data.payroll||[]).forEach((row)=>{if(/^\d{4}-\d{2}$/.test(row.month||''))values.push(row.month)}); return values;
   }
   function setupPeriod() {
-    const select=$('#dashboardMonth'); const data=window.KuSheLegacyData.getState(); const current=businessMonth(); const keys=dateKeys(data); const latest=[current,...keys].sort().at(-1); const cursor=new Date(`${latest}-01T00:00:00`); const options=[];
+    const select=$('#dashboardMonth'); const data=window.KuSheERPStore?.getState?.()||window.KuSheLegacyData?.getState?.()||{}; const current=businessMonth(); const keys=dateKeys(data); const latest=[current,...keys].sort().at(-1); const cursor=new Date(`${latest}-01T00:00:00`); const options=[];
     for(let i=0;i<24;i+=1){const d=new Date(cursor.getFullYear(),cursor.getMonth()-i,1);const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;options.push(`<option value="${key}" ${key===current?'selected':''}>${d.getFullYear()}年${d.getMonth()+1}月</option>`)}
     select.innerHTML=options.join(''); if(!options.some((html)=>html.includes(`value="${current}"`)))select.value=latest;
     select.addEventListener('change',()=>window.KusheDashboard.refresh());

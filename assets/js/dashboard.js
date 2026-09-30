@@ -348,16 +348,25 @@
   function renderPayroll(vm) {
     $('#payrollSummary').innerHTML = `<div><span>薪資總額</span><strong>${money(vm.payrollTotal)}</strong></div><div><span>已付款</span><strong>${money(vm.payrollPaid)}</strong></div><div><span>未付款</span><strong>${money(vm.payrollOpen)}</strong></div><button type="button" data-module="payroll">查看薪資管理　→</button>`;
   }
+  function dashboardData() {
+    const storeData=window.KuSheERPStore?.getState?.();
+    if(storeData&&typeof storeData==='object')return storeData;
+    return window.KuSheLegacyData?.refresh?.()||{};
+  }
+  function dashboardScore(value) {
+    if(window.KuSheLegacyData?.score)return window.KuSheLegacyData.score(value);
+    return ['banks','receivables','payables','billings','receipts','payroll','salaryPayments','projects','customers','vendors','dailyLogs','employees','materials','attendance','quotations','commissions','invoices','materialUsages','bankTransactions'].reduce((sum,key)=>sum+(Array.isArray(value?.[key])?value[key].length:0),0);
+  }
   function render(vm) {
     activeVm = vm; renderKpis(vm); renderStructure(vm); renderProjects(vm); renderAttention(vm); renderPayroll(vm);
     $('#trendCurrent').textContent = money(vm.revenue); const d = vm.deltas.revenue; $('#trendDelta').textContent = d.text; $('#trendDelta').className = d.className;
     renderChart(); window.KusheIcons?.render(document);
-    const info = window.KuSheLegacyData.getSourceInfo();
-    const count = window.KuSheLegacyData.score(vm.data);
-    const stamp = info.updatedAt ? new Date(info.updatedAt).toLocaleString('zh-TW', { hour12:false }) : '—';
-    $('#dataSourceLabel').textContent = count ? `${info.label}｜${count} 筆既有資料｜更新 ${stamp}` : '尚未讀取到既有 ERP 資料；所有缺少項目均顯示 0 或 —';
+    const count=dashboardScore(vm.data),updatedAt=vm.data?.meta?.updatedAt||'';
+    const stamp=updatedAt&&Number.isFinite(Date.parse(updatedAt))?new Date(updatedAt).toLocaleString('zh-TW',{hour12:false}):'—';
+    const source=window.KuSheERPStore?.isEphemeralMode?.()?'雲端即時資料（臨時裝置／不落地）':'ERP Store 即時資料';
+    $('#dataSourceLabel').textContent = count ? `${source}｜${count} 筆既有資料｜更新 ${stamp}` : '尚未讀取到既有 ERP 資料；所有缺少項目均顯示 0 或 —';
   }
-  function refresh() { const data = window.KuSheLegacyData.refresh(); render(derive(data, selectedMonth())); }
+  function refresh() { const data = dashboardData(); render(derive(data, selectedMonth())); }
   function setupChart() {
     const canvas = $('#trendChart'); const tooltip = $('#chartTooltip');
     canvas.addEventListener('mousemove', (event) => { if (!chartPositions.length) return; const rect=canvas.getBoundingClientRect(); const x=event.clientX-rect.left; const point=chartPositions.reduce((best,p)=>Math.abs(p.x-x)<Math.abs(best.x-x)?p:best,chartPositions[0]); tooltip.hidden=false; tooltip.textContent=`${point.key}　${money(point.value)}`; tooltip.style.left=`${point.x}px`; tooltip.style.top=`${point.y}px`; });
@@ -369,7 +378,7 @@
   function readSnapshot(month = businessMonth()) {
     const value = String(month || '');
     const selected = /^\d{4}-\d{2}$/.test(value) ? value : businessMonth();
-    return derive(window.KuSheLegacyData.refresh(), selected);
+    return derive(dashboardData(), selected);
   }
   window.KusheDashboard = { init, refresh, render, readSnapshot, getState: () => activeVm };
 }());

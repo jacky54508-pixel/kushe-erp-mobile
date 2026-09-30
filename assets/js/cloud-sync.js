@@ -18,6 +18,8 @@
   const AUTO_APPLY_FENCE_VERSION = 2;
   const RESTORE_BACKUP_MARKER_KEY = 'kushe_erp_restore_backup_handoff_v1';
   const RESTORE_BACKUP_MARKER_TTL_MS = 30 * 60 * 1000;
+  const DEVICE_TRUST_KEY = 'kushe_erp_device_trust_v1';
+  const DEVICE_TRUST_SCHEMA = 'kushe-device-trust-v1';
   const AUTO_DEBOUNCE_MS = 8000;
   const AUTO_ONLINE_RETRY_MS = 3000;
   const SETTINGS_CREDENTIAL_KEYS = new Set([
@@ -31,6 +33,8 @@
     AUTH_REQUIRED: '登入狀態已失效，請重新登入。',
     AUTH_CHANGED: '登入帳號已變更，請重新檢查並確認雲端操作。',
     PRINCIPAL_UNBOUND: '本機資料尚未確認屬於目前帳號，請手動核對雲端同步。',
+    DEVICE_TRUST_REQUIRED: '此裝置尚未設為公司信任裝置，已停止持久化自動同步。',
+    TEMPORARY_CLOUD_ONLY: '臨時裝置使用雲端即時模式；ERP 業務資料不寫入此裝置的本機快取。',
     REMOTE_EMPTY: '雲端尚無資料，可手動上傳本機備份。',
     SYNCED: '本機與雲端一致。',
     LOCAL_NEWER: '本機資料時間較新。系統不會自動覆蓋；若確認雲端才是正確版本，可手動以雲端覆蓋本機。',
@@ -39,6 +43,7 @@
     UNKNOWN_CONFLICT: '資料版本無法安全判定，已停止同步。',
     SECRET_BLOCKED: '偵測到未清除的憑證欄位，已停止同步。',
     RACE_BLOCKED: '雲端資料剛剛已更新，為避免覆蓋已停止同步。',
+    TRUSTED_PRIORITY_AVAILABLE: '雲端最後更新來自臨時裝置，且與此公司信任裝置從同一版本分叉。已停止自動同步，等待公司信任裝置確認處置。',
     VERIFY_FAILED: '雲端驗證失敗，請停止操作。',
     CAS_RESPONSE_INVALID: '雲端版本回應無法驗證，已停止同步。',
     SERVER_ERROR: '雲端服務回應錯誤，已停止同步。',
@@ -56,6 +61,7 @@
   };
   const AUTO_STATUS_TEXT = {
     PRINCIPAL_UNBOUND: '帳號同步基準未綁定，需要手動核對',
+    DEVICE_TRUST_REQUIRED: '臨時／未信任裝置：自動同步已停止',
     STOPPED: '未啟用',
     CHECKING: '正在確認安全同步基準',
     ARMED: '已啟用',
@@ -66,6 +72,7 @@
     MANUAL_REQUIRED: '需要手動同步',
     CONFLICT: '偵測到衝突，已停止',
     RACE_BLOCKED: '雲端版本已變更，已停止',
+    TRUSTED_PRIORITY_AVAILABLE: '臨時裝置與公司資料衝突，等待信任裝置確認',
     SECRET_BLOCKED: '安全檢查未通過，已停止',
     SERVER_ERROR: '雲端回應無法驗證，已停止',
     AUTH_REQUIRED: '未登入'
@@ -84,6 +91,7 @@
   let autoController = null;
   let autoRetryMode = '';
   let autoPendingVerification = null;
+  let temporarySessionBaseline = null;
   // Only sync bookkeeping is invalidated. ERP snapshots are never touched here.
   let principalId = null;
   let syncGeneration = 0;
@@ -96,6 +104,53 @@
   function observedPrincipal() {
     const gate = window.KusheAuthGate;
     return gate?.session()?.access_token ? String(gate.user()?.id || '') : '';
+  }
+
+  function readDeviceTrustRecord(userId = observedPrincipal()) {
+    try {
+      const raw=window.localStorage.getItem(DEVICE_TRUST_KEY);
+      if(!raw)return null;
+      const value=JSON.parse(raw);
+      if(!value||typeof value!=='object'||Array.isArray(value)
+        ||value.schema!==DEVICE_TRUST_SCHEMA||value.version!==1
+        ||!['trusted','temporary'].includes(value.mode)
+        ||typeof value.userId!=='string'||!value.userId
+        ||typeof value.updatedAt!=='string'||!Number.isFinite(Date.parse(value.updatedAt)))return null;
+      if(userId&&value.userId!==userId)return null;
+      return {schema:value.schema,version:1,mode:value.mode,userId:value.userId,updatedAt:value.updatedAt};
+    } catch (_) { return null; }
+  }
+
+  function deviceSecurityStatus() {
+    const record=readDeviceTrustRecord(observedPrincipal());
+    return {
+      mode:record?.mode==='trusted'?'trusted':'temporary',
+      trusted:record?.mode==='trusted',
+      explicit:Boolean(record),
+      updatedAt:record?.updatedAt||''
+    };
+  }
+
+  function deviceAllowsAutomaticSync() {
+    return deviceSecurityStatus().trusted;
+  }
+
+  function setDeviceMode(mode) {
+    const next=mode==='trusted'?'trusted':'temporary',userId=observedPrincipal();
+    if(!userId)throw new CloudSyncError('AUTH_REQUIRED');
+    const wasEphemeral=Boolean(window.KuSheERPStore?.isEphemeralMode?.());
+    const record={schema:DEVICE_TRUST_SCHEMA,version:1,mode:next,userId,updatedAt:new Date().toISOString()};
+    const encoded=JSON.stringify(record);
+    window.localStorage.setItem(DEVICE_TRUST_KEY,encoded);
+    if(window.localStorage.getItem(DEVICE_TRUST_KEY)!==encoded)throw new CloudSyncError('VERIFY_FAILED');
+    stopAutoBackup();
+    window.dispatchEvent(new CustomEvent('kushe:device-trust-changed',{detail:{mode:next,trusted:next==='trusted'}}));
+    if(next==='trusted'&&wasEphemeral){
+      window.KuSheERPStore?.clearEphemeralSession?.();
+      window.requestAnimationFrame(()=>window.location.reload());
+    }else if(next==='trusted')void startAutoBackup().catch(()=>{});
+    else setAutoState('DEVICE_TRUST_REQUIRED',{pending:false,armed:false});
+    return deviceSecurityStatus();
   }
 
   function observePrincipal() {
@@ -162,8 +217,98 @@
   let cloudRequest = null, cloudTimer = null, cloudLastFinished = 0;
 
   function cloudVisible() { return document.visibilityState === 'visible'; }
+
+  function bootstrapTemporarySession() {
+    return coordinate('temporary-bootstrap',bootstrapTemporarySessionOperation);
+  }
+  async function bootstrapTemporarySessionOperation() {
+    if(deviceAllowsAutomaticSync())return {code:'TRUSTED_DEVICE'};
+    const auth=await authContext(),store=window.KuSheERPStore;
+    if(!store?.loadEphemeralSnapshot)throw new CloudSyncError('STORE_UNAVAILABLE');
+    const firstRow=await readRemote(auth);
+    const firstRemote=firstRow?await validateRemoteSnapshot(firstRow.data,firstRow.updated_at):null;
+    if(!firstRow||!firstRemote)throw new CloudSyncError('REMOTE_EMPTY');
+    const currentAuth=await revalidatePrincipal(auth),raceRow=await readRemote(currentAuth),raceRemote=raceRow?await validateRemoteSnapshot(raceRow.data,raceRow.updated_at):null;
+    if(!raceRow||!raceRemote||!sameSyncVersion(firstRow.sync_version,raceRow.sync_version)
+      ||String(firstRow.updated_at||'')!==String(raceRow.updated_at||'')
+      ||firstRemote.fingerprint!==raceRemote.fingerprint)throw new CloudSyncError('RACE_BLOCKED');
+    await store.loadEphemeralSnapshot(raceRemote.data,{userId:auth.user.id,syncVersion:serverSyncVersion(raceRow.sync_version),updatedAt:String(raceRow.updated_at||''),fingerprint:raceRemote.fingerprint});
+    const memory=await store.readCommittedSnapshot();
+    const memoryInfo=await snapshotInfo(memory.data);
+    if(memoryInfo.fingerprint!==raceRemote.fingerprint)throw new CloudSyncError('VERIFY_FAILED');
+    temporarySessionBaseline={userId:auth.user.id,syncVersion:serverSyncVersion(raceRow.sync_version),updatedAt:String(raceRow.updated_at||''),fingerprint:raceRemote.fingerprint};
+    currentStatus=classified('TEMPORARY_CLOUD_ONLY',auth,memoryInfo,raceRemote,raceRow,false,false);
+    setAutoState('DEVICE_TRUST_REQUIRED',{pending:false,armed:false,message:'臨時裝置：雲端即時模式（本機不落地）'});
+    startCloudEvents();
+    return {code:'TEMPORARY_CLOUD_ONLY',syncVersion:temporarySessionBaseline.syncVersion,remoteFingerprint:raceRemote.fingerprint,localFingerprint:memoryInfo.fingerprint};
+  }
+
+  async function commitTemporarySnapshot(value,context={}) {
+    if(deviceAllowsAutomaticSync())throw new CloudSyncError('DEVICE_TRUST_REQUIRED');
+    const auth=await authContext();
+    if(!temporarySessionBaseline||temporarySessionBaseline.userId!==auth.user.id||context.userId!==auth.user.id)throw new CloudSyncError('PRINCIPAL_UNBOUND');
+    const store=window.KuSheERPStore;
+    if(!store?.isEphemeralMode?.())throw new CloudSyncError('STORE_BUSY');
+    const local=await snapshotInfo(value);
+    if(local.score<=0)throw new CloudSyncError('RESTORE_BLOCKED');
+    const currentMemory=await store.readCommittedSnapshot();
+    if(context.expectedMemoryBaseline&&currentMemory.baseline!==context.expectedMemoryBaseline)throw new CloudSyncError('RACE_BLOCKED');
+    const firstRow=await readRemote(auth),firstRemote=firstRow?await validateRemoteSnapshot(firstRow.data,firstRow.updated_at):null;
+    if(!firstRow||!firstRemote||!sameSyncVersion(firstRow.sync_version,temporarySessionBaseline.syncVersion)
+      ||String(firstRow.updated_at||'')!==temporarySessionBaseline.updatedAt
+      ||firstRemote.fingerprint!==temporarySessionBaseline.fingerprint)throw new CloudSyncError('CONFLICT');
+    const raceRow=await readRemote(await revalidatePrincipal(auth)),raceRemote=raceRow?await validateRemoteSnapshot(raceRow.data,raceRow.updated_at):null;
+    if(!raceRow||!raceRemote||!sameSyncVersion(raceRow.sync_version,firstRow.sync_version)
+      ||String(raceRow.updated_at||'')!==String(firstRow.updated_at||'')
+      ||raceRemote.fingerprint!==firstRemote.fingerprint)throw new CloudSyncError('RACE_BLOCKED');
+    const applied=await casWrite(auth,serverSyncVersion(raceRow.sync_version),local.data);
+    if(applied.status==='CONFLICT')throw new CloudSyncError('CONFLICT');
+    const verifiedRow=await readRemote(await revalidatePrincipal(auth)),verified=verifiedRow?await validateRemoteSnapshot(verifiedRow.data,verifiedRow.updated_at):null;
+    if(!verifiedRow||!verified||!matchesAppliedVersion(verifiedRow,applied)||verified.fingerprint!==local.fingerprint)throw new CloudSyncError('VERIFY_FAILED');
+    temporarySessionBaseline={userId:auth.user.id,syncVersion:serverSyncVersion(verifiedRow.sync_version),updatedAt:String(verifiedRow.updated_at||''),fingerprint:verified.fingerprint};
+    currentStatus=classified('TEMPORARY_CLOUD_ONLY',auth,verified,verified,verifiedRow,false,false);
+    return {data:verified.data,syncVersion:temporarySessionBaseline.syncVersion,updatedAt:temporarySessionBaseline.updatedAt,fingerprint:temporarySessionBaseline.fingerprint};
+  }
+
+  async function refreshTemporaryFromCloud(reason) {
+    if(deviceAllowsAutomaticSync())return {code:'TRUSTED_DEVICE'};
+    if(!['STARTUP','AUTH_READY','VISIBILITY','FOCUS','ONLINE','POLL'].includes(reason))return {code:'CANCELLED'};
+    if(!temporarySessionBaseline||!observedPrincipal())return {code:'PRINCIPAL_UNBOUND'};
+    if(reason==='POLL'&&navigator.onLine===false)return {code:'NETWORK_ERROR'};
+    const editor=editorReadiness();
+    if(!editor.safe)return {code:'EDITOR_DIRTY'};
+    const auth=await authContext(),store=window.KuSheERPStore;
+    if(!store?.isEphemeralMode?.()||!store?.loadEphemeralSnapshot)throw new CloudSyncError('STORE_BUSY');
+    const before=await store.readCommittedSnapshot();
+    const beforeInfo=await snapshotInfo(before.data);
+    if(beforeInfo.fingerprint!==temporarySessionBaseline.fingerprint)throw new CloudSyncError('RACE_BLOCKED');
+    const firstRow=await readRemote(auth),firstRemote=firstRow?await validateRemoteSnapshot(firstRow.data,firstRow.updated_at):null;
+    if(!firstRow||!firstRemote)throw new CloudSyncError('REMOTE_EMPTY');
+    if(sameSyncVersion(firstRow.sync_version,temporarySessionBaseline.syncVersion)
+      &&String(firstRow.updated_at||'')===temporarySessionBaseline.updatedAt
+      &&firstRemote.fingerprint===temporarySessionBaseline.fingerprint)return {code:'SYNCED'};
+    const currentAuth=await revalidatePrincipal(auth),raceRow=await readRemote(currentAuth),raceRemote=raceRow?await validateRemoteSnapshot(raceRow.data,raceRow.updated_at):null;
+    if(!raceRow||!raceRemote||!sameSyncVersion(firstRow.sync_version,raceRow.sync_version)
+      ||String(firstRow.updated_at||'')!==String(raceRow.updated_at||'')
+      ||firstRemote.fingerprint!==raceRemote.fingerprint)throw new CloudSyncError('RACE_BLOCKED');
+    const editorAfter=editorReadiness();
+    if(!editorAfter.safe||editorAfter.generation!==editor.generation)return {code:'EDITOR_DIRTY'};
+    const currentMemory=await store.readCommittedSnapshot();
+    const currentInfo=await snapshotInfo(currentMemory.data);
+    if(currentInfo.fingerprint!==temporarySessionBaseline.fingerprint
+      ||currentMemory.baseline!==before.baseline)throw new CloudSyncError('RACE_BLOCKED');
+    await store.loadEphemeralSnapshot(raceRemote.data,{userId:auth.user.id,syncVersion:serverSyncVersion(raceRow.sync_version),updatedAt:String(raceRow.updated_at||''),fingerprint:raceRemote.fingerprint});
+    const applied=await store.readCommittedSnapshot(),appliedInfo=await snapshotInfo(applied.data);
+    if(appliedInfo.fingerprint!==raceRemote.fingerprint)throw new CloudSyncError('VERIFY_FAILED');
+    temporarySessionBaseline={userId:auth.user.id,syncVersion:serverSyncVersion(raceRow.sync_version),updatedAt:String(raceRow.updated_at||''),fingerprint:raceRemote.fingerprint};
+    currentStatus=classified('TEMPORARY_CLOUD_ONLY',auth,appliedInfo,raceRemote,raceRow,false,false);
+    try{window.dispatchEvent(new CustomEvent('kushe:data-updated',{detail:{action:'temporary-cloud-refresh',syncOrigin:'REMOTE_APPLY'}}))}catch(_){}
+    return {code:'REMOTE_APPLIED',syncVersion:temporarySessionBaseline.syncVersion,remoteFingerprint:raceRemote.fingerprint,localFingerprint:appliedInfo.fingerprint};
+  }
+
   function reconcileFromCloud(reason) {
     if (!['STARTUP','AUTH_READY','VISIBILITY','FOCUS','ONLINE','POLL'].includes(reason)) return Promise.resolve({code:'CANCELLED'});
+    if (!deviceAllowsAutomaticSync()) return refreshTemporaryFromCloud(reason).catch((error)=>({code:writeFailureCode(error)||'ERROR'}));
     if (!cloudEventsEnabled || !cloudVisible() || !observedPrincipal()) return Promise.resolve({code:'AUTH_REQUIRED',eligibleApply:false});
     if (reason === 'POLL' && navigator.onLine === false) return Promise.resolve({code:'NETWORK_ERROR',eligibleApply:false});
     if (cloudRequest) return cloudRequest.promise;
@@ -296,11 +441,11 @@
   const USER_COMMIT_OPERATIONS = new Set([
     'saveSystemSettings','saveQuotationUnitPreset','saveQuotationPublicNotePreset','deleteQuotationPublicNotePreset',
     'saveCommission','deleteCommission','saveDailyBatch','deleteDailyBatch','saveInvoice','createBilling','updateBilling','deleteBilling',
-    'addReceipt','updateReceipt','deleteReceipt','addRetentionReceipt','updateRetentionReceipt','deleteRetentionReceipt','deleteReceivableAccounting',
+    'addReceipt','updateReceipt','deleteReceipt','completeEmployeeCashHandover','cancelEmployeeCashHandover','addRetentionReceipt','updateRetentionReceipt','deleteRetentionReceipt','deleteReceivableAccounting',
     'savePayable','deletePayable','addPayablePayment','updatePayablePayment','deletePayablePayment',
     'updatePayrollAdjustments','addSalaryPayment','updateSalaryPayment','deleteSalaryPayment','updateBillingInvoice',
     'saveCustomer','deleteCustomer','saveProject','deleteProject','saveEmployee','deleteEmployee','saveMaterial','deleteMaterial',
-    'saveMaterialUsage','deleteMaterialUsage','saveProjectCost','deleteProjectCost','saveQuotationPrice','saveQuotation','setQuotationStatus','deleteQuotation',
+    'saveMaterialUsage','assignMaterialUsageEmployee','deleteMaterialUsage','saveProjectCost','deleteProjectCost','saveQuotationPrice','saveQuotation','setQuotationStatus','deleteQuotation',
     'cancelQuotationConfirmation','createQuotationRevision','saveQuotationTemplate'
   ]);
   function isBusinessEditorEvent(event) {
@@ -356,13 +501,29 @@
       && ready.data?.audit?.[0]?.action === detail.action
       && store.getLastStoreTransactionResult()?.operationId === detail.operationId);
   }
+  async function isTemporaryUserCloudCommit(detail) {
+    if (detail?.syncOrigin !== 'TEMPORARY_CLOUD_COMMIT'
+      || !detail?.operationId || !detail?.revisionId) return false;
+    const store=window.KuSheERPStore,result=store?.getLastStoreTransactionResult?.();
+    if (!store?.isEphemeralMode?.() || !result
+      || !['COMMITTED','COMMITTED_WITH_NOTIFICATION_WARNING'].includes(result.status)
+      || !result.ephemeral || result.noChange
+      || result.operationId!==detail.operationId || result.revisionId!==detail.revisionId) return false;
+    const ready=await store.remoteApplyReadiness?.();
+    return Boolean(ready?.safe && ready.ephemeral
+      && ready.revision?.id===detail.revisionId
+      && ready.revision?.operationId===detail.operationId
+      && store.getLastStoreTransactionResult()?.operationId===detail.operationId);
+  }
   function handleEditorCommit(event) {
     if (syncOrigin === 'REMOTE_APPLY' || event?.detail?.syncOrigin === 'REMOTE_APPLY') return;
     const detail = {...event?.detail}, generation = editorGeneration;
     // Store records the completed transaction after synchronous notifications.
     window.setTimeout(async () => {
       try {
-        if (!await isTrustedUserDurableCommit(detail) || syncOrigin === 'REMOTE_APPLY'
+        const temporaryCommit=detail.syncOrigin==='TEMPORARY_CLOUD_COMMIT';
+        const verified=temporaryCommit ? await isTemporaryUserCloudCommit(detail) : await isTrustedUserDurableCommit(detail);
+        if (!verified || syncOrigin === 'REMOTE_APPLY'
           || generation !== editorGeneration || !editorSurfaceSafe()) return;
         editorTouched = false;
         editorCommitFloor = detail.operationId;
@@ -466,6 +627,7 @@
   async function safeApplyOperation(lifecycleGuard = () => true) {
     let invalidated=false,shell=null,priorInert=false,applyStage='PREPARE';
     try {
+      if(!deviceAllowsAutomaticSync())return {code:'DEVICE_TRUST_REQUIRED',eligibleApply:false};
       const auth=await authContext(),store=window.KuSheERPStore;
       if (!store?.remoteApplyReadiness || !store?.applyRemoteSnapshot) throw new CloudSyncError('STORE_BUSY');
       const baseline=readBaseline(auth.user.id),row=await readRemote(auth);
@@ -702,7 +864,7 @@
   }
 
   function remotePath(userId) {
-    return `/rest/v1/erp_states?select=data%2Cupdated_at%2Csync_version&user_id=eq.${encodeURIComponent(userId)}&limit=1`;
+    return `/rest/v1/erp_states?select=data%2Cupdated_at%2Csync_version%2Clast_writer_mode%2Clast_base_sync_version&user_id=eq.${encodeURIComponent(userId)}&limit=1`;
   }
 
   async function readRemote(auth, options = {}) {
@@ -729,24 +891,42 @@
     return left === null || right === null ? left === right : String(serverSyncVersion(left)) === String(serverSyncVersion(right));
   }
 
+  function optionalSyncVersion(value) {
+    return value === null || value === undefined ? null : serverSyncVersion(value);
+  }
+
+  function writerModeForCurrentDevice() {
+    return deviceAllowsAutomaticSync() ? 'trusted' : 'temporary';
+  }
+
   async function casWrite(auth, expectedSyncVersion, data, options = {}) {
     const expected = expectedSyncVersion === null ? null : serverSyncVersion(expectedSyncVersion);
-    const rows = await request('/rest/v1/rpc/erp_state_cas_write', auth, {
+    const writerMode = writerModeForCurrentDevice();
+    const rows = await request('/rest/v1/rpc/erp_state_cas_write_v2', auth, {
       method: 'POST', cas: true, signal: options.signal,
-      body: { expected_sync_version: expected, new_data: data }
+      body: { expected_sync_version: expected, new_data: data, writer_mode: writerMode }
     });
     if (!Array.isArray(rows) || rows.length !== 1) throw new CloudSyncError('CAS_RESPONSE_INVALID');
     const result = rows[0];
-    if (result?.status === 'CONFLICT' && result.sync_version === null && result.updated_at === null) {
-      return { status: 'CONFLICT', syncVersion: null, updatedAt: null };
+    if (result?.status === 'CONFLICT') {
+      const currentVersion=optionalSyncVersion(result.sync_version);
+      const currentBase=optionalSyncVersion(result.last_base_sync_version);
+      const currentMode=['trusted','temporary','legacy'].includes(result.last_writer_mode)?result.last_writer_mode:null;
+      const currentUpdatedAt=typeof result.updated_at==='string'&&Number.isFinite(Date.parse(result.updated_at))?result.updated_at:null;
+      if(currentVersion!==null&&!currentUpdatedAt)throw new CloudSyncError('CAS_RESPONSE_INVALID');
+      return {status:'CONFLICT',syncVersion:currentVersion,updatedAt:currentUpdatedAt,lastWriterMode:currentMode,lastBaseSyncVersion:currentBase};
     }
     if (result?.status !== 'APPLIED') throw new CloudSyncError('CAS_RESPONSE_INVALID');
     const syncVersion = serverSyncVersion(result.sync_version);
+    const returnedMode=result.last_writer_mode;
+    const returnedBase=optionalSyncVersion(result.last_base_sync_version);
     if (BigInt(syncVersion) !== (expected === null ? 1n : BigInt(expected) + 1n)
-      || typeof result.updated_at !== 'string' || !Number.isFinite(Date.parse(result.updated_at))) {
+      || typeof result.updated_at !== 'string' || !Number.isFinite(Date.parse(result.updated_at))
+      || returnedMode!==writerMode
+      || (expected===null ? returnedBase!==null : !sameSyncVersion(returnedBase,expected))) {
       throw new CloudSyncError('CAS_RESPONSE_INVALID');
     }
-    return { status: 'APPLIED', syncVersion, updatedAt: result.updated_at };
+    return { status: 'APPLIED', syncVersion, updatedAt: result.updated_at, lastWriterMode:returnedMode, lastBaseSyncVersion:returnedBase };
   }
 
   function matchesAppliedVersion(row, applied) {
@@ -760,13 +940,32 @@
     return error?.code || 'ERROR';
   }
 
-  function pauseAutoForConflict() {
+  function trustedPriorityEligible(remoteVersion,lastWriterMode,lastBaseSyncVersion,expectedBase) {
+    if(!deviceAllowsAutomaticSync()||expectedBase===null||expectedBase===undefined
+      ||lastWriterMode!=='temporary'||lastBaseSyncVersion===null||remoteVersion===null)return false;
+    try {
+      const base=serverSyncVersion(expectedBase),remote=serverSyncVersion(remoteVersion),writerBase=serverSyncVersion(lastBaseSyncVersion);
+      return sameSyncVersion(base,writerBase)&&BigInt(remote)===BigInt(base)+1n;
+    } catch (_) { return false; }
+  }
+
+  function trustedPriorityFromRow(row,expectedBase) {
+    return Boolean(row)&&trustedPriorityEligible(row.sync_version,row.last_writer_mode,row.last_base_sync_version,expectedBase);
+  }
+
+  function trustedPriorityFromCas(result,expectedBase) {
+    return Boolean(result)&&result.status==='CONFLICT'
+      &&trustedPriorityEligible(result.syncVersion,result.lastWriterMode,result.lastBaseSyncVersion,expectedBase);
+  }
+
+  function pauseAutoForConflict(options={}) {
     clearAutoTimer();
     clearOnlineTimer();
     autoArmed = false;
     autoRetryMode = '';
     autoPendingVerification = null;
-    return setAutoState('CONFLICT', { pending: false, armed: false });
+    const code=options.trustedPriority?'TRUSTED_PRIORITY_AVAILABLE':'CONFLICT';
+    return setAutoState(code, { pending: false, armed: false });
   }
 
   // Ordinary reads never delete persisted bookkeeping, including during auth transitions.
@@ -858,7 +1057,7 @@
   }
 
   function classified(code, auth, local, remote, row, canUpload = false, canRestore = false) {
-    return { code, message: STATUS_TEXT[code], canUpload, canRestore, auth, local, remote, remoteExists: Boolean(row), syncVersion: row ? row.sync_version : null, remoteUpdatedAt: String(row?.updated_at || '') };
+    return { code, message: STATUS_TEXT[code], canUpload, canRestore, auth, local, remote, remoteExists: Boolean(row), syncVersion: row ? row.sync_version : null, remoteUpdatedAt: String(row?.updated_at || ''), remoteWriterMode:row?.last_writer_mode||null, remoteBaseSyncVersion:row?.last_base_sync_version??null };
   }
 
   function classify(auth, local, remote, row) {
@@ -866,6 +1065,7 @@
     if(row&&baseline&&local.fingerprint===baseline.localFingerprint&&baselineMatchesRemote(baseline,row,remote))return classified('SYNCED',auth,local,remote,row,false,false);
     if (!row) return classified('REMOTE_EMPTY', auth, local, null, null, local.score > 0);
     if (local.fingerprint === remote.fingerprint) return classified('SYNCED', auth, local, remote, row, false);
+    if (baseline && trustedPriorityFromRow(row,baseline.syncVersion)) return classified('TRUSTED_PRIORITY_AVAILABLE',auth,local,remote,row,false,false);
     if (local.score === 0 && remote.score > 0) return classified('LOCAL_EMPTY_REMOTE_EXISTS', auth, local, remote, row, false, true);
     if (!local.time || !remote.time) return classified('UNKNOWN_CONFLICT', auth, local, remote, row, false);
     if (remote.time.value >= local.time.value) return classified('REMOTE_NEWER', auth, local, remote, row, false, remote.score > 0);
@@ -901,18 +1101,25 @@
       localScore: Number(value.local?.score) || 0,
       remoteScore: Number(value.remote?.score) || 0,
       localFingerprint: shortFingerprint(value.local?.fingerprint),
-      remoteFingerprint: shortFingerprint(value.remote?.fingerprint)
+      remoteFingerprint: shortFingerprint(value.remote?.fingerprint),
+      remoteWriterMode: value.remoteWriterMode || '',
+      remoteBaseSyncVersion: value.remoteBaseSyncVersion ?? null
     });
   }
 
   function manualRestoreEligible(status) {
+    if(!deviceAllowsAutomaticSync())return false;
     return Boolean(status?.canRestore || status?.code === 'LOCAL_NEWER'
+      && status.remoteExists && status.remoteScore > 0
+      || status?.code === 'TRUSTED_PRIORITY_AVAILABLE'
       && status.remoteExists && status.remoteScore > 0);
   }
 
   function restoreIntentForStatus(status) {
     if (status?.code === 'LOCAL_NEWER' && status.remoteExists && status.remote?.score > 0)
       return 'MANUAL_LOCAL_NEWER';
+    if (status?.code === 'TRUSTED_PRIORITY_AVAILABLE' && status.remoteExists && status.remote?.score > 0)
+      return 'TRUSTED_PRIORITY_KEEP_REMOTE';
     if (status?.code === 'REMOTE_NEWER' && status.canRestore && status.local?.score > 0)
       return 'ORDINARY_REMOTE_RESTORE';
     return null;
@@ -988,20 +1195,29 @@
     setText('cloudSyncState', view.code || '—');
     setText('cloudSyncMessage', view.message || '');
     setText('cloudSyncFingerprint', `本機 ${view.localFingerprint || '—'}／雲端 ${view.remoteFingerprint || '—'}`);
+    const priority=view.code==='TRUSTED_PRIORITY_AVAILABLE';
     const upload = document.getElementById('cloudSyncUpload');
-    if (upload) upload.disabled = busy || !view.canUpload;
+    if (upload) {
+      upload.hidden=priority;
+      upload.disabled = busy || !deviceAllowsAutomaticSync() || !view.canUpload;
+    }
     const restore = document.getElementById('cloudSyncRestore');
     if (restore) {
+      restore.hidden=priority;
       restore.disabled = busy || !manualRestoreEligible(view);
       restore.textContent = view.backupReady ? '繼續以雲端覆蓋本機'
         : view.code === 'LOCAL_NEWER' ? '以雲端覆蓋本機' : '從雲端還原至本機';
     }
+    const keepRemote=document.getElementById('cloudSyncKeepRemote');
+    if(keepRemote){keepRemote.hidden=!priority;keepRemote.disabled=busy||!priority||!deviceAllowsAutomaticSync()}
+    const useTrusted=document.getElementById('cloudSyncUseTrusted');
+    if(useTrusted){useTrusted.hidden=!priority;useTrusted.disabled=busy||!priority||!deviceAllowsAutomaticSync()}
     renderAutoState();
   }
 
   function setBusy(value) {
     busy = Boolean(value);
-    ['cloudSyncRefresh', 'cloudSyncRestore', 'cloudSyncUpload', 'cloudSyncClose', 'cloudSyncHeaderClose', 'cloudSyncBackdrop'].forEach((id) => {
+    ['cloudSyncRefresh', 'cloudSyncRestore', 'cloudSyncUpload', 'cloudSyncKeepRemote', 'cloudSyncUseTrusted', 'cloudSyncClose', 'cloudSyncHeaderClose', 'cloudSyncBackdrop'].forEach((id) => {
       const node = document.getElementById(id);
       if (node) node.disabled = busy;
     });
@@ -1160,42 +1376,41 @@
       :{state:'blocked',code:'VERIFY_FAILED',failureCode:fence.lastFailure?.code||'VERIFY_FAILED'};
   }
 
+  function restoreConfirmModal(preflight, options = {}) {
+    const manualOverride=Boolean(options.manualOverride),backupCompletion=Boolean(options.backupCompletion);
+    return new Promise((resolve)=>{
+      document.getElementById('cloudRestoreConfirmLayer')?.remove();
+      const layer=document.createElement('div');
+      layer.id='cloudRestoreConfirmLayer';
+      layer.className='auth-modal-layer';
+      layer.innerHTML='<button class="auth-modal-backdrop" type="button" data-cloud-restore-cancel aria-label="取消雲端還原"></button><section class="auth-modal cloud-sync-modal" role="dialog" aria-modal="true" aria-labelledby="cloudRestoreConfirmTitle"><header><div><small>安全雲端還原</small><h2 id="cloudRestoreConfirmTitle"></h2></div><button class="auth-modal-close" type="button" data-cloud-restore-cancel aria-label="取消雲端還原">×</button></header><div class="cloud-sync-body"><p class="cloud-sync-intro" id="cloudRestoreConfirmIntro"></p><div class="cloud-sync-status" id="cloudRestoreOverrideWarning" hidden><strong>⚠ 本機資料時間較新</strong><p>你正在手動選擇以雲端資料覆蓋本機；系統不會自動執行。</p></div><div class="cloud-sync-grid"><div class="cloud-sync-item"><span>登入帳號</span><b id="cloudRestoreEmail"></b></div><div class="cloud-sync-item"><span>本機資料筆數</span><b id="cloudRestoreLocalScore"></b></div><div class="cloud-sync-item"><span>雲端資料筆數</span><b id="cloudRestoreRemoteScore"></b></div><div class="cloud-sync-item"><span>本機更新</span><b id="cloudRestoreLocalTime"></b></div><div class="cloud-sync-item"><span>雲端更新</span><b id="cloudRestoreRemoteTime"></b></div><div class="cloud-sync-item"><span>雲端版本</span><b id="cloudRestoreRemoteFingerprint"></b></div></div><div class="cloud-sync-status"><strong>即將執行</strong><p id="cloudRestoreAction"></p></div></div><footer><button class="auth-modal-cancel" type="button" data-cloud-restore-cancel>取消</button><button class="auth-modal-submit" type="button" data-cloud-restore-confirm></button></footer></section>';
+      const set=(id,value)=>{const node=layer.querySelector('#'+id);if(node)node.textContent=String(value??'—')};
+      set('cloudRestoreConfirmTitle',backupCompletion?'確認雲端覆蓋':'確認從雲端還原');
+      set('cloudRestoreConfirmIntro',backupCompletion?'本機安全備份已建立。再次確認後，才會以目前最新雲端資料覆蓋本機。':'確認後才會把雲端 ERP 資料寫入這台裝置；此步驟不會把目前本機資料上傳到雲端。');
+      set('cloudRestoreEmail',preflight.auth?.user?.email||'—');
+      set('cloudRestoreLocalScore',preflight.local?.score||0);
+      set('cloudRestoreRemoteScore',preflight.remote?.score||0);
+      set('cloudRestoreLocalTime',formatTime(preflight.local?.time?.raw));
+      set('cloudRestoreRemoteTime',formatTime(preflight.remote?.time?.raw||preflight.remoteUpdatedAt));
+      set('cloudRestoreRemoteFingerprint',shortFingerprint(preflight.remote?.fingerprint));
+      set('cloudRestoreAction',backupCompletion?'以雲端資料覆蓋本機；完成後系統會驗證資料並重新載入。':'從雲端還原至本機；完成後系統會驗證資料並重新載入。');
+      const warning=layer.querySelector('#cloudRestoreOverrideWarning');if(warning)warning.hidden=!manualOverride;
+      const confirm=layer.querySelector('[data-cloud-restore-confirm]');if(confirm)confirm.textContent=backupCompletion?'確認覆蓋本機':'確認還原';
+      let settled=false;
+      const finish=(approved)=>{if(settled)return;settled=true;layer.remove();resolve(Boolean(approved))};
+      layer.querySelectorAll('[data-cloud-restore-cancel]').forEach((node)=>node.addEventListener('click',()=>finish(false)));
+      confirm?.addEventListener('click',()=>finish(true));
+      document.body.appendChild(layer);
+      confirm?.focus();
+    });
+  }
+
   function restoreConfirmation(preflight, manualOverride = false) {
-    if (manualOverride) return window.confirm([
-      '⚠ 本機資料時間較新',
-      '你正在選擇：捨棄本機較新的資料，以雲端備份覆蓋本機。',
-      '系統不會自動做這件事，只有你這次手動確認才會繼續。',
-      `登入帳號：${preflight.auth?.user?.email || '—'}`,
-      `本機更新時間：${formatTime(preflight.local?.time?.raw)}`,
-      `雲端更新時間：${formatTime(preflight.remote?.time?.raw || preflight.remoteUpdatedAt)}`,
-      `本機資料筆數：${preflight.local?.score || 0}`,
-      `雲端資料筆數：${preflight.remote?.score || 0}`,
-      `本機 fingerprint：${preflight.local?.fingerprint || '—'}`,
-      `雲端 fingerprint：${preflight.remote?.fingerprint || '—'}`
-    ].join('\n'));
-    return window.confirm([
-      '確定要以雲端備份取代此瀏覽器目前 ERP 資料嗎？',
-      `本機更新時間：${formatTime(preflight.local?.time?.raw)}`,
-      `雲端更新時間：${formatTime(preflight.remote?.time?.raw || preflight.remoteUpdatedAt)}`,
-      `本機資料筆數：${preflight.local?.score || 0}`,
-      `雲端資料筆數：${preflight.remote?.score || 0}`,
-      `本機 fingerprint：${shortFingerprint(preflight.local?.fingerprint)}`,
-      `雲端 fingerprint：${shortFingerprint(preflight.remote?.fingerprint)}`
-    ].join('\n'));
+    return restoreConfirmModal(preflight,{manualOverride});
   }
 
   function restoreBackupCompletionConfirmation(preflight, manualOverride) {
-    return window.confirm([
-      '請確認本機備份檔已完成下載。現在要以目前最新的雲端資料覆蓋本機。',
-      ...(manualOverride ? ['⚠ 本機資料時間較新，但你選擇使用雲端資料。'] : []),
-      `登入帳號：${preflight.auth?.user?.email || '—'}`,
-      `本機更新時間：${formatTime(preflight.local?.time?.raw)}`,
-      `雲端更新時間：${formatTime(preflight.remote?.time?.raw || preflight.remoteUpdatedAt)}`,
-      `本機資料筆數：${preflight.local?.score || 0}`,
-      `雲端資料筆數：${preflight.remote?.score || 0}`,
-      `本機 fingerprint：${preflight.local?.fingerprint || '—'}`,
-      `雲端 fingerprint：${preflight.remote?.fingerprint || '—'}`
-    ].join('\n'));
+    return restoreConfirmModal(preflight,{manualOverride,backupCompletion:true});
   }
 
   function backupFileName() {
@@ -1227,12 +1442,15 @@
   }
 
   const MANUAL_RESTORE_TOKEN = Symbol('manual cloud restore');
+  const TRUSTED_PRIORITY_KEEP_REMOTE_TOKEN = Symbol('trusted priority keep remote');
   function restoreRemote(options = {}) {
     const allowLocalNewer = options?.manualToken === MANUAL_RESTORE_TOKEN;
-    return coordinate('restore', () => restoreOperation(allowLocalNewer));
+    const allowTrustedPriority = options?.trustedPriorityToken === TRUSTED_PRIORITY_KEEP_REMOTE_TOKEN;
+    return coordinate('restore', () => restoreOperation(allowLocalNewer,allowTrustedPriority));
   }
 
-  async function restoreOperation(allowLocalNewer = false) {
+  async function restoreOperation(allowLocalNewer = false, allowTrustedPriority = false) {
+    if(!deviceAllowsAutomaticSync()){currentStatus=failure('DEVICE_TRUST_REQUIRED');render(currentStatus);return publicStatus()}
     let restoreCommitted = false, restoreSource = false, applyFenceStarted = false, applyStage = 'PREPARE';
     const expectedContinuation = Boolean(currentStatus?.backupReady);
     setBusy(true);
@@ -1244,7 +1462,10 @@
       const ordinaryRestore = preflight.canRestore && ['REMOTE_NEWER', 'LOCAL_EMPTY_REMOTE_EXISTS'].includes(preflight.code);
       const manualOverride = allowLocalNewer && preflight.code === 'LOCAL_NEWER'
         && manualRestoreEligible(publicStatus(preflight));
-      if (!ordinaryRestore && !manualOverride) {
+      const trustedPriorityKeepRemote = allowTrustedPriority && preflight.code === 'TRUSTED_PRIORITY_AVAILABLE'
+        && trustedPriorityFromRow(row,readBaseline(preflight.auth.user.id)?.syncVersion)
+        && manualRestoreEligible(publicStatus(preflight));
+      if (!ordinaryRestore && !manualOverride && !trustedPriorityKeepRemote) {
         currentStatus = failure('RESTORE_BLOCKED');
         return publicStatus();
       }
@@ -1260,7 +1481,7 @@
       }
 
       if (preflight.local.score > 0 && !preflight.backupReady) {
-        if (!restoreConfirmation(preflight, manualOverride)) {
+        if (!await restoreConfirmation(preflight, manualOverride || trustedPriorityKeepRemote)) {
           currentStatus = { ...preflight, code: 'RESTORE_CANCELLED', message: STATUS_TEXT.RESTORE_CANCELLED, canUpload: false, canRestore: ordinaryRestore };
           return publicStatus();
         }
@@ -1289,7 +1510,7 @@
           currentStatus = failure('RESTORE_BLOCKED');
           return publicStatus();
         }
-        if (!restoreBackupCompletionConfirmation(preflight, manualOverride)) {
+        if (!await restoreBackupCompletionConfirmation(preflight, manualOverride || trustedPriorityKeepRemote)) {
           currentStatus = { ...preflight, code: 'RESTORE_CANCELLED', message: STATUS_TEXT.RESTORE_CANCELLED, canUpload: false, canRestore: ordinaryRestore };
           return publicStatus();
         }
@@ -1302,7 +1523,7 @@
           currentStatus = failure('RESTORE_RACE_BLOCKED');
           return publicStatus();
         }
-      } else if (!restoreConfirmation(preflight, manualOverride)) {
+      } else if (!await restoreConfirmation(preflight, manualOverride)) {
         currentStatus = { ...preflight, code: 'RESTORE_CANCELLED', message: STATUS_TEXT.RESTORE_CANCELLED, canUpload: false, canRestore: ordinaryRestore };
         return publicStatus();
       }
@@ -1386,7 +1607,98 @@
     }
   }
 
+  function trustedPriorityConfirmModal(preflight) {
+    return new Promise((resolve)=>{
+      document.getElementById('trustedPriorityConfirmLayer')?.remove();
+      const layer=document.createElement('div');
+      layer.id='trustedPriorityConfirmLayer';
+      layer.className='auth-modal-layer';
+      layer.innerHTML='<button class="auth-modal-backdrop" type="button" data-trusted-priority-cancel aria-label="取消"></button><section class="auth-modal cloud-sync-modal" role="dialog" aria-modal="true" aria-labelledby="trustedPriorityConfirmTitle"><header><div><small>公司信任裝置優先</small><h2 id="trustedPriorityConfirmTitle">確認以公司信任裝置為準</h2></div><button class="auth-modal-close" type="button" data-trusted-priority-cancel aria-label="取消">×</button></header><div class="cloud-sync-body"><p class="cloud-sync-intro">此操作會放棄雲端中剛由臨時裝置寫入的衝突版本，改以這台公司信任裝置目前資料為準。送出前系統會重新核對雲端版本與本機內容；任一邊再變動就會停止。</p><div class="cloud-sync-grid"><div class="cloud-sync-item"><span>本機資料筆數</span><b id="trustedPriorityLocalScore"></b></div><div class="cloud-sync-item"><span>雲端資料筆數</span><b id="trustedPriorityRemoteScore"></b></div><div class="cloud-sync-item"><span>共同基準版本</span><b id="trustedPriorityBaseVersion"></b></div><div class="cloud-sync-item"><span>目前雲端版本</span><b id="trustedPriorityRemoteVersion"></b></div></div><div class="cloud-sync-status"><strong>⚠ 需要明確確認</strong><p>只有在雲端仍是同一筆 Temporary 分叉版本時才會執行；不會跳過 CAS，也不會在背景自動覆蓋。</p></div></div><footer><button class="auth-modal-cancel" type="button" data-trusted-priority-cancel>取消</button><button class="auth-modal-submit" type="button" data-trusted-priority-confirm>確認以信任裝置為準</button></footer></section>';
+      const set=(id,value)=>{const node=layer.querySelector('#'+id);if(node)node.textContent=String(value??'—')};
+      set('trustedPriorityLocalScore',preflight.local?.score||0);
+      set('trustedPriorityRemoteScore',preflight.remote?.score||0);
+      set('trustedPriorityBaseVersion',preflight.baseline?.syncVersion??'—');
+      set('trustedPriorityRemoteVersion',preflight.row?.sync_version??'—');
+      let settled=false;
+      const finish=(approved)=>{if(settled)return;settled=true;layer.remove();resolve(Boolean(approved))};
+      layer.querySelectorAll('[data-trusted-priority-cancel]').forEach((node)=>node.addEventListener('click',()=>finish(false)));
+      layer.querySelector('[data-trusted-priority-confirm]')?.addEventListener('click',()=>finish(true));
+      document.body.appendChild(layer);
+      layer.querySelector('[data-trusted-priority-confirm]')?.focus();
+    });
+  }
+
+  async function trustedPriorityPreflight() {
+    if(!deviceAllowsAutomaticSync())throw new CloudSyncError('DEVICE_TRUST_REQUIRED');
+    const auth=await authContext(),baseline=readBaseline(auth.user.id);
+    if(!baseline)throw new CloudSyncError('RACE_BLOCKED');
+    const local=await readLocal(),row=await readRemote(auth),remote=row?await validateRemoteSnapshot(row.data,row.updated_at):null;
+    if(!row||!remote||!trustedPriorityFromRow(row,baseline.syncVersion))throw new CloudSyncError('RACE_BLOCKED');
+    const status=classify(auth,local,remote,row);
+    if(status.code!=='TRUSTED_PRIORITY_AVAILABLE')throw new CloudSyncError('RACE_BLOCKED');
+    return {auth,baseline,local,row,remote,status};
+  }
+
+  function keepTrustedPriorityRemote() {
+    return restoreRemote({trustedPriorityToken:TRUSTED_PRIORITY_KEEP_REMOTE_TOKEN});
+  }
+
+  function useTrustedPriorityLocal() {
+    return coordinate('trusted-priority',trustedPriorityUseLocalOperation);
+  }
+
+  async function trustedPriorityUseLocalOperation() {
+    setBusy(true);
+    try {
+      const preflight=await trustedPriorityPreflight();
+      currentStatus=preflight.status;render(currentStatus);
+      if(!await trustedPriorityConfirmModal(preflight)){
+        currentStatus={...preflight.status,code:'CANCELLED',message:STATUS_TEXT.CANCELLED,canUpload:false,canRestore:false};
+        render(currentStatus);return publicStatus();
+      }
+
+      const currentAuth=await revalidatePrincipal(preflight.auth);
+      const firstRow=await readRemote(currentAuth),firstRemote=firstRow?await validateRemoteSnapshot(firstRow.data,firstRow.updated_at):null;
+      if(!firstRow||!firstRemote||!trustedPriorityFromRow(firstRow,preflight.baseline.syncVersion)
+        ||!sameSyncVersion(firstRow.sync_version,preflight.row.sync_version)
+        ||String(firstRow.updated_at||'')!==String(preflight.row.updated_at||'')
+        ||firstRemote.fingerprint!==preflight.remote.fingerprint)throw new CloudSyncError('RACE_BLOCKED');
+
+      const raceAuth=await revalidatePrincipal(currentAuth);
+      const raceRow=await readRemote(raceAuth),raceRemote=raceRow?await validateRemoteSnapshot(raceRow.data,raceRow.updated_at):null;
+      if(!raceRow||!raceRemote||!trustedPriorityFromRow(raceRow,preflight.baseline.syncVersion)
+        ||!sameSyncVersion(raceRow.sync_version,firstRow.sync_version)
+        ||String(raceRow.updated_at||'')!==String(firstRow.updated_at||'')
+        ||raceRemote.fingerprint!==firstRemote.fingerprint)throw new CloudSyncError('RACE_BLOCKED');
+
+      const currentLocal=await readLocal();
+      if(currentLocal.storeBaseline!==preflight.local.storeBaseline
+        ||currentLocal.fingerprint!==preflight.local.fingerprint)throw new CloudSyncError('RACE_BLOCKED');
+
+      const applied=await casWrite(raceAuth,serverSyncVersion(raceRow.sync_version),preflight.local.data);
+      if(applied.status==='CONFLICT')throw new CloudSyncError('RACE_BLOCKED');
+
+      const verifiedRow=await readRemote(await revalidatePrincipal(raceAuth)),verified=verifiedRow?await validateRemoteSnapshot(verifiedRow.data,verifiedRow.updated_at):null;
+      if(!verifiedRow||!verified||verified.fingerprint!==preflight.local.fingerprint
+        ||!matchesAppliedVersion(verifiedRow,applied)
+        ||verifiedRow.last_writer_mode!=='trusted'
+        ||!sameSyncVersion(verifiedRow.last_base_sync_version,raceRow.sync_version))throw new CloudSyncError('VERIFY_FAILED');
+
+      await armAutoBackup(raceAuth,verifiedRow,preflight.local.fingerprint,'AUTO_SYNCED');
+      currentStatus=classified('SYNCED',raceAuth,preflight.local,verified,verifiedRow,false,false);
+      render(currentStatus);
+      return publicStatus();
+    } catch(error) {
+      const code=writeFailureCode(error);
+      autoArmed=false;
+      currentStatus=failure(code==='AUTH_REQUIRED'?'AUTH_REQUIRED':code==='VERIFY_FAILED'?'VERIFY_FAILED':'RACE_BLOCKED');
+      render(currentStatus);
+      return publicStatus();
+    } finally { setBusy(false); }
+  }
+
   async function uploadOperation() {
+    if(!deviceAllowsAutomaticSync()){currentStatus=failure('DEVICE_TRUST_REQUIRED');render(currentStatus);return publicStatus()}
     setBusy(true);
     try {
       const preflight = await inspectCore();
@@ -1420,8 +1732,9 @@
       const currentAuth=await revalidatePrincipal(preflight.auth);
       const applied = await casWrite(currentAuth, expectedSyncVersion, preflight.local.data);
       if (applied.status === 'CONFLICT') {
-        pauseAutoForConflict();
-        currentStatus = failure('RACE_BLOCKED');
+        const priority=trustedPriorityFromCas(applied,expectedSyncVersion);
+        pauseAutoForConflict({trustedPriority:priority});
+        currentStatus = failure(priority?'TRUSTED_PRIORITY_AVAILABLE':'RACE_BLOCKED');
         return publicStatus();
       }
 
@@ -1700,6 +2013,10 @@
       }
       const checked = await inspectCore();
       if (!activeAutoRun(generation)) return autoStatus();
+      if (!deviceAllowsAutomaticSync()) {
+        autoArmed=false;
+        return setAutoState('DEVICE_TRUST_REQUIRED',{pending:false,armed:false});
+      }
       if (!readBaseline(checked.auth.user.id)) {
         if (await recoverSameStateBaseline(checked, generation)) return autoStatus();
         if (await recoverLegacyRestoreBaseline(checked, generation)) return autoStatus();
@@ -1711,9 +2028,17 @@
         await armAutoBackup(checked.auth, { data: checked.remote.data, updated_at: checked.remoteUpdatedAt, sync_version: checked.syncVersion }, checked.local.fingerprint, 'ARMED');
         return autoStatus();
       }
+      if (checked.code === 'TRUSTED_PRIORITY_AVAILABLE') {
+        autoArmed=false;
+        return setAutoState('TRUSTED_PRIORITY_AVAILABLE',{pending:false,armed:false});
+      }
       if (checked.code === 'LOCAL_NEWER') {
         const baseline = readBaseline(checked.auth.user.id);
-        const row = { data: checked.remote.data, updated_at: checked.remoteUpdatedAt, sync_version: checked.syncVersion };
+        const row = { data: checked.remote.data, updated_at: checked.remoteUpdatedAt, sync_version: checked.syncVersion, last_writer_mode:checked.remoteWriterMode, last_base_sync_version:checked.remoteBaseSyncVersion };
+        if (baseline && trustedPriorityFromRow(row,baseline.syncVersion)) {
+          autoArmed=false;
+          return setAutoState('TRUSTED_PRIORITY_AVAILABLE',{pending:false,armed:false});
+        }
         if (baselineMatchesRemote(baseline, row, checked.remote)
           && checked.local.fingerprint !== baseline.localFingerprint) {
           autoArmed = true;
@@ -1798,7 +2123,8 @@
       if (!activeAutoRun(generation)) return autoStatus();
       if (!baselineMatchesRemote(baseline, firstRow, firstRemote)) {
         autoArmed = false;
-        return setAutoState('CONFLICT', { pending: false, armed: false });
+        const priority=trustedPriorityFromRow(firstRow,baseline.syncVersion);
+        return setAutoState(priority?'TRUSTED_PRIORITY_AVAILABLE':'CONFLICT', { pending: false, armed: false });
       }
       if (local.fingerprint === baseline.localFingerprint) {
         return setAutoState('ARMED', { pending: false, armed: true });
@@ -1811,13 +2137,15 @@
       if (!activeAutoRun(generation)) return autoStatus();
       if (!sameObservation(firstObservation, raceObservation) || !baselineMatchesRemote(baseline, raceRow, raceRemote)) {
         autoArmed = false;
-        return setAutoState('RACE_BLOCKED', { pending: false, armed: false });
+        const priority=trustedPriorityFromRow(raceRow,baseline.syncVersion);
+        return setAutoState(priority?'TRUSTED_PRIORITY_AVAILABLE':'RACE_BLOCKED', { pending: false, armed: false });
       }
 
       const currentLocal=await readLocal();
       if(currentLocal.storeBaseline!==local.storeBaseline)throw new CloudSyncError('RACE_BLOCKED');
-      const applied = await casWrite(auth, remoteWriteState(raceRow).syncVersion, local.data, { signal: autoController.signal });
-      if (applied.status === 'CONFLICT') return pauseAutoForConflict();
+      const expectedWriteVersion=remoteWriteState(raceRow).syncVersion;
+      const applied = await casWrite(auth, expectedWriteVersion, local.data, { signal: autoController.signal });
+      if (applied.status === 'CONFLICT') return pauseAutoForConflict({trustedPriority:trustedPriorityFromCas(applied,expectedWriteVersion)});
       autoPendingVerification = { userId: auth.user.id, localFingerprint: local.fingerprint, syncVersion: applied.syncVersion, updatedAt: applied.updatedAt };
       if (!activeAutoRun(generation)) return autoStatus();
 
@@ -1894,6 +2222,7 @@
     autoController = null;
     autoRetryMode = '';
     autoPendingVerification = null;
+    temporarySessionBaseline = null;
     window.removeEventListener('kushe:data-updated', handleDataUpdated);
     window.removeEventListener('online', handleOnline);
     autoState = { code: 'STOPPED', message: AUTO_STATUS_TEXT.STOPPED, userId: principalId || '', pending: false, armed: false };
@@ -1911,6 +2240,8 @@
         : restoreRemote());
     });
     document.getElementById('cloudSyncUpload')?.addEventListener('click', () => { void uploadLocal(); });
+    document.getElementById('cloudSyncKeepRemote')?.addEventListener('click', () => { void keepTrustedPriorityRemote(); });
+    document.getElementById('cloudSyncUseTrusted')?.addEventListener('click', () => { void useTrustedPriorityLocal(); });
     document.getElementById('cloudSyncClose')?.addEventListener('click', close);
     document.getElementById('cloudSyncHeaderClose')?.addEventListener('click', close);
     document.getElementById('cloudSyncBackdrop')?.addEventListener('click', close);
@@ -1939,6 +2270,8 @@
 
   window.KusheCloudSync = Object.freeze({
     inspect, uploadLocal, restoreRemote, status: publicStatus, open, close,
-    startAutoBackup, stopAutoBackup, autoStatus, setSyncOrigin, editorReadiness, decideRemote, safeApplyRemote, reconcileFromCloud
+    startAutoBackup, stopAutoBackup, autoStatus, setSyncOrigin, editorReadiness, decideRemote, safeApplyRemote, reconcileFromCloud,
+    deviceSecurityStatus, setDeviceMode, bootstrapTemporarySession, commitTemporarySnapshot, refreshTemporaryFromCloud,
+    keepTrustedPriorityRemote, useTrustedPriorityLocal
   });
 }());
