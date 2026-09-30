@@ -1065,6 +1065,7 @@
     if(row&&baseline&&local.fingerprint===baseline.localFingerprint&&baselineMatchesRemote(baseline,row,remote))return classified('SYNCED',auth,local,remote,row,false,false);
     if (!row) return classified('REMOTE_EMPTY', auth, local, null, null, local.score > 0);
     if (local.fingerprint === remote.fingerprint) return classified('SYNCED', auth, local, remote, row, false);
+    if (baseline && trustedPriorityFromRow(row,baseline.syncVersion)) return classified('TRUSTED_PRIORITY_AVAILABLE',auth,local,remote,row,false,false);
     if (local.score === 0 && remote.score > 0) return classified('LOCAL_EMPTY_REMOTE_EXISTS', auth, local, remote, row, false, true);
     if (!local.time || !remote.time) return classified('UNKNOWN_CONFLICT', auth, local, remote, row, false);
     if (remote.time.value >= local.time.value) return classified('REMOTE_NEWER', auth, local, remote, row, false, remote.score > 0);
@@ -1919,9 +1920,17 @@
         await armAutoBackup(checked.auth, { data: checked.remote.data, updated_at: checked.remoteUpdatedAt, sync_version: checked.syncVersion }, checked.local.fingerprint, 'ARMED');
         return autoStatus();
       }
+      if (checked.code === 'TRUSTED_PRIORITY_AVAILABLE') {
+        autoArmed=false;
+        return setAutoState('TRUSTED_PRIORITY_AVAILABLE',{pending:false,armed:false});
+      }
       if (checked.code === 'LOCAL_NEWER') {
         const baseline = readBaseline(checked.auth.user.id);
-        const row = { data: checked.remote.data, updated_at: checked.remoteUpdatedAt, sync_version: checked.syncVersion };
+        const row = { data: checked.remote.data, updated_at: checked.remoteUpdatedAt, sync_version: checked.syncVersion, last_writer_mode:checked.remoteWriterMode, last_base_sync_version:checked.remoteBaseSyncVersion };
+        if (baseline && trustedPriorityFromRow(row,baseline.syncVersion)) {
+          autoArmed=false;
+          return setAutoState('TRUSTED_PRIORITY_AVAILABLE',{pending:false,armed:false});
+        }
         if (baselineMatchesRemote(baseline, row, checked.remote)
           && checked.local.fingerprint !== baseline.localFingerprint) {
           autoArmed = true;
