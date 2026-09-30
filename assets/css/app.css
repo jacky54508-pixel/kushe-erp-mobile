@@ -1181,3 +1181,33 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
   #receivablesApp .employee-cash-mobile-card dt{color:#718297;font-size:9px}
   #receivablesApp .employee-cash-mobile-card dd{margin:3px 0 0;color:#274b6d;font-size:11px;font-weight:750;overflow-wrap:anywhere}
 }
+
+/* P19-2A-4 receivable billing-info visual hierarchy. */
+#receivablesApp .receivable-table>thead>tr>th:nth-child(1){width:18%}
+#receivablesApp .receivable-table>thead>tr>th:nth-child(2){width:20%}
+#receivablesApp .receivable-table>thead>tr>th:nth-child(3){width:13%}
+#receivablesApp .receivable-table>thead>tr>th:nth-child(4){width:16%}
+#receivablesApp .receivable-table>thead>tr>th:nth-child(5){width:9%}
+#receivablesApp .receivable-table>thead>tr>th:nth-child(6){width:9%}
+#receivablesApp .receivable-table>thead>tr>th:nth-child(7){width:15%}
+#receivablesApp .receivable-table>tbody>.receivable-main-row{height:auto!important;min-height:88px}
+#receivablesApp .receivable-billing-info{display:grid;align-content:center;gap:5px;min-width:0;padding:2px 0}
+#receivablesApp .receivable-billing-top{display:block;min-width:0}
+#receivablesApp .receivable-billing-top>b{display:block;max-width:100%;overflow:visible;text-overflow:clip;color:#102f56;font-size:12.5px;font-weight:950;line-height:1.35;white-space:normal;overflow-wrap:anywhere}
+#receivablesApp .receivable-billing-date{display:block;margin:0;color:#8290a1;font-size:9.5px;font-weight:700;line-height:1.3;white-space:nowrap}
+#receivablesApp .receivable-billing-meta{display:flex;flex-wrap:wrap;align-items:center;gap:5px;min-width:0;margin-top:1px}
+#receivablesApp .receivable-billing-meta .receipt-count-badge,
+#receivablesApp .receivable-billing-meta .receivable-due,
+#receivablesApp .receivable-detail-link{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;min-height:25px;margin:0;padding:4px 8px;border-radius:8px;font-size:9px;font-weight:850;line-height:1.15;white-space:nowrap}
+#receivablesApp .receivable-billing-meta .receipt-count-badge{border:1px solid #cfe0f8;background:#edf5ff;color:#075bd8}
+#receivablesApp .receivable-billing-meta .receivable-due{border:1px solid #e1e7ee;background:#f5f7fa;color:#60748a}
+#receivablesApp .receivable-billing-meta .receivable-due.is-overdue{border-color:#efc0b9;background:#fff0ed;color:#b83d31}
+#receivablesApp .receivable-detail-link{border:1px solid #cbdcf1;background:#fff;color:#075bd8;cursor:pointer}
+#receivablesApp .receivable-detail-link:hover{border-color:#82abe0;background:#f2f7fd}
+#receivablesApp .receivable-main-row.is-expanded .receivable-detail-link{border-color:#075bd8;background:#075bd8;color:#fff}
+@media(max-width:1100px){
+  #receivablesApp .receivable-table>thead>tr>th:nth-child(1){width:20%}
+  #receivablesApp .receivable-table>thead>tr>th:nth-child(2){width:20%}
+  #receivablesApp .receivable-table>thead>tr>th:nth-child(4){width:15%}
+  #receivablesApp .receivable-table>thead>tr>th:nth-child(7){width:14%}
+}
