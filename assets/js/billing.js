@@ -627,6 +627,68 @@
     if(!mobile.children.length)mobile.append(mobileReceivableNode('p','mobile-detail-item','此篩選條件下沒有應收帳款。'));
     return result;
   };
+  // P19-2A-3: employee cash collection visibility and management view.
+  const employeeCashFilters={month:'',employee:'',project:'',status:'pending',query:''};
+  const employeeCashStatus=(receipt)=>receipt?.handoverStatus==='completed'?'completed':'pending';
+  const employeeCashStatusLabel=(receipt)=>employeeCashStatus(receipt)==='completed'?'已繳回':'待繳回';
+  function employeeCashReceiptRows(state=store.getState()){
+    const query=String(employeeCashFilters.query||'').trim().toLocaleLowerCase('zh-Hant');
+    return (state.receipts||[]).filter((receipt)=>receipt?.collectionType==='employee_cash').map((receipt)=>{
+      const ar=(state.receivables||[]).find((row)=>String(row.id||'')===String(receipt.receivableId||'')),billing=(state.billings||[]).find((row)=>String(row.id||'')===String(receipt.billingId||ar?.billingId||'')||String(row.number||'')===String(ar?.sourceNo||'')),employee=(state.employees||[]).find((row)=>String(row.id||'')===String(receipt.collectorEmployeeId||'')),projectId=String(ar?.project||billing?.project||''),project=(state.projects||[]).find((row)=>String(row.id||'')===projectId),customerId=String(ar?.customer||billing?.customer||project?.customer||''),customer=(state.customers||[]).find((row)=>String(row.id||'')===customerId),status=employeeCashStatus(receipt);
+      return {receipt,receivableId:String(receipt.receivableId||''),date:String(receipt.collectedAt||receipt.date||''),employeeId:String(receipt.collectorEmployeeId||''),employeeName:employee?.name||receipt.collectorEmployeeName||'未指定員工',projectId,projectName:ar?.projectName||billing?.projectName||project?.name||'—',customerName:ar?.customerName||billing?.customerName||customer?.name||'—',billingNo:ar?.sourceNo||billing?.number||'—',amount:store.receiptCashAmount(receipt),status,statusLabel:employeeCashStatusLabel(receipt),handoverDate:String(receipt.handedOverAt||receipt.handoverDate||'')};
+    }).filter((row)=>{
+      if(employeeCashFilters.month&&monthOf(row.date)!==employeeCashFilters.month)return false;
+      if(employeeCashFilters.employee&&row.employeeId!==employeeCashFilters.employee)return false;
+      if(employeeCashFilters.project&&row.projectId!==employeeCashFilters.project)return false;
+      if(employeeCashFilters.status&&row.status!==employeeCashFilters.status)return false;
+      return !query||`${row.employeeName} ${row.projectName} ${row.customerName} ${row.billingNo}`.toLocaleLowerCase('zh-Hant').includes(query);
+    }).sort((a,b)=>String(b.date).localeCompare(String(a.date))||String(b.receipt.createdAt||'').localeCompare(String(a.receipt.createdAt||'')));
+  }
+  function pendingEmployeeCashForReceivable(state,receivableId){
+    return (state.receipts||[]).filter((receipt)=>receipt?.collectionType==='employee_cash'&&employeeCashStatus(receipt)==='pending'&&String(receipt.receivableId||'')===String(receivableId||''));
+  }
+  function employeeCashInlineText(rows){
+    if(!rows.length)return '';
+    const total=rows.reduce((sum,row)=>sum+store.receiptCashAmount(row),0);
+    if(rows.length===1){const row=rows[0],name=(store.getState().employees||[]).find((employee)=>String(employee.id||'')===String(row.collectorEmployeeId||''))?.name||row.collectorEmployeeName||'未指定員工';return `${name}｜${String(row.collectedAt||row.date||'').replaceAll('-','/')}｜代收 ${money(store.receiptCashAmount(row))}｜待繳回`}
+    return `員工代收 ${rows.length} 筆｜待繳回 ${money(total)}`;
+  }
+  function enhanceEmployeeCashReceivableRows(){
+    const state=store.getState();
+    $('#receivablesApp .receivable-main-row').forEach((row)=>{
+      const rows=pendingEmployeeCashForReceivable(state,row.dataset.expandReceivable),progress=$('.receivable-progress',row);if(!progress)return;
+      $('.employee-cash-inline-summary',progress)?.remove();
+      if(rows.length){const note=document.createElement('span');note.className='employee-cash-inline-summary';note.textContent=employeeCashInlineText(rows);progress.append(note)}
+    });
+    $('#receivablesApp [data-mobile-receivable]').forEach((card)=>{
+      $('.employee-cash-mobile-summary',card)?.remove();const rows=pendingEmployeeCashForReceivable(state,card.dataset.mobileReceivable);if(!rows.length)return;
+      const note=document.createElement('div');note.className='employee-cash-mobile-summary';note.innerHTML='<span>員工代收待繳回</span><strong>'+esc(employeeCashInlineText(rows))+'</strong>';const grid=$('.mobile-card-grid',card);if(grid)grid.after(note);else card.append(note);
+    });
+  }
+  function employeeCashFilterOptions(rows,selected,label){return '<option value="">全部'+label+'</option>'+rows.map((row)=>'<option value="'+esc(row.id)+'" '+(String(row.id)===String(selected||'')?'selected':'')+'>'+esc(row.name||'—')+'</option>').join('')}
+  function renderEmployeeCashPanel(){
+    const app=$('#receivablesApp'),state=store.getState();if(!app)return;
+    const rows=employeeCashReceiptRows(state),pending=rows.filter((row)=>row.status==='pending'),pendingTotal=pending.reduce((sum,row)=>sum+row.amount,0),holders=new Set(pending.map((row)=>row.employeeId||row.employeeName).filter(Boolean)).size;
+    const panel=document.createElement('section');panel.id='employeeCashReceivablePanel';panel.className='commission-panel employee-cash-panel';
+    const desktopRows=rows.map((row)=>'<tr><td>'+esc(row.date||'—')+'</td><td><strong>'+esc(row.employeeName)+'</strong></td><td><strong>'+esc(row.customerName)+'</strong><small>'+esc(row.projectName)+'</small></td><td>'+esc(row.billingNo)+'</td><td class="num"><strong>'+money(row.amount)+'</strong></td><td><span class="employee-cash-status '+(row.status==='pending'?'is-pending':'is-completed')+'">'+esc(row.statusLabel)+'</span></td><td>'+esc(row.handoverDate||'—')+'</td></tr>').join('')||'<tr><td colspan="7" class="billing-empty">目前沒有符合條件的員工代收款。</td></tr>';
+    const mobileRows=rows.map((row)=>'<article class="employee-cash-mobile-card"><header><div><span>'+esc(row.date||'—')+'</span><h3>'+esc(row.employeeName)+'</h3></div><strong>'+money(row.amount)+'</strong></header><dl><div><dt>案場</dt><dd>'+esc(row.projectName)+'</dd></div><div><dt>請款單</dt><dd>'+esc(row.billingNo)+'</dd></div><div><dt>客戶</dt><dd>'+esc(row.customerName)+'</dd></div><div><dt>狀態</dt><dd>'+esc(row.statusLabel)+'</dd></div></dl></article>').join('')||'<p class="employee-cash-empty">目前沒有符合條件的員工代收款。</p>';
+    panel.innerHTML='<header class="employee-cash-heading"><div><h2>員工代收款</h2><p>直接查看哪位員工在什麼日期代收多少工程款，以及是否已繳回公司。</p></div></header><div class="employee-cash-kpis"><article><span>待繳回總額</span><strong>'+money(pendingTotal)+'</strong></article><article><span>待繳回筆數</span><strong>'+pending.length+'</strong></article><article><span>持有現金員工</span><strong>'+holders+'</strong></article></div><div class="employee-cash-filters"><label><span>月份</span><input id="employeeCashMonth" type="month" value="'+esc(employeeCashFilters.month)+'"></label><label><span>員工</span><select id="employeeCashEmployee">'+employeeCashFilterOptions(store.masterOptions('employees'),employeeCashFilters.employee,'員工')+'</select></label><label><span>案場</span><select id="employeeCashProject">'+employeeCashFilterOptions(store.masterOptions('projects'),employeeCashFilters.project,'案場')+'</select></label><label><span>狀態</span><select id="employeeCashStatus"><option value="">全部狀態</option><option value="pending" '+(employeeCashFilters.status==='pending'?'selected':'')+'>待繳回</option><option value="completed" '+(employeeCashFilters.status==='completed'?'selected':'')+'>已繳回</option></select></label><label class="employee-cash-search"><span>搜尋</span><input id="employeeCashQuery" type="search" value="'+esc(employeeCashFilters.query)+'" placeholder="員工、案場、客戶、請款單"></label><button class="commission-clear" id="employeeCashClear" type="button">清除篩選</button></div><div class="employee-cash-table-wrap"><table class="commission-table employee-cash-table"><thead><tr><th>代收日期</th><th>員工</th><th>客戶／案場</th><th>請款單</th><th class="num">代收金額</th><th>狀態</th><th>繳回日期</th></tr></thead><tbody>'+desktopRows+'</tbody></table></div><div class="employee-cash-mobile-list">'+mobileRows+'</div>';
+    const list=$('.billing-list-panel',app),kpis=$('.receivable-kpis',app),filterGrid=$('.receivable-filter-grid',app),mobileFilter=$('.mobile-filter-bar',app);if(list)list.style.display='none';if(kpis)kpis.style.display='none';if(filterGrid)filterGrid.style.display='none';if(mobileFilter)mobileFilter.style.display='none';const filters=$('.commission-filters',app);if(filters)filters.after(panel);else app.append(panel);
+    $('#employeeCashMonth',panel).onchange=(event)=>{employeeCashFilters.month=event.target.value;renderReceivables()};
+    $('#employeeCashEmployee',panel).onchange=(event)=>{employeeCashFilters.employee=event.target.value;renderReceivables()};
+    $('#employeeCashProject',panel).onchange=(event)=>{employeeCashFilters.project=event.target.value;renderReceivables()};
+    $('#employeeCashStatus',panel).onchange=(event)=>{employeeCashFilters.status=event.target.value;renderReceivables()};
+    $('#employeeCashQuery',panel).oninput=(event)=>{employeeCashFilters.query=event.target.value;renderReceivables()};
+    $('#employeeCashClear',panel).onclick=()=>{Object.assign(employeeCashFilters,{month:'',employee:'',project:'',status:'pending',query:''});renderReceivables()};
+  }
+  const renderReceivablesBeforeEmployeeCashManagement=renderReceivables;
+  renderReceivables=function(){
+    const result=renderReceivablesBeforeEmployeeCashManagement();if(!receivableActive)return result;
+    const panel=$('#receivablesApp .commission-filters'),switcher=panel&&$('.receivable-view-switch',panel);
+    if(switcher&&!$('[data-receivable-view="employee_cash"]',switcher)){const button=document.createElement('button');button.type='button';button.dataset.receivableView='employee_cash';button.textContent='員工代收款';button.setAttribute('aria-pressed',String(receivableFilters.view==='employee_cash'));button.classList.toggle('is-active',receivableFilters.view==='employee_cash');button.onclick=()=>{receivableFilters.view='employee_cash';renderReceivables()};switcher.append(button)}
+    if(receivableFilters.view==='employee_cash')renderEmployeeCashPanel();else enhanceEmployeeCashReceivableRows();
+    return result;
+  };
   async function activateReceivables(){receivableActive=true;if(!ready){await store.load();ready=true}renderReceivables()}function deactivateReceivables(){receivableActive=false}
   window.addEventListener('kushe:data-updated',()=>{if(billingActive)renderBillingList();if(receivableActive)renderReceivables()});
   window.KusheBilling={activate:activateBilling,deactivate:deactivateBilling,activateDraft,deactivateDraft,startDraft,render:renderBillingList,openDetail:openBillingDetail};
