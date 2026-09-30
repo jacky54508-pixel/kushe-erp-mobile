@@ -655,12 +655,12 @@
   }
   function enhanceEmployeeCashReceivableRows(){
     const state=store.getState();
-    $('#receivablesApp .receivable-main-row').forEach((row)=>{
+    $$('#receivablesApp .receivable-main-row').forEach((row)=>{
       const rows=pendingEmployeeCashForReceivable(state,row.dataset.expandReceivable),progress=$('.receivable-progress',row);if(!progress)return;
       $('.employee-cash-inline-summary',progress)?.remove();
       if(rows.length){const note=document.createElement('span');note.className='employee-cash-inline-summary';note.textContent=employeeCashInlineText(rows);progress.append(note)}
     });
-    $('#receivablesApp [data-mobile-receivable]').forEach((card)=>{
+    $$('#receivablesApp [data-mobile-receivable]').forEach((card)=>{
       $('.employee-cash-mobile-summary',card)?.remove();const rows=pendingEmployeeCashForReceivable(state,card.dataset.mobileReceivable);if(!rows.length)return;
       const note=document.createElement('div');note.className='employee-cash-mobile-summary';note.innerHTML='<span>員工代收待繳回</span><strong>'+esc(employeeCashInlineText(rows))+'</strong>';const grid=$('.mobile-card-grid',card);if(grid)grid.after(note);else card.append(note);
     });
