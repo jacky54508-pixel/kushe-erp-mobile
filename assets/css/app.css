@@ -1441,3 +1441,79 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
   #receivablesApp .receivable-table>tbody>.receivable-main-row,
   #receivablesApp .receivable-table>tbody>.receivable-main-row>td{height:100px;min-height:100px}
 }
+
+/* P19-2A-9A restore true table-cell layout and keep visual rhythm inside cells. */
+#receivablesApp .receivable-table>tbody>.receivable-main-row>td{
+  display:table-cell!important;
+  height:auto!important;
+  min-height:0!important;
+  vertical-align:middle!important;
+  padding-top:12px!important;
+  padding-bottom:12px!important;
+  border-bottom:1px solid #edf1f5!important;
+  background:#fff!important;
+}
+#receivablesApp .receivable-table>tbody>.receivable-main-row{
+  height:auto!important;
+  min-height:0!important;
+}
+#receivablesApp .receivable-billing-info,
+#receivablesApp .receivable-party,
+#receivablesApp .receivable-period-amount,
+#receivablesApp .receivable-progress,
+#receivablesApp .receivable-retention,
+#receivablesApp .receivable-status-stack{
+  display:table-cell!important;
+  min-height:0!important;
+  align-content:normal!important;
+  justify-content:normal!important;
+}
+#receivablesApp .receivable-billing-info{padding-top:12px!important;padding-bottom:12px!important}
+#receivablesApp .receivable-party>strong,
+#receivablesApp .receivable-party>small,
+#receivablesApp .receivable-period-amount>strong,
+#receivablesApp .receivable-period-amount>small,
+#receivablesApp .receivable-progress>strong,
+#receivablesApp .receivable-progress>small,
+#receivablesApp .receivable-retention>.retention-amount,
+#receivablesApp .receivable-retention>.retention-status-badge,
+#receivablesApp .receivable-status-stack>span{
+  display:block;
+  margin:0;
+}
+#receivablesApp .receivable-party>small,
+#receivablesApp .receivable-period-amount>small,
+#receivablesApp .receivable-progress>small{margin-top:4px!important}
+#receivablesApp .receivable-progress{
+  border:0!important;
+  box-shadow:none!important;
+}
+#receivablesApp .receivable-progress.is-open>strong{
+  display:inline-flex!important;
+  min-height:25px;
+  padding:3px 8px;
+  border:0!important;
+  background:#fff3e8;
+  color:#a45100;
+  font-size:11.5px;
+  line-height:1.2;
+}
+#receivablesApp .employee-cash-inline-summary{
+  display:block!important;
+  margin-top:5px!important;
+  border:0!important;
+  background:#fff8e8;
+}
+#receivablesApp .receivable-retention{text-align:right!important}
+#receivablesApp .receivable-retention>.retention-status-badge{margin-top:4px!important}
+#receivablesApp .receivable-status-stack{text-align:center!important}
+#receivablesApp .receivable-status-stack>span{width:max-content;max-width:100%;margin:0 auto 5px!important}
+#receivablesApp .receivable-status-stack>span:last-child{margin-bottom:0!important}
+#receivablesApp .receivable-actions-cell{vertical-align:middle!important}
+#receivablesApp .receivable-actions{
+  display:grid!important;
+  align-content:center;
+  min-height:0!important;
+}
+#receivablesApp .receivable-table>tbody>.receivable-main-row:hover>td{background:#fff!important}
+#receivablesApp .receivable-table>tbody>.receivable-main-row.is-expanded>td{background:#f7faff!important}
