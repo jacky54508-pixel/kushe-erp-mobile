@@ -1517,3 +1517,56 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 }
 #receivablesApp .receivable-table>tbody>.receivable-main-row:hover>td{background:#fff!important}
 #receivablesApp .receivable-table>tbody>.receivable-main-row.is-expanded>td{background:#f7faff!important}
+
+/* P19-2B-1C-2 polished employee cash rollback action. */
+#receivablesApp .employee-cash-completed-actions{
+  display:grid;
+  justify-items:start;
+  gap:7px;
+}
+#receivablesApp .employee-cash-cancel-button{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  min-height:28px;
+  padding:5px 10px;
+  border:1px solid #efc8c3;
+  border-radius:999px;
+  background:#fff8f7;
+  color:#a9342b;
+  font:inherit;
+  font-size:9.5px;
+  font-weight:850;
+  line-height:1;
+  white-space:nowrap;
+  cursor:pointer;
+  box-shadow:0 1px 2px rgba(112,36,29,.05);
+  transition:background .15s ease,border-color .15s ease,color .15s ease,box-shadow .15s ease,transform .15s ease;
+}
+#receivablesApp .employee-cash-cancel-button>span{
+  font-size:13px;
+  line-height:1;
+  transform:translateY(-.5px);
+}
+#receivablesApp .employee-cash-cancel-button:hover{
+  border-color:#e5a9a2;
+  background:#fff1ef;
+  color:#8f241c;
+  box-shadow:0 4px 10px rgba(126,45,36,.10);
+  transform:translateY(-1px);
+}
+#receivablesApp .employee-cash-cancel-button:active{
+  transform:translateY(0);
+  box-shadow:0 1px 3px rgba(126,45,36,.08);
+}
+#receivablesApp .employee-cash-cancel-button:focus-visible{
+  outline:2px solid rgba(196,70,58,.25);
+  outline-offset:2px;
+}
+#receivablesApp .employee-cash-cancel-button.is-mobile{
+  width:100%;
+  min-height:36px;
+  border-radius:9px;
+  font-size:10px;
+}
