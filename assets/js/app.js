@@ -358,7 +358,7 @@
     (data.payroll||[]).forEach((row)=>{if(/^\d{4}-\d{2}$/.test(row.month||''))values.push(row.month)}); return values;
   }
   function setupPeriod() {
-    const select=$('#dashboardMonth'); const data=window.KuSheLegacyData.getState(); const current=businessMonth(); const keys=dateKeys(data); const latest=[current,...keys].sort().at(-1); const cursor=new Date(`${latest}-01T00:00:00`); const options=[];
+    const select=$('#dashboardMonth'); const data=window.KuSheERPStore?.getState?.()||window.KuSheLegacyData?.getState?.()||{}; const current=businessMonth(); const keys=dateKeys(data); const latest=[current,...keys].sort().at(-1); const cursor=new Date(`${latest}-01T00:00:00`); const options=[];
     for(let i=0;i<24;i+=1){const d=new Date(cursor.getFullYear(),cursor.getMonth()-i,1);const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;options.push(`<option value="${key}" ${key===current?'selected':''}>${d.getFullYear()}年${d.getMonth()+1}月</option>`)}
     select.innerHTML=options.join(''); if(!options.some((html)=>html.includes(`value="${current}"`)))select.value=latest;
     select.addEventListener('change',()=>window.KusheDashboard.refresh());
