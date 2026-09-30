@@ -1160,42 +1160,41 @@
       :{state:'blocked',code:'VERIFY_FAILED',failureCode:fence.lastFailure?.code||'VERIFY_FAILED'};
   }
 
+  function restoreConfirmModal(preflight, options = {}) {
+    const manualOverride=Boolean(options.manualOverride),backupCompletion=Boolean(options.backupCompletion);
+    return new Promise((resolve)=>{
+      document.getElementById('cloudRestoreConfirmLayer')?.remove();
+      const layer=document.createElement('div');
+      layer.id='cloudRestoreConfirmLayer';
+      layer.className='auth-modal-layer';
+      layer.innerHTML='<button class="auth-modal-backdrop" type="button" data-cloud-restore-cancel aria-label="取消雲端還原"></button><section class="auth-modal cloud-sync-modal" role="dialog" aria-modal="true" aria-labelledby="cloudRestoreConfirmTitle"><header><div><small>安全雲端還原</small><h2 id="cloudRestoreConfirmTitle"></h2></div><button class="auth-modal-close" type="button" data-cloud-restore-cancel aria-label="取消雲端還原">×</button></header><div class="cloud-sync-body"><p class="cloud-sync-intro" id="cloudRestoreConfirmIntro"></p><div class="cloud-sync-status" id="cloudRestoreOverrideWarning" hidden><strong>⚠ 本機資料時間較新</strong><p>你正在手動選擇以雲端資料覆蓋本機；系統不會自動執行。</p></div><div class="cloud-sync-grid"><div class="cloud-sync-item"><span>登入帳號</span><b id="cloudRestoreEmail"></b></div><div class="cloud-sync-item"><span>本機資料筆數</span><b id="cloudRestoreLocalScore"></b></div><div class="cloud-sync-item"><span>雲端資料筆數</span><b id="cloudRestoreRemoteScore"></b></div><div class="cloud-sync-item"><span>本機更新</span><b id="cloudRestoreLocalTime"></b></div><div class="cloud-sync-item"><span>雲端更新</span><b id="cloudRestoreRemoteTime"></b></div><div class="cloud-sync-item"><span>雲端版本</span><b id="cloudRestoreRemoteFingerprint"></b></div></div><div class="cloud-sync-status"><strong>即將執行</strong><p id="cloudRestoreAction"></p></div></div><footer><button class="auth-modal-cancel" type="button" data-cloud-restore-cancel>取消</button><button class="auth-modal-submit" type="button" data-cloud-restore-confirm></button></footer></section>';
+      const set=(id,value)=>{const node=layer.querySelector('#'+id);if(node)node.textContent=String(value??'—')};
+      set('cloudRestoreConfirmTitle',backupCompletion?'確認雲端覆蓋':'確認從雲端還原');
+      set('cloudRestoreConfirmIntro',backupCompletion?'本機安全備份已建立。再次確認後，才會以目前最新雲端資料覆蓋本機。':'確認後才會把雲端 ERP 資料寫入這台裝置；此步驟不會把目前本機資料上傳到雲端。');
+      set('cloudRestoreEmail',preflight.auth?.user?.email||'—');
+      set('cloudRestoreLocalScore',preflight.local?.score||0);
+      set('cloudRestoreRemoteScore',preflight.remote?.score||0);
+      set('cloudRestoreLocalTime',formatTime(preflight.local?.time?.raw));
+      set('cloudRestoreRemoteTime',formatTime(preflight.remote?.time?.raw||preflight.remoteUpdatedAt));
+      set('cloudRestoreRemoteFingerprint',shortFingerprint(preflight.remote?.fingerprint));
+      set('cloudRestoreAction',backupCompletion?'以雲端資料覆蓋本機；完成後系統會驗證資料並重新載入。':'從雲端還原至本機；完成後系統會驗證資料並重新載入。');
+      const warning=layer.querySelector('#cloudRestoreOverrideWarning');if(warning)warning.hidden=!manualOverride;
+      const confirm=layer.querySelector('[data-cloud-restore-confirm]');if(confirm)confirm.textContent=backupCompletion?'確認覆蓋本機':'確認還原';
+      let settled=false;
+      const finish=(approved)=>{if(settled)return;settled=true;layer.remove();resolve(Boolean(approved))};
+      layer.querySelectorAll('[data-cloud-restore-cancel]').forEach((node)=>node.addEventListener('click',()=>finish(false)));
+      confirm?.addEventListener('click',()=>finish(true));
+      document.body.appendChild(layer);
+      confirm?.focus();
+    });
+  }
+
   function restoreConfirmation(preflight, manualOverride = false) {
-    if (manualOverride) return window.confirm([
-      '⚠ 本機資料時間較新',
-      '你正在選擇：捨棄本機較新的資料，以雲端備份覆蓋本機。',
-      '系統不會自動做這件事，只有你這次手動確認才會繼續。',
-      `登入帳號：${preflight.auth?.user?.email || '—'}`,
-      `本機更新時間：${formatTime(preflight.local?.time?.raw)}`,
-      `雲端更新時間：${formatTime(preflight.remote?.time?.raw || preflight.remoteUpdatedAt)}`,
-      `本機資料筆數：${preflight.local?.score || 0}`,
-      `雲端資料筆數：${preflight.remote?.score || 0}`,
-      `本機 fingerprint：${preflight.local?.fingerprint || '—'}`,
-      `雲端 fingerprint：${preflight.remote?.fingerprint || '—'}`
-    ].join('\n'));
-    return window.confirm([
-      '確定要以雲端備份取代此瀏覽器目前 ERP 資料嗎？',
-      `本機更新時間：${formatTime(preflight.local?.time?.raw)}`,
-      `雲端更新時間：${formatTime(preflight.remote?.time?.raw || preflight.remoteUpdatedAt)}`,
-      `本機資料筆數：${preflight.local?.score || 0}`,
-      `雲端資料筆數：${preflight.remote?.score || 0}`,
-      `本機 fingerprint：${shortFingerprint(preflight.local?.fingerprint)}`,
-      `雲端 fingerprint：${shortFingerprint(preflight.remote?.fingerprint)}`
-    ].join('\n'));
+    return restoreConfirmModal(preflight,{manualOverride});
   }
 
   function restoreBackupCompletionConfirmation(preflight, manualOverride) {
-    return window.confirm([
-      '請確認本機備份檔已完成下載。現在要以目前最新的雲端資料覆蓋本機。',
-      ...(manualOverride ? ['⚠ 本機資料時間較新，但你選擇使用雲端資料。'] : []),
-      `登入帳號：${preflight.auth?.user?.email || '—'}`,
-      `本機更新時間：${formatTime(preflight.local?.time?.raw)}`,
-      `雲端更新時間：${formatTime(preflight.remote?.time?.raw || preflight.remoteUpdatedAt)}`,
-      `本機資料筆數：${preflight.local?.score || 0}`,
-      `雲端資料筆數：${preflight.remote?.score || 0}`,
-      `本機 fingerprint：${preflight.local?.fingerprint || '—'}`,
-      `雲端 fingerprint：${preflight.remote?.fingerprint || '—'}`
-    ].join('\n'));
+    return restoreConfirmModal(preflight,{manualOverride,backupCompletion:true});
   }
 
   function backupFileName() {
@@ -1260,7 +1259,7 @@
       }
 
       if (preflight.local.score > 0 && !preflight.backupReady) {
-        if (!restoreConfirmation(preflight, manualOverride)) {
+        if (!await restoreConfirmation(preflight, manualOverride)) {
           currentStatus = { ...preflight, code: 'RESTORE_CANCELLED', message: STATUS_TEXT.RESTORE_CANCELLED, canUpload: false, canRestore: ordinaryRestore };
           return publicStatus();
         }
@@ -1289,7 +1288,7 @@
           currentStatus = failure('RESTORE_BLOCKED');
           return publicStatus();
         }
-        if (!restoreBackupCompletionConfirmation(preflight, manualOverride)) {
+        if (!await restoreBackupCompletionConfirmation(preflight, manualOverride)) {
           currentStatus = { ...preflight, code: 'RESTORE_CANCELLED', message: STATUS_TEXT.RESTORE_CANCELLED, canUpload: false, canRestore: ordinaryRestore };
           return publicStatus();
         }
@@ -1302,7 +1301,7 @@
           currentStatus = failure('RESTORE_RACE_BLOCKED');
           return publicStatus();
         }
-      } else if (!restoreConfirmation(preflight, manualOverride)) {
+      } else if (!await restoreConfirmation(preflight, manualOverride)) {
         currentStatus = { ...preflight, code: 'RESTORE_CANCELLED', message: STATUS_TEXT.RESTORE_CANCELLED, canUpload: false, canRestore: ordinaryRestore };
         return publicStatus();
       }
