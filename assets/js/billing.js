@@ -361,7 +361,8 @@
       const v=retention.values;
       return '<tr><td>'+esc(v[0])+'</td><td class="num">'+v[1]+'</td><td>'+esc(v[2])+'</td><td>'+esc(v[3])+'</td><td class="num">'+v[4]+'</td><td>'+esc(v[5])+'</td><td><button class="commission-link" type="button" data-edit-retention-receipt="'+esc(retention.id)+'">編輯</button><button class="commission-link" type="button" data-delete-retention-receipt="'+esc(retention.id)+'">刪除</button></td></tr>';
     }).join('');
-    return '<tr class="receipt-history-row" data-receipt-detail="'+esc(id)+'"><td colspan="7"><div class="receivable-detail-panel">'+originalBillingDetailMarkup(billing,state)+receivableDetailSummary(ar,row,billing,history,showRetention)+'<h3>本期收款紀錄</h3>'+(history.length?'<div class="receipt-history-scroll"><table class="receipt-detail-table customer-settlement-history"><thead><tr><th>收款日期</th><th class="num">實際匯款</th><th>客戶扣款</th><th class="num">本次沖銷</th><th>銀行／代收狀態</th><th class="num">銀行實際入帳</th><th>備註</th><th>操作</th></tr></thead><tbody>'+receiptRows+'</tbody></table></div>':'<div class="receipt-empty-state"><span>尚無收款紀錄</span>'+(row.outstanding>0?'<button class="commission-secondary compact" type="button" data-empty-receive="'+esc(id)+'">＋ 新增收款</button>':'')+'</div>')+(showRetention?'<h3>保留款收回紀錄</h3>'+(retentions.length?'<div class="receipt-history-scroll"><table class="receipt-detail-table"><thead><tr><th>收回日期</th><th class="num">本次收回</th><th>銀行帳戶</th><th>收款方式</th><th class="num">手續費</th><th>備註</th><th>操作</th></tr></thead><tbody>'+retentionRows+'</tbody></table></div>':'<div class="receipt-empty-state"><span>'+(row.retention>0?'尚無保留款收回紀錄':'此筆無保留款')+'</span>'+(row.retentionOutstanding>0?'<button class="commission-secondary compact" type="button" data-empty-retention-receive="'+esc(id)+'">＋ 收回保留款</button>':'')+'</div>'):'')+'</div></td></tr>';
+    const billingLink=billing?'<section class="receivable-billing-link"><div><span>對應請款單</span><strong>'+esc(billing.number||ar.sourceNo||'—')+'</strong><small>施工明細以正式請款單內容為準</small></div><button type="button" class="commission-primary compact" data-open-receivable-billing="'+esc(id)+'">查看請款單</button></section>':'<section class="receivable-billing-link is-unresolved"><div><span>對應請款單</span><strong>'+esc(ar.sourceNo||'—')+'</strong><small>找不到唯一對應請款單，請先確認資料關聯</small></div></section>';
+    return '<tr class="receipt-history-row" data-receipt-detail="'+esc(id)+'"><td colspan="7"><div class="receivable-detail-panel">'+billingLink+receivableDetailSummary(ar,row,billing,history,showRetention)+'<h3>本期收款紀錄</h3>'+(history.length?'<div class="receipt-history-scroll"><table class="receipt-detail-table customer-settlement-history"><thead><tr><th>收款日期</th><th class="num">實際匯款</th><th>客戶扣款</th><th class="num">本次沖銷</th><th>銀行／代收狀態</th><th class="num">銀行實際入帳</th><th>備註</th><th>操作</th></tr></thead><tbody>'+receiptRows+'</tbody></table></div>':'<div class="receipt-empty-state"><span>尚無收款紀錄</span>'+(row.outstanding>0?'<button class="commission-secondary compact" type="button" data-empty-receive="'+esc(id)+'">＋ 新增收款</button>':'')+'</div>')+(showRetention?'<h3>保留款收回紀錄</h3>'+(retentions.length?'<div class="receipt-history-scroll"><table class="receipt-detail-table"><thead><tr><th>收回日期</th><th class="num">本次收回</th><th>銀行帳戶</th><th>收款方式</th><th class="num">手續費</th><th>備註</th><th>操作</th></tr></thead><tbody>'+retentionRows+'</tbody></table></div>':'<div class="receipt-empty-state"><span>'+(row.retention>0?'尚無保留款收回紀錄':'此筆無保留款')+'</span>'+(row.retentionOutstanding>0?'<button class="commission-secondary compact" type="button" data-empty-retention-receive="'+esc(id)+'">＋ 收回保留款</button>':'')+'</div>'):'')+'</div></td></tr>';
   };
   const renderReceivablesWithoutCustomerDeductionKpi=renderReceivables;
   renderReceivables=function(){renderReceivablesWithoutCustomerDeductionKpi();if(!receivableActive)return;const state=store.getState(),month=monthOf(today()),deductionTotal=(state.receipts||[]).filter((row)=>monthOf(row.date)===month).reduce((sum,row)=>sum+store.receiptDeductionAmount(row),0),card=$$('.receivable-kpis article')[1],small=card&&$('small',card);if(small)small.textContent=month+' 實際現金｜客戶扣款 '+money(deductionTotal)};
@@ -431,6 +432,7 @@
         const button=summary.querySelector('[data-house-toggle]');
         if(button)toggleHouseGroup(id,button.dataset.houseToggle);
       });
+      $$('[data-open-receivable-billing]',detail).forEach(button=>button.onclick=event=>{event.stopPropagation();openReceivableBilling(button.dataset.openReceivableBilling)});
     }
     clarifyReceivableSettlementLabels();
     return result;
@@ -696,7 +698,14 @@
     const result=renderReceivablesBeforeEmployeeCashManagement();if(!receivableActive)return result;
     const panel=$('#receivablesApp .commission-filters'),switcher=panel&&$('.receivable-view-switch',panel);
     if(switcher&&!$('[data-receivable-view="employee_cash"]',switcher)){const button=document.createElement('button');button.type='button';button.dataset.receivableView='employee_cash';button.textContent='員工代收款';button.setAttribute('aria-pressed',String(receivableFilters.view==='employee_cash'));button.classList.toggle('is-active',receivableFilters.view==='employee_cash');button.onclick=()=>{receivableFilters.view='employee_cash';renderReceivables()};switcher.append(button)}
-    if(receivableFilters.view==='employee_cash')renderEmployeeCashPanel();else enhanceEmployeeCashReceivableRows();
+    if(receivableFilters.view==='employee_cash')renderEmployeeCashPanel();else{
+      enhanceEmployeeCashReceivableRows();
+      $$('#receivablesApp .receivable-main-row').forEach((rowNode)=>{
+        const id=rowNode.dataset.expandReceivable,actions=$('.receivable-actions',rowNode),historyButton=$('[data-expand-button]',rowNode);
+        if(actions&&!$('[data-view-receivable-billing]',actions)){const button=document.createElement('button');button.className='commission-secondary compact';button.type='button';button.dataset.viewReceivableBilling=id;button.textContent='查看請款單';button.onclick=(event)=>{event.stopPropagation();openReceivableBilling(id)};actions.insertBefore(button,historyButton||actions.firstChild)}
+        if(historyButton){const opened=openReceiptHistories.has(id);historyButton.textContent=opened?'收合歷程':'收款歷程';historyButton.setAttribute('aria-label',opened?'收合收款歷程':'查看收款歷程')}
+      });
+    }
     return result;
   };
   async function activateReceivables(){receivableActive=true;if(!ready){await store.load();ready=true}renderReceivables()}function deactivateReceivables(){receivableActive=false}

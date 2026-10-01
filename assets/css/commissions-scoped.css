@@ -423,3 +423,21 @@
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-mobile{display:grid;gap:10px}
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-mobile footer{display:flex;gap:8px;flex-wrap:wrap}
 }
+
+
+/* P20-8E receivable billing direct open */
+#receivablesApp .receivable-billing-link{
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  margin:0 0 18px;padding:14px 16px;border:1px solid #d9e6f5;border-radius:12px;background:#f7fbff;
+}
+#receivablesApp .receivable-billing-link>div{min-width:0}
+#receivablesApp .receivable-billing-link span,
+#receivablesApp .receivable-billing-link small{display:block;color:#74859b}
+#receivablesApp .receivable-billing-link span{font-size:11px;font-weight:700}
+#receivablesApp .receivable-billing-link strong{display:block;margin:3px 0;color:#12345b;font-size:16px}
+#receivablesApp .receivable-billing-link small{font-size:11px}
+#receivablesApp .receivable-billing-link.is-unresolved{background:#fffaf2;border-color:#f1d5a6}
+@media(max-width:620px){
+  #receivablesApp .receivable-billing-link{align-items:stretch;flex-direction:column}
+  #receivablesApp .receivable-billing-link button{width:100%}
+}
