@@ -1,6 +1,15 @@
 (function () {
   'use strict';
 
+  function bindImeSafeSearch(input,commit,refresh,delay=160){
+    if(!input)return;let composing=false,timer=0;
+    const cancel=()=>{window.clearTimeout(timer);timer=0};
+    const run=()=>{cancel();timer=window.setTimeout(()=>{timer=0;refresh()},delay)};
+    input.addEventListener('compositionstart',()=>{composing=true;cancel()});
+    input.addEventListener('input',(event)=>{if(composing||event.isComposing){composing=true;cancel();return}commit(input.value);run()});
+    input.addEventListener('compositionend',()=>{composing=false;commit(input.value);run()});
+  }
+
   const store = window.KuSheERPStore;
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -824,16 +833,12 @@
     [['payableMonth','month'],['payablePaymentMonth','paymentMonth'],['payableVendor','vendor'],['payableProject','project'],['payableCategory','category'],['payableStatus','status']].forEach(([id,key]) => {
       $(`#${id}`).onchange = (event) => { filters[key] = event.target.value; render(); };
     });
-    $('#payableQuery').oninput = (event) => {
-      filters.query = event.target.value;
-      clearTimeout(queryTimer);
-      queryTimer = setTimeout(() => {
-        render();
-        const input = $('#payableQuery');
-        input?.focus();
-        input?.setSelectionRange(input.value.length, input.value.length);
-      }, 140);
-    };
+    bindImeSafeSearch($('#payableQuery'),(value)=>{filters.query=value},()=>{
+      render();
+      const input=$('#payableQuery');
+      input?.focus();
+      input?.setSelectionRange(input.value.length,input.value.length);
+    },140);
     $('#newPayable').onclick = openNewPayable;
     $$('[data-pay]').forEach((button) => { button.onclick = (event) => { event.stopPropagation(); openPayment(button.dataset.pay); }; });
     $$('[data-expand-button]').forEach((button) => { button.onclick = (event) => { event.stopPropagation();toggleDetail(button.dataset.expandButton,modelById.get(String(button.dataset.expandButton)));}; });
