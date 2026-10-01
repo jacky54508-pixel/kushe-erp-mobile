@@ -398,9 +398,25 @@
 
 
 /* P20-5C commission settlement history / print entry */
-:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history{margin-top:16px}
-:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history>header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history{margin-top:16px;overflow:hidden}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history>header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:18px 20px 16px;border-bottom:1px solid #e7edf3;background:#fff}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history>header>div{min-width:0}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history>header h2{margin:0;color:#102f57;font-size:20px;line-height:1.25}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history>header p{margin:6px 0 0;color:#677a91;font-size:12px;line-height:1.5}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop{width:100%;overflow-x:auto}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop .commission-table{width:100%;min-width:980px;table-layout:fixed}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop th:nth-child(1){width:12%}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop th:nth-child(2){width:12%}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop th:nth-child(3){width:18%}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop th:nth-child(4){width:13%}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop th:nth-child(5){width:20%}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop th:nth-child(6){width:15%}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop th:nth-child(7){width:10%}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop th,:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop td{vertical-align:middle}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop td:nth-child(4),:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop th:nth-child(4){text-align:right}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop td:nth-child(5),:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop td:nth-child(6){white-space:normal;overflow-wrap:anywhere}
 :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history td small{display:block;margin-top:3px;color:#6c7a8e}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history .commission-empty{height:112px;padding:24px;text-align:center;vertical-align:middle;color:#718197}
 :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-mobile{display:none}
 @media(max-width:820px){
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop{display:none}
