@@ -29,9 +29,16 @@
     requestAnimationFrame(()=>node.classList.add('is-visible')); setTimeout(()=>{node.classList.remove('is-visible');setTimeout(()=>node.remove(),220)},2400);
   }
   function setAuthView(authenticated) {
-    const loginView = $('#loginView'), appShell = $('#appShell');
+    const loginView = $('#loginView'), appShell = $('#appShell'), employeeShell = $('#employeeShellView');
     if (loginView) loginView.hidden = Boolean(authenticated);
     if (appShell) appShell.hidden = !authenticated;
+    if (employeeShell && authenticated) employeeShell.hidden = true;
+  }
+  function setEmployeeShellView(active) {
+    const loginView=$('#loginView'),appShell=$('#appShell'),employeeShell=$('#employeeShellView');
+    if(loginView)loginView.hidden=Boolean(active);
+    if(appShell)appShell.hidden=true;
+    if(employeeShell)employeeShell.hidden=!active;
   }
   function setLoginMessage(message = '', error = false) {
     const status = $('#loginStatus'), alert = $('#loginError');
@@ -51,7 +58,18 @@
     try {
       if (!window.KusheAuthGate?.resolveCompanyContext) throw new Error('Company context unavailable');
       const companyContext = await window.KusheAuthGate.resolveCompanyContext();
-      if (!companyContext?.legacySourceUserId || companyContext.userId !== companyContext.legacySourceUserId) {
+      const isLegacySource=Boolean(companyContext?.legacySourceUserId)&&companyContext.userId===companyContext.legacySourceUserId;
+      if(companyContext?.role==='employee'&&!isLegacySource){
+        window.KusheCloudSync?.stopAutoBackup?.();
+        window.KusheCloudSync?.close?.();
+        window.KuSheERPStore?.clearEphemeralSession?.();
+        setLoginMessage();
+        setEmployeeShellView(true);
+        if(!window.KusheEmployeeShell?.start)throw new Error('Employee shell unavailable');
+        await window.KusheEmployeeShell.start(companyContext);
+        return true;
+      }
+      if (!isLegacySource) {
         window.KusheCloudSync?.stopAutoBackup?.();
         window.KusheCloudSync?.close?.();
         window.KuSheERPStore?.clearEphemeralSession?.();
@@ -114,6 +132,8 @@
     window.KusheCloudSync?.stopAutoBackup?.();
     window.KusheCloudSync?.close();
     window.KuSheERPStore?.clearEphemeralSession?.();
+    window.KusheEmployeeShell?.clear?.();
+    setEmployeeShellView(false);
     closeChangePasswordModal(true);
     try { await window.KusheAuthGate?.logout(); } catch (_) {}
     setAuthView(false);
@@ -473,6 +493,7 @@
     setupHeader();setupNavigation();setupNavTooltips();setupPeriod();setupSearch();window.KusheDashboard.init();
     navigate(currentHashRoute(), { replace: true, instant: true });
   }
+  window.addEventListener('kushe:employee-logout',()=>void handleLogout());
   window.KushePhase1={navigate,toast,boot};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{void boot()},{once:true});else void boot();
 }());
