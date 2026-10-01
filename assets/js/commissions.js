@@ -28,6 +28,9 @@
   let dailyDetailActive = false;
   let dailyDetailNeedsRefresh = false;
   let dailyDetailContext = null;
+  let settlementDrawerActive = false;
+  let settlementSubmitInFlight = false;
+  let settlementSelectionKeys = new Set();
 
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const money = (value) => new Intl.NumberFormat('zh-TW', { style:'currency', currency:'TWD', maximumFractionDigits:0 }).format(Number(value) || 0);
@@ -336,21 +339,117 @@
   function attendanceSection(state, rows) {
     return `<section class="commission-panel commission-table-panel workforce-attendance-panel"><header><div><h2>出勤／點工</h2><p>直接呈現正式薪資來源；歷史獨立出勤維持唯讀，不進行轉換。</p></div><span class="workforce-readonly">唯讀</span></header><div class="commission-table-wrap attendance-desktop-table"><table class="commission-table workforce-attendance-table"><thead><tr><th>日期</th><th>員工</th><th>案場</th><th>點工類型</th><th class="num">天數</th><th class="num">時數</th><th class="num">單價</th><th class="num">點工金額</th><th class="num">油費</th><th>來源</th><th>狀態</th><th>操作</th></tr></thead><tbody>${rows.map((row)=>{const employeeId=employeeIdOf(row),projectId=projectIdOf(row),isDaily=row.sourceType==='daily-log',isHourly=row.workMode==='hourly'||number(row.hours)>0,rate=isHourly?row.hourlyRate??row.rate:row.dailyRate??row.rate;return `<tr data-attendance-id="${esc(row.id)}"><td>${esc(row.date||'—')}</td><td><b>${esc(label(state,'employees',employeeId,row.employeeName||'—'))}</b></td><td>${esc(label(state,'projects',projectId,row.projectName||'—'))}</td><td>${esc(isHourly?'時薪':'日薪')}</td><td class="num">${number(row.days)?number(row.days):'—'}</td><td class="num">${number(row.hours)?number(row.hours):'—'}</td><td class="num">${rate===null||rate===undefined?'—':money(rate)}</td><td class="num"><b>${money(row.amount)}</b></td><td class="num">${number(row.fuel)?money(row.fuel):'—'}</td><td><span class="workforce-source-badge ${isDaily?'is-synced':'is-legacy'}">${isDaily?'每日施工同步':'歷史出勤'}</span>${row.sourceNo?`<small class="workforce-source-no">${esc(row.sourceNo)}</small>`:''}</td><td><span class="commission-status ${row.status==='已列入薪資'?'is-settled':'is-unsettled'}">${esc(row.status||'—')}</span></td><td>${isDaily&&row.sourceId?`<button class="commission-link" type="button" data-view-daily-source="${esc(row.sourceId)}">查看來源</button>`:'<span class="workforce-readonly-row">唯讀</span>'}</td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="12">此篩選條件下沒有出勤／點工紀錄。</td></tr>'}</tbody></table></div><div class="attendance-mobile-list" aria-label="出勤／點工清單">${attendanceMobileCards(state,rows)}</div></section>`;
   }
+  function commissionSettlementStatusForRow(row, cache) {
+    const employeeId=employeeIdOf(row),projectId=projectIdOf(row),key=`${employeeId}::${projectId}`;
+    if(!cache.has(key)){
+      let preview=null;
+      try{preview=store.projectCommissionSettlementPreview?.(employeeId,projectId,[])}catch(_error){preview=null}
+      cache.set(key,preview);
+    }
+    const allocations=(cache.get(key)?.availableAllocations||[]).filter((item)=>String(item.commissionId||'')===String(row.id||''));
+    if(!allocations.length)return {label:'—',className:'is-neutral'};
+    const settled=allocations.filter((item)=>item.settled).length;
+    if(settled===allocations.length)return {label:'已發',className:'is-settled'};
+    if(settled>0)return {label:'部分已發',className:'is-unsettled'};
+    return {label:'待發',className:'is-unsettled'};
+  }
   function buildCommissionPresentationRows(state, rows) {
+    const settlementCache=new Map();
     return rows.map((row)=>{
-      const linkedPayroll=state.payroll.filter((item)=>item.month===String(row.date||'').slice(0,7)&&item.employee===row.employee),locked=store.payrollHistoryLock(row.employee,row.date).locked,source=store.commissionBillingLink(row),isDaily=source.kind==='daily-log',sourceView={linked:['請款來源','is-synced'],'orphan-billing':['來源已不存在','is-legacy'],manual:['手動登錄','is-manual'],'daily-log':['每日施工同步','is-synced'],ambiguous:['來源待確認','is-legacy']}[source.kind]||['來源待確認','is-legacy'];
-      return {row,employeeName:label(state,'employees',row.employee,row.employeeName||'—'),projectName:label(state,'projects',row.project,row.projectName||'—'),source,sourceView,gross:grossOf(state,row),locked,actions:locked?`<span class="commission-status is-settled" title="${source.kind==='orphan-billing'?'此抽成已納入真正已付款薪資，不能直接清除來源。':'此紀錄已納入已付款薪資，為保留歷史帳務不可修改。'}">已付款鎖定</span>`:isDaily?'<span class="commission-status" title="請由每日施工來源調整">來源同步</span>':`<div class="commission-row-actions"><button type="button" data-edit="${esc(row.id)}">編輯</button><button type="button" data-delete="${esc(row.id)}">刪除</button></div>`,payrollRecords:linkedPayroll.length,payrollCommission:linkedPayroll.filter((item)=>item.status!=='已付款').reduce((sum,item)=>sum+number(item.commission),0),settlementLabel:row.status==='已列入薪資'?'已結算':'未結算',settlementClass:row.status==='已列入薪資'?'is-settled':'is-unsettled'};
+      const linkedPayroll=state.payroll.filter((item)=>item.month===String(row.date||'').slice(0,7)&&item.employee===row.employee),locked=store.payrollHistoryLock(row.employee,row.date).locked,source=store.commissionBillingLink(row),isDaily=source.kind==='daily-log',sourceView={linked:['請款來源','is-synced'],'orphan-billing':['來源已不存在','is-legacy'],manual:['手動登錄','is-manual'],'daily-log':['每日施工同步','is-synced'],ambiguous:['來源待確認','is-legacy']}[source.kind]||['來源待確認','is-legacy'],projectPayment=commissionSettlementStatusForRow(row,settlementCache);
+      return {row,employeeName:label(state,'employees',row.employee,row.employeeName||'—'),projectName:label(state,'projects',row.project,row.projectName||'—'),source,sourceView,gross:grossOf(state,row),locked,actions:locked?`<span class="commission-status is-settled" title="${source.kind==='orphan-billing'?'此抽成已納入真正已付款薪資，不能直接清除來源。':'此紀錄已納入已付款薪資，為保留歷史帳務不可修改。'}">已付款鎖定</span>`:isDaily?'<span class="commission-status" title="請由每日施工來源調整">來源同步</span>':`<div class="commission-row-actions"><button type="button" data-edit="${esc(row.id)}">編輯</button><button type="button" data-delete="${esc(row.id)}">刪除</button></div>`,payrollRecords:linkedPayroll.length,payrollCommission:linkedPayroll.filter((item)=>item.status!=='已付款').reduce((sum,item)=>sum+number(item.commission),0),payrollLabel:row.status==='已列入薪資'?'已列入薪資':'未列入薪資',payrollClass:row.status==='已列入薪資'?'is-settled':'is-unsettled',projectPayment};
     });
   }
   function commissionPresentationAttributes(view) {
     return `data-row-id="${esc(view.row.id)}" data-source-integrity="${esc(view.source.kind)}" data-payroll-records="${view.payrollRecords}" data-payroll-commission="${view.payrollCommission}"`;
   }
   function commissionMobileCards(views) {
-    return `<div class="commission-mobile-list">${views.map((view)=>{const row=view.row;return `<article class="commission-mobile-card" ${commissionPresentationAttributes(view)}><header><span>${esc(row.date||'—')}</span><span class="commission-status ${view.settlementClass}">${view.settlementLabel}</span></header><div class="commission-mobile-primary"><strong>${esc(view.employeeName)}</strong><span>${esc(view.projectName)}</span></div><div class="commission-mobile-source"><span class="workforce-source-badge ${view.sourceView[1]}">${view.sourceView[0]}</span>${row.sourceNo?`<small class="workforce-source-no">${esc(row.sourceNo)}</small>`:''}</div><dl><div><dt>含稅金額</dt><dd>${money(view.gross)}</dd></div><div><dt>未稅金額</dt><dd>${money(row.untaxedAmount)}</dd></div><div><dt>抽成 %</dt><dd>${number(row.rate)}%</dd></div><div><dt>抽成金額</dt><dd>${money(row.commission)}</dd></div></dl><footer>${view.actions}</footer></article>`}).join('')||'<p class="commission-mobile-empty">此篩選條件下沒有業績／抽成紀錄。</p>'}</div>`;
+    return `<div class="commission-mobile-list">${views.map((view)=>{const row=view.row;return `<article class="commission-mobile-card" ${commissionPresentationAttributes(view)}><header><span>${esc(row.date||'—')}</span><span class="commission-status ${view.projectPayment.className}">${view.projectPayment.label}</span></header><div class="commission-mobile-primary"><strong>${esc(view.employeeName)}</strong><span>${esc(view.projectName)}</span></div><div class="commission-mobile-source"><span class="workforce-source-badge ${view.sourceView[1]}">${view.sourceView[0]}</span>${row.sourceNo?`<small class="workforce-source-no">${esc(row.sourceNo)}</small>`:''}</div><dl><div><dt>含稅金額</dt><dd>${money(view.gross)}</dd></div><div><dt>未稅金額</dt><dd>${money(row.untaxedAmount)}</dd></div><div><dt>抽成 %</dt><dd>${number(row.rate)}%</dd></div><div><dt>抽成金額</dt><dd>${money(row.commission)}</dd></div><div><dt>薪資狀態</dt><dd><span class="commission-status ${view.payrollClass}">${view.payrollLabel}</span></dd></div><div><dt>案場抽成付款</dt><dd><span class="commission-status ${view.projectPayment.className}">${view.projectPayment.label}</span></dd></div></dl><footer>${view.actions}</footer></article>`}).join('')||'<p class="commission-mobile-empty">此篩選條件下沒有業績／抽成紀錄。</p>'}</div>`;
   }
   function commissionSection(state, rows) {
     const views=buildCommissionPresentationRows(state,rows);
-    return `<section class="commission-panel commission-table-panel"><header><div><h2>業績／抽成</h2><p>每日施工同步與手動登錄分流呈現，既有抽成公式與薪資狀態保持不變。</p></div></header><div class="commission-table-wrap commission-desktop-table"><table class="commission-table workforce-commission-table"><thead><tr><th>${sortButton('date','日期')}</th><th>${sortButton('employee','員工')}</th><th>${sortButton('project','案場')}</th><th>業績來源</th><th class="num">含稅金額</th><th class="num">${sortButton('untaxedAmount','未稅金額')}</th><th class="num">${sortButton('rate','抽成 %')}</th><th class="num">${sortButton('commission','抽成金額')}</th><th>${sortButton('status','結算狀態')}</th><th>操作</th></tr></thead><tbody>${views.map((view)=>{const row=view.row;return `<tr ${commissionPresentationAttributes(view)}><td>${esc(row.date||'—')}</td><td><b>${esc(view.employeeName)}</b></td><td>${esc(view.projectName)}</td><td><span class="workforce-source-badge ${view.sourceView[1]}">${view.sourceView[0]}</span>${row.sourceNo?`<small class="workforce-source-no">${esc(row.sourceNo)}</small>`:''}</td><td class="num">${money(view.gross)}</td><td class="num">${money(row.untaxedAmount)}</td><td class="num">${number(row.rate)}%</td><td class="num"><b>${money(row.commission)}</b></td><td><span class="commission-status ${view.settlementClass}">${view.settlementLabel}</span></td><td>${view.actions}</td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="10">此篩選條件下沒有業績／抽成紀錄。</td></tr>'}</tbody></table></div>${commissionMobileCards(views)}</section>`;
+    return `<section class="commission-panel commission-table-panel"><header><div><h2>業績／抽成</h2><p>薪資列入狀態與案場抽成實際付款分開呈現，避免把「已列入薪資」誤認為「已付款」。</p></div><button class="commission-primary commission-settlement-open" id="projectCommissionSettlementOpen" type="button">案場抽成結算</button></header><div class="commission-table-wrap commission-desktop-table"><table class="commission-table workforce-commission-table"><thead><tr><th>${sortButton('date','日期')}</th><th>${sortButton('employee','員工')}</th><th>${sortButton('project','案場')}</th><th>業績來源</th><th class="num">含稅金額</th><th class="num">${sortButton('untaxedAmount','未稅金額')}</th><th class="num">${sortButton('rate','抽成 %')}</th><th class="num">${sortButton('commission','抽成金額')}</th><th>${sortButton('status','薪資狀態')}</th><th>案場抽成付款</th><th>操作</th></tr></thead><tbody>${views.map((view)=>{const row=view.row;return `<tr ${commissionPresentationAttributes(view)}><td>${esc(row.date||'—')}</td><td><b>${esc(view.employeeName)}</b></td><td>${esc(view.projectName)}</td><td><span class="workforce-source-badge ${view.sourceView[1]}">${view.sourceView[0]}</span>${row.sourceNo?`<small class="workforce-source-no">${esc(row.sourceNo)}</small>`:''}</td><td class="num">${money(view.gross)}</td><td class="num">${money(row.untaxedAmount)}</td><td class="num">${number(row.rate)}%</td><td class="num"><b>${money(row.commission)}</b></td><td><span class="commission-status ${view.payrollClass}">${view.payrollLabel}</span></td><td><span class="commission-status ${view.projectPayment.className}">${view.projectPayment.label}</span></td><td>${view.actions}</td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="11">此篩選條件下沒有業績／抽成紀錄。</td></tr>'}</tbody></table></div>${commissionMobileCards(views)}</section>`;
+  }
+
+  function settlementHouseGroups(preview) {
+    const groups=new Map();
+    (preview?.availableAllocations||[]).forEach((row)=>{
+      const house=String(row.house||'未指定戶別'),key=house;
+      if(!groups.has(key))groups.set(key,{house,dates:new Set(),selectionKeys:[],untaxedAmount:0,amount:0,settledAmount:0,settledCount:0,totalCount:0});
+      const group=groups.get(key);group.totalCount+=1;group.dates.add(row.date||'—');
+      if(row.settled){group.settledCount+=1;group.settledAmount+=number(row.amount)}
+      else{group.selectionKeys.push(row.allocationKey);group.untaxedAmount+=number(row.untaxedAmount);group.amount+=number(row.amount)}
+    });
+    return [...groups.values()].sort((a,b)=>a.house.localeCompare(b.house,'zh-Hant'));
+  }
+  function settlementGroupStatus(group) {
+    if(group.settledCount===group.totalCount&&group.totalCount>0)return {label:'已發',className:'is-settled'};
+    if(group.settledCount>0)return {label:'部分已發',className:'is-unsettled'};
+    return {label:'待發',className:'is-unsettled'};
+  }
+  function renderProjectCommissionSettlementDrawer(employeeId=filters.employee,projectId=filters.project) {
+    const layer=$('#commissionDrawerLayer');if(!layer)return;
+    const state=store.getState(),employee=String(employeeId||''),project=String(projectId||'');
+    let preview=null;try{if(employee&&project)preview=store.projectCommissionSettlementPreview(employee,project,[])}catch(_error){preview=null}
+    const groups=settlementHouseGroups(preview);
+    const availableKeys=new Set(groups.flatMap((group)=>group.selectionKeys));
+    if(!settlementSelectionKeys.size)availableKeys.forEach((key)=>settlementSelectionKeys.add(key));
+    [...settlementSelectionKeys].forEach((key)=>{if(!availableKeys.has(key))settlementSelectionKeys.delete(key)});
+    const selected=[...settlementSelectionKeys],selectedPreview=employee&&project?store.projectCommissionSettlementPreview(employee,project,selected):null;
+    const blockers=selectedPreview?.blockers||[],total=selectedPreview?.total||0;
+    settlementDrawerActive=true;layer.dataset.drawerMode='settlement';
+    layer.innerHTML=`<aside class="commission-drawer project-settlement-drawer" role="dialog" aria-modal="true" aria-labelledby="projectSettlementTitle">
+      <form id="projectSettlementForm">
+        <header><div><h2 id="projectSettlementTitle">案場抽成結算</h2><p>同案場、同戶別可跨日期彙整；底層仍保留每筆來源，避免重複付款。</p></div><button type="button" data-settlement-close aria-label="關閉">×</button></header>
+        <div class="commission-drawer-body project-settlement-body">
+          <div class="project-settlement-selectors">
+            <label><span>員工 *</span><select name="employeeId" required>${options(state.employees,employee,'請選員工')}</select></label>
+            <label><span>案場 *</span><select name="projectId" required>${options(state.projects,project,'請選案場')}</select></label>
+          </div>
+          ${employee&&project?`<section class="project-settlement-houses"><header><div><b>戶別抽成</b><small>勾選本次要付款的戶別；已發來源不可再次勾選。</small></div><button type="button" class="commission-secondary" data-settlement-select-all>全選待發</button></header>
+            <div class="project-settlement-house-list">${groups.map((group)=>{const status=settlementGroupStatus(group),enabled=group.selectionKeys.length>0,checked=enabled&&group.selectionKeys.every((key)=>settlementSelectionKeys.has(key));return `<label class="project-settlement-house ${enabled?'':'is-disabled'}"><input type="checkbox" data-settlement-house="${esc(group.house)}" ${checked?'checked':''} ${enabled?'':'disabled'}><span class="project-settlement-house-main"><strong>${esc(group.house)}</strong><small>${esc([...group.dates].sort().join('、'))}</small></span><span class="project-settlement-house-money"><b>${money(group.amount)}</b><small>未稅業績 ${money(group.untaxedAmount)}</small></span><span class="commission-status ${status.className}">${status.label}</span></label>`}).join('')||'<p class="commission-mobile-empty">此員工／案場目前沒有可結算戶別。</p>'}</div>
+          </section>`:'<p class="project-settlement-empty">請先選擇員工與案場。</p>'}
+          <section class="project-settlement-payment">
+            <label><span>付款銀行 *</span><select name="bankAccountId" required>${options(state.banks, '', '請選銀行')}</select></label>
+            <label><span>付款日期 *</span><input name="date" type="date" value="${today()}" required></label>
+            <label><span>手續費</span><input name="fee" type="number" min="0" step="1" value="0"></label>
+            <label><span>手續費負擔</span><select name="feePayer"><option value="company">公司負擔</option><option value="recipient">員工負擔</option></select></label>
+            <label class="full"><span>備註</span><textarea name="note" rows="3" placeholder="例如：本次結算戶別、轉帳備註"></textarea></label>
+          </section>
+          <div class="project-settlement-summary"><span>本次勾選</span><strong>${money(total)}</strong><small>${selected.length} 筆戶別來源</small></div>
+          ${blockers.length?`<div class="project-settlement-blockers">${blockers.map((row)=>`<p>${esc(row.message||'目前不可結算')}</p>`).join('')}</div>`:''}
+        </div>
+        <footer><button class="commission-secondary" type="button" data-settlement-close>取消</button><button class="commission-primary" type="submit" ${!employee||!project||!selected.length||!selectedPreview?.allowed?'disabled':''}>確認付款</button></footer>
+      </form>
+    </aside>`;
+    layer.hidden=false;requestAnimationFrame(()=>layer.classList.add('is-open'));
+    const form=$('#projectSettlementForm',layer),employeeSelect=form.elements.employeeId,projectSelect=form.elements.projectId;
+    const rerender=()=>{const nextEmployee=employeeSelect.value,nextProject=projectSelect.value;settlementSelectionKeys=new Set();renderProjectCommissionSettlementDrawer(nextEmployee,nextProject)};
+    employeeSelect.addEventListener('change',rerender);projectSelect.addEventListener('change',rerender);
+    $('[data-settlement-house]',form).forEach((input)=>input.addEventListener('change',()=>{
+      const group=groups.find((item)=>item.house===input.dataset.settlementHouse);if(!group)return;
+      group.selectionKeys.forEach((key)=>input.checked?settlementSelectionKeys.add(key):settlementSelectionKeys.delete(key));
+      renderProjectCommissionSettlementDrawer(employee,project);
+    }));
+    $('[data-settlement-select-all]',form)?.addEventListener('click',()=>{settlementSelectionKeys=new Set(groups.flatMap((group)=>group.selectionKeys));renderProjectCommissionSettlementDrawer(employee,project)});
+    $('[data-settlement-close]',form).forEach((button)=>button.addEventListener('click',closeProjectCommissionSettlementDrawer));
+    form.addEventListener('submit',submitProjectCommissionSettlement);
+  }
+  function closeProjectCommissionSettlementDrawer() {
+    const layer=$('#commissionDrawerLayer');if(!layer)return;
+    settlementDrawerActive=false;settlementSubmitInFlight=false;settlementSelectionKeys=new Set();layer.classList.remove('is-open');layer.hidden=true;layer.innerHTML='';delete layer.dataset.drawerMode;
+    if(searchRenderPending)refreshWorkforceResults();
+  }
+  async function submitProjectCommissionSettlement(event) {
+    event.preventDefault();if(settlementSubmitInFlight)return;
+    const form=event.currentTarget,data=new FormData(form),employeeId=String(data.get('employeeId')||''),projectId=String(data.get('projectId')||''),selectionKeys=[...settlementSelectionKeys];
+    if(!employeeId||!projectId||!selectionKeys.length)return window.KushePhase1?.toast('請選擇員工、案場與至少一個待發戶別');
+    settlementSubmitInFlight=true;const submit=form.querySelector('[type="submit"]');if(submit)submit.disabled=true;
+    try{
+      await store.addProjectCommissionSettlement({employeeId,projectId,selectionKeys,bankAccountId:String(data.get('bankAccountId')||''),date:String(data.get('date')||today()),fee:number(data.get('fee')),feePayer:String(data.get('feePayer')||'company'),paymentMethod:'銀行轉帳',note:String(data.get('note')||'')});
+      closeProjectCommissionSettlementDrawer();refreshWorkforceResults();window.KushePhase1?.toast('案場抽成付款已完成，銀行與薪資摘要已同步');
+    }catch(error){window.KushePhase1?.toast(error.message||'案場抽成結算失敗');if(submit)submit.disabled=false}
+    finally{settlementSubmitInFlight=false}
   }
   function payrollState(state, employeeId, month) {
     const group=store.monthlyPayrollGroups().find((row)=>row.employeeId===employeeId&&String(row.month||'').slice(0,7)===month);
@@ -399,7 +498,7 @@
     cancelSearchTimer();
     if (!active) return;
     if (dailyDetailActive) { dailyDetailNeedsRefresh = true; searchRenderPending = true; return; }
-    if (searchComposing || dailyEditorActive || manualDrawerActive || quickProjectSaveActive || dailySubmitInFlight) {
+    if (searchComposing || dailyEditorActive || manualDrawerActive || settlementDrawerActive || quickProjectSaveActive || dailySubmitInFlight) {
       searchRenderPending = true;
       return;
     }
@@ -527,7 +626,8 @@
     $$('[data-daily-edit]', panel).forEach((button) => button.addEventListener('click', () => openDailyDrawer(button.dataset.dailyEdit)));
     $$('[data-daily-delete]', panel).forEach((button) => button.addEventListener('click', () => removeDaily(button.dataset.dailyDelete)));
     $$('[data-view-daily-source]', panel).forEach((button)=>button.addEventListener('click',()=>showDailySource(button.dataset.viewDailySource,button)));
-    $$('[data-view-payroll]', panel).forEach((button)=>button.addEventListener('click',()=>{window.KushePayroll?.prepareNavigationTarget({employeeId:button.dataset.viewPayroll,month:filters.month});window.location.hash='#payroll'}));
+    $('[data-view-payroll]', panel).forEach((button)=>button.addEventListener('click',()=>{window.KushePayroll?.prepareNavigationTarget({employeeId:button.dataset.viewPayroll,month:filters.month});window.location.hash='#payroll'}));
+    $('#projectCommissionSettlementOpen',panel)?.addEventListener('click',()=>{settlementSelectionKeys=new Set();renderProjectCommissionSettlementDrawer(filters.employee,filters.project)});
   }
   function showDailySource(sourceId,trigger=document.activeElement) {
     const log=(store.getState().dailyLogs||[]).find((row)=>row.id===sourceId);
@@ -1032,8 +1132,8 @@
     searchLifecycleGeneration += 1;
     searchComposing = false;
     searchRenderPending = false;
-    active = false; stopDailyDrawerViewport(); stopManualDrawerViewport(); closeDailyDetail(); dailyDetailNeedsRefresh=false; dailyDetailContext=null; dailyEditorActive = false;
+    active = false; stopDailyDrawerViewport(); stopManualDrawerViewport(); closeDailyDetail(); closeProjectCommissionSettlementDrawer(); dailyDetailNeedsRefresh=false; dailyDetailContext=null; dailyEditorActive = false;
   }
-  window.addEventListener('kushe:data-updated', () => { if (active && !quickProjectSaveActive && !dailySubmitInFlight && !dailyEditorActive && !manualDrawerActive) refreshWorkforceResults(); });
+  window.addEventListener('kushe:data-updated', () => { if (active && !quickProjectSaveActive && !dailySubmitInFlight && !dailyEditorActive && !manualDrawerActive && !settlementDrawerActive) refreshWorkforceResults(); });
   window.KusheCommissions = { activate, deactivate, render };
 }());

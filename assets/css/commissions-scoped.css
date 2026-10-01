@@ -337,3 +337,48 @@
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-employee-choice{flex-wrap:wrap}
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-commission-rate{width:100%;grid-template-columns:1fr minmax(92px,120px) auto;padding-left:28px}
 }
+
+
+/* P20-5B Project commission settlement UI */
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .commission-table-panel>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .commission-settlement-open{flex:0 0 auto}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="settlement"] .project-settlement-drawer{width:min(760px,100%)}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-body{display:grid;gap:16px}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-selectors,
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-payment{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-selectors label,
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-payment label{display:grid;gap:6px;min-width:0}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-payment .full{grid-column:1/-1}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-houses{border:1px solid #dbe5ef;border-radius:12px;overflow:hidden;background:#fff}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-houses>header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px;background:#f7faff;border-bottom:1px solid #e4ebf3}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-houses>header div{display:grid;gap:3px}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-houses>header small{color:#66758d}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-house-list{display:grid}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-house{display:grid;grid-template-columns:auto minmax(0,1.4fr) minmax(140px,.8fr) auto;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid #edf1f6;cursor:pointer}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-house:last-child{border-bottom:0}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-house.is-disabled{opacity:.62;cursor:default;background:#fafbfc}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-house input{width:18px;height:18px}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-house-main,
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-house-money{display:grid;gap:3px;min-width:0}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-house-main small,
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-house-money small{color:#6d7c91;font-size:11px;overflow-wrap:anywhere}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-house-money{text-align:right}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-summary{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:end;padding:14px;border-radius:12px;background:#f3f7fd}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-summary strong{font-size:24px}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-summary small{grid-column:1/-1;color:#66758d}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-blockers{display:grid;gap:6px;padding:12px 14px;border:1px solid #f1c8c3;border-radius:10px;background:#fff6f5;color:#a93427}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-blockers p{margin:0}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-empty{margin:0;padding:18px;border:1px dashed #ccd8e5;border-radius:10px;color:#66758d;text-align:center}
+@media(max-width:820px){
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .commission-table-panel>header{align-items:stretch;flex-direction:column}
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .commission-settlement-open{width:100%;min-height:44px}
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="settlement"]{position:fixed;inset:0;padding:0}
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="settlement"] .project-settlement-drawer{width:100%;max-width:none;height:100%;max-height:none;border-radius:0;display:flex;flex-direction:column}
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="settlement"] #projectSettlementForm{height:100%;display:flex;flex-direction:column;min-height:0}
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-body{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:18px}
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-selectors,
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-payment{grid-template-columns:1fr}
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-payment .full{grid-column:auto}
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-house{grid-template-columns:auto minmax(0,1fr) auto;gap:10px}
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-house-money{grid-column:2/4;text-align:left}
+}
