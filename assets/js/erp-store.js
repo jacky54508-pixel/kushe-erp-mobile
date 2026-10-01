@@ -4939,14 +4939,22 @@
     const existing=state.materialUsages.find((row)=>row.id===id),project=state.projects.find((row)=>row.id===values.project),material=state.materials.find((row)=>row.id===values.material),vendor=state.vendors.find((row)=>row.id===(values.vendor||material?.vendor));
     const employeeId=String(values.employee||existing?.employee||''),employee=state.employees.find((row)=>String(row.id)===employeeId),quantity=num(values.quantity),unitPrice=num(values.unitPrice);
     if(!project)throw new Error('找不到案場'); if(!material)throw new Error('請選擇既有材料'); if(!vendor)throw new Error('請選擇材料廠商'); if(!existing&&!employee)throw new Error('請選擇補料員工'); if(existing?.employee&&!employee)throw new Error('原補料員工不存在，請重新選擇員工'); if(quantity<=0)throw new Error('數量必須大於 0'); if(unitPrice<0)throw new Error('單價不可小於 0');
+    if(!material.inventoryInitializedAt)throw new Error('此材料尚未建立期初庫存，禁止新增材料使用');
+    const oldMaterial=existing?state.materials.find((row)=>String(row.id)===String(existing.material||'')):null,existingWasDeducted=Boolean(existing?.inventoryDeductedAt);
+    const oldQuantity=existingWasDeducted?Math.max(0,num(existing.quantity)):0,oldAvailable=oldMaterial?Math.max(0,num(oldMaterial.stock))+oldQuantity:0,newAvailable=Math.max(0,num(material.stock))+(existingWasDeducted&&oldMaterial&&String(oldMaterial.id)===String(material.id)?oldQuantity:0);
+    if(newAvailable<quantity)throw new Error(`庫存不足，禁止送出。目前可用 ${newAvailable} ${material.unit||''}，本次需要 ${quantity} ${material.unit||''}`);
     const now=new Date().toISOString(),oldPayable=payableForUsage(existing);
     if(existing&&payableLocked(oldPayable))throw new Error('此材料來源的應付已付款，不能直接修改；請先以正式帳務方式處理');
+    if(existingWasDeducted&&oldMaterial){
+      oldMaterial.stock=oldAvailable;oldMaterial.inventoryUpdatedAt=now;oldMaterial.updatedAt=now;
+    }
+    material.stock=Math.max(0,num(material.stock))-quantity;material.inventoryUpdatedAt=now;material.updatedAt=now;
     const row=existing||{id:uid(),createdAt:now,status:'未付'};
     if(existing&&oldPayable){oldPayable.usageIds=(oldPayable.usageIds||[]).filter((usageId)=>String(usageId)!==String(existing.id));}
-    Object.assign(row,{date:values.date||businessDate(new Date(now)),employee:employee?.id||row.employee||'',employeeName:employee?.name||row.employeeName||'',project:project.id,projectName:project.name,material:material.id,materialName:material.name||'',vendor:vendor.id,vendorName:vendor.name||'',quantity,unitPrice,amount:Math.round(quantity*unitPrice),unit:material.unit||'',model:material.model||'',note:clean(values.note),updatedAt:now,payableId:''});
+    Object.assign(row,{date:values.date||businessDate(new Date(now)),employee:employee?.id||row.employee||'',employeeName:employee?.name||row.employeeName||'',project:project.id,projectName:project.name,material:material.id,materialName:material.name||'',vendor:vendor.id,vendorName:vendor.name||'',quantity,unitPrice,amount:Math.round(quantity*unitPrice),unit:material.unit||'',model:material.model||'',note:clean(values.note),updatedAt:now,payableId:'',inventoryDeductedAt:now,inventoryQuantity:quantity,inventoryMaterialId:material.id});
     if(!existing)state.materialUsages.unshift(row);
     if(oldPayable)syncMaterialPayable(oldPayable); assignMaterialUsage(row);
-    persist(`${id?'修改':'新增'}案場材料 ${project.name}`); return row;
+    persist(`${id?'修改':'新增'}案場材料 ${project.name}`,{materialUsageId:row.id,materialId:material.id,inventoryBefore:newAvailable,inventoryAfter:material.stock,inventoryQuantity:quantity}); return row;
   }
   async function assignMaterialUsageEmployee(id, employeeId) {
     requireStoreTransactionDraft();
@@ -4962,9 +4970,13 @@
   async function deleteMaterialUsage(id) {
     requireStoreTransactionDraft(); const row=state.materialUsages.find((item)=>item.id===id); if(!row)return false;
     const payable=payableForUsage(row); if(payableLocked(payable))throw new Error('此材料來源的應付已有付款紀錄，不能直接刪除');
+    const material=state.materials.find((item)=>String(item.id)===String(row.material||row.inventoryMaterialId||''));
+    if(row.inventoryDeductedAt&&material){
+      material.stock=Math.max(0,num(material.stock))+Math.max(0,num(row.inventoryQuantity??row.quantity));material.inventoryUpdatedAt=new Date().toISOString();material.updatedAt=material.inventoryUpdatedAt;
+    }
     state.materialUsages=state.materialUsages.filter((item)=>item.id!==id);
     if(payable){payable.usageIds=(payable.usageIds||[]).filter((usageId)=>String(usageId)!==String(id));syncMaterialPayable(payable)}
-    persist('刪除案場材料使用'); return true;
+    persist('刪除案場材料使用',{materialUsageId:row.id,inventoryRestored:Boolean(row.inventoryDeductedAt&&material),restoredQuantity:row.inventoryDeductedAt?Math.max(0,num(row.inventoryQuantity??row.quantity)):0}); return true;
   }
   async function saveProjectCost(values, id = '') {
     requireStoreTransactionDraft(); const project=state.projects.find((row)=>row.id===values.project),amount=Math.max(0,Math.round(num(values.amount)));
