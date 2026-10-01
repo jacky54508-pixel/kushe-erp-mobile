@@ -382,3 +382,15 @@
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-house{grid-template-columns:auto minmax(0,1fr) auto;gap:10px}
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-house-money{grid-column:2/4;text-align:left}
 }
+
+
+/* P20-5C commission settlement history / print entry */
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history{margin-top:16px}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history>header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history td small{display:block;margin-top:3px;color:#6c7a8e}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-mobile{display:none}
+@media(max-width:820px){
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-desktop{display:none}
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-mobile{display:grid;gap:10px}
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-mobile footer{display:flex;gap:8px;flex-wrap:wrap}
+}
