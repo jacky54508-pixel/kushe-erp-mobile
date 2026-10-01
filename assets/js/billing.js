@@ -699,13 +699,18 @@
     if(receivableFilters.view==='employee_cash')renderEmployeeCashPanel();else{
       enhanceEmployeeCashReceivableRows();
       $$('#receivablesApp .receivable-main-row').forEach((rowNode)=>{
-        const id=rowNode.dataset.expandReceivable,actions=$('.receivable-actions',rowNode),mainButton=$('[data-expand-button]',rowNode);
-        if(!actions||!mainButton)return;
-        $$('[data-view-receivable-billing]',actions).forEach((button)=>{if(button!==mainButton)button.remove()});
+        const id=rowNode.dataset.expandReceivable,actions=$('.receivable-actions',rowNode);
+        if(!actions)return;
+        const firstCell=rowNode.children?.[0]||null;
+        let mainButton=$('[data-expand-button]',firstCell||rowNode);
+        if(!mainButton)mainButton=$$('button',firstCell||rowNode).find((button)=>/^(收款歷程|收合歷程|展開明細|收合明細)$/.test(String(button.textContent||'').trim()))||null;
+        if(!mainButton)return;
+        $$('[data-view-receivable-billing]',rowNode).forEach((button)=>{if(button!==mainButton)button.remove()});
+        $$('[data-expand-button]',actions).forEach((button)=>button.remove());
         const opened=openReceiptHistories.has(id),historyButton=document.createElement('button');
         historyButton.className='commission-link receivable-history-link';historyButton.type='button';historyButton.dataset.expandButton=id;historyButton.textContent=opened?'收合歷程':'收款歷程';historyButton.setAttribute('aria-label',opened?'收合收款歷程':'查看收款歷程');historyButton.setAttribute('aria-expanded',String(opened));historyButton.onclick=(event)=>{event.stopPropagation();toggleReceivableDetail(id)};
-        mainButton.removeAttribute('data-expand-button');mainButton.dataset.viewReceivableBilling=id;mainButton.textContent='查看請款單';mainButton.setAttribute('aria-label','查看對應請款單');mainButton.removeAttribute('aria-expanded');mainButton.onclick=(event)=>{event.stopPropagation();openReceivableBilling(id)};
-        actions.insertBefore(historyButton,mainButton);
+        mainButton.removeAttribute('data-expand-button');mainButton.removeAttribute('data-history');mainButton.dataset.viewReceivableBilling=id;mainButton.textContent='查看請款單';mainButton.setAttribute('aria-label','查看對應請款單');mainButton.removeAttribute('aria-expanded');mainButton.onclick=(event)=>{event.stopPropagation();openReceivableBilling(id)};
+        actions.append(historyButton);
       });
     }
     return result;
