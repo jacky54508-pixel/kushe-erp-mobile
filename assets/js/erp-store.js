@@ -4064,10 +4064,72 @@
   function commissionSettlementSourceIds(settlement) {
     return [...new Set([...(Array.isArray(settlement?.sourceCommissionIds)?settlement.sourceCommissionIds:[]),...(Array.isArray(settlement?.allocations)?settlement.allocations.map((row)=>row?.commissionId):[])].map((value)=>String(value||'').trim()).filter(Boolean))];
   }
+  function commissionHouseAllocationKey(commissionId,house) {
+    return JSON.stringify([String(commissionId||''),String(house||'未指定戶別')]);
+  }
+  function proportionalSplit(total,weightedRows,precision=0) {
+    const factor=10**precision,target=Math.round(Math.max(0,num(total))*factor),rows=weightedRows.map((row,index)=>({...row,_index:index,_weight:Math.max(0,num(row.weight))}));
+    if(!rows.length)return [];
+    const weightTotal=rows.reduce((sum,row)=>sum+row._weight,0);
+    if(weightTotal<=0)return rows.map((row,index)=>({...row,value:index===0?target/factor:0}));
+    let used=0;
+    const shares=rows.map((row)=>{
+      const exact=target*row._weight/weightTotal,base=Math.floor(exact);used+=base;
+      return {...row,_base:base,_remainder:exact-base};
+    });
+    let remainder=target-used;
+    shares.sort((a,b)=>b._remainder-a._remainder||String(a.house||'').localeCompare(String(b.house||''),'zh-Hant')||a._index-b._index);
+    for(let i=0;i<shares.length&&remainder>0;i++,remainder--)shares[i]._base+=1;
+    return shares.sort((a,b)=>a._index-b._index).map(({_index,_weight,_base,_remainder,...row})=>({...row,value:_base/factor}));
+  }
+  function commissionHouseAllocations(row) {
+    const commissionId=String(row?.id||''),fallbackHouse='未指定戶別',commissionTotal=Math.max(0,Math.round(num(row?.commission))),performanceTotal=Math.max(0,num(row?.untaxedAmount));
+    if(!commissionId||commissionTotal<=0)return [];
+    let weighted=[];
+    if(String(row?.sourceType||'')==='daily-log'&&String(row?.sourceId||'')){
+      const logs=(state.dailyLogs||[]).filter((log)=>String(log.id||'')===String(row.sourceId));
+      if(logs.length===1){
+        const grouped=new Map();
+        (logs[0].items||[]).forEach((item)=>{
+          const house=String(item?.house||'').trim()||fallbackHouse,weight=Math.max(0,num(item?.untaxedSubtotal)||num(item?.qty)*num(item?.price));
+          if(!grouped.has(house))grouped.set(house,0);
+          grouped.set(house,grouped.get(house)+weight);
+        });
+        weighted=[...grouped.entries()].map(([house,weight])=>({house,weight})).filter((entry)=>entry.weight>0).sort((a,b)=>a.house.localeCompare(b.house,'zh-Hant'));
+      }
+    }
+    if(!weighted.length)weighted=[{house:fallbackHouse,weight:performanceTotal||1}];
+    const commissionShares=proportionalSplit(commissionTotal,weighted,0),performanceShares=proportionalSplit(performanceTotal,weighted,2);
+    return commissionShares.map((share,index)=>({
+      allocationKey:commissionHouseAllocationKey(commissionId,share.house),
+      commissionId,
+      date:row.date||'',
+      month:monthOf(row.date),
+      house:share.house,
+      untaxedAmount:num(performanceShares[index]?.value),
+      amount:Math.max(0,num(share.value)),
+      rate:num(row.rate),
+      sourceNo:row.sourceNo||'',
+      note:row.note||''
+    }));
+  }
+  function settlementUsesWholeCommission(settlement,commissionId) {
+    if(Number(settlement?.allocationVersion)===2)return false;
+    const id=String(commissionId||'');
+    return Array.isArray(settlement?.sourceCommissionIds)&&settlement.sourceCommissionIds.some((value)=>String(value)===id);
+  }
+  function settlementAllocationKeys(settlement) {
+    const keys=new Set();
+    (settlement?.allocations||[]).forEach((row)=>{
+      if(row?.allocationKey)keys.add(String(row.allocationKey));
+      else if(Number(settlement?.allocationVersion)===2&&row?.commissionId)keys.add(commissionHouseAllocationKey(row.commissionId,row.house));
+    });
+    return keys;
+  }
   function commissionSettlementForCommissionId(commissionId) {
     const id=String(commissionId||'').trim();
     if(!id)return null;
-    return (state.commissionSettlements||[]).find((row)=>commissionSettlementSourceIds(row).includes(id))||null;
+    return (state.commissionSettlements||[]).find((row)=>settlementUsesWholeCommission(row,id)||(row.allocations||[]).some((allocation)=>String(allocation?.commissionId||'')===id))||null;
   }
   function commissionSettlementLock(row) {
     const settlement=commissionSettlementForCommissionId(row?.id);
@@ -4079,22 +4141,40 @@
     const settlements=linked.map((row)=>commissionSettlementForCommissionId(row.id)).filter(Boolean);
     return {locked:settlements.length>0,commissionIds:linked.filter((row)=>commissionSettlementForCommissionId(row.id)).map((row)=>String(row.id)),settlementIds:[...new Set(settlements.map((row)=>String(row.id)))]};
   }
-  function projectCommissionSettlementPreview(employeeId,projectId,sourceIds=[]) {
-    const employee=String(employeeId||'').trim(),project=String(projectId||'').trim(),requested=[...new Set((Array.isArray(sourceIds)?sourceIds:[]).map((value)=>String(value||'').trim()).filter(Boolean))],blockers=[];
+  function projectCommissionSettlementPreview(employeeId,projectId,selections=[]) {
+    const employee=String(employeeId||'').trim(),project=String(projectId||'').trim(),requested=[...new Set((Array.isArray(selections)?selections:[]).map((value)=>String(value||'').trim()).filter(Boolean))],blockers=[];
     const allSources=(state.commissions||[]).filter((row)=>String(row.employee||row.employeeId||'')===employee&&String(row.project||row.projectId||'')===project&&row.status==='已列入薪資'&&num(row.commission)>0);
-    const settledIds=new Set((state.commissionSettlements||[]).flatMap(commissionSettlementSourceIds));
-    const selected=requested.length?requested.map((id)=>(state.commissions||[]).find((row)=>String(row.id)===id)).filter(Boolean):allSources.filter((row)=>!settledIds.has(String(row.id)));
+    const allAllocations=allSources.flatMap((row)=>commissionHouseAllocations(row).map((allocation)=>({...allocation,source:row})));
+    const settledKeys=new Set(),wholeSettledIds=new Set();
+    (state.commissionSettlements||[]).forEach((settlement)=>{
+      commissionSettlementSourceIds(settlement).forEach((id)=>{if(settlementUsesWholeCommission(settlement,id))wholeSettledIds.add(id)});
+      settlementAllocationKeys(settlement).forEach((key)=>settledKeys.add(key));
+    });
+    allAllocations.forEach((allocation)=>{if(wholeSettledIds.has(allocation.commissionId))settledKeys.add(allocation.allocationKey)});
+    let selected=[];
+    const missing=[];
+    if(requested.length){
+      requested.forEach((token)=>{
+        const byKey=allAllocations.find((allocation)=>allocation.allocationKey===token);
+        if(byKey){selected.push(byKey);return}
+        const byCommission=allAllocations.filter((allocation)=>allocation.commissionId===token&&!settledKeys.has(allocation.allocationKey));
+        if(byCommission.length){selected.push(...byCommission);return}
+        missing.push(token);
+      });
+      const seen=new Set();selected=selected.filter((allocation)=>!seen.has(allocation.allocationKey)&&seen.add(allocation.allocationKey));
+    }else selected=allAllocations.filter((allocation)=>!settledKeys.has(allocation.allocationKey));
     if(!employee||!(state.employees||[]).some((row)=>String(row.id)===employee))blockers.push({code:'EMPLOYEE_NOT_FOUND',message:'找不到指定員工'});
     if(!project||!(state.projects||[]).some((row)=>String(row.id)===project))blockers.push({code:'PROJECT_NOT_FOUND',message:'找不到指定案場'});
-    if(requested.length!==selected.length)blockers.push({code:'COMMISSION_SOURCE_NOT_FOUND',message:'部分抽成來源已不存在'});
-    selected.forEach((row)=>{
-      if(String(row.employee||row.employeeId||'')!==employee||String(row.project||row.projectId||'')!==project)blockers.push({code:'SOURCE_SCOPE_MISMATCH',commissionId:String(row.id),message:'抽成來源的員工或案場不一致'});
-      if(row.status!=='已列入薪資'||num(row.commission)<=0)blockers.push({code:'SOURCE_NOT_PAYABLE',commissionId:String(row.id),message:'抽成來源目前不可結算'});
-      if(settledIds.has(String(row.id)))blockers.push({code:'SOURCE_ALREADY_SETTLED',commissionId:String(row.id),message:'此抽成來源已完成案場結算，不可重複發放'});
+    if(missing.length)blockers.push({code:'COMMISSION_ALLOCATION_NOT_FOUND',selectionKeys:missing,message:'部分戶別抽成來源已不存在或已無可結算金額'});
+    selected.forEach((allocation)=>{
+      const row=allocation.source;
+      if(String(row.employee||row.employeeId||'')!==employee||String(row.project||row.projectId||'')!==project)blockers.push({code:'SOURCE_SCOPE_MISMATCH',commissionId:allocation.commissionId,message:'抽成來源的員工或案場不一致'});
+      if(row.status!=='已列入薪資'||num(row.commission)<=0||num(allocation.amount)<=0)blockers.push({code:'SOURCE_NOT_PAYABLE',allocationKey:allocation.allocationKey,message:'抽成來源目前不可結算'});
+      if(settledKeys.has(allocation.allocationKey))blockers.push({code:'ALLOCATION_ALREADY_SETTLED',allocationKey:allocation.allocationKey,message:`${allocation.house} 的這筆抽成已完成結算，不可重複發放`});
     });
-    if(!selected.length)blockers.push({code:'NO_SETTLEMENT_SOURCE',message:'目前沒有可結算的案場抽成'});
+    if(!selected.length)blockers.push({code:'NO_SETTLEMENT_SOURCE',message:'目前沒有可結算的案場戶別抽成'});
     const monthAmounts=new Map();
-    selected.forEach((row)=>{const month=monthOf(row.date);monthAmounts.set(month,(monthAmounts.get(month)||0)+Math.max(0,num(row.commission)))});
+    selected.forEach((allocation)=>{const month=allocation.month;monthAmounts.set(month,(monthAmounts.get(month)||0)+Math.max(0,num(allocation.amount)))});
     for(const [month,amount] of monthAmounts){
       const records=(state.payroll||[]).filter((row)=>payrollEmployeeId(row)===employee&&String(row.month||'')===month);
       if(!records.length){blockers.push({code:'PAYROLL_MONTH_NOT_FOUND',month,message:`${month} 找不到對應薪資彙總，已停止案場抽成結算`});continue}
@@ -4102,9 +4182,16 @@
       if(truth.hasRegularPayment)blockers.push({code:'REGULAR_PAYROLL_ALREADY_PAID',month,message:`${month} 已有一般薪資付款，為避免重複發放，不能再以案場抽成方式結算此月份來源`});
       if(amount>truth.outstanding)blockers.push({code:'SETTLEMENT_EXCEEDS_OUTSTANDING',month,message:`${month} 本次案場抽成超過該月未付薪資`});
     }
-    const projectSources=allSources.map((row)=>String(row.id)),settledProjectCount=projectSources.filter((id)=>settledIds.has(id)).length,selectedUnsettledCount=selected.filter((row)=>!settledIds.has(String(row.id))).length;
-    const projectedSettled=Math.min(projectSources.length,settledProjectCount+selectedUnsettledCount),status=projectSources.length&&projectedSettled>=projectSources.length?'已發':projectedSettled>0?'部分已發':'待發';
-    return {allowed:blockers.length===0,employeeId:employee,projectId:project,sourceIds:selected.map((row)=>String(row.id)),sources:selected.map((row)=>({id:String(row.id),date:row.date||'',month:monthOf(row.date),untaxedAmount:num(row.untaxedAmount),rate:num(row.rate),commission:num(row.commission),sourceNo:row.sourceNo||'',note:row.note||''})),total:selected.reduce((sum,row)=>sum+Math.max(0,num(row.commission)),0),status,blockers,monthAmounts:Object.fromEntries(monthAmounts)};
+    const settledCount=allAllocations.filter((allocation)=>settledKeys.has(allocation.allocationKey)).length,selectedUnsettledCount=selected.filter((allocation)=>!settledKeys.has(allocation.allocationKey)).length,projectedSettled=Math.min(allAllocations.length,settledCount+selectedUnsettledCount),status=allAllocations.length&&projectedSettled>=allAllocations.length?'已發':projectedSettled>0?'部分已發':'待發';
+    const sourceMap=new Map();
+    selected.forEach((allocation)=>{if(!sourceMap.has(allocation.commissionId)){const row=allocation.source;sourceMap.set(allocation.commissionId,{id:allocation.commissionId,date:row.date||'',month:monthOf(row.date),untaxedAmount:num(row.untaxedAmount),rate:num(row.rate),commission:num(row.commission),sourceNo:row.sourceNo||'',note:row.note||''})}});
+    return {
+      allowed:blockers.length===0,employeeId:employee,projectId:project,
+      sourceIds:[...sourceMap.keys()],selectionKeys:selected.map((allocation)=>allocation.allocationKey),
+      allocations:selected.map(({source,...allocation})=>allocation),sources:[...sourceMap.values()],
+      availableAllocations:allAllocations.map(({source,...allocation})=>({...allocation,settled:settledKeys.has(allocation.allocationKey)})),
+      total:selected.reduce((sum,allocation)=>sum+Math.max(0,num(allocation.amount)),0),status,blockers,monthAmounts:Object.fromEntries(monthAmounts)
+    };
   }
   function payrollPaymentTruth(payroll) {
     const records=payrollGroupRows(payroll),recordIds=new Set(records.map((row)=>String(row.id))),employeeId=payrollEmployeeId(payroll),month=String(payroll?.month||records[0]?.month||''),total=payroll?.total!==undefined&&Array.isArray(payroll?.recordIds)?Math.max(0,num(payroll.total)):Math.max(0,...records.map((row)=>num(row.total)));
@@ -4276,17 +4363,20 @@
     requireStoreTransactionDraft();
     const idempotencyKey=String(values.idempotencyKey||'').trim();
     if(idempotencyKey){const existing=(state.commissionSettlements||[]).find((row)=>row.idempotencyKey===idempotencyKey);if(existing)return existing}
-    const employeeId=String(values.employeeId||values.employee||''),projectId=String(values.projectId||values.project||''),sourceIds=[...new Set((Array.isArray(values.sourceCommissionIds)?values.sourceCommissionIds:Array.isArray(values.sourceIds)?values.sourceIds:[]).map((value)=>String(value||'').trim()).filter(Boolean))];
-    const preview=projectCommissionSettlementPreview(employeeId,projectId,sourceIds);
+    const employeeId=String(values.employeeId||values.employee||''),projectId=String(values.projectId||values.project||'');
+    const selections=Array.isArray(values.selectionKeys)?values.selectionKeys:Array.isArray(values.allocationKeys)?values.allocationKeys:Array.isArray(values.sourceCommissionIds)?values.sourceCommissionIds:Array.isArray(values.sourceIds)?values.sourceIds:[];
+    const preview=projectCommissionSettlementPreview(employeeId,projectId,selections);
     if(!preview.allowed)throw new Error(preview.blockers.map((row)=>row.message).join('；')||'此案場抽成目前不可結算');
     const bank=state.banks.find((row)=>String(row.id)===String(values.bankAccountId||values.bankId||''));if(!bank)throw new Error('請選擇案場抽成付款銀行帳戶');
     const amount=Math.round(preview.total),fee=Math.max(0,Math.round(num(values.fee))),feePayer=values.feePayer==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount;
     if(amount<=0)throw new Error('本次案場抽成結算金額必須大於 0');if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次結算金額');
     const employee=state.employees.find((row)=>String(row.id)===employeeId),project=state.projects.find((row)=>String(row.id)===projectId),now=new Date().toISOString();
-    const settlement={id:uid(),idempotencyKey:idempotencyKey||uid(),date:values.date||businessDate(new Date(now)),employeeId,employeeName:employee?.name||'',projectId,projectName:project?.name||'',sourceCommissionIds:preview.sourceIds,allocations:preview.sources.map((row)=>({commissionId:row.id,date:row.date,month:row.month,amount:Math.max(0,num(row.commission))})),amount,fee,feePayer,actualDebit,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:String(values.note||''),createdAt:now,updatedAt:now};
+    const allocations=preview.allocations.map((row)=>({...row,amount:Math.max(0,num(row.amount)),untaxedAmount:Math.max(0,num(row.untaxedAmount))}));
+    if(Math.round(allocations.reduce((sum,row)=>sum+num(row.amount),0))!==amount)throw new Error('戶別抽成分攤總額與本次結算不一致，已停止付款');
+    const settlement={id:uid(),allocationVersion:2,idempotencyKey:idempotencyKey||uid(),date:values.date||businessDate(new Date(now)),employeeId,employeeName:employee?.name||'',projectId,projectName:project?.name||'',sourceCommissionIds:[...new Set(allocations.map((row)=>row.commissionId))],selectionKeys:allocations.map((row)=>row.allocationKey),allocations,amount,fee,feePayer,actualDebit,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:String(values.note||''),createdAt:now,updatedAt:now};
     state.commissionSettlements.unshift(settlement);syncProjectCommissionSettlementBankTransaction(settlement,now);
     [...new Set(settlement.allocations.map((row)=>row.month))].forEach((month)=>{const payroll=state.payroll.find((row)=>payrollEmployeeId(row)===employeeId&&String(row.month||'')===month);if(payroll)syncSalarySummary(payroll,now)});
-    persist(`新增案場抽成結算 ${project?.name||projectId}｜${employee?.name||employeeId}`,{commissionSettlementId:settlement.id,employeeId,projectId,sourceCommissionIds:settlement.sourceCommissionIds,amount});
+    persist(`新增案場戶別抽成結算 ${project?.name||projectId}｜${employee?.name||employeeId}`,{commissionSettlementId:settlement.id,employeeId,projectId,selectionKeys:settlement.selectionKeys,sourceCommissionIds:settlement.sourceCommissionIds,amount});
     return settlement;
   }
   async function deleteProjectCommissionSettlement(id) {
@@ -5509,7 +5599,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, commissionHouseAllocations, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
