@@ -640,10 +640,10 @@
     $$('[data-daily-edit]', panel).forEach((button) => button.addEventListener('click', () => openDailyDrawer(button.dataset.dailyEdit)));
     $$('[data-daily-delete]', panel).forEach((button) => button.addEventListener('click', () => removeDaily(button.dataset.dailyDelete)));
     $$('[data-view-daily-source]', panel).forEach((button)=>button.addEventListener('click',()=>showDailySource(button.dataset.viewDailySource,button)));
-    $('[data-view-payroll]', panel).forEach((button)=>button.addEventListener('click',()=>{window.KushePayroll?.prepareNavigationTarget({employeeId:button.dataset.viewPayroll,month:filters.month});window.location.hash='#payroll'}));
+    $$('[data-view-payroll]', panel).forEach((button)=>button.addEventListener('click',()=>{window.KushePayroll?.prepareNavigationTarget({employeeId:button.dataset.viewPayroll,month:filters.month});window.location.hash='#payroll'}));
     $('#projectCommissionSettlementOpen',panel)?.addEventListener('click',()=>{settlementSelectionKeys=new Set();renderProjectCommissionSettlementDrawer(filters.employee,filters.project)});
-    $('[data-settlement-print]',panel).forEach((button)=>button.addEventListener('click',()=>openCommissionSettlementPrint(button.dataset.settlementPrint,false)));
-    $('[data-settlement-export]',panel).forEach((button)=>button.addEventListener('click',()=>openCommissionSettlementPrint(button.dataset.settlementExport,true)));
+    $$('[data-settlement-print]',panel).forEach((button)=>button.addEventListener('click',()=>openCommissionSettlementPrint(button.dataset.settlementPrint,false)));
+    $$('[data-settlement-export]',panel).forEach((button)=>button.addEventListener('click',()=>openCommissionSettlementPrint(button.dataset.settlementExport,true)));
   }
   function openCommissionSettlementPrint(id,autoPrint) {
     const state=store.getState(),settlement=(state.commissionSettlements||[]).find((row)=>String(row.id||'')===String(id||''));
