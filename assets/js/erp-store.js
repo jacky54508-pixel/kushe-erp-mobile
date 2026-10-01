@@ -2481,6 +2481,16 @@
     const value = Math.max(0, num(untaxed));
     return value + Math.round(value * (num(state.settings.defaultTax) || 5) / 100);
   }
+  function normalizeCommissionBasis(value) { return value==='taxIncluded'?'taxIncluded':'preTax'; }
+  function commissionBasisAmounts(items=[]) {
+    const taxRate=num(state.settings.defaultTax)||5;
+    return (items||[]).reduce((totals,item)=>{
+      const entered=Math.max(0,num(item?.subtotal)||num(item?.qty)*num(item?.inputPrice??item?.unitPrice??item?.price));
+      const untaxed=Math.max(0,num(item?.untaxedSubtotal)||(item?.taxMode==='含稅'?Math.round(entered/(1+taxRate/100)):entered));
+      const taxIncluded=item?.taxMode==='含稅'?entered:untaxed+Math.round(untaxed*taxRate/100);
+      totals.preTax+=untaxed;totals.taxIncluded+=taxIncluded;return totals;
+    },{preTax:0,taxIncluded:0});
+  }
   function dailyWorkAmount(log) {
     if (!log || log.isPrimaryWork === false || log.workMode === 'none') return 0;
     return Math.round(num(log.workQty) * num(log.workRate));
@@ -2502,7 +2512,7 @@
     state.attendance = state.attendance.filter((row) => !(row.sourceType === 'daily-log' && row.sourceId === log.id));
     const now = new Date().toISOString();
     if (log.commissionEnabled!==false && num(log.performance) > 0 && num(log.commission) > 0) {
-      state.commissions.unshift({id:uid(),date:log.date,employee:log.employee,employeeName:log.employeeName||'',customer:log.customer||'',project:log.project,projectName:log.projectName||'',sourceNo:log.billingNo||'每日業績',sourceType:'daily-log',sourceId:log.id,untaxedAmount:num(log.performance),rate:num(log.rate),commission:num(log.commission),status:'已列入薪資',note:`每日業績：${log.note||''}`,createdAt:now,updatedAt:now});
+      state.commissions.unshift({id:uid(),date:log.date,employee:log.employee,employeeName:log.employeeName||'',customer:log.customer||'',project:log.project,projectName:log.projectName||'',sourceNo:log.billingNo||'每日業績',sourceType:'daily-log',sourceId:log.id,untaxedAmount:num(log.untaxedPerformance??log.performance),commissionBasis:normalizeCommissionBasis(log.commissionBasis),commissionBaseAmount:num(log.commissionBaseAmount??log.performance),rate:num(log.rate),commission:num(log.commission),status:'已列入薪資',note:`每日業績：${log.note||''}`,createdAt:now,updatedAt:now});
     }
     const workAmount = dailyWorkAmount(log);
     if (workAmount > 0) {
@@ -2659,25 +2669,25 @@
       return left < right ? -1 : left > right ? 1 : 0;
     });
     const performanceIndexByEmployeeId = new Map(sortedEmployeeIds.map((employeeId, index) => [employeeId, index]));
-    const commissionRates=values.commissionRates&&typeof values.commissionRates==='object'&&!Array.isArray(values.commissionRates)?values.commissionRates:{};
+    const commissionRates=values.commissionRates&&typeof values.commissionRates==='object'&&!Array.isArray(values.commissionRates)?values.commissionRates:{},commissionBases=values.commissionBases&&typeof values.commissionBases==='object'&&!Array.isArray(values.commissionBases)?values.commissionBases:{};
     employeeIds.forEach((employeeId) => {
       const employee = state.employees.find((row) => row.id === employeeId) || {};
       const rawRate=Object.prototype.hasOwnProperty.call(commissionRates,employeeId)?Number(commissionRates[employeeId]):employee.commissionRate===undefined||employee.commissionRate===null||employee.commissionRate===''?25:Number(employee.commissionRate);
       if(!Number.isFinite(rawRate)||rawRate<0||rawRate>100)throw new Error(`員工 ${employee.name||employeeId} 的本次抽成比例必須介於 0～100`);
-      const commissionRate=Math.round(rawRate*100)/100;
+      const commissionRate=Math.round(rawRate*100)/100,defaultCommissionBasis=normalizeCommissionBasis(employee.commissionBasis),commissionBasis=normalizeCommissionBasis(Object.prototype.hasOwnProperty.call(commissionBases,employeeId)?commissionBases[employeeId]:defaultCommissionBasis);
       const hasDaily = state.dailyLogs.some((row) => row.employee === employeeId && row.date === date && row.workMode === 'daily' && row.isPrimaryWork !== false);
       let firstProject = true;
       byProject.forEach((projectLines, projectId) => {
         const project = state.projects.find((row) => row.id === projectId) || {};
         const customer = state.customers.find((row) => row.id === project.customer) || {};
-        const total = projectLines.reduce((sum, line) => sum + num(line.untaxedSubtotal), 0);
+        const basisAmounts=commissionBasisAmounts(projectLines),total=basisAmounts.preTax,taxIncludedTotal=basisAmounts.taxIncluded;
         const billableTotal = projectLines.filter((line) => line.billable).reduce((sum, line) => sum + num(line.untaxedSubtotal), 0);
         const canAddWork = firstProject && !(values.workMode === 'daily' && hasDaily);
-        const performance = splitPerformanceAmount(total, sortedEmployeeIds.length, performanceIndexByEmployeeId.get(employeeId));
-        const commissionEnabledForLog=values.commissionEnabled!==false,commissionAmount=commissionEnabledForLog?Math.round(performance*commissionRate/100):0;
+        const untaxedPerformance=splitPerformanceAmount(total,sortedEmployeeIds.length,performanceIndexByEmployeeId.get(employeeId)),taxIncludedPerformance=splitPerformanceAmount(taxIncludedTotal,sortedEmployeeIds.length,performanceIndexByEmployeeId.get(employeeId)),commissionBaseAmount=commissionBasis==='taxIncluded'?taxIncludedPerformance:untaxedPerformance,performance=untaxedPerformance;
+        const commissionEnabledForLog=values.commissionEnabled!==false,commissionAmount=commissionEnabledForLog?Math.round(commissionBaseAmount*commissionRate/100):0;
         const workMode = canAddWork ? values.workMode : 'none';
         const hasCommission=commissionAmount>0;
-        const log = {id:uid(),batchId,groupId:`${batchId}:${projectId}`,date,employee:employeeId,employeeName:employee.name||'',customer:project.customer||'',customerName:customer.name||project.customerName||'',project:projectId,projectName:project.name||'',payType:hasCommission&&workMode!=='none'?'業績抽成／點工':hasCommission?'業績抽成':workMode!=='none'?'點工':'僅業績',items:projectLines.map((line)=>({...line})),groupTotal:total,grossTotal:projectLines.reduce((sum,line)=>sum+num(line.subtotal),0),billingTotal:billableTotal,billable:billableTotal>0,billingStatus:billableTotal>0?'未請款':'',billingId:'',billingNo:'',performance,commissionEnabled:commissionEnabledForLog,rate:commissionRate,commission:commissionAmount,workMode,workQty:canAddWork?num(values.workQty):0,workRate:canAddWork?num(values.workRate):0,isPrimaryWork:canAddWork,note:values.note||'',createdAt:previous[0]?.createdAt||now,updatedAt:now};
+        const log = {id:uid(),batchId,groupId:`${batchId}:${projectId}`,date,employee:employeeId,employeeName:employee.name||'',customer:project.customer||'',customerName:customer.name||project.customerName||'',project:projectId,projectName:project.name||'',payType:hasCommission&&workMode!=='none'?'業績抽成／點工':hasCommission?'業績抽成':workMode!=='none'?'點工':'僅業績',items:projectLines.map((line)=>({...line})),groupTotal:total,grossTotal:projectLines.reduce((sum,line)=>sum+num(line.subtotal),0),billingTotal:billableTotal,billable:billableTotal>0,billingStatus:billableTotal>0?'未請款':'',billingId:'',billingNo:'',performance,untaxedPerformance,taxIncludedPerformance,commissionBasis,commissionBaseAmount,commissionEnabled:commissionEnabledForLog,rate:commissionRate,commission:commissionAmount,workMode,workQty:canAddWork?num(values.workQty):0,workRate:canAddWork?num(values.workRate):0,isPrimaryWork:canAddWork,note:values.note||'',createdAt:previous[0]?.createdAt||now,updatedAt:now};
         state.dailyLogs.unshift(log); syncDailyLogLinks(log); firstProject = false;
       });
     });
@@ -4954,14 +4964,14 @@
   }
   async function saveEmployee(values, id = '') {
     requireStoreTransactionDraft();
-    const existing=state.employees.find((item)=>String(item.id)===String(id)),name=clean(values.name),dailyRate=values.dailyRate===''||values.dailyRate===undefined?0:Number(values.dailyRate),commissionRate=values.commissionRate===''||values.commissionRate===undefined?(existing?num(existing.commissionRate):25):Number(values.commissionRate);
+    const existing=state.employees.find((item)=>String(item.id)===String(id)),name=clean(values.name),dailyRate=values.dailyRate===''||values.dailyRate===undefined?0:Number(values.dailyRate),commissionRate=values.commissionRate===''||values.commissionRate===undefined?(existing?num(existing.commissionRate):25):Number(values.commissionRate),commissionBasis=normalizeCommissionBasis(values.commissionBasis??existing?.commissionBasis);
     if(!name)throw new Error('請輸入員工姓名');
     if(!Number.isFinite(dailyRate)||dailyRate<0)throw new Error('日薪不可小於 0');
     if(!Number.isFinite(commissionRate)||commissionRate<0||commissionRate>100)throw new Error('抽成比例必須介於 0～100');
     const duplicate=state.employees.find((row)=>String(row.id)!==String(id)&&sameName(row.name,name));
     if(duplicate)throw new Error('已有同名員工，請直接編輯既有員工');
     const now=new Date().toISOString(),row=existing||{id:uid(),createdAt:now};
-    Object.assign(row,{name,phone:clean(values.phone),role:clean(values.role),dailyRate,commissionRate,startDate:values.startDate||'',status:clean(values.status)||row.status||'在職',note:clean(values.note),updatedAt:now});
+    Object.assign(row,{name,phone:clean(values.phone),role:clean(values.role),dailyRate,commissionRate,commissionBasis,startDate:values.startDate||'',status:clean(values.status)||row.status||'在職',note:clean(values.note),updatedAt:now});
     if(!id)state.employees.unshift(row);
     persist(`${id?'修改':'新增'}員工 ${row.name}`); return row;
   }
