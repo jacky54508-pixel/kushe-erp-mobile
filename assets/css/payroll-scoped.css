@@ -232,3 +232,28 @@ body[data-route="payroll"] #payrollApp .payroll-mobile-list { display: none; }
   .erp-detail-overlay .payroll-commission-basis-control{grid-template-columns:1fr;gap:10px}
   .erp-detail-overlay .payroll-commission-project strong{white-space:normal;overflow-wrap:anywhere}
 }
+
+
+/* P20-8F payroll action alignment */
+:is(body[data-route="payroll"]) #payrollApp .payroll-month-cell{display:grid;justify-items:start;gap:7px}
+:is(body[data-route="payroll"]) #payrollApp .payroll-month-cell>span{font-variant-numeric:tabular-nums}
+:is(body[data-route="payroll"]) #payrollApp .payroll-detail-toggle{min-height:28px;padding:4px 10px;border:1px solid #c9d9ec;border-radius:9px;background:#fff;color:#0b5bd8;font-size:11px;font-weight:800;cursor:pointer}
+:is(body[data-route="payroll"]) #payrollApp .payroll-detail-toggle:hover{background:#f4f8ff}
+:is(body[data-route="payroll"]) #payrollApp .payroll-row-actions{display:grid;grid-template-columns:88px 88px 104px;align-items:center;gap:10px}
+:is(body[data-route="payroll"]) #payrollApp .payroll-action-slot{display:flex;align-items:center;justify-content:center;width:100%;min-width:0}
+:is(body[data-route="payroll"]) #payrollApp .payroll-action-slot>button,
+:is(body[data-route="payroll"]) #payrollApp .payroll-action-state{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:38px;margin:0;white-space:nowrap}
+:is(body[data-route="payroll"]) #payrollApp .payroll-action-state{padding:7px 8px;border-radius:9px;font-size:11px;font-weight:800}
+:is(body[data-route="payroll"]) #payrollApp .payroll-action-state.is-waiting{background:#fff7e7;color:#9a5a00}
+:is(body[data-route="payroll"]) #payrollApp .payroll-action-state.is-locked{background:#f2f4f7;color:#667085}
+:is(body[data-route="payroll"]) #payrollApp .payroll-action-state.is-muted{background:#f7f9fc;color:#98a2b3}
+@media(max-width:820px){
+  :is(body[data-route="payroll"]) #payrollApp .payroll-mobile-card>header>div{display:grid;justify-items:start;gap:4px}
+  :is(body[data-route="payroll"]) #payrollApp .payroll-mobile-card .payroll-detail-toggle{min-height:30px;margin:2px 0 4px}
+  :is(body[data-route="payroll"]) #payrollApp .payroll-mobile-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  :is(body[data-route="payroll"]) #payrollApp .payroll-mobile-actions .payroll-action-slot>button,
+  :is(body[data-route="payroll"]) #payrollApp .payroll-mobile-actions .payroll-action-state{width:100%;min-height:44px}
+}
+@media(max-width:520px){
+  :is(body[data-route="payroll"]) #payrollApp .payroll-mobile-actions{grid-template-columns:1fr}
+}
