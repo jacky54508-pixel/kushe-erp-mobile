@@ -46,4 +46,36 @@ body[data-route="payroll"] #payrollApp .payroll-mobile-list { display: none; }
 :is(body[data-route="payroll"]) #payrollApp .payroll-release-mobile-card{border:1px solid #e2eaf3;border-radius:12px;padding:12px;background:#fff}
 :is(body[data-route="payroll"]) #payrollApp .payroll-release-mobile-card footer{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid #edf1f5}
 :is(body[data-route="payroll"]) #payrollApp .payroll-release-mobile-card footer small{color:#7b8797}
-
+/* P20-7C source-aware payroll payment */
+:is(body[data-route="payroll"]) #payrollApp .payroll-center-table{min-width:1180px}
+:is(body[data-route="payroll"]) #payrollApp .payroll-current-payable-head,
+:is(body[data-route="payroll"]) #payrollApp .payroll-current-payable{background:#f5f9ff}
+:is(body[data-route="payroll"]) #payrollApp .payroll-current-payable b{font-size:16px;color:#0b5bd8}
+.erp-detail-overlay .payroll-source-payment-card{width:min(820px,calc(100vw - 32px));max-height:min(880px,calc(100vh - 32px))}
+.erp-detail-overlay .payroll-source-payment-card form{display:flex;flex-direction:column;min-height:0}
+.erp-detail-overlay .payroll-source-payment-card .erp-detail-body{overflow-y:auto;min-height:0}
+.erp-detail-overlay .payroll-payment-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}
+.erp-detail-overlay .payroll-payment-summary article{display:grid;gap:5px;padding:12px 14px;border:1px solid #dfe8f2;border-radius:12px;background:#fff}
+.erp-detail-overlay .payroll-payment-summary article span{font-size:11px;color:#6b7c91}
+.erp-detail-overlay .payroll-payment-summary article b{font-size:18px;color:#173b67}
+.erp-detail-overlay .payroll-payment-summary article.is-muted{background:#fafbfc}
+.erp-detail-overlay .payroll-payment-summary article.is-primary{background:#f2f7ff;border-color:#bfd5f4}
+.erp-detail-overlay .payroll-payment-summary article.is-primary b{color:#075bd8}
+.erp-detail-overlay .payroll-payment-source-section{margin:16px 0;border:1px solid #dfe7f0;border-radius:12px;overflow:hidden;background:#fff}
+.erp-detail-overlay .payroll-payment-source-section>header{padding:12px 14px;background:#f8fafd;border-bottom:1px solid #e8edf3}
+.erp-detail-overlay .payroll-payment-source-section h3{margin:0;font-size:15px}
+.erp-detail-overlay .payroll-payment-source-section p{margin:4px 0 0;font-size:11px;color:#6d7c91}
+.erp-detail-overlay .payroll-payment-commission-list{display:grid}
+.erp-detail-overlay .payroll-payment-commission-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid #edf1f5;cursor:pointer}
+.erp-detail-overlay .payroll-payment-commission-row:last-child{border-bottom:0}
+.erp-detail-overlay .payroll-payment-commission-row input{width:18px;height:18px}
+.erp-detail-overlay .payroll-payment-commission-row span{display:grid;gap:3px}
+.erp-detail-overlay .payroll-payment-commission-row small{color:#728197}
+.erp-detail-overlay .payroll-payment-commission-row strong{font-variant-numeric:tabular-nums}
+.erp-detail-overlay .payroll-payment-empty{margin:0;padding:16px;color:#728197;text-align:center}
+@media(max-width:820px){
+  .erp-detail-overlay .payroll-source-payment-card{width:100%;max-height:none;height:100%;border-radius:0}
+  .erp-detail-overlay .payroll-payment-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .erp-detail-overlay .payroll-payment-commission-row{grid-template-columns:auto minmax(0,1fr)}
+  .erp-detail-overlay .payroll-payment-commission-row strong{grid-column:2}
+}

@@ -4162,9 +4162,13 @@
     if(states.some((item)=>item.receipt.status==='部分收款'||item.receipt.status==='已收')){result.releaseStatus='部分收款';return result}
     result.releaseStatus='未收款';return result;
   }
+  function salaryPaymentCommissionKeys(payment) {
+    return [...new Set((Array.isArray(payment?.commissionSelectionKeys)?payment.commissionSelectionKeys:[]).map((value)=>String(value||'').trim()).filter(Boolean))];
+  }
   function commissionReleasePool() {
     const settledKeys=new Set(),wholeSettledIds=new Set();
     (state.commissionSettlements||[]).forEach((settlement)=>{commissionSettlementSourceIds(settlement).forEach((id)=>{if(settlementUsesWholeCommission(settlement,id))wholeSettledIds.add(id)});settlementAllocationKeys(settlement).forEach((key)=>settledKeys.add(key))});
+    (state.salaryPayments||[]).forEach((payment)=>salaryPaymentCommissionKeys(payment).forEach((key)=>settledKeys.add(key)));
     return (state.commissions||[]).filter((row)=>row.status==='已列入薪資'&&num(row.commission)>0).flatMap((row)=>commissionHouseAllocations(row).map((allocation)=>{
       const release=commissionAllocationReleaseState(row,allocation),settled=wholeSettledIds.has(String(row.id))||settledKeys.has(allocation.allocationKey);
       return {...allocation,employeeId:String(row.employee||row.employeeId||''),employeeName:row.employeeName||state.employees.find((employee)=>String(employee.id)===String(row.employee||row.employeeId||''))?.name||'',projectId:String(row.project||row.projectId||''),projectName:row.projectName||state.projects.find((project)=>String(project.id)===String(row.project||row.projectId||''))?.name||'',settled,...release};
@@ -4189,8 +4193,8 @@
     return (state.commissionSettlements||[]).find((row)=>settlementUsesWholeCommission(row,id)||(row.allocations||[]).some((allocation)=>String(allocation?.commissionId||'')===id))||null;
   }
   function commissionSettlementLock(row) {
-    const settlement=commissionSettlementForCommissionId(row?.id);
-    return {locked:Boolean(settlement),settlementId:settlement?.id||'',projectId:settlement?.projectId||settlement?.project||'',date:settlement?.date||''};
+    const settlement=commissionSettlementForCommissionId(row?.id),allocationKeys=new Set(commissionHouseAllocations(row).map((item)=>item.allocationKey)),salaryPayment=(state.salaryPayments||[]).find((payment)=>salaryPaymentCommissionKeys(payment).some((key)=>allocationKeys.has(key)));
+    return {locked:Boolean(settlement||salaryPayment),settlementId:settlement?.id||'',salaryPaymentId:salaryPayment?.id||'',projectId:settlement?.projectId||settlement?.project||row?.project||'',date:settlement?.date||salaryPayment?.date||''};
   }
   function dailyLogCommissionSettlementLock(log) {
     if(!log)return {locked:false,commissionIds:[],settlementIds:[]};
@@ -4207,6 +4211,7 @@
       commissionSettlementSourceIds(settlement).forEach((id)=>{if(settlementUsesWholeCommission(settlement,id))wholeSettledIds.add(id)});
       settlementAllocationKeys(settlement).forEach((key)=>settledKeys.add(key));
     });
+    (state.salaryPayments||[]).forEach((payment)=>salaryPaymentCommissionKeys(payment).forEach((key)=>settledKeys.add(key)));
     allAllocations.forEach((allocation)=>{if(wholeSettledIds.has(allocation.commissionId))settledKeys.add(allocation.allocationKey)});
     let selected=[];
     const missing=[];
@@ -4322,6 +4327,22 @@
   function salaryPaymentSummary(payroll) {
     return payrollPaymentTruth(payroll);
   }
+  function salaryPaymentPlan(payrollReference, selectionKeys=[], options={}) {
+    const reference=String(payrollReference||''),groups=monthlyPayrollGroups(),group=groups.find((row)=>row.key===reference||row.recordIds.some((id)=>String(id)===reference));
+    if(!group)throw new Error('找不到薪資月份或員工');
+    const employeeId=String(group.employeeId||''),month=String(group.month||''),excludePaymentId=String(options.excludePaymentId||''),requested=[...new Set((Array.isArray(selectionKeys)?selectionKeys:[]).map((value)=>String(value||'').trim()).filter(Boolean))];
+    const nonCommissionTotal=Math.max(0,Math.round(group.sources.filter((source)=>source.type!=='抽成').reduce((sum,source)=>sum+num(source.amount),0)));
+    const explicitPayments=(state.salaryPayments||[]).filter((payment)=>group.recordIds.some((id)=>String(id)===String(payment.payrollId||''))&&String(payment.id||'')!==excludePaymentId);
+    const legacyPayments=explicitPayments.filter((payment)=>Number(payment.paymentAllocationVersion)!==2&&num(payment.amount)>0),allocatedPayments=explicitPayments.filter((payment)=>Number(payment.paymentAllocationVersion)===2);
+    const basePaid=allocatedPayments.reduce((sum,payment)=>sum+Math.max(0,num(payment.baseAmount)),0),baseOutstanding=Math.max(0,nonCommissionTotal-basePaid);
+    const pool=commissionReleasePool().filter((row)=>String(row.employeeId||'')===employeeId&&String(row.month||'')===month),available=pool.filter((row)=>row.unlocked&&!row.settled),locked=pool.filter((row)=>!row.unlocked&&!row.settled),settled=pool.filter((row)=>row.settled);
+    const availableMap=new Map(available.map((row)=>[String(row.allocationKey),row])),missing=requested.filter((key)=>!availableMap.has(key)),selected=requested.map((key)=>availableMap.get(key)).filter(Boolean),selectedCommission=Math.round(selected.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0));
+    const availableCommission=Math.round(available.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0)),lockedCommission=Math.round(locked.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0)),settledCommission=Math.round(settled.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0));
+    const currentPayable=Math.max(0,baseOutstanding+availableCommission),selectedPayable=Math.max(0,baseOutstanding+selectedCommission),blockers=[];
+    if(legacyPayments.length)blockers.push({code:'LEGACY_PAYMENT_BREAKDOWN',message:'此月份已有舊式薪資付款，無法安全判定日薪與抽成拆分；請先核對或沖回既有付款。'});
+    if(missing.length)blockers.push({code:'COMMISSION_SELECTION_UNAVAILABLE',selectionKeys:missing,message:'部分選取抽成已付款、尚未收清或來源已變更，請重新整理後再試。'});
+    return {allowed:blockers.length===0,groupKey:group.key,payrollId:group.primaryPayrollId,employeeId,month,nonCommissionTotal,basePaid,baseOutstanding,availableCommission,lockedCommission,settledCommission,currentPayable,selectedCommission,selectedPayable,available,locked,settled,selected,selectionKeys:selected.map((row)=>row.allocationKey),blockers,legacyPaymentCount:legacyPayments.length};
+  }
   function payrollAdjustmentAmount(value, label) {
     const text=String(value??'').trim();if(!text)return 0;const amount=Number(text);
     if(!Number.isFinite(amount)||amount<0)throw new Error(`${label}必須是 0 以上的有限數字`);
@@ -4387,12 +4408,20 @@
   }
   async function addSalaryPayment(values) {
     requireStoreTransactionDraft();const idempotencyKey=String(values.idempotencyKey||'').trim();if(idempotencyKey){const existing=state.salaryPayments.find((row)=>row.idempotencyKey===idempotencyKey);if(existing)return existing}
-    const payroll=state.payroll.find((row)=>row.id===values.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const summary=salaryPaymentSummary(payroll),amount=Math.round(num(values.amount)),fee=Math.max(0,Math.round(num(values.fee))),feePayer=values.feePayer==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount;if(amount<=0||amount>summary.outstanding)throw new Error('本次付款不可超過未付薪資');if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次付款');
-    const bank=state.banks.find((row)=>row.id===String(values.bankAccountId||values.bankId||''));if(!bank)throw new Error('請選擇薪資付款銀行帳戶');const now=new Date().toISOString(),payment={id:uid(),idempotencyKey:idempotencyKey||uid(),payrollId:payroll.id,date:values.date||businessDate(new Date(now)),amount,fee,feePayer,actualDebit,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:String(values.note||''),createdAt:now,updatedAt:now};
+    const payroll=state.payroll.find((row)=>row.id===values.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');
+    const requestedKeys=Array.isArray(values.commissionSelectionKeys)?values.commissionSelectionKeys:[],plan=salaryPaymentPlan(payroll.id,requestedKeys),amount=Math.round(num(values.amount)),fee=Math.max(0,Math.round(num(values.fee))),feePayer=values.feePayer==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount;
+    if(!plan.allowed)throw new Error(plan.blockers.map((row)=>row.message).join(' '));
+    if(amount<=0||amount>plan.currentPayable)throw new Error('本次付款不可超過目前已解鎖可付款金額');
+    const baseAmount=Math.min(amount,plan.baseOutstanding),commissionAmount=Math.max(0,amount-baseAmount);
+    if(commissionAmount>0&&commissionAmount!==plan.selectedCommission)throw new Error('本次抽成付款金額必須與勾選的已解鎖抽成完全一致');
+    if(commissionAmount===0&&requestedKeys.length)throw new Error('已勾選抽成來源，但本次付款金額未包含抽成，已停止付款');
+    if(commissionAmount>0&&!requestedKeys.length)throw new Error('付款金額包含抽成時，必須明確勾選已收款解鎖的抽成來源');
+    if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次付款');
+    const bank=state.banks.find((row)=>row.id===String(values.bankAccountId||values.bankId||''));if(!bank)throw new Error('請選擇薪資付款銀行帳戶');const now=new Date().toISOString(),payment={id:uid(),idempotencyKey:idempotencyKey||uid(),paymentAllocationVersion:2,payrollId:payroll.id,date:values.date||businessDate(new Date(now)),amount,baseAmount,commissionAmount,commissionSelectionKeys:commissionAmount>0?[...plan.selectionKeys]:[],fee,feePayer,actualDebit,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:String(values.note||''),createdAt:now,updatedAt:now};
     state.salaryPayments.unshift(payment);syncSalaryBankTransaction(payment,payroll,now);syncSalarySummary(payroll,now);persist(`新增薪資付款 ${payroll.month||''}`);return payment;
   }
   async function updateSalaryPayment(id, values={}) {
-    requireStoreTransactionDraft();const payment=state.salaryPayments.find((row)=>row.id===id);if(!payment)throw new Error('找不到薪資付款紀錄');const payroll=state.payroll.find((row)=>row.id===payment.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const summary=salaryPaymentSummary(payroll),otherPaid=summary.history.filter((row)=>row!==payment).reduce((sum,row)=>sum+num(row.amount),0),amount=Math.round(num(values.amount)),fee=values.fee===undefined?num(payment.fee):Math.max(0,Math.round(num(values.fee))),feePayer=(values.feePayer===undefined?payment.feePayer:values.feePayer)==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount,bankId=String(values.bankAccountId||values.bankId||'');if(amount<=0||otherPaid+amount>summary.total)throw new Error('本次付款不可超過未付薪資');if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次付款');if(!state.banks.some((row)=>row.id===bankId))throw new Error('請選擇薪資付款銀行帳戶');
+    requireStoreTransactionDraft();const payment=state.salaryPayments.find((row)=>row.id===id);if(!payment)throw new Error('找不到薪資付款紀錄');if(Number(payment.paymentAllocationVersion)===2)throw new Error('新版來源式薪資付款不可直接修改；請刪除後重新建立，避免日薪／抽成來源失配。');const payroll=state.payroll.find((row)=>row.id===payment.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const summary=salaryPaymentSummary(payroll),otherPaid=summary.history.filter((row)=>row!==payment).reduce((sum,row)=>sum+num(row.amount),0),amount=Math.round(num(values.amount));if(amount>num(payment.amount))throw new Error('舊式薪資付款不可增加金額；如需新增付款請使用新版來源式付款。');const fee=values.fee===undefined?num(payment.fee):Math.max(0,Math.round(num(values.fee))),feePayer=(values.feePayer===undefined?payment.feePayer:values.feePayer)==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount,bankId=String(values.bankAccountId||values.bankId||'');if(amount<=0||otherPaid+amount>summary.total)throw new Error('本次付款不可超過未付薪資');if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次付款');if(!state.banks.some((row)=>row.id===bankId))throw new Error('請選擇薪資付款銀行帳戶');
     const now=new Date().toISOString();Object.assign(payment,{date:values.date||payment.date||businessDate(new Date(now)),amount,fee,feePayer,actualDebit,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||payment.paymentMethod||'銀行轉帳',note:values.note===undefined?payment.note:String(values.note||''),updatedAt:now});syncSalaryBankTransaction(payment,payroll,now);syncSalarySummary(payroll,now);persist(`修改薪資付款 ${payroll.month||''}`);return payment;
   }
   async function deleteSalaryPayment(id) {
@@ -5703,7 +5732,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
