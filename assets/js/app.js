@@ -98,6 +98,12 @@
       init();
       initialized = true;
     }
+    applyRoleNavigationPermissions();
+    const permittedRoute=currentHashRoute();
+    if(decodeURIComponent(window.location.hash.slice(1))!==permittedRoute){
+      history.replaceState({route:permittedRoute},'',`#${permittedRoute}`);
+      renderRoute(permittedRoute,{instant:true});
+    }
     if(device.trusted)try { void Promise.resolve(window.KusheCloudSync?.startAutoBackup?.()).catch(() => {}); } catch (_) {}
     return true;
   }
@@ -227,9 +233,29 @@
   }
   function closePopovers(except) { $$('.topbar-popover.is-open').forEach((node)=>{if(node!==except)node.classList.remove('is-open')}); }
   function togglePopover(id) { const node=$(`#${id}`); if(!node)return; const open=!node.classList.contains('is-open'); closePopovers(node); node.classList.toggle('is-open',open); }
+  function knownRoute(module) {
+    const route=String(module||'').replace(/^#/,'');
+    return route==='dashboard'||config.moduleLabels?.[route]?route:'dashboard';
+  }
+  function firstAllowedRoute() {
+    return window.KusheAuthGate?.firstAllowedRoute?.()||'dashboard';
+  }
   function validRoute(module) {
-    const route = String(module || '').replace(/^#/, '');
-    return route === 'dashboard' || config.moduleLabels?.[route] ? route : 'dashboard';
+    const route=knownRoute(module);
+    if(window.KusheAuthGate?.canView?.(route))return route;
+    const fallback=firstAllowedRoute();
+    return fallback&&window.KusheAuthGate?.canView?.(fallback)?fallback:'dashboard';
+  }
+  function applyRoleNavigationPermissions() {
+    $$('[data-module]').forEach((node)=>{
+      const allowed=Boolean(window.KusheAuthGate?.canView?.(node.dataset.module));
+      node.hidden=!allowed;
+      node.setAttribute('aria-hidden',String(!allowed));
+      if(!allowed&&node.classList.contains('active')){
+        node.classList.remove('active');
+        node.setAttribute('aria-current','false');
+      }
+    });
   }
   function currentHashRoute() { return validRoute(decodeURIComponent(window.location.hash.slice(1))); }
   function renderRoute(module, options = {}) {
@@ -352,7 +378,9 @@
     }
   }
   function navigate(module, options = {}) {
-    const route = validRoute(module);
+    const requested=knownRoute(module);
+    const route = validRoute(requested);
+    if(route!==requested)toast('此帳號沒有此功能的查看權限');
     if (!options.replace && currentHashRoute() !== route) history.pushState({ route }, '', `#${route}`);
     else if (options.replace) history.replaceState({ route }, '', `#${route}`);
     renderRoute(route, options);

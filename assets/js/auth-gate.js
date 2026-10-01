@@ -7,6 +7,30 @@
   let activeValidation = null;
   let activeCompanyContext = null;
 
+  const PERMISSION_ALIASES = Object.freeze({
+    attendance:'commissions',
+    'billing-draft':'billings',
+    customers:'projects'
+  });
+  const ROLE_PERMISSIONS = Object.freeze({
+    owner:Object.freeze({
+      view:Object.freeze(['dashboard','projects','quotations','billings','unbilled-work','receivables','payables','banks','invoices','materials','employees','commissions','payroll','reports','settings']),
+      write:Object.freeze(['dashboard','projects','quotations','billings','unbilled-work','receivables','payables','banks','invoices','materials','employees','commissions','payroll','reports','settings'])
+    }),
+    admin:Object.freeze({
+      view:Object.freeze(['dashboard','projects','quotations','billings','unbilled-work','receivables','payables','banks','invoices','materials','employees','commissions','payroll','reports']),
+      write:Object.freeze(['projects','quotations','billings','unbilled-work','receivables','payables','banks','invoices','materials','employees','commissions','payroll'])
+    }),
+    accounting:Object.freeze({
+      view:Object.freeze(['dashboard','projects','quotations','billings','unbilled-work','receivables','payables','banks','invoices','payroll','reports']),
+      write:Object.freeze(['quotations','billings','unbilled-work','receivables','payables','banks','invoices','payroll'])
+    }),
+    employee:Object.freeze({
+      view:Object.freeze(['projects','materials','commissions']),
+      write:Object.freeze(['materials','commissions'])
+    })
+  });
+
   // Persistent Auth sessions from earlier releases are intentionally discarded.
   try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
 
@@ -252,6 +276,42 @@
     };
   }
 
+  function permissionModule(module) {
+    const value=String(module||'').replace(/^#/,'');
+    return PERMISSION_ALIASES[value]||value;
+  }
+
+  function permissionList(kind) {
+    const role=String(activeCompanyContext?.role||'');
+    const permissions=ROLE_PERMISSIONS[role];
+    return permissions&&Array.isArray(permissions[kind])?permissions[kind]:[];
+  }
+
+  function canView(module) {
+    const target=permissionModule(module);
+    return Boolean(target)&&permissionList('view').includes(target);
+  }
+
+  function canWrite(module) {
+    const target=permissionModule(module);
+    return Boolean(target)&&canView(target)&&permissionList('write').includes(target);
+  }
+
+  function firstAllowedRoute() {
+    const preferred=['dashboard','projects','commissions','materials','quotations','billings','receivables','payables','banks','invoices','payroll','reports','settings'];
+    return preferred.find((route)=>canView(route))||'';
+  }
+
+  function permissionSnapshot() {
+    const role=String(activeCompanyContext?.role||'');
+    return {
+      role,
+      view:[...permissionList('view')],
+      write:[...permissionList('write')],
+      firstRoute:firstAllowedRoute()
+    };
+  }
+
   async function changePassword(currentPassword, newPassword) {
     const currentSecret = String(currentPassword || '');
     const nextSecret = String(newPassword || '');
@@ -322,5 +382,5 @@
     return session()?.user || null;
   }
 
-  window.KusheAuthGate = Object.freeze({ requireAuth, login, resolveCompanyContext, companyContext, changePassword, logout, session, user });
+  window.KusheAuthGate = Object.freeze({ requireAuth, login, resolveCompanyContext, companyContext, canView, canWrite, firstAllowedRoute, permissionSnapshot, changePassword, logout, session, user });
 }());
