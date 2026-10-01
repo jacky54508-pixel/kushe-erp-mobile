@@ -2491,6 +2491,30 @@
       totals.preTax+=untaxed;totals.taxIncluded+=taxIncluded;return totals;
     },{preTax:0,taxIncluded:0});
   }
+  function projectCommissionBasisAmounts(employeeId,month,projectId) {
+    const employee=String(employeeId||''),targetMonth=String(month||''),project=String(projectId||''),logs=(state.dailyLogs||[]).filter((log)=>String(log.employee||log.employeeId||'')===employee&&monthOf(log.date)===targetMonth&&String(log.project||log.projectId||'')===project);
+    const daily=logs.reduce((totals,log)=>{const amounts=commissionBasisAmounts(log.items||[]);totals.preTax+=num(log.untaxedPerformance??log.performance)||amounts.preTax;totals.taxIncluded+=num(log.taxIncludedPerformance)||amounts.taxIncluded;return totals},{preTax:0,taxIncluded:0});
+    const billableItems=logs.flatMap((log)=>(log.items||[]).filter((item)=>item.billable!==false&&item.pricingType!=='lump_sum'));
+    const linkedIds=[...new Set(billableItems.map((item)=>String(item.billingId||'').trim()).filter(Boolean))];
+    const hasLinked=linkedIds.length>0,hasMissingLink=billableItems.some((item)=>!String(item.billingId||'').trim());
+    if(!hasLinked)return {resolved:true,source:'daily',preTax:daily.preTax,taxIncluded:daily.taxIncluded,billingIds:[],billingNumbers:[]};
+    if(hasMissingLink)return {resolved:false,source:'billing',preTax:daily.preTax,taxIncluded:daily.taxIncluded,billingIds:linkedIds,billingNumbers:[],reason:'部分施工已有請款但部分缺少 billingId'};
+    const billings=[];
+    for(const id of linkedIds){
+      const matches=(state.billings||[]).filter((billing)=>String(billing.id||'')===id);
+      if(matches.length!==1)return {resolved:false,source:'billing',preTax:daily.preTax,taxIncluded:daily.taxIncluded,billingIds:linkedIds,billingNumbers:[],reason:matches.length?'billingId 對應多筆請款單':'billingId 找不到請款單'};
+      const billing=matches[0];
+      if(String(billing.project||billing.projectId||'')!==project)return {resolved:false,source:'billing',preTax:daily.preTax,taxIncluded:daily.taxIncluded,billingIds:linkedIds,billingNumbers:[],reason:'請款單案場與施工案場不一致'};
+      billings.push(billing);
+    }
+    return {
+      resolved:true,source:'billing',
+      preTax:billings.reduce((sum,billing)=>sum+num(billing.preTaxAmount??billing.amount),0),
+      taxIncluded:billings.reduce((sum,billing)=>sum+num(billing.taxIncludedAmount??billing.grossTotal??(num(billing.amount)+num(billing.tax))),0),
+      billingIds:billings.map((billing)=>String(billing.id||'')),
+      billingNumbers:billings.map((billing)=>String(billing.number||'')).filter(Boolean)
+    };
+  }
   function dailyWorkAmount(log) {
     if (!log || log.isPrimaryWork === false || log.workMode === 'none') return 0;
     return Math.round(num(log.workQty) * num(log.workRate));
@@ -4373,8 +4397,11 @@
       const basis=normalizeCommissionBasis(rawBasis),targets=(state.dailyLogs||[]).filter((log)=>String(log.employee||'')===employeeId&&monthOf(log.date)===month&&String(log.project||'')===String(projectId));
       if(!targets.length)continue;
       if(targets.some((log)=>dailyLogCommissionSettlementLock(log).locked))throw new Error('此案場抽成已有實際發放紀錄，不能直接改含稅／未稅基準。');
-      targets.forEach((log)=>{
-        const amounts=commissionBasisAmounts(log.items||[]),untaxed=num(log.untaxedPerformance??log.performance)||amounts.preTax,taxIncluded=num(log.taxIncludedPerformance)||amounts.taxIncluded,base=basis==='taxIncluded'?taxIncluded:untaxed,nextCommission=log.commissionEnabled===false?0:Math.round(base*num(log.rate)/100);
+      const formalBasis=projectCommissionBasisAmounts(employeeId,month,projectId);
+      if(!formalBasis.resolved)throw new Error(`此案場無法唯一核對正式請款金額：${formalBasis.reason||'請確認請款關聯'}`);
+      const weights=targets.map((log)=>Math.max(0,num(log.untaxedPerformance??log.performance)||commissionBasisAmounts(log.items||[]).preTax)),weightTotal=weights.reduce((sum,value)=>sum+value,0);
+      targets.forEach((log,index)=>{
+        const ratio=formalBasis.source==='billing'?(weightTotal>0?weights[index]/weightTotal:1/targets.length):1,untaxed=formalBasis.source==='billing'?formalBasis.preTax*ratio:(num(log.untaxedPerformance??log.performance)||commissionBasisAmounts(log.items||[]).preTax),taxIncluded=formalBasis.source==='billing'?formalBasis.taxIncluded*ratio:(num(log.taxIncludedPerformance)||commissionBasisAmounts(log.items||[]).taxIncluded),base=basis==='taxIncluded'?taxIncluded:untaxed,nextCommission=log.commissionEnabled===false?0:Math.round(base*num(log.rate)/100);
         log.untaxedPerformance=untaxed;log.performance=untaxed;log.taxIncludedPerformance=taxIncluded;log.commissionBasis=basis;log.commissionBaseAmount=base;log.commission=nextCommission;log.updatedAt=new Date().toISOString();
         const linked=(state.commissions||[]).filter((row)=>row.sourceType==='daily-log'&&String(row.sourceId||'')===String(log.id));
         if(linked.length!==1)throw new Error('抽成來源關聯不是唯一一筆，為避免帳務錯誤已停止修改。');
@@ -5785,7 +5812,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
