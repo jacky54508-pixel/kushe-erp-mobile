@@ -182,3 +182,12 @@ body[data-route="materials"] #materialsApp .material-usage-assign:focus-visible 
   body[data-route="materials"] #materialsApp .material-usage-mobile-card .material-usage-employee-cell { justify-content: flex-start; }
   body[data-route="materials"] #materialsApp .material-usage-assign { min-height: 44px; }
 }
+
+/* P20-6A inventory foundation */
+body[data-route="materials"] #materialsApp .material-inventory-ledger{margin-top:16px}
+body[data-route="materials"] #materialsApp .material-inventory-mobile{display:none}
+body[data-route="materials"] #materialsApp .materials-list-panel .project-row-actions{display:flex;flex-wrap:wrap;gap:6px}
+@media(max-width:820px){
+  body[data-route="materials"] #materialsApp .material-inventory-desktop{display:none}
+  body[data-route="materials"] #materialsApp .material-inventory-mobile{display:grid;gap:10px}
+}

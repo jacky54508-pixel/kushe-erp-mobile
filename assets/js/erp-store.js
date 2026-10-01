@@ -564,7 +564,7 @@
       try { const emergency = JSON.parse(localStorage.getItem(EMERGENCY_KEY) || 'null'); if (score(emergency)) state = emergency; } catch (_) {}
     }
     if (!score(state)) state = storeStateClone(window.KuSheLegacyData?.getState() || {});
-    ['commissions','employees','customers','projects','vendors','materials','materialUsages','projectCosts','billings','receivables','payables','invoices','receipts','retentionReceipts','payments','salaryPayments','commissionSettlements','banks','bankTransactions','payroll','attendance','dailyLogs','dailyItemPresets','quotations','quotationPrices','quotationTemplates','audit'].forEach((key) => { if (!Array.isArray(state[key])) state[key] = []; });
+    ['commissions','employees','customers','projects','vendors','materials','materialUsages','inventoryReceipts','projectCosts','billings','receivables','payables','invoices','receipts','retentionReceipts','payments','salaryPayments','commissionSettlements','banks','bankTransactions','payroll','attendance','dailyLogs','dailyItemPresets','quotations','quotationPrices','quotationTemplates','audit'].forEach((key) => { if (!Array.isArray(state[key])) state[key] = []; });
     if (!state.settings) state.settings = {};
     if (!state.meta) state.meta = {};
     state.quotations.forEach((quote) => {
@@ -4883,6 +4883,36 @@
     if(employeeUsage(id).used)throw new Error('此員工已有出勤、抽成、補料、薪資或銀行歷史，請改為離職／停用，不可直接刪除');
     state.employees=state.employees.filter((item)=>item!==row); persist(`刪除員工 ${row.name||''}`); return true;
   }
+  function materialInventorySummary(materialId) {
+    const id=String(materialId||''),material=state.materials.find((row)=>String(row.id)===id);
+    if(!material)return {materialId:id,openingStock:0,received:0,stock:0,initialized:false,receipts:[]};
+    const receipts=(state.inventoryReceipts||[]).filter((row)=>String(row.material||row.materialId||'')===id).sort((a,b)=>String(b.date||b.createdAt||'').localeCompare(String(a.date||a.createdAt||'')));
+    const openingStock=Math.max(0,num(material.openingStock??(material.inventoryInitializedAt?0:material.stock))),received=receipts.reduce((sum,row)=>sum+Math.max(0,num(row.quantity)),0),stock=Math.max(0,num(material.stock));
+    return {materialId:id,openingStock,received,stock,initialized:Boolean(material.inventoryInitializedAt),receipts};
+  }
+  async function setMaterialOpeningStock(materialId, quantity) {
+    requireStoreTransactionDraft();
+    const material=state.materials.find((row)=>String(row.id)===String(materialId||'')),value=Number(quantity);
+    if(!material)throw new Error('找不到材料');
+    if(material.inventoryInitializedAt||(state.inventoryReceipts||[]).some((row)=>String(row.material||row.materialId||'')===String(material.id)))throw new Error('此材料已建立庫存基準或已有入庫紀錄，期初庫存不可再次覆寫');
+    if(!Number.isFinite(value)||value<0)throw new Error('期初庫存必須是 0 以上的有效數量');
+    const now=new Date().toISOString();
+    material.openingStock=value;material.stock=value;material.inventoryInitializedAt=now;material.inventoryUpdatedAt=now;material.updatedAt=now;
+    persist('設定材料期初庫存 '+(material.name||'')+'｜'+value+' '+(material.unit||''),{materialId:material.id,openingStock:value});
+    return materialInventorySummary(material.id);
+  }
+  async function addInventoryReceipt(values) {
+    requireStoreTransactionDraft();
+    const material=state.materials.find((row)=>String(row.id)===String(values.material||values.materialId||'')),quantity=Number(values.quantity);
+    if(!material)throw new Error('請選擇有效材料');
+    if(!material.inventoryInitializedAt)throw new Error('請先設定此材料的期初庫存，再新增入庫');
+    if(!Number.isFinite(quantity)||quantity<=0)throw new Error('入庫數量必須大於 0');
+    const now=new Date().toISOString(),beforeStock=Math.max(0,num(material.stock)),afterStock=beforeStock+quantity;
+    const receipt={id:uid(),date:values.date||businessDate(new Date(now)),material:material.id,materialId:material.id,materialName:material.name||'',vendor:material.vendor||'',vendorName:material.vendorName||'',unit:material.unit||'',model:material.model||'',quantity,beforeStock,afterStock,note:clean(values.note),createdAt:now,updatedAt:now};
+    state.inventoryReceipts.unshift(receipt);material.stock=afterStock;material.inventoryUpdatedAt=now;material.updatedAt=now;
+    persist('材料入庫 '+(material.name||'')+'｜+'+quantity+' '+(material.unit||''),{inventoryReceiptId:receipt.id,materialId:material.id,quantity,beforeStock,afterStock});
+    return receipt;
+  }
   async function saveMaterial(values, id = '') {
     requireStoreTransactionDraft();
     const name=clean(values.name),code=clean(values.code),unit=clean(values.unit),vendor=state.vendors.find((row)=>row.id===values.vendor),unitPrice=Math.max(0,num(values.unitPrice));
@@ -4890,9 +4920,13 @@
     const duplicate=state.materials.find((row)=>row.id!==id&&sameName(row.name,name)&&String(row.vendor||'')===String(vendor.id));
     if(duplicate)throw new Error('此廠商已有相同名稱的材料');
     if(code&&state.materials.some((row)=>row.id!==id&&sameName(row.code,code)))throw new Error('材料代碼已存在');
-    const now=new Date().toISOString(),row=state.materials.find((item)=>item.id===id)||{id:uid(),stock:0,safeStock:0,createdAt:now};
+    const now=new Date().toISOString(),row=state.materials.find((item)=>item.id===id)||{id:uid(),stock:0,openingStock:0,safeStock:0,createdAt:now};
     Object.assign(row,{name,code,vendor:vendor.id,vendorName:vendor.name||'',unit,unitPrice,model:clean(values.model),note:clean(values.note),updatedAt:now});
-    if(!id)state.materials.unshift(row);
+    if(!id){
+      const openingRaw=values.openingStock,opening=openingRaw===undefined||openingRaw===null||String(openingRaw).trim()===''?0:Number(openingRaw);
+      if(!Number.isFinite(opening)||opening<0)throw new Error('期初庫存必須是 0 以上的有效數量');
+      row.openingStock=opening;row.stock=opening;row.inventoryInitializedAt=now;row.inventoryUpdatedAt=now;state.materials.unshift(row);
+    }
     persist(`${id?'修改':'新增'}材料 ${row.name}`); return row;
   }
   async function deleteMaterial(id) {
@@ -5587,7 +5621,7 @@
     'addReceipt','updateReceipt','deleteReceipt','completeEmployeeCashHandover','cancelEmployeeCashHandover','addRetentionReceipt','updateRetentionReceipt','deleteRetentionReceipt','deleteReceivableAccounting',
     'savePayable','deletePayable','cleanupMaterialPayableTestData','repairMergedPayableHistory','addPayablePayment','updatePayablePayment','deletePayablePayment',
     'updatePayrollAdjustments','addSalaryPayment','updateSalaryPayment','deleteSalaryPayment','addProjectCommissionSettlement','deleteProjectCommissionSettlement','updateBillingInvoice',
-    'saveCustomer','deleteCustomer','saveProject','deleteProject','mergeProject','saveEmployee','deleteEmployee','saveMaterial','deleteMaterial',
+    'saveCustomer','deleteCustomer','saveProject','deleteProject','mergeProject','saveEmployee','deleteEmployee','saveMaterial','deleteMaterial','setMaterialOpeningStock','addInventoryReceipt',
     'saveMaterialUsage','assignMaterialUsageEmployee','deleteMaterialUsage','saveProjectCost','deleteProjectCost','saveQuotationPrice','saveQuotation','setQuotationStatus','deleteQuotation',
     'cancelQuotationConfirmation','createQuotationRevision','saveQuotationTemplate'
   ]);
@@ -5599,7 +5633,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, commissionHouseAllocations, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, commissionHouseAllocations, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
