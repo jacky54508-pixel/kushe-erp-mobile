@@ -1039,7 +1039,7 @@
         <label><span>未稅金額</span><input name="untaxedAmount" type="number" value="${number(row?.untaxedAmount)}" readonly></label>
         <label><span>抽成比例（%）*</span><input name="rate" type="number" min="0" step="0.1" value="${number(row?.rate)}" required></label>
         <label><span>抽成金額</span><input name="commission" type="number" value="${number(row?.commission)}" readonly></label>
-        <label class="full"><span>結算狀態</span><select name="status"><option value="未列入薪資" ${row?.status !== '已列入薪資' ? 'selected' : ''}>未結算（未列入薪資）</option><option value="已列入薪資" ${row?.status === '已列入薪資' ? 'selected' : ''}>已結算（列入薪資）</option></select></label>
+        <label class="full"><span>薪資列入狀態</span><select name="status"><option value="未列入薪資" ${row?.status !== '已列入薪資' ? 'selected' : ''}>未列入薪資</option><option value="已列入薪資" ${row?.status === '已列入薪資' ? 'selected' : ''}>已列入薪資</option></select></label>
         <label class="full"><span>備註</span><textarea name="note" rows="3" placeholder="補充說明">${esc(row?.note || '')}</textarea></label>
         <div class="commission-calc-note full"><b>正式版計算規則</b><span id="commissionTaxHint">含稅 → 未稅 → 抽成金額</span></div>
       </div><footer><button class="commission-secondary" type="button" data-cancel>取消</button><button class="commission-primary" type="submit">儲存業績</button></footer></form>
