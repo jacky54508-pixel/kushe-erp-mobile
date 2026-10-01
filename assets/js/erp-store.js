@@ -564,7 +564,7 @@
       try { const emergency = JSON.parse(localStorage.getItem(EMERGENCY_KEY) || 'null'); if (score(emergency)) state = emergency; } catch (_) {}
     }
     if (!score(state)) state = storeStateClone(window.KuSheLegacyData?.getState() || {});
-    ['commissions','employees','customers','projects','vendors','materials','materialUsages','projectCosts','billings','receivables','payables','invoices','receipts','retentionReceipts','payments','salaryPayments','banks','bankTransactions','payroll','attendance','dailyLogs','dailyItemPresets','quotations','quotationPrices','quotationTemplates','audit'].forEach((key) => { if (!Array.isArray(state[key])) state[key] = []; });
+    ['commissions','employees','customers','projects','vendors','materials','materialUsages','projectCosts','billings','receivables','payables','invoices','receipts','retentionReceipts','payments','salaryPayments','commissionSettlements','banks','bankTransactions','payroll','attendance','dailyLogs','dailyItemPresets','quotations','quotationPrices','quotationTemplates','audit'].forEach((key) => { if (!Array.isArray(state[key])) state[key] = []; });
     if (!state.settings) state.settings = {};
     if (!state.meta) state.meta = {};
     state.quotations.forEach((quote) => {
@@ -766,7 +766,7 @@
     const payrollRows=(state?.payroll||[]).filter((row)=>String(row.employee||row.employeeId||'')===employee&&monthOf(row.month)===month);
     if(!payrollRows.length)return {locked:false,reason:'',payrollIds:[],salaryPaymentIds:[],bankTransactionIds:[]};
     const truth=payrollPaymentTruth({employee,month,recordIds:payrollRows.map((row)=>row.id),total:Math.max(0,...payrollRows.map((row)=>num(row.total)))});
-    return {locked:truth.hasVerifiedPayment,reason:truth.explicitPayments.length?'salary-payment':truth.verifiedLegacyTransactions.length?'salary-bank-transaction':'',payrollIds:truth.recordIds,salaryPaymentIds:truth.explicitPayments.map((row)=>String(row.id)),bankTransactionIds:truth.bankTransactionIds};
+    return {locked:truth.hasRegularPayment,reason:truth.explicitPayments.length?'salary-payment':truth.verifiedLegacyTransactions.length?'salary-bank-transaction':'',payrollIds:truth.recordIds,salaryPaymentIds:truth.explicitPayments.map((row)=>String(row.id)),bankTransactionIds:truth.hasRegularPayment?truth.bankTransactionIds.filter((id)=>!truth.projectSettlementTransactions?.some((row)=>String(row.id)===String(id))):[]};
   }
   function rebuildPayrollFor(month, employee) {
     if (!month || !employee) return;
@@ -2491,8 +2491,8 @@
     return dailyWorkAmount(log)>0||num(log.commission)>0||Math.round(num(log.performance)*num(log.rate)/100)>0||linkedAttendance.some((row)=>num(row.amount)>0||num(row.fuel)>0)||linkedCommissions.some((row)=>num(row.commission)>0);
   }
   function dailyLogPayrollDeleteLock(log) {
-    const history=payrollHistoryLock(log?.employee,log?.date),hasPayrollSource=dailyLogHasPayrollSource(log);
-    return {...history,locked:hasPayrollSource&&history.locked,historyLocked:history.locked,hasPayrollSource};
+    const history=payrollHistoryLock(log?.employee,log?.date),hasPayrollSource=dailyLogHasPayrollSource(log),settlement=dailyLogCommissionSettlementLock(log);
+    return {...history,locked:hasPayrollSource&&history.locked||settlement.locked,historyLocked:history.locked,hasPayrollSource,commissionSettlementLocked:settlement.locked,commissionSettlementIds:settlement.settlementIds};
   }
   function syncDailyLogLinks(log, oldLog = null) {
     const pairs = [];
@@ -2632,6 +2632,7 @@
     const date = values.date;
     const employeeIds = values.employeeIds || [];
     if ([...previous.map((log)=>[log.employee,log.date]),...employeeIds.map((employeeId)=>[employeeId,date])].some(([employeeId,workDate])=>payrollHistoryLock(employeeId,workDate).locked)) throw new Error(PAID_PAYROLL_SOURCE_ERROR);
+    if(previous.some((log)=>dailyLogCommissionSettlementLock(log).locked))throw new Error('此施工紀錄的案場抽成已發放，為保留結算歷史不可修改。');
     previous.forEach((log) => syncDailyLogLinks({...log,performance:0,workMode:'none'}, log));
     if (previous.length) state.dailyLogs = state.dailyLogs.filter((log) => (log.batchId || log.id) !== editingBatchId);
     const lines = strictLines || (values.lines || []).filter((line) => line.project && line.item && num(line.qty) > 0);
@@ -2658,8 +2659,12 @@
       return left < right ? -1 : left > right ? 1 : 0;
     });
     const performanceIndexByEmployeeId = new Map(sortedEmployeeIds.map((employeeId, index) => [employeeId, index]));
+    const commissionRates=values.commissionRates&&typeof values.commissionRates==='object'&&!Array.isArray(values.commissionRates)?values.commissionRates:{};
     employeeIds.forEach((employeeId) => {
       const employee = state.employees.find((row) => row.id === employeeId) || {};
+      const rawRate=Object.prototype.hasOwnProperty.call(commissionRates,employeeId)?Number(commissionRates[employeeId]):employee.commissionRate===undefined||employee.commissionRate===null||employee.commissionRate===''?25:Number(employee.commissionRate);
+      if(!Number.isFinite(rawRate)||rawRate<0||rawRate>100)throw new Error(`員工 ${employee.name||employeeId} 的本次抽成比例必須介於 0～100`);
+      const commissionRate=Math.round(rawRate*100)/100;
       const hasDaily = state.dailyLogs.some((row) => row.employee === employeeId && row.date === date && row.workMode === 'daily' && row.isPrimaryWork !== false);
       let firstProject = true;
       byProject.forEach((projectLines, projectId) => {
@@ -2670,7 +2675,7 @@
         const canAddWork = firstProject && !(values.workMode === 'daily' && hasDaily);
         const performance = values.commissionEnabled === false ? 0 : splitPerformanceAmount(total, sortedEmployeeIds.length, performanceIndexByEmployeeId.get(employeeId));
         const workMode = canAddWork ? values.workMode : 'none';
-        const log = {id:uid(),batchId,groupId:`${batchId}:${projectId}`,date,employee:employeeId,employeeName:employee.name||'',customer:project.customer||'',customerName:customer.name||project.customerName||'',project:projectId,projectName:project.name||'',payType:performance>0&&workMode!=='none'?'業績抽成／點工':performance>0?'業績抽成':'點工',items:projectLines.map((line)=>({...line})),groupTotal:total,grossTotal:projectLines.reduce((sum,line)=>sum+num(line.subtotal),0),billingTotal:billableTotal,billable:billableTotal>0,billingStatus:billableTotal>0?'未請款':'',billingId:'',billingNo:'',performance,rate:num(employee.commissionRate),commission:Math.round(performance*num(employee.commissionRate)/100),workMode,workQty:canAddWork?num(values.workQty):0,workRate:canAddWork?num(values.workRate):0,isPrimaryWork:canAddWork,note:values.note||'',createdAt:previous[0]?.createdAt||now,updatedAt:now};
+        const log = {id:uid(),batchId,groupId:`${batchId}:${projectId}`,date,employee:employeeId,employeeName:employee.name||'',customer:project.customer||'',customerName:customer.name||project.customerName||'',project:projectId,projectName:project.name||'',payType:performance>0&&workMode!=='none'?'業績抽成／點工':performance>0?'業績抽成':'點工',items:projectLines.map((line)=>({...line})),groupTotal:total,grossTotal:projectLines.reduce((sum,line)=>sum+num(line.subtotal),0),billingTotal:billableTotal,billable:billableTotal>0,billingStatus:billableTotal>0?'未請款':'',billingId:'',billingNo:'',performance,rate:commissionRate,commission:Math.round(performance*commissionRate/100),workMode,workQty:canAddWork?num(values.workQty):0,workRate:canAddWork?num(values.workRate):0,isPrimaryWork:canAddWork,note:values.note||'',createdAt:previous[0]?.createdAt||now,updatedAt:now};
         state.dailyLogs.unshift(log); syncDailyLogLinks(log); firstProject = false;
       });
     });
@@ -2725,6 +2730,7 @@
   async function saveCommission(values, id) {
     requireStoreTransactionDraft();
     const existing = id ? state.commissions.find((x) => x.id === id) : null;
+    if (existing&&commissionSettlementLock(existing).locked) throw new Error(PAID_COMMISSION_SOURCE_ERROR);
     if (existing?.sourceType === 'daily-log') {
       if (payrollHistoryLock(existing.employee,existing.date).locked) throw new Error(PAID_COMMISSION_SOURCE_ERROR);
       throw new Error(DAILY_LOG_COMMISSION_ERROR);
@@ -2758,7 +2764,7 @@
     const row = state.commissions.find((x) => x.id === id);
     if (!row) return false;
     const source=commissionBillingLink(row);
-    if (payrollHistoryLock(row.employee,row.date).locked) throw new Error(source.kind==='orphan-billing'?PAID_ORPHAN_COMMISSION_ERROR:PAID_COMMISSION_SOURCE_ERROR);
+    if (payrollHistoryLock(row.employee,row.date).locked||commissionSettlementLock(row).locked) throw new Error(source.kind==='orphan-billing'?PAID_ORPHAN_COMMISSION_ERROR:PAID_COMMISSION_SOURCE_ERROR);
     if (row.sourceType === 'daily-log') throw new Error(DAILY_LOG_COMMISSION_ERROR);
     state.commissions = state.commissions.filter((x) => x.id !== id);
     rebuildPayrollFor(monthOf(row.date), row.employee);
@@ -4055,6 +4061,51 @@
     const employeeId=payrollEmployeeId(payroll),month=String(payroll?.month||'');
     return state.payroll.filter((row)=>payrollEmployeeId(row)===employeeId&&String(row.month||'')===month);
   }
+  function commissionSettlementSourceIds(settlement) {
+    return [...new Set([...(Array.isArray(settlement?.sourceCommissionIds)?settlement.sourceCommissionIds:[]),...(Array.isArray(settlement?.allocations)?settlement.allocations.map((row)=>row?.commissionId):[])].map((value)=>String(value||'').trim()).filter(Boolean))];
+  }
+  function commissionSettlementForCommissionId(commissionId) {
+    const id=String(commissionId||'').trim();
+    if(!id)return null;
+    return (state.commissionSettlements||[]).find((row)=>commissionSettlementSourceIds(row).includes(id))||null;
+  }
+  function commissionSettlementLock(row) {
+    const settlement=commissionSettlementForCommissionId(row?.id);
+    return {locked:Boolean(settlement),settlementId:settlement?.id||'',projectId:settlement?.projectId||settlement?.project||'',date:settlement?.date||''};
+  }
+  function dailyLogCommissionSettlementLock(log) {
+    if(!log)return {locked:false,commissionIds:[],settlementIds:[]};
+    const linked=(state.commissions||[]).filter((row)=>String(row.sourceType||'')==='daily-log'&&String(row.sourceId||'')===String(log.id||''));
+    const settlements=linked.map((row)=>commissionSettlementForCommissionId(row.id)).filter(Boolean);
+    return {locked:settlements.length>0,commissionIds:linked.filter((row)=>commissionSettlementForCommissionId(row.id)).map((row)=>String(row.id)),settlementIds:[...new Set(settlements.map((row)=>String(row.id)))]};
+  }
+  function projectCommissionSettlementPreview(employeeId,projectId,sourceIds=[]) {
+    const employee=String(employeeId||'').trim(),project=String(projectId||'').trim(),requested=[...new Set((Array.isArray(sourceIds)?sourceIds:[]).map((value)=>String(value||'').trim()).filter(Boolean))],blockers=[];
+    const allSources=(state.commissions||[]).filter((row)=>String(row.employee||row.employeeId||'')===employee&&String(row.project||row.projectId||'')===project&&row.status==='已列入薪資'&&num(row.commission)>0);
+    const settledIds=new Set((state.commissionSettlements||[]).flatMap(commissionSettlementSourceIds));
+    const selected=requested.length?requested.map((id)=>(state.commissions||[]).find((row)=>String(row.id)===id)).filter(Boolean):allSources.filter((row)=>!settledIds.has(String(row.id)));
+    if(!employee||!(state.employees||[]).some((row)=>String(row.id)===employee))blockers.push({code:'EMPLOYEE_NOT_FOUND',message:'找不到指定員工'});
+    if(!project||!(state.projects||[]).some((row)=>String(row.id)===project))blockers.push({code:'PROJECT_NOT_FOUND',message:'找不到指定案場'});
+    if(requested.length!==selected.length)blockers.push({code:'COMMISSION_SOURCE_NOT_FOUND',message:'部分抽成來源已不存在'});
+    selected.forEach((row)=>{
+      if(String(row.employee||row.employeeId||'')!==employee||String(row.project||row.projectId||'')!==project)blockers.push({code:'SOURCE_SCOPE_MISMATCH',commissionId:String(row.id),message:'抽成來源的員工或案場不一致'});
+      if(row.status!=='已列入薪資'||num(row.commission)<=0)blockers.push({code:'SOURCE_NOT_PAYABLE',commissionId:String(row.id),message:'抽成來源目前不可結算'});
+      if(settledIds.has(String(row.id)))blockers.push({code:'SOURCE_ALREADY_SETTLED',commissionId:String(row.id),message:'此抽成來源已完成案場結算，不可重複發放'});
+    });
+    if(!selected.length)blockers.push({code:'NO_SETTLEMENT_SOURCE',message:'目前沒有可結算的案場抽成'});
+    const monthAmounts=new Map();
+    selected.forEach((row)=>{const month=monthOf(row.date);monthAmounts.set(month,(monthAmounts.get(month)||0)+Math.max(0,num(row.commission)))});
+    for(const [month,amount] of monthAmounts){
+      const records=(state.payroll||[]).filter((row)=>payrollEmployeeId(row)===employee&&String(row.month||'')===month);
+      if(!records.length){blockers.push({code:'PAYROLL_MONTH_NOT_FOUND',month,message:`${month} 找不到對應薪資彙總，已停止案場抽成結算`});continue}
+      const truth=payrollPaymentTruth({employee,month,recordIds:records.map((row)=>row.id),total:Math.max(0,...records.map((row)=>num(row.total)))});
+      if(truth.hasRegularPayment)blockers.push({code:'REGULAR_PAYROLL_ALREADY_PAID',month,message:`${month} 已有一般薪資付款，為避免重複發放，不能再以案場抽成方式結算此月份來源`});
+      if(amount>truth.outstanding)blockers.push({code:'SETTLEMENT_EXCEEDS_OUTSTANDING',month,message:`${month} 本次案場抽成超過該月未付薪資`});
+    }
+    const projectSources=allSources.map((row)=>String(row.id)),settledProjectCount=projectSources.filter((id)=>settledIds.has(id)).length,selectedUnsettledCount=selected.filter((row)=>!settledIds.has(String(row.id))).length;
+    const projectedSettled=Math.min(projectSources.length,settledProjectCount+selectedUnsettledCount),status=projectSources.length&&projectedSettled>=projectSources.length?'已發':projectedSettled>0?'部分已發':'待發';
+    return {allowed:blockers.length===0,employeeId:employee,projectId:project,sourceIds:selected.map((row)=>String(row.id)),sources:selected.map((row)=>({id:String(row.id),date:row.date||'',month:monthOf(row.date),untaxedAmount:num(row.untaxedAmount),rate:num(row.rate),commission:num(row.commission),sourceNo:row.sourceNo||'',note:row.note||''})),total:selected.reduce((sum,row)=>sum+Math.max(0,num(row.commission)),0),status,blockers,monthAmounts:Object.fromEntries(monthAmounts)};
+  }
   function payrollPaymentTruth(payroll) {
     const records=payrollGroupRows(payroll),recordIds=new Set(records.map((row)=>String(row.id))),employeeId=payrollEmployeeId(payroll),month=String(payroll?.month||records[0]?.month||''),total=payroll?.total!==undefined&&Array.isArray(payroll?.recordIds)?Math.max(0,num(payroll.total)):Math.max(0,...records.map((row)=>num(row.total)));
     const explicitPayments=state.salaryPayments.filter((row)=>recordIds.has(String(row.payrollId||''))||(!String(row.payrollId||'').trim()&&String(row.employee||row.employeeId||'')===employeeId&&monthOf(row.month||row.date)===month));
@@ -4071,10 +4122,22 @@
       const record=referencedRecord||records.find((item)=>String(item.id)===payrollId||String(item.id)===sourceId);
       legacyHistory.push({id:`legacy-bank-${transactionId}`,payrollId:record?.id||payrollId||sourceId,date:row.date||record?.payDate||'',amount,fee:Math.max(0,num(row.fee)),actualDebit:Math.max(0,num(row.actualDebit??row.amount)),bankId:row.bankId||row.bankAccountId||record?.bankId||'',bankAccountId:row.bankAccountId||row.bankId||record?.bankId||'',paymentMethod:row.paymentMethod||'歷史銀行交易',note:row.note||row.description||'可驗證的歷史薪資付款',bankTransactionId:transactionId,legacy:true,readOnly:true});
     });
-    const history=[...explicitPayments,...legacyHistory].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))),paid=Math.min(total,history.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0)),outstanding=Math.max(0,total-paid),status=paid>0&&outstanding<=0&&total>0?'已付清':paid>0?'部分付款':'未付款',hasVerifiedPayment=explicitPayments.length>0||verifiedLegacyTransactions.length>0;
+    const projectSettlementHistory=[],projectSettlementTransactions=[],missingProjectSettlementIds=[];
+    (state.commissionSettlements||[]).forEach((settlement)=>{
+      if(String(settlement.employeeId||settlement.employee||'')!==employeeId)return;
+      const amount=(Array.isArray(settlement.allocations)?settlement.allocations:[]).filter((row)=>String(row.month||monthOf(row.date))===month).reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0);
+      if(amount<=0)return;
+      const settlementId=String(settlement.id||''),transactionId=String(settlement.bankTransactionId||''),matches=(state.bankTransactions||[]).filter((row)=>String(row.id||'')===transactionId||(String(row.sourceType||'')==='project_commission_settlement'&&String(row.sourceId||'')===settlementId));
+      if(!settlementId||matches.length!==1){missingProjectSettlementIds.push(settlementId||'unknown');return}
+      const transaction=matches[0],bankId=String(settlement.bankAccountId||settlement.bankId||''),transactionBankId=String(transaction.bankAccountId||transaction.bankId||'');
+      if(!bankId||bankId!==transactionBankId||num(transaction.amount)!==num(settlement.actualDebit)){missingProjectSettlementIds.push(settlementId);return}
+      projectSettlementTransactions.push(transaction);
+      projectSettlementHistory.push({id:`project-settlement-${settlementId}-${month}`,date:settlement.date||'',amount,fee:0,actualDebit:amount,bankId,bankAccountId:bankId,paymentMethod:settlement.paymentMethod||'銀行轉帳',note:settlement.note||'案場抽成結算',bankTransactionId:transaction.id,projectId:settlement.projectId||settlement.project||'',projectName:settlement.projectName||'',settlementId,projectSettlement:true,readOnly:true});
+    });
+    const history=[...explicitPayments,...legacyHistory,...projectSettlementHistory].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))),paid=Math.min(total,history.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0)),outstanding=Math.max(0,total-paid),status=paid>0&&outstanding<=0&&total>0?'已付清':paid>0?'部分付款':'未付款',hasRegularPayment=explicitPayments.length>0||verifiedLegacyTransactions.length>0,hasVerifiedPayment=hasRegularPayment||projectSettlementHistory.length>0;
     const stalePayrollStatus=!hasVerifiedPayment&&records.some((row)=>row.status==='已付款'||num(row.paidAmount)>0||row.payDate||row.paidAt||row.paymentTransactionId),missingBankPaymentIds=explicitPayments.filter((payment)=>!explicitBankTransactions.some((row)=>String(row.id||'')===String(payment.bankTransactionId||'')||(row.sourceType==='salary_payment'&&(String(row.sourceId||'')===String(payment.id)||String(row.salaryPaymentId||'')===String(payment.id))))).map((row)=>String(row.id));
-    const integrity=missingBankPaymentIds.length?'explicit-missing-bank-transaction':explicitPayments.length&&verifiedLegacyTransactions.length?'explicit-and-legacy':explicitPayments.length?'explicit':verifiedLegacyTransactions.length?'verified-legacy':stalePayrollStatus?'stale-payroll-status':'none';
-    return {explicitPayments,verifiedLegacyTransactions,history,paid,outstanding,status,hasVerifiedPayment,integrity,missingBankPaymentIds,total,recordIds:[...recordIds],bankTransactionIds:[...new Set([...explicitBankTransactions,...verifiedLegacyTransactions].map((row)=>String(row.id||'')).filter(Boolean))],legacyPaid:verifiedLegacyTransactions.length>0};
+    const integrity=missingBankPaymentIds.length?'explicit-missing-bank-transaction':missingProjectSettlementIds.length?'project-settlement-missing-bank-transaction':explicitPayments.length&&verifiedLegacyTransactions.length?'explicit-and-legacy':explicitPayments.length?'explicit':verifiedLegacyTransactions.length?'verified-legacy':projectSettlementHistory.length?'project-commission-settlement':stalePayrollStatus?'stale-payroll-status':'none';
+    return {explicitPayments,verifiedLegacyTransactions,projectSettlementHistory,projectSettlementTransactions,history,paid,outstanding,status,hasVerifiedPayment,hasRegularPayment,integrity,missingBankPaymentIds,missingProjectSettlementIds,total,recordIds:[...recordIds],bankTransactionIds:[...new Set([...explicitBankTransactions,...verifiedLegacyTransactions,...projectSettlementTransactions].map((row)=>String(row.id||'')).filter(Boolean))],legacyPaid:verifiedLegacyTransactions.length>0};
   }
   function salarySourceIdentity(row,type) {
     const sourceId=String(row?.sourceId||row?.attendanceId||row?.commissionId||'').trim();
@@ -4201,6 +4264,43 @@
       } catch (rollbackError) { error.rollbackError=rollbackError; }
       throw error;
     }
+  }
+  function syncProjectCommissionSettlementBankTransaction(settlement,now) {
+    const bankId=String(settlement.bankAccountId||settlement.bankId||''),bank=state.banks.find((row)=>String(row.id)===bankId);
+    if(!bank)throw new Error('請選擇案場抽成付款銀行帳戶');
+    const employee=state.employees.find((row)=>String(row.id)===String(settlement.employeeId||'')),project=state.projects.find((row)=>String(row.id)===String(settlement.projectId||'')),transaction={id:uid(),createdAt:now};
+    Object.assign(transaction,{date:settlement.date,bankId:bank.id,bankAccountId:bank.id,type:'支出',direction:'out',category:'案場抽成',amount:num(settlement.actualDebit),salaryAmount:num(settlement.amount),fee:num(settlement.fee),feePayer:settlement.feePayer,actualDebit:num(settlement.actualDebit),employeeNetAmount:Math.max(0,num(settlement.amount)-num(settlement.fee)*(settlement.feePayer==='recipient'?1:0)),sourceType:'project_commission_settlement',sourceId:settlement.id,commissionSettlementId:settlement.id,employee:settlement.employeeId,employeeName:employee?.name||settlement.employeeName||'員工',project:settlement.projectId,projectId:settlement.projectId,projectName:project?.name||settlement.projectName||'',sourceNo:project?.name||settlement.projectName||'',description:`${employee?.name||settlement.employeeName||'員工'}｜${project?.name||settlement.projectName||'案場'} 抽成結算`,note:settlement.note||`${project?.name||settlement.projectName||'案場'} 抽成結算`,updatedAt:now});
+    state.bankTransactions.unshift(transaction);settlement.bankId=bank.id;settlement.bankAccountId=bank.id;settlement.bankTransactionId=transaction.id;adjustBankExpense(bank,num(settlement.actualDebit),now);return transaction;
+  }
+  async function addProjectCommissionSettlement(values={}) {
+    requireStoreTransactionDraft();
+    const idempotencyKey=String(values.idempotencyKey||'').trim();
+    if(idempotencyKey){const existing=(state.commissionSettlements||[]).find((row)=>row.idempotencyKey===idempotencyKey);if(existing)return existing}
+    const employeeId=String(values.employeeId||values.employee||''),projectId=String(values.projectId||values.project||''),sourceIds=[...new Set((Array.isArray(values.sourceCommissionIds)?values.sourceCommissionIds:Array.isArray(values.sourceIds)?values.sourceIds:[]).map((value)=>String(value||'').trim()).filter(Boolean))];
+    const preview=projectCommissionSettlementPreview(employeeId,projectId,sourceIds);
+    if(!preview.allowed)throw new Error(preview.blockers.map((row)=>row.message).join('；')||'此案場抽成目前不可結算');
+    const bank=state.banks.find((row)=>String(row.id)===String(values.bankAccountId||values.bankId||''));if(!bank)throw new Error('請選擇案場抽成付款銀行帳戶');
+    const amount=Math.round(preview.total),fee=Math.max(0,Math.round(num(values.fee))),feePayer=values.feePayer==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount;
+    if(amount<=0)throw new Error('本次案場抽成結算金額必須大於 0');if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次結算金額');
+    const employee=state.employees.find((row)=>String(row.id)===employeeId),project=state.projects.find((row)=>String(row.id)===projectId),now=new Date().toISOString();
+    const settlement={id:uid(),idempotencyKey:idempotencyKey||uid(),date:values.date||businessDate(new Date(now)),employeeId,employeeName:employee?.name||'',projectId,projectName:project?.name||'',sourceCommissionIds:preview.sourceIds,allocations:preview.sources.map((row)=>({commissionId:row.id,date:row.date,month:row.month,amount:Math.max(0,num(row.commission))})),amount,fee,feePayer,actualDebit,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:String(values.note||''),createdAt:now,updatedAt:now};
+    state.commissionSettlements.unshift(settlement);syncProjectCommissionSettlementBankTransaction(settlement,now);
+    [...new Set(settlement.allocations.map((row)=>row.month))].forEach((month)=>{const payroll=state.payroll.find((row)=>payrollEmployeeId(row)===employeeId&&String(row.month||'')===month);if(payroll)syncSalarySummary(payroll,now)});
+    persist(`新增案場抽成結算 ${project?.name||projectId}｜${employee?.name||employeeId}`,{commissionSettlementId:settlement.id,employeeId,projectId,sourceCommissionIds:settlement.sourceCommissionIds,amount});
+    return settlement;
+  }
+  async function deleteProjectCommissionSettlement(id) {
+    requireStoreTransactionDraft();
+    const settlement=(state.commissionSettlements||[]).find((row)=>String(row.id)===String(id||''));if(!settlement)throw new Error('找不到案場抽成結算紀錄');
+    const settlementId=String(settlement.id),transactionId=String(settlement.bankTransactionId||''),matches=(state.bankTransactions||[]).filter((row)=>String(row.id||'')===transactionId||(String(row.sourceType||'')==='project_commission_settlement'&&String(row.sourceId||'')===settlementId));
+    if(!transactionId||matches.length!==1)throw new Error('案場抽成結算與銀行流水無法唯一核對，已停止刪除');
+    const transaction=matches[0],bankId=String(settlement.bankAccountId||settlement.bankId||''),transactionBankId=String(transaction.bankAccountId||transaction.bankId||''),bank=state.banks.find((row)=>String(row.id)===bankId);
+    if(!bank||bankId!==transactionBankId||num(transaction.amount)!==num(settlement.actualDebit))throw new Error('案場抽成結算與銀行扣款不一致，已停止刪除');
+    const months=[...new Set((settlement.allocations||[]).map((row)=>String(row.month||monthOf(row.date))).filter(Boolean))],now=new Date().toISOString();
+    adjustBankExpense(bank,-num(settlement.actualDebit),now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==transaction);state.commissionSettlements=state.commissionSettlements.filter((row)=>row!==settlement);
+    months.forEach((month)=>{const payroll=state.payroll.find((row)=>payrollEmployeeId(row)===String(settlement.employeeId||settlement.employee||'')&&String(row.month||'')===month);if(payroll)syncSalarySummary(payroll,now)});
+    persist(`刪除案場抽成結算 ${settlement.projectName||settlement.projectId||''}｜${settlement.employeeName||settlement.employeeId||''}`,{commissionSettlementId:settlementId});
+    return true;
   }
   async function updateBillingInvoice(id, values = {}) {
     requireStoreTransactionDraft(); const billing=state.billings.find((row)=>row.id===id);if(!billing)throw new Error('找不到請款單');
@@ -4361,6 +4461,7 @@
     ['receipts','收款'],
     ['payments','付款'],
     ['salaryPayments','薪資付款'],
+    ['commissionSettlements','案場抽成結算'],
     ['payroll','薪資'],
     ['bankTransactions','銀行交易'],
     ['inventoryReceipts','材料入庫'],
@@ -4671,18 +4772,18 @@
   function employeeUsage(id) {
     const employeeId=String(id||''),sameEmployee=(row)=>String(row?.employee||row?.employeeId||'')===employeeId;
     const payrollRows=state.payroll.filter(sameEmployee),payrollIds=new Set(payrollRows.map((row)=>String(row.id)));
-    const counts={dailyLogs:state.dailyLogs.filter(sameEmployee).length,attendance:state.attendance.filter(sameEmployee).length,commissions:state.commissions.filter(sameEmployee).length,materialUsages:state.materialUsages.filter(sameEmployee).length,payroll:payrollRows.length,salaryPayments:state.salaryPayments.filter((row)=>sameEmployee(row)||payrollIds.has(String(row.payrollId||''))).length,bankTransactions:state.bankTransactions.filter(sameEmployee).length,calendar:(state.calendar||[]).filter(sameEmployee).length};
+    const counts={dailyLogs:state.dailyLogs.filter(sameEmployee).length,attendance:state.attendance.filter(sameEmployee).length,commissions:state.commissions.filter(sameEmployee).length,materialUsages:state.materialUsages.filter(sameEmployee).length,payroll:payrollRows.length,salaryPayments:state.salaryPayments.filter((row)=>sameEmployee(row)||payrollIds.has(String(row.payrollId||''))).length,commissionSettlements:(state.commissionSettlements||[]).filter((row)=>String(row.employeeId||row.employee||'')===employeeId).length,bankTransactions:state.bankTransactions.filter(sameEmployee).length,calendar:(state.calendar||[]).filter(sameEmployee).length};
     return {...counts,used:Object.values(counts).some((count)=>count>0)};
   }
   async function saveEmployee(values, id = '') {
     requireStoreTransactionDraft();
-    const name=clean(values.name),dailyRate=values.dailyRate===''||values.dailyRate===undefined?0:Number(values.dailyRate),commissionRate=values.commissionRate===''||values.commissionRate===undefined?0:Number(values.commissionRate);
+    const existing=state.employees.find((item)=>String(item.id)===String(id)),name=clean(values.name),dailyRate=values.dailyRate===''||values.dailyRate===undefined?0:Number(values.dailyRate),commissionRate=values.commissionRate===''||values.commissionRate===undefined?(existing?num(existing.commissionRate):25):Number(values.commissionRate);
     if(!name)throw new Error('請輸入員工姓名');
     if(!Number.isFinite(dailyRate)||dailyRate<0)throw new Error('日薪不可小於 0');
     if(!Number.isFinite(commissionRate)||commissionRate<0||commissionRate>100)throw new Error('抽成比例必須介於 0～100');
     const duplicate=state.employees.find((row)=>String(row.id)!==String(id)&&sameName(row.name,name));
     if(duplicate)throw new Error('已有同名員工，請直接編輯既有員工');
-    const now=new Date().toISOString(),row=state.employees.find((item)=>String(item.id)===String(id))||{id:uid(),createdAt:now};
+    const now=new Date().toISOString(),row=existing||{id:uid(),createdAt:now};
     Object.assign(row,{name,phone:clean(values.phone),role:clean(values.role),dailyRate,commissionRate,startDate:values.startDate||'',status:clean(values.status)||row.status||'在職',note:clean(values.note),updatedAt:now});
     if(!id)state.employees.unshift(row);
     persist(`${id?'修改':'新增'}員工 ${row.name}`); return row;
@@ -4948,7 +5049,7 @@
   }
   function validateReplacementSnapshot(value) {
     if(!value||typeof value!=='object'||Array.isArray(value)||!value.settings||typeof value.settings!=='object'||Array.isArray(value.settings)||!value.meta||typeof value.meta!=='object'||Array.isArray(value.meta))throw storeError('還原快照格式不完整','SNAPSHOT_INVALID');
-    const collections=['customers','projects','vendors','materials','employees','banks','quotations','dailyLogs','attendance','commissions','billings','receivables','receipts','retentionReceipts','payables','payments','salaryPayments','bankTransactions','payroll','materialUsages','projectCosts','invoices','audit'];
+    const collections=['customers','projects','vendors','materials','employees','banks','quotations','dailyLogs','attendance','commissions','billings','receivables','receipts','retentionReceipts','payables','payments','salaryPayments','commissionSettlements','bankTransactions','payroll','materialUsages','projectCosts','invoices','audit'];
     collections.forEach(key=>{if(value[key]!==undefined&&!Array.isArray(value[key]))throw storeError(`還原快照 ${key} 格式錯誤`,'SNAPSHOT_INVALID')});
     const cloned=JSON.parse(JSON.stringify(value));
     if(storeStateFingerprint(cloned)!==storeStateFingerprint(value))throw storeError('還原快照不是可完整保存的 JSON','SNAPSHOT_INVALID');
@@ -5395,7 +5496,7 @@
     'saveCommission','deleteCommission','saveDailyBatch','deleteDailyBatch','saveInvoice','createBilling','updateBilling','deleteBilling',
     'addReceipt','updateReceipt','deleteReceipt','completeEmployeeCashHandover','cancelEmployeeCashHandover','addRetentionReceipt','updateRetentionReceipt','deleteRetentionReceipt','deleteReceivableAccounting',
     'savePayable','deletePayable','cleanupMaterialPayableTestData','repairMergedPayableHistory','addPayablePayment','updatePayablePayment','deletePayablePayment',
-    'updatePayrollAdjustments','addSalaryPayment','updateSalaryPayment','deleteSalaryPayment','updateBillingInvoice',
+    'updatePayrollAdjustments','addSalaryPayment','updateSalaryPayment','deleteSalaryPayment','addProjectCommissionSettlement','deleteProjectCommissionSettlement','updateBillingInvoice',
     'saveCustomer','deleteCustomer','saveProject','deleteProject','mergeProject','saveEmployee','deleteEmployee','saveMaterial','deleteMaterial',
     'saveMaterialUsage','assignMaterialUsageEmployee','deleteMaterialUsage','saveProjectCost','deleteProjectCost','saveQuotationPrice','saveQuotation','setQuotationStatus','deleteQuotation',
     'cancelQuotationConfirmation','createQuotationRevision','saveQuotationTemplate'
@@ -5408,7 +5509,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
