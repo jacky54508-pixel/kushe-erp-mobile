@@ -440,13 +440,13 @@
     const form=$('#projectSettlementForm',layer),employeeSelect=form.elements.employeeId,projectSelect=form.elements.projectId;
     const rerender=()=>{const nextEmployee=employeeSelect.value,nextProject=projectSelect.value;settlementSelectionKeys=new Set();renderProjectCommissionSettlementDrawer(nextEmployee,nextProject)};
     employeeSelect.addEventListener('change',rerender);projectSelect.addEventListener('change',rerender);
-    $('[data-settlement-house]',form).forEach((input)=>input.addEventListener('change',()=>{
+    $$('[data-settlement-house]',form).forEach((input)=>input.addEventListener('change',()=>{
       const group=groups.find((item)=>item.house===input.dataset.settlementHouse);if(!group)return;
       group.selectionKeys.forEach((key)=>input.checked?settlementSelectionKeys.add(key):settlementSelectionKeys.delete(key));
       renderProjectCommissionSettlementDrawer(employee,project);
     }));
     $('[data-settlement-select-all]',form)?.addEventListener('click',()=>{settlementSelectionKeys=new Set(groups.flatMap((group)=>group.selectionKeys));renderProjectCommissionSettlementDrawer(employee,project)});
-    $('[data-settlement-close]',form).forEach((button)=>button.addEventListener('click',closeProjectCommissionSettlementDrawer));
+    $$('[data-settlement-close]',form).forEach((button)=>button.addEventListener('click',closeProjectCommissionSettlementDrawer));
     form.addEventListener('submit',submitProjectCommissionSettlement);
   }
   function closeProjectCommissionSettlementDrawer() {
@@ -708,7 +708,7 @@
     let batchTemplate=null,quickProjectTargetGroup=null,draftSequence=0;
     const commissionRatePanel=$('#dailyCommissionRatePanel',form);
     const renderCommissionRatePanel=()=>{
-      const selectedIds=$('input[name="dailyEmployees"]:checked',form).map(input=>String(input.value));
+      const selectedIds=$$('input[name="dailyEmployees"]:checked',form).map(input=>String(input.value));
       if(!selectedIds.length){commissionRatePanel.innerHTML='';commissionRatePanel.hidden=true;return}
       commissionRatePanel.hidden=false;
       commissionRatePanel.innerHTML=`<div class="daily-commission-rate-heading"><div><b>本次抽成設定</b><small>未修改時沿用員工預設抽成，只影響本次每日施工。</small></div></div><div class="daily-commission-rate-list">${selectedIds.map(id=>{const employee=employeeOptions.find(item=>String(item.id)===id);if(!employee)return '';const fallback=defaultCommissionRate(employee),value=Object.prototype.hasOwnProperty.call(commissionRateDraft,id)?commissionRateDraft[id]:fallback;return `<div class="daily-commission-rate-row"><span class="daily-commission-rate-employee"><b>${esc(employee.name)}</b><small>預設 ${fallback}%</small></span><label><span>本次抽成</span><span class="daily-commission-rate-input"><input type="number" inputmode="decimal" name="dailyCommissionRate" data-employee-id="${esc(id)}" min="0" max="100" step="0.01" value="${esc(value)}" aria-label="${esc(employee.name)} 本次抽成比例"><em>%</em></span></label></div>`}).join('')}</div>`;
@@ -843,8 +843,8 @@
     const initialGroups=new Map();lines.forEach((line,index)=>{const key=groupKey(line.project,line.house);if(!initialGroups.has(key))initialGroups.set(key,[]);initialGroups.get(key).push({...line,draftOrder:index})});draftSequence=lines.length;
     initialGroups.forEach(groupLines=>createGroup(groupLines[0].project,groupLines[0].house,groupLines));
     $('#addDailyLine',layer).onclick=()=>{const block=createProjectBlock('');createGroup('','',[emptyLine()],block);calc();$('.daily-house-project',block).focus()};
-    $('input[name="dailyEmployees"]',form).forEach(input=>{input.onchange=()=>{renderCommissionRatePanel();calc()}});
-    $('select[name="workMode"],input[name="workQty"],input[name="workRate"],input[name="commissionEnabled"]',form).forEach(input=>{input.oninput=calc;input.onchange=calc});
+    $$('input[name="dailyEmployees"]',form).forEach(input=>{input.onchange=()=>{renderCommissionRatePanel();calc()}});
+    $$('select[name="workMode"],input[name="workQty"],input[name="workRate"],input[name="commissionEnabled"]',form).forEach(input=>{input.oninput=calc;input.onchange=calc});
     renderCommissionRatePanel();
     const showRowError=(error,rows)=>{const row=rows[error.dailyRowIndex]||rows[0];if(row){const field=error.dailyField==='house'?$('.daily-house-name',row.closest('.daily-house-group')):error.dailyField==='project'?projectInput(row):error.dailyField==='qty'?$('.daily-line-qty',row):error.dailyField==='quotation'?$('.daily-line-choice',row):$('.daily-line-item',row);field.setAttribute('aria-invalid','true');$('.daily-quote-hint',row).textContent=error.message;field.focus();field.scrollIntoView({block:'nearest',inline:'nearest'})}window.KushePhase1?.toast(error.message)};
     const validateRows=rows=>{const ids=new Set(),current=store.getState();if(!$('input[name="dailyEmployees"]:checked',form))throw new Error('請至少選擇一位員工');rows.forEach((row,index)=>{const draft=rowDraft(row),project=current.projects.find(item=>String(item.id)===String(draft.project)),fail=(message,field)=>{const error=new Error(`第 ${index+1} 筆施工：${message}`);Object.assign(error,{dailyRowIndex:index,dailyField:field});throw error};if(!project||!project.customer||!current.customers.some(item=>String(item.id)===String(project.customer)))fail('請選擇有有效客戶關聯的案場','project');if(!draft.house&&!(legacyItems.has(draft.workItemId)&&!String(legacyItems.get(draft.workItemId).house||'').trim()))fail('請填寫戶別','house');if(!draft.item)fail('請填寫施工品項','item');if(!/^\d+(?:\.\d+)?$/.test(draft.qty.trim())||!Number.isFinite(Number(draft.qty))||Number(draft.qty)<=0||Number(draft.qty)>Number.MAX_SAFE_INTEGER)fail('數量必須是有限正數，不可空白','qty');if(draft.sourceType==='quotation'||draft.quotationId||draft.quotationLineId){if(!draft.quotationId||!draft.quotationLineId||!quoteChoices(draft.project).some(item=>String(item.quotationId)===draft.quotationId&&String(item.quotationLineId)===draft.quotationLineId))fail('報價項目已失效，請重新選擇正式報價來源','quotation')}else if(draft.sourceType!=='manual')fail('請選擇報價品項或明確使用手動施工','quotation');if(draft.workItemId&&ids.has(draft.workItemId))fail('施工來源識別重複','item');if(draft.workItemId)ids.add(draft.workItemId)});if(!rows.length)throw new Error('請至少填寫一筆施工項目')};
