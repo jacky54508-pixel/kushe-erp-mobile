@@ -1,0 +1,50 @@
+name: P20 native browser storage QA
+on:
+  push:
+    branches: [p20-native-storage-qa-20261002]
+permissions:
+  contents: read
+jobs:
+  native-storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout isolated QA control
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: control
+          persist-credentials: false
+      - name: Checkout exact released ERP
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 19e80f83912d98f12bd6dad151e5c09f8e7b763f
+          path: work
+          persist-credentials: false
+      - name: Decode verified synthetic-only QA source
+        run: |
+          python - <<'PY'
+          import pathlib,base64,lzma,json,hashlib
+          data=lzma.decompress(base64.b64decode(pathlib.Path('control/.p20-native-qa/payload.txt').read_text(),validate=True))
+          assert hashlib.sha256(data).hexdigest()=='7f4f1cbe5b1b9cea0efa506d2fb16d6dd4d13a99845d098133ed6c4a386297f3'
+          files=json.loads(data);assert set(files)=={'native_storage_ci.py','native_fixture.js'}
+          pathlib.Path('qa').mkdir()
+          for name,content in files.items():pathlib.Path('qa',name).write_text(content)
+          PY
+      - name: Install pinned test driver
+        run: |
+          python -m venv .qa-venv
+          .qa-venv/bin/pip install playwright==1.57.0
+          command -v google-chrome || command -v chromium || .qa-venv/bin/python -m playwright install --with-deps chromium
+      - name: Run native persistence tests on localhost and new profile
+        env:
+          ERP_CODE_ROOT: work
+          QA_OUTPUT: results/native-storage-result.json
+        run: .qa-venv/bin/python qa/native_storage_ci.py
+      - name: Upload synthetic QA results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p20-native-storage-results
+          path: results/native-storage-result.json
+          retention-days: 7
+          if-no-files-found: warn
