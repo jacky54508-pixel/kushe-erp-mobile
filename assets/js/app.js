@@ -70,7 +70,7 @@
   function setMfaBusy(busy,message=''){
     mfaFlow.busy=Boolean(busy);
     const form=$('#mfaForm'),submit=$('#mfaSubmit');
-    $('input,button',form||document.createElement('div')).forEach((node)=>{node.disabled=Boolean(busy)});
+    $$('input,button',form||document.createElement('div')).forEach((node)=>{node.disabled=Boolean(busy)});
     if(submit)submit.textContent=busy?'驗證中…':'驗證並進入 ERP';
     if(form)form.setAttribute('aria-busy',String(Boolean(busy)));
     if(message)setMfaMessage(message);
@@ -311,11 +311,17 @@
       try {
         if (!window.KusheAuthGate) throw new Error('Auth gate unavailable');
         await window.KusheAuthGate.login(email?.value, password?.value);
-        if (password) password.value = '';
-        await startAuthenticatedApp();
       } catch (_) {
         if (password) password.value = '';
         setLoginMessage('登入失敗，請確認 Email 與密碼後再試一次。', true);
+        setLoginBusy(false);
+        return;
+      }
+      if (password) password.value = '';
+      try {
+        await startAuthenticatedApp();
+      } catch (_) {
+        setLoginMessage('登入資訊已驗證，但安全驗證流程發生錯誤；ERP 尚未載入，請重新整理後再試。', true);
       } finally {
         setLoginBusy(false);
       }
