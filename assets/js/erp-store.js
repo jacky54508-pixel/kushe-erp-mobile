@@ -564,7 +564,7 @@
       try { const emergency = JSON.parse(localStorage.getItem(EMERGENCY_KEY) || 'null'); if (score(emergency)) state = emergency; } catch (_) {}
     }
     if (!score(state)) state = storeStateClone(window.KuSheLegacyData?.getState() || {});
-    ['commissions','employees','customers','projects','vendors','materials','materialUsages','projectCosts','billings','receivables','payables','invoices','receipts','retentionReceipts','payments','salaryPayments','banks','bankTransactions','payroll','attendance','dailyLogs','dailyItemPresets','quotations','quotationPrices','quotationTemplates','audit'].forEach((key) => { if (!Array.isArray(state[key])) state[key] = []; });
+    ['commissions','employees','customers','projects','vendors','materials','materialUsages','inventoryReceipts','projectCosts','billings','receivables','payables','invoices','receipts','retentionReceipts','payments','salaryPayments','commissionSettlements','banks','bankTransactions','payroll','attendance','dailyLogs','dailyItemPresets','quotations','quotationPrices','quotationTemplates','audit'].forEach((key) => { if (!Array.isArray(state[key])) state[key] = []; });
     if (!state.settings) state.settings = {};
     if (!state.meta) state.meta = {};
     state.quotations.forEach((quote) => {
@@ -766,7 +766,7 @@
     const payrollRows=(state?.payroll||[]).filter((row)=>String(row.employee||row.employeeId||'')===employee&&monthOf(row.month)===month);
     if(!payrollRows.length)return {locked:false,reason:'',payrollIds:[],salaryPaymentIds:[],bankTransactionIds:[]};
     const truth=payrollPaymentTruth({employee,month,recordIds:payrollRows.map((row)=>row.id),total:Math.max(0,...payrollRows.map((row)=>num(row.total)))});
-    return {locked:truth.hasVerifiedPayment,reason:truth.explicitPayments.length?'salary-payment':truth.verifiedLegacyTransactions.length?'salary-bank-transaction':'',payrollIds:truth.recordIds,salaryPaymentIds:truth.explicitPayments.map((row)=>String(row.id)),bankTransactionIds:truth.bankTransactionIds};
+    return {locked:truth.hasRegularPayment,reason:truth.explicitPayments.length?'salary-payment':truth.verifiedLegacyTransactions.length?'salary-bank-transaction':'',payrollIds:truth.recordIds,salaryPaymentIds:truth.explicitPayments.map((row)=>String(row.id)),bankTransactionIds:truth.hasRegularPayment?truth.bankTransactionIds.filter((id)=>!truth.projectSettlementTransactions?.some((row)=>String(row.id)===String(id))):[]};
   }
   function rebuildPayrollFor(month, employee) {
     if (!month || !employee) return;
@@ -1111,7 +1111,7 @@
   });
   function financialIntegrityAuditReport() {
     const repair=FINANCIAL_INTEGRITY_REPAIR,issues=[];
-    const billings=state.billings||[],receivables=state.receivables||[],receipts=state.receipts||[],retentionReceipts=state.retentionReceipts||[],invoices=state.invoices||[],dailyLogs=state.dailyLogs||[],payrollRows=state.payroll||[],payables=state.payables||[],payments=state.payments||[],salaryPayments=state.salaryPayments||[],bankTransactions=state.bankTransactions||[],materialUsages=state.materialUsages||[];
+    const billings=state.billings||[],receivables=state.receivables||[],receipts=state.receipts||[],retentionReceipts=state.retentionReceipts||[],invoices=state.invoices||[],dailyLogs=state.dailyLogs||[],payrollRows=state.payroll||[],payables=state.payables||[],payments=state.payments||[],salaryPayments=state.salaryPayments||[],commissionSettlements=state.commissionSettlements||[],bankTransactions=state.bankTransactions||[],materials=state.materials||[],inventoryReceipts=state.inventoryReceipts||[],materialUsages=state.materialUsages||[];
     const addIssue=(section,id,code,severity,repairClassification,message)=>{issues.push({section,id:financialAuditText(id),code,severity,repairClassification,message})};
     const billingValues=(billing)=>{
       const lineUntaxed=(billing.lines||[]).reduce((sum,line)=>sum+num(line.untaxedSubtotal??line.preTaxAmount??line.amount??num(line.qty)*num(line.price)),0);
@@ -1343,6 +1343,62 @@
       if(ambiguousMaterialPayable)addIssue('material-payable',usage.id,'MATERIAL_AMBIGUOUS_PAYABLE','BLOCKING',repair.MANUAL,'Material Usage 對應多筆 Payable。');
       return {materialUsageId:usage.id,payableId:usage.payableId,payableMatchCount:matches.length,orphanMaterialPayable,ambiguousMaterialPayable,repairClassification:orphanMaterialPayable||ambiguousMaterialPayable?repair.MANUAL:null};
     });
+    const commissionAllocationOccurrences=new Map();
+    commissionSettlements.forEach((settlement)=>{
+      (settlement.allocations||[]).forEach((allocation)=>{
+        const key=financialAuditText(allocation.allocationKey||commissionHouseAllocationKey(allocation.commissionId,allocation.house));
+        if(!key)return;
+        if(!commissionAllocationOccurrences.has(key))commissionAllocationOccurrences.set(key,[]);
+        commissionAllocationOccurrences.get(key).push({settlementId:financialAuditText(settlement.id),allocation});
+      });
+    });
+    const commissionSettlementAudit=commissionSettlements.map((settlement)=>{
+      const settlementId=financialAuditText(settlement.id),employeeId=financialAuditText(settlement.employeeId||settlement.employee),projectId=financialAuditText(settlement.projectId||settlement.project),allocations=Array.isArray(settlement.allocations)?settlement.allocations:[],allocationTotal=allocations.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0),amount=num(settlement.amount),fee=Math.max(0,num(settlement.fee)),expectedDebit=settlement.feePayer==='company'?amount+fee:amount,actualDebit=num(settlement.actualDebit),employeeMatches=(state.employees||[]).filter((row)=>financialAuditText(row.id)===employeeId),projectMatches=(state.projects||[]).filter((row)=>financialAuditText(row.id)===projectId);
+      const allocationChecks=allocations.map((allocation)=>{
+        const commissionId=financialAuditText(allocation.commissionId),matches=(state.commissions||[]).filter((row)=>financialAuditText(row.id)===commissionId),source=matches.length===1?matches[0]:null,key=financialAuditText(allocation.allocationKey||commissionHouseAllocationKey(commissionId,allocation.house)),scopeMatch=Boolean(source&&financialAuditText(source.employee||source.employeeId)===employeeId&&financialAuditText(source.project||source.projectId)===projectId),positive=num(allocation.amount)>0,duplicateCount=(commissionAllocationOccurrences.get(key)||[]).length,salaryPaymentIds=(state.salaryPayments||[]).filter((payment)=>salaryPaymentCommissionKeys(payment).includes(key)).map((payment)=>financialAuditText(payment.id));
+        if(matches.length!==1)addIssue('commission-settlement',settlementId,'COMMISSION_SETTLEMENT_SOURCE_MISSING','BLOCKING',repair.MANUAL,'案場抽成結算來源抽成不存在或不唯一。');
+        if(source&&!scopeMatch)addIssue('commission-settlement',settlementId,'COMMISSION_SETTLEMENT_SCOPE_MISMATCH','BLOCKING',repair.MANUAL,'案場抽成結算來源的員工／案場與結算單不一致。');
+        if(!positive)addIssue('commission-settlement',settlementId,'COMMISSION_SETTLEMENT_NONPOSITIVE_ALLOCATION','BLOCKING',repair.SEMANTIC,'案場抽成結算存在 0 或負數分攤。');
+        if(key&&duplicateCount>1)addIssue('commission-settlement',settlementId,'COMMISSION_ALLOCATION_DUPLICATE_SETTLEMENT','BLOCKING',repair.MANUAL,'同一戶別抽成 allocationKey 被多筆案場抽成結算重複使用。');
+        if(salaryPaymentIds.length)addIssue('commission-settlement',settlementId,'COMMISSION_ALLOCATION_DOUBLE_PAID','BLOCKING',repair.MANUAL,'同一戶別抽成同時存在案場抽成結算與一般薪資付款。');
+        return {allocationKey:key,commissionId,commissionMatchCount:matches.length,scopeMatch,positive,duplicateSettlementCount:duplicateCount,salaryPaymentIds};
+      });
+      const selectionKeys=(settlement.selectionKeys||[]).map(financialAuditText).filter(Boolean),allocationKeys=allocations.map((row)=>financialAuditText(row.allocationKey||commissionHouseAllocationKey(row.commissionId,row.house))).filter(Boolean),selectionMatch=selectionKeys.length===allocationKeys.length&&selectionKeys.every((key)=>allocationKeys.includes(key)),sourceIds=[...new Set(allocations.map((row)=>financialAuditText(row.commissionId)).filter(Boolean))],storedSourceIds=[...new Set((settlement.sourceCommissionIds||[]).map(financialAuditText).filter(Boolean))],sourceIdsMatch=sourceIds.length===storedSourceIds.length&&sourceIds.every((id)=>storedSourceIds.includes(id));
+      const bankMatches=financialAuditUnique(bankTransactions.filter((transaction)=>financialAuditText(transaction.id)===financialAuditText(settlement.bankTransactionId)||(financialAuditText(transaction.sourceType)==='project_commission_settlement'&&financialAuditText(transaction.sourceId)===settlementId))),bankTransaction=bankMatches.length===1?bankMatches[0]:null,settlementBankIds=financialAuditUnique([settlement.bankAccountId,settlement.bankId].map(financialAuditText).filter(Boolean)),transactionBankIds=financialAuditUnique([bankTransaction?.bankAccountId,bankTransaction?.bankId].map(financialAuditText).filter(Boolean)),bankIdentityMatch=Boolean(bankTransaction&&settlementBankIds.length===1&&transactionBankIds.length===1&&settlementBankIds[0]===transactionBankIds[0]),bankAmountMatch=Boolean(bankTransaction&&financialAuditMoneyEqual(financialAuditFirst(bankTransaction,['actualDebit','amount'],0),actualDebit)),bankSourceMatch=Boolean(bankTransaction&&financialAuditText(bankTransaction.sourceType)==='project_commission_settlement'&&financialAuditText(bankTransaction.sourceId)===settlementId),bankDirectionMatch=Boolean(bankTransaction&&(['out','expense'].includes(financialAuditText(bankTransaction.direction).toLowerCase())||financialAuditText(bankTransaction.type)==='支出'));
+      if(employeeMatches.length!==1)addIssue('commission-settlement',settlementId,'COMMISSION_SETTLEMENT_EMPLOYEE_MISSING','BLOCKING',repair.MANUAL,'案場抽成結算找不到唯一員工。');
+      if(projectMatches.length!==1)addIssue('commission-settlement',settlementId,'COMMISSION_SETTLEMENT_PROJECT_MISSING','BLOCKING',repair.MANUAL,'案場抽成結算找不到唯一案場。');
+      if(!allocations.length)addIssue('commission-settlement',settlementId,'COMMISSION_SETTLEMENT_EMPTY','BLOCKING',repair.MANUAL,'案場抽成結算沒有任何 allocation。');
+      if(!financialAuditMoneyEqual(allocationTotal,amount))addIssue('commission-settlement',settlementId,'COMMISSION_SETTLEMENT_AMOUNT_MISMATCH','BLOCKING',repair.SEMANTIC,'案場抽成結算金額與 allocation 合計不一致。');
+      if(!financialAuditMoneyEqual(expectedDebit,actualDebit))addIssue('commission-settlement',settlementId,'COMMISSION_SETTLEMENT_DEBIT_MISMATCH','BLOCKING',repair.SEMANTIC,'案場抽成結算實際扣款與金額／手續費規則不一致。');
+      if(!selectionMatch)addIssue('commission-settlement',settlementId,'COMMISSION_SETTLEMENT_SELECTION_MISMATCH','BLOCKING',repair.MANUAL,'案場抽成結算 selectionKeys 與 allocations 不一致。');
+      if(!sourceIdsMatch)addIssue('commission-settlement',settlementId,'COMMISSION_SETTLEMENT_SOURCE_IDS_MISMATCH','BLOCKING',repair.MANUAL,'案場抽成結算 sourceCommissionIds 與 allocations 不一致。');
+      if(bankMatches.length!==1)addIssue('commission-settlement',settlementId,bankMatches.length?'COMMISSION_SETTLEMENT_BANK_DUPLICATE':'COMMISSION_SETTLEMENT_BANK_MISSING','BLOCKING',repair.MANUAL,'案場抽成結算找不到唯一銀行流水。');
+      if(bankTransaction&&(!bankIdentityMatch||!bankAmountMatch||!bankSourceMatch||!bankDirectionMatch))addIssue('commission-settlement',settlementId,'COMMISSION_SETTLEMENT_BANK_MISMATCH','BLOCKING',repair.MANUAL,'案場抽成結算與銀行流水內容不一致。');
+      return {id:settlementId,employeeId,projectId,amount,fee,expectedDebit,actualDebit,allocationTotal,allocationCount:allocations.length,selectionMatch,sourceIdsMatch,allocationChecks,bankTransactionIds:bankMatches.map((row)=>financialAuditText(row.id)),bankIdentityMatch,bankAmountMatch,bankSourceMatch,bankDirectionMatch};
+    });
+    const inventoryReceiptAudit=inventoryReceipts.map((receipt)=>{
+      const materialId=financialAuditText(receipt.material||receipt.materialId),matches=materials.filter((row)=>financialAuditText(row.id)===materialId),quantity=num(receipt.quantity),before=num(receipt.beforeStock),after=num(receipt.afterStock),amountChainMatch=financialAuditMoneyEqual(after,before+quantity);
+      if(matches.length!==1)addIssue('inventory',receipt.id,'INVENTORY_RECEIPT_MATERIAL_MISSING','BLOCKING',repair.MANUAL,'材料入庫紀錄找不到唯一材料主檔。');
+      if(quantity<=0)addIssue('inventory',receipt.id,'INVENTORY_RECEIPT_NONPOSITIVE','BLOCKING',repair.SEMANTIC,'材料入庫數量必須大於 0。');
+      if(!amountChainMatch)addIssue('inventory',receipt.id,'INVENTORY_RECEIPT_CHAIN_MISMATCH','BLOCKING',repair.SEMANTIC,'材料入庫 beforeStock + quantity 不等於 afterStock。');
+      return {id:financialAuditText(receipt.id),materialId,materialMatchCount:matches.length,quantity,beforeStock:before,afterStock:after,amountChainMatch};
+    });
+    const inventoryUsageAudit=materialUsages.filter((usage)=>usage.inventoryDeductedAt).map((usage)=>{
+      const materialId=financialAuditText(usage.inventoryMaterialId||usage.material),declaredMaterialId=financialAuditText(usage.material),matches=materials.filter((row)=>financialAuditText(row.id)===materialId),quantity=num(usage.inventoryQuantity??usage.quantity),materialIdMatch=!declaredMaterialId||declaredMaterialId===materialId;
+      if(matches.length!==1)addIssue('inventory',usage.id,'INVENTORY_USAGE_MATERIAL_MISSING','BLOCKING',repair.MANUAL,'已扣庫存的材料使用紀錄找不到唯一材料主檔。');
+      if(quantity<=0)addIssue('inventory',usage.id,'INVENTORY_USAGE_NONPOSITIVE','BLOCKING',repair.SEMANTIC,'已扣庫存的材料使用數量必須大於 0。');
+      if(!materialIdMatch)addIssue('inventory',usage.id,'INVENTORY_USAGE_MATERIAL_ID_MISMATCH','BLOCKING',repair.MANUAL,'材料使用的 inventoryMaterialId 與 material 不一致。');
+      return {id:financialAuditText(usage.id),materialId,declaredMaterialId,materialMatchCount:matches.length,quantity,materialIdMatch};
+    });
+    const inventoryMaterialAudit=materials.map((material)=>{
+      const materialId=financialAuditText(material.id),initialized=Boolean(material.inventoryInitializedAt),openingStock=num(material.openingStock),received=inventoryReceipts.filter((row)=>financialAuditText(row.material||row.materialId)===materialId).reduce((sum,row)=>sum+Math.max(0,num(row.quantity)),0),deducted=materialUsages.filter((row)=>row.inventoryDeductedAt&&financialAuditText(row.inventoryMaterialId||row.material)===materialId).reduce((sum,row)=>sum+Math.max(0,num(row.inventoryQuantity??row.quantity)),0),expectedStock=openingStock+received-deducted,storedStock=num(material.stock),stockMatch=!initialized||financialAuditMoneyEqual(storedStock,expectedStock),legacyUndeductedCount=materialUsages.filter((row)=>!row.inventoryDeductedAt&&financialAuditText(row.material)===materialId).length;
+      if(initialized&&openingStock<0)addIssue('inventory',materialId,'INVENTORY_OPENING_NEGATIVE','BLOCKING',repair.SEMANTIC,'材料期初庫存不可為負數。');
+      if(storedStock<0)addIssue('inventory',materialId,'INVENTORY_STOCK_NEGATIVE','BLOCKING',repair.SEMANTIC,'材料目前庫存不可為負數。');
+      if(initialized&&!stockMatch)addIssue('inventory',materialId,'INVENTORY_STOCK_MISMATCH','BLOCKING',repair.SEMANTIC,'目前庫存不等於期初庫存＋入庫－正式扣庫存使用。');
+      if(!initialized&&(inventoryReceipts.some((row)=>financialAuditText(row.material||row.materialId)===materialId)||materialUsages.some((row)=>row.inventoryDeductedAt&&financialAuditText(row.inventoryMaterialId||row.material)===materialId)))addIssue('inventory',materialId,'INVENTORY_NOT_INITIALIZED_WITH_LEDGER','BLOCKING',repair.MANUAL,'材料未建立期初庫存，卻已有正式入庫或扣庫存紀錄。');
+      if(legacyUndeductedCount)addIssue('inventory',materialId,'INVENTORY_LEGACY_UNDEDUCTED_USAGE','INFO',repair.LEGACY,'存在未標記扣庫存的舊材料使用紀錄；不納入目前庫存公式。');
+      return {materialId,initialized,openingStock,received,deducted,expectedStock,storedStock,stockMatch,legacyUndeductedCount};
+    });
     const bankAudit=bankTransactions.map((transaction)=>{
       const sourceType=financialAuditText(transaction.sourceType).toLocaleLowerCase('en-US');
       let classification='unknown',matches=[];
@@ -1350,9 +1406,10 @@
       else if(['retention_receipt','retention-receipt'].includes(sourceType)){classification='retention_receipt';matches=retentionReceipts.filter((row)=>[financialAuditText(row.id),financialAuditText(row.retentionReceiptId)].includes(financialAuditText(transaction.sourceId||transaction.retentionReceiptId)));}
       else if(['payable_payment','payable-payment'].includes(sourceType)){classification='payable_payment';matches=payments.filter((row)=>financialAuditText(row.id)===financialAuditText(transaction.sourceId||transaction.paymentId));}
       else if(['salary_payment','salary-payment'].includes(sourceType)){classification='salary_payment';matches=salaryPayments.filter((row)=>financialAuditText(row.id)===financialAuditText(transaction.sourceId||transaction.salaryPaymentId));}
+      else if(['project_commission_settlement','project-commission-settlement'].includes(sourceType)){classification='project_commission_settlement';matches=commissionSettlements.filter((row)=>financialAuditText(row.id)===financialAuditText(transaction.sourceId||transaction.commissionSettlementId));}
       else if(sourceType.includes('legacy')||['payable','payroll','receivable','billing'].includes(sourceType))classification='legacy';
       else if(!sourceType||sourceType==='manual'||sourceType.startsWith('manual_')||sourceType.startsWith('manual-'))classification='manual';
-      const knownSource=['receipt','retention_receipt','payable_payment','salary_payment'].includes(classification),orphanBankTransaction=knownSource&&matches.length===0,ambiguousBankTransaction=knownSource&&matches.length>1,unknownSourceTransaction=classification==='unknown';
+      const knownSource=['receipt','retention_receipt','payable_payment','salary_payment','project_commission_settlement'].includes(classification),orphanBankTransaction=knownSource&&matches.length===0,ambiguousBankTransaction=knownSource&&matches.length>1,unknownSourceTransaction=classification==='unknown';
       if(orphanBankTransaction)addIssue('bank',transaction.id,'ORPHAN_BANK_TRANSACTION','BLOCKING',repair.MANUAL,'銀行流水找不到來源紀錄。');
       if(ambiguousBankTransaction)addIssue('bank',transaction.id,'AMBIGUOUS_BANK_TRANSACTION','BLOCKING',repair.MANUAL,'銀行流水反查到多筆來源。');
       if(unknownSourceTransaction)addIssue('bank',transaction.id,'UNKNOWN_SOURCE_TRANSACTION','WARNING',repair.MANUAL,'銀行流水 sourceType 無法分類。');
@@ -1370,15 +1427,19 @@
       paymentId:financialAuditDuplicateGroups(payments,(row)=>row.id,(row,index)=>row.id||index),
       invoiceNumber:financialAuditDuplicateGroups(invoices,(row)=>row.invoiceNumber||row.invoiceNo||row.number,(row)=>row.id||row.invoiceId),
       workItemId:workItemDuplicateGroups,
-      bankTransactionId:financialAuditDuplicateGroups(bankTransactions,(row)=>row.id,(row,index)=>row.id||index)
+      bankTransactionId:financialAuditDuplicateGroups(bankTransactions,(row)=>row.id,(row,index)=>row.id||index),
+      commissionSettlementId:financialAuditDuplicateGroups(commissionSettlements,(row)=>row.id,(row,index)=>row.id||index),
+      commissionSettlementIdempotencyKey:financialAuditDuplicateGroups(commissionSettlements,(row)=>row.idempotencyKey,(row)=>row.id),
+      commissionAllocationKey:[...commissionAllocationOccurrences.entries()].filter(([,rows])=>rows.length>1).map(([value,rows])=>({value,count:rows.length,ids:rows.map((row)=>row.settlementId)})),
+      inventoryReceiptId:financialAuditDuplicateGroups(inventoryReceipts,(row)=>row.id,(row,index)=>row.id||index)
     };
     Object.entries(duplicates).forEach(([kind,groups])=>groups.forEach((group)=>addIssue('identity',group.value,`DUPLICATE_${kind.replace(/([A-Z])/g,'_$1').toUpperCase()}`,'BLOCKING',repair.MANUAL,`${kind} 存在重複 identity。`)));
     const b643Pair=billingReceivablePairs.find((row)=>financialAuditText(row.number)==='B643124'),b643Billing=b643Pair?billings.find((row)=>financialAuditText(row.id)===financialAuditText(b643Pair.id)):null,b643Receivable=b643Billing&&receivableMatchesForBilling(b643Billing).length===1?receivableMatchesForBilling(b643Billing)[0]:null,b643Truth=b643Receivable?receiptTruthFor(b643Receivable,b643Billing):null;
     const b643124={billing:b643Billing?{id:b643Billing.id,number:b643Billing.number,sourceType:b643Billing.sourceType||''}:null,receivable:b643Receivable?{id:b643Receivable.id,sourceNo:b643Receivable.sourceNo||''}:null,billingTotal:b643Billing?billingValues(b643Billing).total:0,receivableAmount:num(b643Receivable?.amount),storedReceived:num(b643Receivable?.received),explicitReceiptTotal:b643Truth?.explicitReceiptTotal||0,legacyReceived:b643Truth?.legacyReceived||0,legacyBankCandidateCount:b643Truth?.legacyBankCandidateCount||0,legacyBankVerified:Boolean(b643Truth?.legacyBankVerified),legacyBankTransactionIds:b643Truth?.legacyBankTransactionIds||[],receiptTruthClassification:b643Truth?.classification||'NOT_FOUND',correctExpectedReceived:b643Truth?.classification==='LEGACY_RECEIVED_UNVERIFIED'?null:b643Truth?.expectedReceived??null,integrityResult:!b643Billing||!b643Receivable?'MISSING_TARGET':b643Truth.classification==='LEGACY_RECEIVED_VERIFIED'?'VERIFIED_LEGACY_RECEIPT':b643Truth.classification==='LEGACY_RECEIVED_UNVERIFIED'?'BLOCK_MANUAL_REVIEW_UNVERIFIED_LEGACY_RECEIVED':b643Truth.storedReceivedMatch?'PASS':'RECEIVED_MISMATCH',repairClassification:b643Truth?.classification==='LEGACY_RECEIVED_VERIFIED'?repair.LEGACY:b643Truth?.classification==='LEGACY_RECEIVED_UNVERIFIED'?repair.MANUAL:null};
     const specialPayroll=payrollAudit.find((row)=>financialAuditText(row.id)==='msdfc59cbvc6p7')||null;
-    const duplicateIdentityCount=Object.values(duplicates).reduce((sum,groups)=>sum+groups.length,0),billingAmountMismatchCount=billingReceivablePairs.filter((row)=>row.amountChecks&&!row.amountMatch).length,orphanReceiptCount=[...receiptAudit,...retentionReceiptAudit].filter((row)=>row.orphanReceipt).length,receiptBankMismatchCount=[...receiptAudit,...retentionReceiptAudit].filter((row)=>row.missingBankTransaction||row.unexpectedBankTransaction||row.duplicateBankTransaction||row.amountMismatch||row.netAmountMismatch||row.settlementMismatch).length,paymentIntegrityIssueCount=paymentAudit.filter((row)=>row.orphanPayment||row.ambiguousPayment||row.missingBank||row.duplicateBank||row.duplicatePayment||row.amountMismatch||row.netAmountMismatch).length;
-    const summary={billingCount:billings.length,receivableCount:receivables.length,exactBillingReceivablePairs:billingReceivablePairs.filter((row)=>row.relation==='EXACT').length,orphanBillingCount:billingReceivablePairs.filter((row)=>row.relation==='ORPHAN').length,ambiguousBillingCount:billingReceivablePairs.filter((row)=>row.relation==='AMBIGUOUS').length,orphanReceivableCount:receivableAudit.filter((row)=>row.orphanClassification).length,legacyReceivableCount:receivableAudit.filter((row)=>/^LEGACY_/u.test(row.orphanClassification)||/^LEGACY_/u.test(row.receiptTruth.classification)).length,likelyDuplicateReceivableCount:receivableAudit.filter((row)=>row.orphanClassification==='LIKELY_DUPLICATE').length,billingAmountMismatchCount,unverifiedLegacyReceivedCount:receivableAudit.filter((row)=>row.receiptTruth.classification==='LEGACY_RECEIVED_UNVERIFIED').length,orphanReceiptCount,receiptBankMismatchCount,orphanInvoiceCount:invoiceAudit.filter((row)=>row.orphanInvoice).length,dailyBillingOrphanCount:dailyBillingLinks.filter((row)=>row.dailyOrphanBilling).length,orphanPayrollCount:payrollAudit.filter((row)=>row.classification==='ORPHAN_PAYROLL').length,stalePayrollCount:payrollAudit.filter((row)=>row.classification==='STALE_PAYROLL_STATUS').length,orphanPayableCount:payableAudit.filter((row)=>row.orphanPayable).length,paymentIntegrityIssueCount,orphanBankTransactionCount:bankAudit.filter((row)=>row.orphanBankTransaction).length,duplicateIdentityCount,blockingIssueCount:issues.filter((row)=>row.severity==='BLOCKING').length,warningIssueCount:issues.filter((row)=>row.severity==='WARNING').length,informationalIssueCount:issues.filter((row)=>row.severity==='INFO').length};
-    return {readOnly:true,auditVersion:'global-financial-integrity-v1',generatedAt:new Date().toISOString(),repairClassifications:Object.values(repair),billingReceivablePairs,receivables:receivableAudit,receipts:receiptAudit,retentionReceipts:retentionReceiptAudit,invoices:invoiceAudit,billingSources,dailyBillingLinks,payroll:payrollAudit,payables:payableAudit,payments:paymentAudit,materialPayableLinks,bankTransactions:bankAudit,duplicates,special:{B643124:b643124,linZiYue202608PaidPayroll:specialPayroll},issues,summary};
+    const duplicateIdentityCount=Object.values(duplicates).reduce((sum,groups)=>sum+groups.length,0),billingAmountMismatchCount=billingReceivablePairs.filter((row)=>row.amountChecks&&!row.amountMatch).length,orphanReceiptCount=[...receiptAudit,...retentionReceiptAudit].filter((row)=>row.orphanReceipt).length,receiptBankMismatchCount=[...receiptAudit,...retentionReceiptAudit].filter((row)=>row.missingBankTransaction||row.unexpectedBankTransaction||row.duplicateBankTransaction||row.amountMismatch||row.netAmountMismatch||row.settlementMismatch).length,paymentIntegrityIssueCount=paymentAudit.filter((row)=>row.orphanPayment||row.ambiguousPayment||row.missingBank||row.duplicateBank||row.duplicatePayment||row.amountMismatch||row.netAmountMismatch).length,commissionSettlementIntegrityIssueCount=commissionSettlementAudit.filter((row)=>!financialAuditMoneyEqual(row.amount,row.allocationTotal)||!financialAuditMoneyEqual(row.actualDebit,row.expectedDebit)||!row.selectionMatch||!row.sourceIdsMatch||row.bankTransactionIds.length!==1||!row.bankIdentityMatch||!row.bankAmountMatch||!row.bankSourceMatch||!row.bankDirectionMatch||row.allocationChecks.some((item)=>item.commissionMatchCount!==1||!item.scopeMatch||!item.positive||item.duplicateSettlementCount>1||item.salaryPaymentIds.length)).length,inventoryIntegrityIssueCount=inventoryMaterialAudit.filter((row)=>row.initialized&&!row.stockMatch||row.storedStock<0).length+inventoryReceiptAudit.filter((row)=>row.materialMatchCount!==1||row.quantity<=0||!row.amountChainMatch).length+inventoryUsageAudit.filter((row)=>row.materialMatchCount!==1||row.quantity<=0||!row.materialIdMatch).length;
+    const summary={billingCount:billings.length,receivableCount:receivables.length,exactBillingReceivablePairs:billingReceivablePairs.filter((row)=>row.relation==='EXACT').length,orphanBillingCount:billingReceivablePairs.filter((row)=>row.relation==='ORPHAN').length,ambiguousBillingCount:billingReceivablePairs.filter((row)=>row.relation==='AMBIGUOUS').length,orphanReceivableCount:receivableAudit.filter((row)=>row.orphanClassification).length,legacyReceivableCount:receivableAudit.filter((row)=>/^LEGACY_/u.test(row.orphanClassification)||/^LEGACY_/u.test(row.receiptTruth.classification)).length,likelyDuplicateReceivableCount:receivableAudit.filter((row)=>row.orphanClassification==='LIKELY_DUPLICATE').length,billingAmountMismatchCount,unverifiedLegacyReceivedCount:receivableAudit.filter((row)=>row.receiptTruth.classification==='LEGACY_RECEIVED_UNVERIFIED').length,orphanReceiptCount,receiptBankMismatchCount,orphanInvoiceCount:invoiceAudit.filter((row)=>row.orphanInvoice).length,dailyBillingOrphanCount:dailyBillingLinks.filter((row)=>row.dailyOrphanBilling).length,orphanPayrollCount:payrollAudit.filter((row)=>row.classification==='ORPHAN_PAYROLL').length,stalePayrollCount:payrollAudit.filter((row)=>row.classification==='STALE_PAYROLL_STATUS').length,orphanPayableCount:payableAudit.filter((row)=>row.orphanPayable).length,paymentIntegrityIssueCount,orphanBankTransactionCount:bankAudit.filter((row)=>row.orphanBankTransaction).length,commissionSettlementCount:commissionSettlements.length,commissionSettlementIntegrityIssueCount,inventoryMaterialCount:materials.length,inventoryReceiptCount:inventoryReceipts.length,inventoryDeductedUsageCount:inventoryUsageAudit.length,inventoryIntegrityIssueCount,duplicateIdentityCount,blockingIssueCount:issues.filter((row)=>row.severity==='BLOCKING').length,warningIssueCount:issues.filter((row)=>row.severity==='WARNING').length,informationalIssueCount:issues.filter((row)=>row.severity==='INFO').length};
+    return {readOnly:true,auditVersion:'global-financial-integrity-v2',generatedAt:new Date().toISOString(),repairClassifications:Object.values(repair),billingReceivablePairs,receivables:receivableAudit,receipts:receiptAudit,retentionReceipts:retentionReceiptAudit,invoices:invoiceAudit,billingSources,dailyBillingLinks,payroll:payrollAudit,payables:payableAudit,payments:paymentAudit,commissionSettlements:commissionSettlementAudit,materialPayableLinks,inventory:{materials:inventoryMaterialAudit,receipts:inventoryReceiptAudit,usages:inventoryUsageAudit},bankTransactions:bankAudit,duplicates,special:{B643124:b643124,linZiYue202608PaidPayroll:specialPayroll},issues,summary};
   }
   async function financialIntegrityAudit() {
     await load();
@@ -2481,6 +2542,40 @@
     const value = Math.max(0, num(untaxed));
     return value + Math.round(value * (num(state.settings.defaultTax) || 5) / 100);
   }
+  function normalizeCommissionBasis(value) { return value==='taxIncluded'?'taxIncluded':'preTax'; }
+  function commissionBasisAmounts(items=[]) {
+    const taxRate=num(state.settings.defaultTax)||5;
+    return (items||[]).reduce((totals,item)=>{
+      const entered=Math.max(0,num(item?.subtotal)||num(item?.qty)*num(item?.inputPrice??item?.unitPrice??item?.price));
+      const untaxed=Math.max(0,num(item?.untaxedSubtotal)||(item?.taxMode==='含稅'?Math.round(entered/(1+taxRate/100)):entered));
+      const taxIncluded=item?.taxMode==='含稅'?entered:untaxed+Math.round(untaxed*taxRate/100);
+      totals.preTax+=untaxed;totals.taxIncluded+=taxIncluded;return totals;
+    },{preTax:0,taxIncluded:0});
+  }
+  function projectCommissionBasisAmounts(employeeId,month,projectId) {
+    const employee=String(employeeId||''),targetMonth=String(month||''),project=String(projectId||''),logs=(state.dailyLogs||[]).filter((log)=>String(log.employee||log.employeeId||'')===employee&&monthOf(log.date)===targetMonth&&String(log.project||log.projectId||'')===project);
+    const daily=logs.reduce((totals,log)=>{const amounts=commissionBasisAmounts(log.items||[]);totals.preTax+=num(log.untaxedPerformance??log.performance)||amounts.preTax;totals.taxIncluded+=num(log.taxIncludedPerformance)||amounts.taxIncluded;return totals},{preTax:0,taxIncluded:0});
+    const billableItems=logs.flatMap((log)=>(log.items||[]).filter((item)=>item.billable!==false&&item.pricingType!=='lump_sum'));
+    const linkedIds=[...new Set(billableItems.map((item)=>String(item.billingId||'').trim()).filter(Boolean))];
+    const hasLinked=linkedIds.length>0,hasMissingLink=billableItems.some((item)=>!String(item.billingId||'').trim());
+    if(!hasLinked)return {resolved:true,source:'daily',preTax:daily.preTax,taxIncluded:daily.taxIncluded,billingIds:[],billingNumbers:[]};
+    if(hasMissingLink)return {resolved:false,source:'billing',preTax:daily.preTax,taxIncluded:daily.taxIncluded,billingIds:linkedIds,billingNumbers:[],reason:'部分施工已有請款但部分缺少 billingId'};
+    const billings=[];
+    for(const id of linkedIds){
+      const matches=(state.billings||[]).filter((billing)=>String(billing.id||'')===id);
+      if(matches.length!==1)return {resolved:false,source:'billing',preTax:daily.preTax,taxIncluded:daily.taxIncluded,billingIds:linkedIds,billingNumbers:[],reason:matches.length?'billingId 對應多筆請款單':'billingId 找不到請款單'};
+      const billing=matches[0];
+      if(String(billing.project||billing.projectId||'')!==project)return {resolved:false,source:'billing',preTax:daily.preTax,taxIncluded:daily.taxIncluded,billingIds:linkedIds,billingNumbers:[],reason:'請款單案場與施工案場不一致'};
+      billings.push(billing);
+    }
+    return {
+      resolved:true,source:'billing',
+      preTax:billings.reduce((sum,billing)=>sum+num(billing.preTaxAmount??billing.amount),0),
+      taxIncluded:billings.reduce((sum,billing)=>sum+num(billing.taxIncludedAmount??billing.grossTotal??(num(billing.amount)+num(billing.tax))),0),
+      billingIds:billings.map((billing)=>String(billing.id||'')),
+      billingNumbers:billings.map((billing)=>String(billing.number||'')).filter(Boolean)
+    };
+  }
   function dailyWorkAmount(log) {
     if (!log || log.isPrimaryWork === false || log.workMode === 'none') return 0;
     return Math.round(num(log.workQty) * num(log.workRate));
@@ -2488,11 +2583,11 @@
   function dailyLogHasPayrollSource(log) {
     if (!log) return false;
     const sourceId=String(log.id||''),linkedAttendance=sourceId?(state.attendance||[]).filter((row)=>row.sourceType==='daily-log'&&String(row.sourceId||'')===sourceId):[],linkedCommissions=sourceId?(state.commissions||[]).filter((row)=>row.sourceType==='daily-log'&&String(row.sourceId||'')===sourceId):[];
-    return dailyWorkAmount(log)>0||num(log.commission)>0||Math.round(num(log.performance)*num(log.rate)/100)>0||linkedAttendance.some((row)=>num(row.amount)>0||num(row.fuel)>0)||linkedCommissions.some((row)=>num(row.commission)>0);
+    return dailyWorkAmount(log)>0||num(log.commission)>0||(log.commissionEnabled!==false&&Math.round(num(log.performance)*num(log.rate)/100)>0)||linkedAttendance.some((row)=>num(row.amount)>0||num(row.fuel)>0)||linkedCommissions.some((row)=>num(row.commission)>0);
   }
   function dailyLogPayrollDeleteLock(log) {
-    const history=payrollHistoryLock(log?.employee,log?.date),hasPayrollSource=dailyLogHasPayrollSource(log);
-    return {...history,locked:hasPayrollSource&&history.locked,historyLocked:history.locked,hasPayrollSource};
+    const history=payrollHistoryLock(log?.employee,log?.date),hasPayrollSource=dailyLogHasPayrollSource(log),settlement=dailyLogCommissionSettlementLock(log);
+    return {...history,locked:hasPayrollSource&&history.locked||settlement.locked,historyLocked:history.locked,hasPayrollSource,commissionSettlementLocked:settlement.locked,commissionSettlementIds:settlement.settlementIds};
   }
   function syncDailyLogLinks(log, oldLog = null) {
     const pairs = [];
@@ -2501,8 +2596,8 @@
     state.commissions = state.commissions.filter((row) => !(row.sourceType === 'daily-log' && row.sourceId === log.id));
     state.attendance = state.attendance.filter((row) => !(row.sourceType === 'daily-log' && row.sourceId === log.id));
     const now = new Date().toISOString();
-    if (num(log.performance) > 0) {
-      state.commissions.unshift({id:uid(),date:log.date,employee:log.employee,employeeName:log.employeeName||'',customer:log.customer||'',project:log.project,projectName:log.projectName||'',sourceNo:log.billingNo||'每日業績',sourceType:'daily-log',sourceId:log.id,untaxedAmount:num(log.performance),rate:num(log.rate),commission:Math.round(num(log.performance)*num(log.rate)/100),status:'已列入薪資',note:`每日業績：${log.note||''}`,createdAt:now,updatedAt:now});
+    if (log.commissionEnabled!==false && num(log.performance) > 0 && num(log.commission) > 0) {
+      state.commissions.unshift({id:uid(),date:log.date,employee:log.employee,employeeName:log.employeeName||'',customer:log.customer||'',project:log.project,projectName:log.projectName||'',sourceNo:log.billingNo||'每日業績',sourceType:'daily-log',sourceId:log.id,untaxedAmount:num(log.untaxedPerformance??log.performance),commissionBasis:normalizeCommissionBasis(log.commissionBasis),commissionBaseAmount:num(log.commissionBaseAmount??log.performance),rate:num(log.rate),commission:num(log.commission),status:'已列入薪資',note:`每日業績：${log.note||''}`,createdAt:now,updatedAt:now});
     }
     const workAmount = dailyWorkAmount(log);
     if (workAmount > 0) {
@@ -2632,6 +2727,7 @@
     const date = values.date;
     const employeeIds = values.employeeIds || [];
     if ([...previous.map((log)=>[log.employee,log.date]),...employeeIds.map((employeeId)=>[employeeId,date])].some(([employeeId,workDate])=>payrollHistoryLock(employeeId,workDate).locked)) throw new Error(PAID_PAYROLL_SOURCE_ERROR);
+    if(previous.some((log)=>dailyLogCommissionSettlementLock(log).locked))throw new Error('此施工紀錄的案場抽成已發放，為保留結算歷史不可修改。');
     previous.forEach((log) => syncDailyLogLinks({...log,performance:0,workMode:'none'}, log));
     if (previous.length) state.dailyLogs = state.dailyLogs.filter((log) => (log.batchId || log.id) !== editingBatchId);
     const lines = strictLines || (values.lines || []).filter((line) => line.project && line.item && num(line.qty) > 0);
@@ -2658,19 +2754,26 @@
       return left < right ? -1 : left > right ? 1 : 0;
     });
     const performanceIndexByEmployeeId = new Map(sortedEmployeeIds.map((employeeId, index) => [employeeId, index]));
+    const commissionRates=values.commissionRates&&typeof values.commissionRates==='object'&&!Array.isArray(values.commissionRates)?values.commissionRates:{},commissionBases=values.commissionBases&&typeof values.commissionBases==='object'&&!Array.isArray(values.commissionBases)?values.commissionBases:{};
     employeeIds.forEach((employeeId) => {
       const employee = state.employees.find((row) => row.id === employeeId) || {};
+      const rawRate=Object.prototype.hasOwnProperty.call(commissionRates,employeeId)?Number(commissionRates[employeeId]):employee.commissionRate===undefined||employee.commissionRate===null||employee.commissionRate===''?25:Number(employee.commissionRate);
+      if(!Number.isFinite(rawRate)||rawRate<0||rawRate>100)throw new Error(`員工 ${employee.name||employeeId} 的本次抽成比例必須介於 0～100`);
+      const commissionRate=Math.round(rawRate*100)/100,employeeCommissionBasis=normalizeCommissionBasis(employee.commissionBasis),requestedCommissionBasis=Object.prototype.hasOwnProperty.call(commissionBases,employeeId)?commissionBases[employeeId]:'projectDefault';
       const hasDaily = state.dailyLogs.some((row) => row.employee === employeeId && row.date === date && row.workMode === 'daily' && row.isPrimaryWork !== false);
       let firstProject = true;
       byProject.forEach((projectLines, projectId) => {
         const project = state.projects.find((row) => row.id === projectId) || {};
         const customer = state.customers.find((row) => row.id === project.customer) || {};
-        const total = projectLines.reduce((sum, line) => sum + num(line.untaxedSubtotal), 0);
+        const projectCommissionBasis=normalizeCommissionBasis(project.defaultCommissionBasis??customer.defaultCommissionBasis??employeeCommissionBasis),commissionBasis=requestedCommissionBasis==='projectDefault'?projectCommissionBasis:normalizeCommissionBasis(requestedCommissionBasis);
+        const basisAmounts=commissionBasisAmounts(projectLines),total=basisAmounts.preTax,taxIncludedTotal=basisAmounts.taxIncluded;
         const billableTotal = projectLines.filter((line) => line.billable).reduce((sum, line) => sum + num(line.untaxedSubtotal), 0);
         const canAddWork = firstProject && !(values.workMode === 'daily' && hasDaily);
-        const performance = values.commissionEnabled === false ? 0 : splitPerformanceAmount(total, sortedEmployeeIds.length, performanceIndexByEmployeeId.get(employeeId));
+        const untaxedPerformance=splitPerformanceAmount(total,sortedEmployeeIds.length,performanceIndexByEmployeeId.get(employeeId)),taxIncludedPerformance=splitPerformanceAmount(taxIncludedTotal,sortedEmployeeIds.length,performanceIndexByEmployeeId.get(employeeId)),commissionBaseAmount=commissionBasis==='taxIncluded'?taxIncludedPerformance:untaxedPerformance,performance=untaxedPerformance;
+        const commissionEnabledForLog=values.commissionEnabled!==false,commissionAmount=commissionEnabledForLog?Math.round(commissionBaseAmount*commissionRate/100):0;
         const workMode = canAddWork ? values.workMode : 'none';
-        const log = {id:uid(),batchId,groupId:`${batchId}:${projectId}`,date,employee:employeeId,employeeName:employee.name||'',customer:project.customer||'',customerName:customer.name||project.customerName||'',project:projectId,projectName:project.name||'',payType:performance>0&&workMode!=='none'?'業績抽成／點工':performance>0?'業績抽成':'點工',items:projectLines.map((line)=>({...line})),groupTotal:total,grossTotal:projectLines.reduce((sum,line)=>sum+num(line.subtotal),0),billingTotal:billableTotal,billable:billableTotal>0,billingStatus:billableTotal>0?'未請款':'',billingId:'',billingNo:'',performance,rate:num(employee.commissionRate),commission:Math.round(performance*num(employee.commissionRate)/100),workMode,workQty:canAddWork?num(values.workQty):0,workRate:canAddWork?num(values.workRate):0,isPrimaryWork:canAddWork,note:values.note||'',createdAt:previous[0]?.createdAt||now,updatedAt:now};
+        const hasCommission=commissionAmount>0;
+        const log = {id:uid(),batchId,groupId:`${batchId}:${projectId}`,date,employee:employeeId,employeeName:employee.name||'',customer:project.customer||'',customerName:customer.name||project.customerName||'',project:projectId,projectName:project.name||'',payType:hasCommission&&workMode!=='none'?'業績抽成／點工':hasCommission?'業績抽成':workMode!=='none'?'點工':'僅業績',items:projectLines.map((line)=>({...line})),groupTotal:total,grossTotal:projectLines.reduce((sum,line)=>sum+num(line.subtotal),0),billingTotal:billableTotal,billable:billableTotal>0,billingStatus:billableTotal>0?'未請款':'',billingId:'',billingNo:'',performance,untaxedPerformance,taxIncludedPerformance,commissionBasis,commissionBaseAmount,commissionEnabled:commissionEnabledForLog,rate:commissionRate,commission:commissionAmount,workMode,workQty:canAddWork?num(values.workQty):0,workRate:canAddWork?num(values.workRate):0,isPrimaryWork:canAddWork,note:values.note||'',createdAt:previous[0]?.createdAt||now,updatedAt:now};
         state.dailyLogs.unshift(log); syncDailyLogLinks(log); firstProject = false;
       });
     });
@@ -2725,6 +2828,7 @@
   async function saveCommission(values, id) {
     requireStoreTransactionDraft();
     const existing = id ? state.commissions.find((x) => x.id === id) : null;
+    if (existing&&commissionSettlementLock(existing).locked) throw new Error(PAID_COMMISSION_SOURCE_ERROR);
     if (existing?.sourceType === 'daily-log') {
       if (payrollHistoryLock(existing.employee,existing.date).locked) throw new Error(PAID_COMMISSION_SOURCE_ERROR);
       throw new Error(DAILY_LOG_COMMISSION_ERROR);
@@ -2758,7 +2862,7 @@
     const row = state.commissions.find((x) => x.id === id);
     if (!row) return false;
     const source=commissionBillingLink(row);
-    if (payrollHistoryLock(row.employee,row.date).locked) throw new Error(source.kind==='orphan-billing'?PAID_ORPHAN_COMMISSION_ERROR:PAID_COMMISSION_SOURCE_ERROR);
+    if (payrollHistoryLock(row.employee,row.date).locked||commissionSettlementLock(row).locked) throw new Error(source.kind==='orphan-billing'?PAID_ORPHAN_COMMISSION_ERROR:PAID_COMMISSION_SOURCE_ERROR);
     if (row.sourceType === 'daily-log') throw new Error(DAILY_LOG_COMMISSION_ERROR);
     state.commissions = state.commissions.filter((x) => x.id !== id);
     rebuildPayrollFor(monthOf(row.date), row.employee);
@@ -4055,6 +4159,199 @@
     const employeeId=payrollEmployeeId(payroll),month=String(payroll?.month||'');
     return state.payroll.filter((row)=>payrollEmployeeId(row)===employeeId&&String(row.month||'')===month);
   }
+  function commissionSettlementSourceIds(settlement) {
+    return [...new Set([...(Array.isArray(settlement?.sourceCommissionIds)?settlement.sourceCommissionIds:[]),...(Array.isArray(settlement?.allocations)?settlement.allocations.map((row)=>row?.commissionId):[])].map((value)=>String(value||'').trim()).filter(Boolean))];
+  }
+  function commissionHouseAllocationKey(commissionId,house) {
+    return JSON.stringify([String(commissionId||''),String(house||'未指定戶別')]);
+  }
+  function proportionalSplit(total,weightedRows,precision=0) {
+    const factor=10**precision,target=Math.round(Math.max(0,num(total))*factor),rows=weightedRows.map((row,index)=>({...row,_index:index,_weight:Math.max(0,num(row.weight))}));
+    if(!rows.length)return [];
+    const weightTotal=rows.reduce((sum,row)=>sum+row._weight,0);
+    if(weightTotal<=0)return rows.map((row,index)=>({...row,value:index===0?target/factor:0}));
+    let used=0;
+    const shares=rows.map((row)=>{
+      const exact=target*row._weight/weightTotal,base=Math.floor(exact);used+=base;
+      return {...row,_base:base,_remainder:exact-base};
+    });
+    let remainder=target-used;
+    shares.sort((a,b)=>b._remainder-a._remainder||String(a.house||'').localeCompare(String(b.house||''),'zh-Hant')||a._index-b._index);
+    for(let i=0;i<shares.length&&remainder>0;i++,remainder--)shares[i]._base+=1;
+    return shares.sort((a,b)=>a._index-b._index).map(({_index,_weight,_base,_remainder,...row})=>({...row,value:_base/factor}));
+  }
+  function commissionHouseAllocations(row) {
+    const commissionId=String(row?.id||''),fallbackHouse='未指定戶別',commissionTotal=Math.max(0,Math.round(num(row?.commission))),performanceTotal=Math.max(0,num(row?.untaxedAmount));
+    if(!commissionId||commissionTotal<=0)return [];
+    let weighted=[];
+    if(String(row?.sourceType||'')==='daily-log'&&String(row?.sourceId||'')){
+      const logs=(state.dailyLogs||[]).filter((log)=>String(log.id||'')===String(row.sourceId));
+      if(logs.length===1){
+        const grouped=new Map();
+        (logs[0].items||[]).forEach((item)=>{
+          const house=String(item?.house||'').trim()||fallbackHouse,weight=Math.max(0,num(item?.untaxedSubtotal)||num(item?.qty)*num(item?.price));
+          if(!grouped.has(house))grouped.set(house,0);
+          grouped.set(house,grouped.get(house)+weight);
+        });
+        weighted=[...grouped.entries()].map(([house,weight])=>({house,weight})).filter((entry)=>entry.weight>0).sort((a,b)=>a.house.localeCompare(b.house,'zh-Hant'));
+      }
+    }
+    if(!weighted.length)weighted=[{house:fallbackHouse,weight:performanceTotal||1}];
+    const commissionShares=proportionalSplit(commissionTotal,weighted,0),performanceShares=proportionalSplit(performanceTotal,weighted,2);
+    return commissionShares.map((share,index)=>({
+      allocationKey:commissionHouseAllocationKey(commissionId,share.house),
+      commissionId,
+      date:row.date||'',
+      month:monthOf(row.date),
+      house:share.house,
+      untaxedAmount:num(performanceShares[index]?.value),
+      amount:Math.max(0,num(share.value)),
+      rate:num(row.rate),
+      sourceNo:row.sourceNo||'',
+      note:row.note||''
+    }));
+  }
+  function dailyLogPerformanceAmount(log) {
+    const stored=Math.max(0,num(log?.performance));
+    if(stored>0)return stored;
+    if(log?.commissionEnabled===false)return Math.max(0,num(log?.groupTotal)||(log?.items||[]).reduce((sum,item)=>sum+Math.max(0,num(item?.untaxedSubtotal)||num(item?.qty)*num(item?.price)),0));
+    return stored;
+  }
+  function employeePerformanceSummary(month='') {
+    const target=String(month||'').trim(),groups=new Map();
+    (state.dailyLogs||[]).forEach((log)=>{
+      if(target&&monthOf(log.date)!==target)return;
+      const employeeId=String(log.employee||log.employeeId||'').trim();if(!employeeId)return;
+      const amount=dailyLogPerformanceAmount(log),key=employeeId;
+      if(!groups.has(key))groups.set(key,{employeeId,employeeName:log.employeeName||state.employees.find((row)=>String(row.id)===employeeId)?.name||'',performance:0,days:new Set(),projects:new Set(),sourceIds:[]});
+      const group=groups.get(key);group.performance+=amount;if(log.date)group.days.add(log.date);if(log.project)group.projects.add(String(log.project));if(log.id)group.sourceIds.push(String(log.id));
+    });
+    return [...groups.values()].map((row)=>({...row,days:row.days.size,projectCount:row.projects.size,sourceIds:[...new Set(row.sourceIds)]})).sort((a,b)=>String(a.employeeName||'').localeCompare(String(b.employeeName||''),'zh-Hant'));
+  }
+  function commissionAllocationReleaseState(row,allocation) {
+    const sourceType=String(row?.sourceType||''),billingSet=new Map(),result={unlocked:false,releaseStatus:'來源待核對',billingIds:[],billingNumbers:[],customerId:String(row?.customer||''),customerName:'',projectId:String(row?.project||''),projectName:row?.projectName||'',receivedAmount:0,receivableAmount:0};
+    if(sourceType==='daily-log'&&row?.sourceId){
+      const logs=(state.dailyLogs||[]).filter((log)=>String(log.id||'')===String(row.sourceId));
+      if(logs.length!==1)return result;
+      const targetHouse=String(allocation?.house||'未指定戶別'),items=(logs[0].items||[]).filter((item)=>{const house=String(item?.house||'').trim()||'未指定戶別',weight=Math.max(0,num(item?.untaxedSubtotal)||num(item?.qty)*num(item?.price));return house===targetHouse&&weight>0});
+      if(!items.length)return result;
+      if(items.some((item)=>item.billable===false)){result.releaseStatus='含未請款施工';return result}
+      if(items.some((item)=>!String(item.billingId||'').trim())){result.releaseStatus='未請款';return result}
+      for(const item of items){
+        const matches=(state.billings||[]).filter((billing)=>String(billing.id||'')===String(item.billingId||''));
+        if(matches.length!==1)return result;
+        billingSet.set(String(matches[0].id),matches[0]);
+      }
+      result.customerId=String(logs[0].customer||result.customerId);result.projectId=String(logs[0].project||result.projectId);result.projectName=logs[0].projectName||result.projectName;
+    }else{
+      const link=commissionBillingLink(row);
+      if(link.kind!=='linked'||!link.billing){result.releaseStatus=link.kind==='manual'?'未連結請款':'來源待核對';return result}
+      billingSet.set(String(link.billing.id),link.billing);
+    }
+    const billings=[...billingSet.values()];if(!billings.length){result.releaseStatus='未請款';return result}
+    const states=billings.map((billing)=>({billing,receipt:billingReceiptState(billing)}));
+    result.billingIds=billings.map((billing)=>String(billing.id));result.billingNumbers=billings.map((billing)=>String(billing.number||'')).filter(Boolean);
+    if(!result.customerId)result.customerId=String(billings[0]?.customer||'');
+    result.customerName=state.customers.find((customer)=>String(customer.id)===result.customerId)?.name||billings[0]?.customerName||'';
+    result.receivedAmount=states.reduce((sum,item)=>sum+num(item.receipt.received),0);result.receivableAmount=states.reduce((sum,item)=>sum+num(item.receipt.receivable?.amount??item.billing.total),0);
+    if(states.every((item)=>item.receipt.status==='已收')){result.unlocked=true;result.releaseStatus='可發';return result}
+    if(states.some((item)=>item.receipt.status==='部分收款'||item.receipt.status==='已收')){result.releaseStatus='部分收款';return result}
+    result.releaseStatus='未收款';return result;
+  }
+  function salaryPaymentCommissionKeys(payment) {
+    return [...new Set((Array.isArray(payment?.commissionSelectionKeys)?payment.commissionSelectionKeys:[]).map((value)=>String(value||'').trim()).filter(Boolean))];
+  }
+  function commissionReleasePool() {
+    const settledKeys=new Set(),wholeSettledIds=new Set();
+    (state.commissionSettlements||[]).forEach((settlement)=>{commissionSettlementSourceIds(settlement).forEach((id)=>{if(settlementUsesWholeCommission(settlement,id))wholeSettledIds.add(id)});settlementAllocationKeys(settlement).forEach((key)=>settledKeys.add(key))});
+    (state.salaryPayments||[]).forEach((payment)=>salaryPaymentCommissionKeys(payment).forEach((key)=>settledKeys.add(key)));
+    return (state.commissions||[]).filter((row)=>row.status==='已列入薪資'&&num(row.commission)>0).flatMap((row)=>commissionHouseAllocations(row).map((allocation)=>{
+      const release=commissionAllocationReleaseState(row,allocation),settled=wholeSettledIds.has(String(row.id))||settledKeys.has(allocation.allocationKey);
+      return {...allocation,employeeId:String(row.employee||row.employeeId||''),employeeName:row.employeeName||state.employees.find((employee)=>String(employee.id)===String(row.employee||row.employeeId||''))?.name||'',projectId:String(row.project||row.projectId||''),projectName:row.projectName||state.projects.find((project)=>String(project.id)===String(row.project||row.projectId||''))?.name||'',settled,...release};
+    }));
+  }
+  function settlementUsesWholeCommission(settlement,commissionId) {
+    if(Number(settlement?.allocationVersion)===2)return false;
+    const id=String(commissionId||'');
+    return Array.isArray(settlement?.sourceCommissionIds)&&settlement.sourceCommissionIds.some((value)=>String(value)===id);
+  }
+  function settlementAllocationKeys(settlement) {
+    const keys=new Set();
+    (settlement?.allocations||[]).forEach((row)=>{
+      if(row?.allocationKey)keys.add(String(row.allocationKey));
+      else if(Number(settlement?.allocationVersion)===2&&row?.commissionId)keys.add(commissionHouseAllocationKey(row.commissionId,row.house));
+    });
+    return keys;
+  }
+  function commissionSettlementForCommissionId(commissionId) {
+    const id=String(commissionId||'').trim();
+    if(!id)return null;
+    return (state.commissionSettlements||[]).find((row)=>settlementUsesWholeCommission(row,id)||(row.allocations||[]).some((allocation)=>String(allocation?.commissionId||'')===id))||null;
+  }
+  function commissionSettlementLock(row) {
+    const settlement=commissionSettlementForCommissionId(row?.id),allocationKeys=new Set(commissionHouseAllocations(row).map((item)=>item.allocationKey)),salaryPayment=(state.salaryPayments||[]).find((payment)=>salaryPaymentCommissionKeys(payment).some((key)=>allocationKeys.has(key)));
+    return {locked:Boolean(settlement||salaryPayment),settlementId:settlement?.id||'',salaryPaymentId:salaryPayment?.id||'',projectId:settlement?.projectId||settlement?.project||row?.project||'',date:settlement?.date||salaryPayment?.date||''};
+  }
+  function dailyLogCommissionSettlementLock(log) {
+    if(!log)return {locked:false,commissionIds:[],settlementIds:[]};
+    const linked=(state.commissions||[]).filter((row)=>String(row.sourceType||'')==='daily-log'&&String(row.sourceId||'')===String(log.id||''));
+    const settlements=linked.map((row)=>commissionSettlementForCommissionId(row.id)).filter(Boolean);
+    return {locked:settlements.length>0,commissionIds:linked.filter((row)=>commissionSettlementForCommissionId(row.id)).map((row)=>String(row.id)),settlementIds:[...new Set(settlements.map((row)=>String(row.id)))]};
+  }
+  function projectCommissionSettlementPreview(employeeId,projectId,selections=[]) {
+    const employee=String(employeeId||'').trim(),project=String(projectId||'').trim(),requested=[...new Set((Array.isArray(selections)?selections:[]).map((value)=>String(value||'').trim()).filter(Boolean))],blockers=[];
+    const allSources=(state.commissions||[]).filter((row)=>String(row.employee||row.employeeId||'')===employee&&String(row.project||row.projectId||'')===project&&row.status==='已列入薪資'&&num(row.commission)>0);
+    const allAllocations=allSources.flatMap((row)=>commissionHouseAllocations(row).map((allocation)=>({...allocation,source:row,release:commissionAllocationReleaseState(row,allocation)})));
+    const settledKeys=new Set(),wholeSettledIds=new Set();
+    (state.commissionSettlements||[]).forEach((settlement)=>{
+      commissionSettlementSourceIds(settlement).forEach((id)=>{if(settlementUsesWholeCommission(settlement,id))wholeSettledIds.add(id)});
+      settlementAllocationKeys(settlement).forEach((key)=>settledKeys.add(key));
+    });
+    (state.salaryPayments||[]).forEach((payment)=>salaryPaymentCommissionKeys(payment).forEach((key)=>settledKeys.add(key)));
+    allAllocations.forEach((allocation)=>{if(wholeSettledIds.has(allocation.commissionId))settledKeys.add(allocation.allocationKey)});
+    let selected=[];
+    const missing=[];
+    if(requested.length){
+      requested.forEach((token)=>{
+        const byKey=allAllocations.find((allocation)=>allocation.allocationKey===token);
+        if(byKey){selected.push(byKey);return}
+        const byCommission=allAllocations.filter((allocation)=>allocation.commissionId===token&&!settledKeys.has(allocation.allocationKey));
+        if(byCommission.length){selected.push(...byCommission);return}
+        missing.push(token);
+      });
+      const seen=new Set();selected=selected.filter((allocation)=>!seen.has(allocation.allocationKey)&&seen.add(allocation.allocationKey));
+    }else selected=allAllocations.filter((allocation)=>!settledKeys.has(allocation.allocationKey)&&allocation.release?.unlocked);
+    if(!employee||!(state.employees||[]).some((row)=>String(row.id)===employee))blockers.push({code:'EMPLOYEE_NOT_FOUND',message:'找不到指定員工'});
+    if(!project||!(state.projects||[]).some((row)=>String(row.id)===project))blockers.push({code:'PROJECT_NOT_FOUND',message:'找不到指定案場'});
+    if(missing.length)blockers.push({code:'COMMISSION_ALLOCATION_NOT_FOUND',selectionKeys:missing,message:'部分戶別抽成來源已不存在或已無可結算金額'});
+    selected.forEach((allocation)=>{
+      const row=allocation.source;
+      if(String(row.employee||row.employeeId||'')!==employee||String(row.project||row.projectId||'')!==project)blockers.push({code:'SOURCE_SCOPE_MISMATCH',commissionId:allocation.commissionId,message:'抽成來源的員工或案場不一致'});
+      if(row.status!=='已列入薪資'||num(row.commission)<=0||num(allocation.amount)<=0)blockers.push({code:'SOURCE_NOT_PAYABLE',allocationKey:allocation.allocationKey,message:'抽成來源目前不可結算'});
+      if(!allocation.release?.unlocked)blockers.push({code:'RECEIPT_NOT_UNLOCKED',allocationKey:allocation.allocationKey,releaseStatus:allocation.release?.releaseStatus||'來源待核對',message:`${allocation.house} 對應工程款尚未收清（${allocation.release?.releaseStatus||'來源待核對'}），抽成不可發放`});
+      if(settledKeys.has(allocation.allocationKey))blockers.push({code:'ALLOCATION_ALREADY_SETTLED',allocationKey:allocation.allocationKey,message:`${allocation.house} 的這筆抽成已完成結算，不可重複發放`});
+    });
+    if(!selected.length)blockers.push({code:'NO_SETTLEMENT_SOURCE',message:'目前沒有可結算的案場戶別抽成'});
+    const monthAmounts=new Map();
+    selected.forEach((allocation)=>{const month=allocation.month;monthAmounts.set(month,(monthAmounts.get(month)||0)+Math.max(0,num(allocation.amount)))});
+    for(const [month,amount] of monthAmounts){
+      const records=(state.payroll||[]).filter((row)=>payrollEmployeeId(row)===employee&&String(row.month||'')===month);
+      if(!records.length){blockers.push({code:'PAYROLL_MONTH_NOT_FOUND',month,message:`${month} 找不到對應薪資彙總，已停止案場抽成結算`});continue}
+      const truth=payrollPaymentTruth({employee,month,recordIds:records.map((row)=>row.id),total:Math.max(0,...records.map((row)=>num(row.total)))});
+      if(truth.hasRegularPayment)blockers.push({code:'REGULAR_PAYROLL_ALREADY_PAID',month,message:`${month} 已有一般薪資付款，為避免重複發放，不能再以案場抽成方式結算此月份來源`});
+      if(amount>truth.outstanding)blockers.push({code:'SETTLEMENT_EXCEEDS_OUTSTANDING',month,message:`${month} 本次案場抽成超過該月未付薪資`});
+    }
+    const settledCount=allAllocations.filter((allocation)=>settledKeys.has(allocation.allocationKey)).length,selectedUnsettledCount=selected.filter((allocation)=>!settledKeys.has(allocation.allocationKey)).length,projectedSettled=Math.min(allAllocations.length,settledCount+selectedUnsettledCount),status=allAllocations.length&&projectedSettled>=allAllocations.length?'已發':projectedSettled>0?'部分已發':'待發';
+    const sourceMap=new Map();
+    selected.forEach((allocation)=>{if(!sourceMap.has(allocation.commissionId)){const row=allocation.source;sourceMap.set(allocation.commissionId,{id:allocation.commissionId,date:row.date||'',month:monthOf(row.date),untaxedAmount:num(row.untaxedAmount),rate:num(row.rate),commission:num(row.commission),sourceNo:row.sourceNo||'',note:row.note||''})}});
+    return {
+      allowed:blockers.length===0,employeeId:employee,projectId:project,
+      sourceIds:[...sourceMap.keys()],selectionKeys:selected.map((allocation)=>allocation.allocationKey),
+      allocations:selected.map(({source,...allocation})=>allocation),sources:[...sourceMap.values()],
+      availableAllocations:allAllocations.map(({source,release,...allocation})=>({...allocation,...release,settled:settledKeys.has(allocation.allocationKey)})),
+      total:selected.reduce((sum,allocation)=>sum+Math.max(0,num(allocation.amount)),0),status,blockers,monthAmounts:Object.fromEntries(monthAmounts)
+    };
+  }
   function payrollPaymentTruth(payroll) {
     const records=payrollGroupRows(payroll),recordIds=new Set(records.map((row)=>String(row.id))),employeeId=payrollEmployeeId(payroll),month=String(payroll?.month||records[0]?.month||''),total=payroll?.total!==undefined&&Array.isArray(payroll?.recordIds)?Math.max(0,num(payroll.total)):Math.max(0,...records.map((row)=>num(row.total)));
     const explicitPayments=state.salaryPayments.filter((row)=>recordIds.has(String(row.payrollId||''))||(!String(row.payrollId||'').trim()&&String(row.employee||row.employeeId||'')===employeeId&&monthOf(row.month||row.date)===month));
@@ -4071,10 +4368,22 @@
       const record=referencedRecord||records.find((item)=>String(item.id)===payrollId||String(item.id)===sourceId);
       legacyHistory.push({id:`legacy-bank-${transactionId}`,payrollId:record?.id||payrollId||sourceId,date:row.date||record?.payDate||'',amount,fee:Math.max(0,num(row.fee)),actualDebit:Math.max(0,num(row.actualDebit??row.amount)),bankId:row.bankId||row.bankAccountId||record?.bankId||'',bankAccountId:row.bankAccountId||row.bankId||record?.bankId||'',paymentMethod:row.paymentMethod||'歷史銀行交易',note:row.note||row.description||'可驗證的歷史薪資付款',bankTransactionId:transactionId,legacy:true,readOnly:true});
     });
-    const history=[...explicitPayments,...legacyHistory].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))),paid=Math.min(total,history.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0)),outstanding=Math.max(0,total-paid),status=paid>0&&outstanding<=0&&total>0?'已付清':paid>0?'部分付款':'未付款',hasVerifiedPayment=explicitPayments.length>0||verifiedLegacyTransactions.length>0;
+    const projectSettlementHistory=[],projectSettlementTransactions=[],missingProjectSettlementIds=[];
+    (state.commissionSettlements||[]).forEach((settlement)=>{
+      if(String(settlement.employeeId||settlement.employee||'')!==employeeId)return;
+      const amount=(Array.isArray(settlement.allocations)?settlement.allocations:[]).filter((row)=>String(row.month||monthOf(row.date))===month).reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0);
+      if(amount<=0)return;
+      const settlementId=String(settlement.id||''),transactionId=String(settlement.bankTransactionId||''),matches=(state.bankTransactions||[]).filter((row)=>String(row.id||'')===transactionId||(String(row.sourceType||'')==='project_commission_settlement'&&String(row.sourceId||'')===settlementId));
+      if(!settlementId||matches.length!==1){missingProjectSettlementIds.push(settlementId||'unknown');return}
+      const transaction=matches[0],bankId=String(settlement.bankAccountId||settlement.bankId||''),transactionBankId=String(transaction.bankAccountId||transaction.bankId||'');
+      if(!bankId||bankId!==transactionBankId||num(transaction.amount)!==num(settlement.actualDebit)){missingProjectSettlementIds.push(settlementId);return}
+      projectSettlementTransactions.push(transaction);
+      projectSettlementHistory.push({id:`project-settlement-${settlementId}-${month}`,date:settlement.date||'',amount,fee:0,actualDebit:amount,bankId,bankAccountId:bankId,paymentMethod:settlement.paymentMethod||'銀行轉帳',note:settlement.note||'案場抽成結算',bankTransactionId:transaction.id,projectId:settlement.projectId||settlement.project||'',projectName:settlement.projectName||'',settlementId,projectSettlement:true,readOnly:true});
+    });
+    const history=[...explicitPayments,...legacyHistory,...projectSettlementHistory].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))),paid=Math.min(total,history.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0)),outstanding=Math.max(0,total-paid),status=paid>0&&outstanding<=0&&total>0?'已付清':paid>0?'部分付款':'未付款',hasRegularPayment=explicitPayments.length>0||verifiedLegacyTransactions.length>0,hasVerifiedPayment=hasRegularPayment||projectSettlementHistory.length>0;
     const stalePayrollStatus=!hasVerifiedPayment&&records.some((row)=>row.status==='已付款'||num(row.paidAmount)>0||row.payDate||row.paidAt||row.paymentTransactionId),missingBankPaymentIds=explicitPayments.filter((payment)=>!explicitBankTransactions.some((row)=>String(row.id||'')===String(payment.bankTransactionId||'')||(row.sourceType==='salary_payment'&&(String(row.sourceId||'')===String(payment.id)||String(row.salaryPaymentId||'')===String(payment.id))))).map((row)=>String(row.id));
-    const integrity=missingBankPaymentIds.length?'explicit-missing-bank-transaction':explicitPayments.length&&verifiedLegacyTransactions.length?'explicit-and-legacy':explicitPayments.length?'explicit':verifiedLegacyTransactions.length?'verified-legacy':stalePayrollStatus?'stale-payroll-status':'none';
-    return {explicitPayments,verifiedLegacyTransactions,history,paid,outstanding,status,hasVerifiedPayment,integrity,missingBankPaymentIds,total,recordIds:[...recordIds],bankTransactionIds:[...new Set([...explicitBankTransactions,...verifiedLegacyTransactions].map((row)=>String(row.id||'')).filter(Boolean))],legacyPaid:verifiedLegacyTransactions.length>0};
+    const integrity=missingBankPaymentIds.length?'explicit-missing-bank-transaction':missingProjectSettlementIds.length?'project-settlement-missing-bank-transaction':explicitPayments.length&&verifiedLegacyTransactions.length?'explicit-and-legacy':explicitPayments.length?'explicit':verifiedLegacyTransactions.length?'verified-legacy':projectSettlementHistory.length?'project-commission-settlement':stalePayrollStatus?'stale-payroll-status':'none';
+    return {explicitPayments,verifiedLegacyTransactions,projectSettlementHistory,projectSettlementTransactions,history,paid,outstanding,status,hasVerifiedPayment,hasRegularPayment,integrity,missingBankPaymentIds,missingProjectSettlementIds,total,recordIds:[...recordIds],bankTransactionIds:[...new Set([...explicitBankTransactions,...verifiedLegacyTransactions,...projectSettlementTransactions].map((row)=>String(row.id||'')).filter(Boolean))],legacyPaid:verifiedLegacyTransactions.length>0};
   }
   function salarySourceIdentity(row,type) {
     const sourceId=String(row?.sourceId||row?.attendanceId||row?.commissionId||'').trim();
@@ -4114,6 +4423,22 @@
   function salaryPaymentSummary(payroll) {
     return payrollPaymentTruth(payroll);
   }
+  function salaryPaymentPlan(payrollReference, selectionKeys=[], options={}) {
+    const reference=String(payrollReference||''),groups=monthlyPayrollGroups(),group=groups.find((row)=>row.key===reference||row.recordIds.some((id)=>String(id)===reference));
+    if(!group)throw new Error('找不到薪資月份或員工');
+    const employeeId=String(group.employeeId||''),month=String(group.month||''),excludePaymentId=String(options.excludePaymentId||''),requested=[...new Set((Array.isArray(selectionKeys)?selectionKeys:[]).map((value)=>String(value||'').trim()).filter(Boolean))];
+    const nonCommissionTotal=Math.max(0,Math.round(group.sources.filter((source)=>source.type!=='抽成').reduce((sum,source)=>sum+num(source.amount),0)));
+    const explicitPayments=(state.salaryPayments||[]).filter((payment)=>group.recordIds.some((id)=>String(id)===String(payment.payrollId||''))&&String(payment.id||'')!==excludePaymentId);
+    const legacyPayments=explicitPayments.filter((payment)=>Number(payment.paymentAllocationVersion)!==2&&num(payment.amount)>0),allocatedPayments=explicitPayments.filter((payment)=>Number(payment.paymentAllocationVersion)===2);
+    const basePaid=allocatedPayments.reduce((sum,payment)=>sum+Math.max(0,num(payment.baseAmount)),0),baseOutstanding=Math.max(0,nonCommissionTotal-basePaid);
+    const pool=commissionReleasePool().filter((row)=>String(row.employeeId||'')===employeeId&&String(row.month||'')===month),available=pool.filter((row)=>row.unlocked&&!row.settled),locked=pool.filter((row)=>!row.unlocked&&!row.settled),settled=pool.filter((row)=>row.settled);
+    const availableMap=new Map(available.map((row)=>[String(row.allocationKey),row])),missing=requested.filter((key)=>!availableMap.has(key)),selected=requested.map((key)=>availableMap.get(key)).filter(Boolean),selectedCommission=Math.round(selected.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0));
+    const availableCommission=Math.round(available.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0)),lockedCommission=Math.round(locked.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0)),settledCommission=Math.round(settled.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0));
+    const currentPayable=Math.max(0,baseOutstanding+availableCommission),selectedPayable=Math.max(0,baseOutstanding+selectedCommission),blockers=[];
+    if(legacyPayments.length)blockers.push({code:'LEGACY_PAYMENT_BREAKDOWN',message:'此月份已有舊式薪資付款，無法安全判定日薪與抽成拆分；請先核對或沖回既有付款。'});
+    if(missing.length)blockers.push({code:'COMMISSION_SELECTION_UNAVAILABLE',selectionKeys:missing,message:'部分選取抽成已付款、尚未收清或來源已變更，請重新整理後再試。'});
+    return {allowed:blockers.length===0,groupKey:group.key,payrollId:group.primaryPayrollId,employeeId,month,nonCommissionTotal,basePaid,baseOutstanding,availableCommission,lockedCommission,settledCommission,currentPayable,selectedCommission,selectedPayable,available,locked,settled,selected,selectionKeys:selected.map((row)=>row.allocationKey),blockers,legacyPaymentCount:legacyPayments.length};
+  }
   function payrollAdjustmentAmount(value, label) {
     const text=String(value??'').trim();if(!text)return 0;const amount=Number(text);
     if(!Number.isFinite(amount)||amount<0)throw new Error(`${label}必須是 0 以上的有限數字`);
@@ -4128,6 +4453,22 @@
     const records=state.payroll.filter((row)=>payrollEmployeeId(row)===employeeId&&String(row.month||'')===month),truth=payrollPaymentTruth({employee:employeeId,month,recordIds:records.map((row)=>row.id),total:Math.max(0,...records.map((row)=>num(row.total)))});
     if(truth.paid>0||truth.hasVerifiedPayment)throw new Error('此月份已有薪資付款，請先刪除／沖回薪資付款後再調整薪資。');
     const normalized=Object.fromEntries(salaryAdjustmentFields.map(([field,label])=>[field,payrollAdjustmentAmount(values[field],label)])),payrollAdjustmentNote=String(values.adjustmentNote??values.payrollAdjustmentNote??'').trim(),otherNote=String(values.otherNote??records.find((row)=>String(row.otherNote||'').trim())?.otherNote??'').trim(),deductionNote=String(values.deductionNote??records.find((row)=>String(row.deductionNote||'').trim())?.deductionNote??'').trim();
+    const requestedBases=values.projectCommissionBases&&typeof values.projectCommissionBases==='object'&&!Array.isArray(values.projectCommissionBases)?values.projectCommissionBases:{};
+    for(const [projectId,rawBasis] of Object.entries(requestedBases)){
+      const basis=normalizeCommissionBasis(rawBasis),targets=(state.dailyLogs||[]).filter((log)=>String(log.employee||'')===employeeId&&monthOf(log.date)===month&&String(log.project||'')===String(projectId));
+      if(!targets.length)continue;
+      if(targets.some((log)=>dailyLogCommissionSettlementLock(log).locked))throw new Error('此案場抽成已有實際發放紀錄，不能直接改含稅／未稅基準。');
+      const formalBasis=projectCommissionBasisAmounts(employeeId,month,projectId);
+      if(!formalBasis.resolved)throw new Error(`此案場無法唯一核對正式請款金額：${formalBasis.reason||'請確認請款關聯'}`);
+      const weights=targets.map((log)=>Math.max(0,num(log.untaxedPerformance??log.performance)||commissionBasisAmounts(log.items||[]).preTax)),weightTotal=weights.reduce((sum,value)=>sum+value,0);
+      targets.forEach((log,index)=>{
+        const ratio=formalBasis.source==='billing'?(weightTotal>0?weights[index]/weightTotal:1/targets.length):1,untaxed=formalBasis.source==='billing'?formalBasis.preTax*ratio:(num(log.untaxedPerformance??log.performance)||commissionBasisAmounts(log.items||[]).preTax),taxIncluded=formalBasis.source==='billing'?formalBasis.taxIncluded*ratio:(num(log.taxIncludedPerformance)||commissionBasisAmounts(log.items||[]).taxIncluded),base=basis==='taxIncluded'?taxIncluded:untaxed,nextCommission=log.commissionEnabled===false?0:Math.round(base*num(log.rate)/100);
+        log.untaxedPerformance=untaxed;log.performance=untaxed;log.taxIncludedPerformance=taxIncluded;log.commissionBasis=basis;log.commissionBaseAmount=base;log.commission=nextCommission;log.updatedAt=new Date().toISOString();
+        const linked=(state.commissions||[]).filter((row)=>row.sourceType==='daily-log'&&String(row.sourceId||'')===String(log.id));
+        if(linked.length!==1)throw new Error('抽成來源關聯不是唯一一筆，為避免帳務錯誤已停止修改。');
+        Object.assign(linked[0],{untaxedAmount:untaxed,commissionBasis:basis,commissionBaseAmount:base,rate:num(log.rate),commission:nextCommission,updatedAt:log.updatedAt});
+      });
+    }
     const employeeRecord=state.employees.find((row)=>String(row.id)===employeeId),employeeValue=records[0]?.employee??records[0]?.employeeId??employeeRecord?.id;
     if(employeeValue===undefined||employeeValue===null||employeeValue==='')throw new Error('找不到員工資料');
     let payroll=state.payroll.find((row)=>payrollEmployeeId(row)===employeeId&&String(row.month||'')===month&&row.status!=='已付款')||records[0];
@@ -4179,12 +4520,20 @@
   }
   async function addSalaryPayment(values) {
     requireStoreTransactionDraft();const idempotencyKey=String(values.idempotencyKey||'').trim();if(idempotencyKey){const existing=state.salaryPayments.find((row)=>row.idempotencyKey===idempotencyKey);if(existing)return existing}
-    const payroll=state.payroll.find((row)=>row.id===values.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const summary=salaryPaymentSummary(payroll),amount=Math.round(num(values.amount)),fee=Math.max(0,Math.round(num(values.fee))),feePayer=values.feePayer==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount;if(amount<=0||amount>summary.outstanding)throw new Error('本次付款不可超過未付薪資');if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次付款');
-    const bank=state.banks.find((row)=>row.id===String(values.bankAccountId||values.bankId||''));if(!bank)throw new Error('請選擇薪資付款銀行帳戶');const now=new Date().toISOString(),payment={id:uid(),idempotencyKey:idempotencyKey||uid(),payrollId:payroll.id,date:values.date||businessDate(new Date(now)),amount,fee,feePayer,actualDebit,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:String(values.note||''),createdAt:now,updatedAt:now};
+    const payroll=state.payroll.find((row)=>row.id===values.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');
+    const requestedKeys=Array.isArray(values.commissionSelectionKeys)?values.commissionSelectionKeys:[],plan=salaryPaymentPlan(payroll.id,requestedKeys),amount=Math.round(num(values.amount)),fee=Math.max(0,Math.round(num(values.fee))),feePayer=values.feePayer==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount;
+    if(!plan.allowed)throw new Error(plan.blockers.map((row)=>row.message).join(' '));
+    if(amount<=0||amount>plan.currentPayable)throw new Error('本次付款不可超過目前已解鎖可付款金額');
+    const baseAmount=Math.min(amount,plan.baseOutstanding),commissionAmount=Math.max(0,amount-baseAmount);
+    if(commissionAmount>0&&commissionAmount!==plan.selectedCommission)throw new Error('本次抽成付款金額必須與勾選的已解鎖抽成完全一致');
+    if(commissionAmount===0&&requestedKeys.length)throw new Error('已勾選抽成來源，但本次付款金額未包含抽成，已停止付款');
+    if(commissionAmount>0&&!requestedKeys.length)throw new Error('付款金額包含抽成時，必須明確勾選已收款解鎖的抽成來源');
+    if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次付款');
+    const bank=state.banks.find((row)=>row.id===String(values.bankAccountId||values.bankId||''));if(!bank)throw new Error('請選擇薪資付款銀行帳戶');const now=new Date().toISOString(),payment={id:uid(),idempotencyKey:idempotencyKey||uid(),paymentAllocationVersion:2,payrollId:payroll.id,date:values.date||businessDate(new Date(now)),amount,baseAmount,commissionAmount,commissionSelectionKeys:commissionAmount>0?[...plan.selectionKeys]:[],fee,feePayer,actualDebit,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:String(values.note||''),createdAt:now,updatedAt:now};
     state.salaryPayments.unshift(payment);syncSalaryBankTransaction(payment,payroll,now);syncSalarySummary(payroll,now);persist(`新增薪資付款 ${payroll.month||''}`);return payment;
   }
   async function updateSalaryPayment(id, values={}) {
-    requireStoreTransactionDraft();const payment=state.salaryPayments.find((row)=>row.id===id);if(!payment)throw new Error('找不到薪資付款紀錄');const payroll=state.payroll.find((row)=>row.id===payment.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const summary=salaryPaymentSummary(payroll),otherPaid=summary.history.filter((row)=>row!==payment).reduce((sum,row)=>sum+num(row.amount),0),amount=Math.round(num(values.amount)),fee=values.fee===undefined?num(payment.fee):Math.max(0,Math.round(num(values.fee))),feePayer=(values.feePayer===undefined?payment.feePayer:values.feePayer)==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount,bankId=String(values.bankAccountId||values.bankId||'');if(amount<=0||otherPaid+amount>summary.total)throw new Error('本次付款不可超過未付薪資');if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次付款');if(!state.banks.some((row)=>row.id===bankId))throw new Error('請選擇薪資付款銀行帳戶');
+    requireStoreTransactionDraft();const payment=state.salaryPayments.find((row)=>row.id===id);if(!payment)throw new Error('找不到薪資付款紀錄');if(Number(payment.paymentAllocationVersion)===2)throw new Error('新版來源式薪資付款不可直接修改；請刪除後重新建立，避免日薪／抽成來源失配。');const payroll=state.payroll.find((row)=>row.id===payment.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');const summary=salaryPaymentSummary(payroll),otherPaid=summary.history.filter((row)=>row!==payment).reduce((sum,row)=>sum+num(row.amount),0),amount=Math.round(num(values.amount));if(amount>num(payment.amount))throw new Error('舊式薪資付款不可增加金額；如需新增付款請使用新版來源式付款。');const fee=values.fee===undefined?num(payment.fee):Math.max(0,Math.round(num(values.fee))),feePayer=(values.feePayer===undefined?payment.feePayer:values.feePayer)==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount,bankId=String(values.bankAccountId||values.bankId||'');if(amount<=0||otherPaid+amount>summary.total)throw new Error('本次付款不可超過未付薪資');if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次付款');if(!state.banks.some((row)=>row.id===bankId))throw new Error('請選擇薪資付款銀行帳戶');
     const now=new Date().toISOString();Object.assign(payment,{date:values.date||payment.date||businessDate(new Date(now)),amount,fee,feePayer,actualDebit,bankId,bankAccountId:bankId,paymentMethod:values.paymentMethod||payment.paymentMethod||'銀行轉帳',note:values.note===undefined?payment.note:String(values.note||''),updatedAt:now});syncSalaryBankTransaction(payment,payroll,now);syncSalarySummary(payroll,now);persist(`修改薪資付款 ${payroll.month||''}`);return payment;
   }
   async function deleteSalaryPayment(id) {
@@ -4201,6 +4550,46 @@
       } catch (rollbackError) { error.rollbackError=rollbackError; }
       throw error;
     }
+  }
+  function syncProjectCommissionSettlementBankTransaction(settlement,now) {
+    const bankId=String(settlement.bankAccountId||settlement.bankId||''),bank=state.banks.find((row)=>String(row.id)===bankId);
+    if(!bank)throw new Error('請選擇案場抽成付款銀行帳戶');
+    const employee=state.employees.find((row)=>String(row.id)===String(settlement.employeeId||'')),project=state.projects.find((row)=>String(row.id)===String(settlement.projectId||'')),transaction={id:uid(),createdAt:now};
+    Object.assign(transaction,{date:settlement.date,bankId:bank.id,bankAccountId:bank.id,type:'支出',direction:'out',category:'案場抽成',amount:num(settlement.actualDebit),salaryAmount:num(settlement.amount),fee:num(settlement.fee),feePayer:settlement.feePayer,actualDebit:num(settlement.actualDebit),employeeNetAmount:Math.max(0,num(settlement.amount)-num(settlement.fee)*(settlement.feePayer==='recipient'?1:0)),sourceType:'project_commission_settlement',sourceId:settlement.id,commissionSettlementId:settlement.id,employee:settlement.employeeId,employeeName:employee?.name||settlement.employeeName||'員工',project:settlement.projectId,projectId:settlement.projectId,projectName:project?.name||settlement.projectName||'',sourceNo:project?.name||settlement.projectName||'',description:`${employee?.name||settlement.employeeName||'員工'}｜${project?.name||settlement.projectName||'案場'} 抽成結算`,note:settlement.note||`${project?.name||settlement.projectName||'案場'} 抽成結算`,updatedAt:now});
+    state.bankTransactions.unshift(transaction);settlement.bankId=bank.id;settlement.bankAccountId=bank.id;settlement.bankTransactionId=transaction.id;adjustBankExpense(bank,num(settlement.actualDebit),now);return transaction;
+  }
+  async function addProjectCommissionSettlement(values={}) {
+    requireStoreTransactionDraft();
+    const idempotencyKey=String(values.idempotencyKey||'').trim();
+    if(idempotencyKey){const existing=(state.commissionSettlements||[]).find((row)=>row.idempotencyKey===idempotencyKey);if(existing)return existing}
+    const employeeId=String(values.employeeId||values.employee||''),projectId=String(values.projectId||values.project||'');
+    const selections=Array.isArray(values.selectionKeys)?values.selectionKeys:Array.isArray(values.allocationKeys)?values.allocationKeys:Array.isArray(values.sourceCommissionIds)?values.sourceCommissionIds:Array.isArray(values.sourceIds)?values.sourceIds:[];
+    const preview=projectCommissionSettlementPreview(employeeId,projectId,selections);
+    if(!preview.allowed)throw new Error(preview.blockers.map((row)=>row.message).join('；')||'此案場抽成目前不可結算');
+    const bank=state.banks.find((row)=>String(row.id)===String(values.bankAccountId||values.bankId||''));if(!bank)throw new Error('請選擇案場抽成付款銀行帳戶');
+    const amount=Math.round(preview.total),fee=Math.max(0,Math.round(num(values.fee))),feePayer=values.feePayer==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount;
+    if(amount<=0)throw new Error('本次案場抽成結算金額必須大於 0');if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次結算金額');
+    const employee=state.employees.find((row)=>String(row.id)===employeeId),project=state.projects.find((row)=>String(row.id)===projectId),now=new Date().toISOString();
+    const allocations=preview.allocations.map((row)=>({...row,amount:Math.max(0,num(row.amount)),untaxedAmount:Math.max(0,num(row.untaxedAmount))}));
+    if(Math.round(allocations.reduce((sum,row)=>sum+num(row.amount),0))!==amount)throw new Error('戶別抽成分攤總額與本次結算不一致，已停止付款');
+    const settlement={id:uid(),allocationVersion:2,idempotencyKey:idempotencyKey||uid(),date:values.date||businessDate(new Date(now)),employeeId,employeeName:employee?.name||'',projectId,projectName:project?.name||'',sourceCommissionIds:[...new Set(allocations.map((row)=>row.commissionId))],selectionKeys:allocations.map((row)=>row.allocationKey),allocations,amount,fee,feePayer,actualDebit,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:String(values.note||''),createdAt:now,updatedAt:now};
+    state.commissionSettlements.unshift(settlement);syncProjectCommissionSettlementBankTransaction(settlement,now);
+    [...new Set(settlement.allocations.map((row)=>row.month))].forEach((month)=>{const payroll=state.payroll.find((row)=>payrollEmployeeId(row)===employeeId&&String(row.month||'')===month);if(payroll)syncSalarySummary(payroll,now)});
+    persist(`新增案場戶別抽成結算 ${project?.name||projectId}｜${employee?.name||employeeId}`,{commissionSettlementId:settlement.id,employeeId,projectId,selectionKeys:settlement.selectionKeys,sourceCommissionIds:settlement.sourceCommissionIds,amount});
+    return settlement;
+  }
+  async function deleteProjectCommissionSettlement(id) {
+    requireStoreTransactionDraft();
+    const settlement=(state.commissionSettlements||[]).find((row)=>String(row.id)===String(id||''));if(!settlement)throw new Error('找不到案場抽成結算紀錄');
+    const settlementId=String(settlement.id),transactionId=String(settlement.bankTransactionId||''),matches=(state.bankTransactions||[]).filter((row)=>String(row.id||'')===transactionId||(String(row.sourceType||'')==='project_commission_settlement'&&String(row.sourceId||'')===settlementId));
+    if(!transactionId||matches.length!==1)throw new Error('案場抽成結算與銀行流水無法唯一核對，已停止刪除');
+    const transaction=matches[0],bankId=String(settlement.bankAccountId||settlement.bankId||''),transactionBankId=String(transaction.bankAccountId||transaction.bankId||''),bank=state.banks.find((row)=>String(row.id)===bankId);
+    if(!bank||bankId!==transactionBankId||num(transaction.amount)!==num(settlement.actualDebit))throw new Error('案場抽成結算與銀行扣款不一致，已停止刪除');
+    const months=[...new Set((settlement.allocations||[]).map((row)=>String(row.month||monthOf(row.date))).filter(Boolean))],now=new Date().toISOString();
+    adjustBankExpense(bank,-num(settlement.actualDebit),now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==transaction);state.commissionSettlements=state.commissionSettlements.filter((row)=>row!==settlement);
+    months.forEach((month)=>{const payroll=state.payroll.find((row)=>payrollEmployeeId(row)===String(settlement.employeeId||settlement.employee||'')&&String(row.month||'')===month);if(payroll)syncSalarySummary(payroll,now)});
+    persist(`刪除案場抽成結算 ${settlement.projectName||settlement.projectId||''}｜${settlement.employeeName||settlement.employeeId||''}`,{commissionSettlementId:settlementId});
+    return true;
   }
   async function updateBillingInvoice(id, values = {}) {
     requireStoreTransactionDraft(); const billing=state.billings.find((row)=>row.id===id);if(!billing)throw new Error('找不到請款單');
@@ -4361,6 +4750,7 @@
     ['receipts','收款'],
     ['payments','付款'],
     ['salaryPayments','薪資付款'],
+    ['commissionSettlements','案場抽成結算'],
     ['payroll','薪資'],
     ['bankTransactions','銀行交易'],
     ['inventoryReceipts','材料入庫'],
@@ -4657,33 +5047,48 @@
     catch(error){state.projects=previousProjects;state.meta=previousMeta;state.audit=previousAudit;throw error}
     return true;
   }
+  function companyProjectDefaults(customer) {
+    const latest=[...(state.projects||[])].filter((row)=>String(row.customer||'')===String(customer?.id||'')).sort((a,b)=>String(b.updatedAt||b.createdAt||'').localeCompare(String(a.updatedAt||a.createdAt||'')))[0]||{};
+    const source=customer?.projectDefaultsConfigured===true?customer:latest;
+    return {
+      defaultRetentionMode:['5','10','custom'].includes(source.defaultRetentionMode)?source.defaultRetentionMode:'none',
+      defaultRetentionRate:Math.max(0,num(source.defaultRetentionRate)),
+      defaultRetentionBase:source.defaultRetentionBase==='preTax'?'preTax':'taxIncluded',
+      defaultInvoiceChoice:source.defaultInvoiceChoice==='invoice_required'?'invoice_required':'no_invoice',
+      defaultTaxMode:source.defaultTaxMode==='含稅'?'含稅':'未稅',
+      defaultPricingMode:pricingMode(source.defaultPricingMode)||'actual',
+      defaultCommissionBasis:normalizeCommissionBasis(source.defaultCommissionBasis)
+    };
+  }
   async function saveProject(values, id = '') {
     requireStoreTransactionDraft();
     const name=clean(values.name),customer=state.customers.find((row)=>row.id===values.customer);
     if(!name)throw new Error('請輸入案場名稱'); if(!customer)throw new Error('請選擇所屬客戶');
     const duplicate=state.projects.find((row)=>row.id!==id&&sameName(row.name,name)&&row.customer===customer.id);
     if(duplicate)throw new Error('此客戶已有同名案場，請直接編輯既有案場');
-    const now=new Date().toISOString(),row=state.projects.find((item)=>item.id===id)||{id:uid(),createdAt:now};
-    const retentionMode=['5','10','custom'].includes(values.defaultRetentionMode)?values.defaultRetentionMode:'none';
-    Object.assign(row,{name,customer:customer.id,customerName:customer.name,address:clean(values.address),startDate:values.startDate||'',expectedEndDate:values.expectedEndDate||'',actualEndDate:values.actualEndDate||'',status:['進行中','已完工','暫停'].includes(values.status)?values.status:'進行中',contractAmount:Math.max(0,num(values.contractAmount)),note:clean(values.note),defaultRetentionMode:retentionMode,defaultRetentionRate:retentionMode==='5'?5:retentionMode==='10'?10:retentionMode==='custom'?Math.max(0,num(values.defaultRetentionRate)):0,defaultRetentionAmount:0,defaultRetentionBase:values.defaultRetentionBase==='preTax'?'preTax':'taxIncluded',defaultInvoiceChoice:values.defaultInvoiceChoice==='invoice_required'?'invoice_required':'no_invoice',defaultTaxMode:values.defaultTaxMode==='含稅'?'含稅':'未稅',defaultPricingMode:pricingMode(values.defaultPricingMode)||row.defaultPricingMode||'',updatedAt:now});
-    if(!id)state.projects.unshift(row); persist(`${id?'修改':'新增'}案場 ${row.name}`); return row;
+    const now=new Date().toISOString(),row=state.projects.find((item)=>item.id===id)||{id:uid(),createdAt:now},companyDefaults=companyProjectDefaults(customer);
+    const retentionMode=['5','10','custom'].includes(values.defaultRetentionMode)?values.defaultRetentionMode:(!id?companyDefaults.defaultRetentionMode:'none');
+    const defaultCommissionBasis=normalizeCommissionBasis(values.defaultCommissionBasis??(!id?companyDefaults.defaultCommissionBasis:row.defaultCommissionBasis));
+    Object.assign(row,{name,customer:customer.id,customerName:customer.name,address:clean(values.address),startDate:values.startDate||'',expectedEndDate:values.expectedEndDate||'',actualEndDate:values.actualEndDate||'',status:['進行中','已完工','暫停'].includes(values.status)?values.status:'進行中',contractAmount:Math.max(0,num(values.contractAmount)),note:clean(values.note),defaultRetentionMode:retentionMode,defaultRetentionRate:retentionMode==='5'?5:retentionMode==='10'?10:retentionMode==='custom'?Math.max(0,num(values.defaultRetentionRate)):0,defaultRetentionAmount:0,defaultRetentionBase:values.defaultRetentionBase==='preTax'?'preTax':'taxIncluded',defaultInvoiceChoice:values.defaultInvoiceChoice==='invoice_required'?'invoice_required':'no_invoice',defaultTaxMode:values.defaultTaxMode==='含稅'?'含稅':'未稅',defaultPricingMode:pricingMode(values.defaultPricingMode)||row.defaultPricingMode||companyDefaults.defaultPricingMode||'',defaultCommissionBasis,updatedAt:now});
+    Object.assign(customer,{projectDefaultsConfigured:true,defaultRetentionMode:row.defaultRetentionMode,defaultRetentionRate:row.defaultRetentionRate,defaultRetentionBase:row.defaultRetentionBase,defaultInvoiceChoice:row.defaultInvoiceChoice,defaultTaxMode:row.defaultTaxMode,defaultPricingMode:row.defaultPricingMode,defaultCommissionBasis:row.defaultCommissionBasis,projectDefaultsUpdatedAt:now,updatedAt:now});
+    if(!id)state.projects.unshift(row); persist(`${id?'修改':'新增'}案場 ${row.name}｜同步公司預設`); return row;
   }
   function employeeUsage(id) {
     const employeeId=String(id||''),sameEmployee=(row)=>String(row?.employee||row?.employeeId||'')===employeeId;
     const payrollRows=state.payroll.filter(sameEmployee),payrollIds=new Set(payrollRows.map((row)=>String(row.id)));
-    const counts={dailyLogs:state.dailyLogs.filter(sameEmployee).length,attendance:state.attendance.filter(sameEmployee).length,commissions:state.commissions.filter(sameEmployee).length,materialUsages:state.materialUsages.filter(sameEmployee).length,payroll:payrollRows.length,salaryPayments:state.salaryPayments.filter((row)=>sameEmployee(row)||payrollIds.has(String(row.payrollId||''))).length,bankTransactions:state.bankTransactions.filter(sameEmployee).length,calendar:(state.calendar||[]).filter(sameEmployee).length};
+    const counts={dailyLogs:state.dailyLogs.filter(sameEmployee).length,attendance:state.attendance.filter(sameEmployee).length,commissions:state.commissions.filter(sameEmployee).length,materialUsages:state.materialUsages.filter(sameEmployee).length,payroll:payrollRows.length,salaryPayments:state.salaryPayments.filter((row)=>sameEmployee(row)||payrollIds.has(String(row.payrollId||''))).length,commissionSettlements:(state.commissionSettlements||[]).filter((row)=>String(row.employeeId||row.employee||'')===employeeId).length,bankTransactions:state.bankTransactions.filter(sameEmployee).length,calendar:(state.calendar||[]).filter(sameEmployee).length};
     return {...counts,used:Object.values(counts).some((count)=>count>0)};
   }
   async function saveEmployee(values, id = '') {
     requireStoreTransactionDraft();
-    const name=clean(values.name),dailyRate=values.dailyRate===''||values.dailyRate===undefined?0:Number(values.dailyRate),commissionRate=values.commissionRate===''||values.commissionRate===undefined?0:Number(values.commissionRate);
+    const existing=state.employees.find((item)=>String(item.id)===String(id)),name=clean(values.name),dailyRate=values.dailyRate===''||values.dailyRate===undefined?0:Number(values.dailyRate),commissionRate=values.commissionRate===''||values.commissionRate===undefined?(existing?num(existing.commissionRate):25):Number(values.commissionRate),commissionBasis=normalizeCommissionBasis(values.commissionBasis??existing?.commissionBasis);
     if(!name)throw new Error('請輸入員工姓名');
     if(!Number.isFinite(dailyRate)||dailyRate<0)throw new Error('日薪不可小於 0');
     if(!Number.isFinite(commissionRate)||commissionRate<0||commissionRate>100)throw new Error('抽成比例必須介於 0～100');
     const duplicate=state.employees.find((row)=>String(row.id)!==String(id)&&sameName(row.name,name));
     if(duplicate)throw new Error('已有同名員工，請直接編輯既有員工');
-    const now=new Date().toISOString(),row=state.employees.find((item)=>String(item.id)===String(id))||{id:uid(),createdAt:now};
-    Object.assign(row,{name,phone:clean(values.phone),role:clean(values.role),dailyRate,commissionRate,startDate:values.startDate||'',status:clean(values.status)||row.status||'在職',note:clean(values.note),updatedAt:now});
+    const now=new Date().toISOString(),row=existing||{id:uid(),createdAt:now};
+    Object.assign(row,{name,phone:clean(values.phone),role:clean(values.role),dailyRate,commissionRate,commissionBasis,startDate:values.startDate||'',status:clean(values.status)||row.status||'在職',note:clean(values.note),updatedAt:now});
     if(!id)state.employees.unshift(row);
     persist(`${id?'修改':'新增'}員工 ${row.name}`); return row;
   }
@@ -4692,6 +5097,50 @@
     if(employeeUsage(id).used)throw new Error('此員工已有出勤、抽成、補料、薪資或銀行歷史，請改為離職／停用，不可直接刪除');
     state.employees=state.employees.filter((item)=>item!==row); persist(`刪除員工 ${row.name||''}`); return true;
   }
+  async function saveVendor(values, id = '') {
+    requireStoreTransactionDraft();
+    const existing=state.vendors.find((row)=>String(row.id)===String(id)),name=clean(values.name);
+    if(!name)throw new Error('請輸入廠商名稱');
+    const duplicate=state.vendors.find((row)=>String(row.id)!==String(id)&&sameName(row.name,name));
+    if(duplicate)throw new Error('已有同名廠商，請直接選擇或編輯既有廠商');
+    const taxId=clean(values.taxId);
+    if(taxId&&state.vendors.some((row)=>String(row.id)!==String(id)&&clean(row.taxId)===taxId))throw new Error('此統編已存在於其他廠商');
+    const now=new Date().toISOString(),row=existing||{id:uid(),createdAt:now};
+    Object.assign(row,{name,contact:clean(values.contact),phone:clean(values.phone),taxId,address:clean(values.address),note:clean(values.note),isVendor:true,isSupplier:true,entityType:'vendor',updatedAt:now});
+    if(!existing)state.vendors.unshift(row);
+    persist(`${existing?'修改':'新增'}材料廠商 ${row.name}`,{vendorId:row.id});
+    return row;
+  }
+  function materialInventorySummary(materialId) {
+    const id=String(materialId||''),material=state.materials.find((row)=>String(row.id)===id);
+    if(!material)return {materialId:id,openingStock:0,received:0,stock:0,initialized:false,receipts:[]};
+    const receipts=(state.inventoryReceipts||[]).filter((row)=>String(row.material||row.materialId||'')===id).sort((a,b)=>String(b.date||b.createdAt||'').localeCompare(String(a.date||a.createdAt||'')));
+    const openingStock=Math.max(0,num(material.openingStock??(material.inventoryInitializedAt?0:material.stock))),received=receipts.reduce((sum,row)=>sum+Math.max(0,num(row.quantity)),0),stock=Math.max(0,num(material.stock));
+    return {materialId:id,openingStock,received,stock,initialized:Boolean(material.inventoryInitializedAt),receipts};
+  }
+  async function setMaterialOpeningStock(materialId, quantity) {
+    requireStoreTransactionDraft();
+    const material=state.materials.find((row)=>String(row.id)===String(materialId||'')),value=Number(quantity);
+    if(!material)throw new Error('找不到材料');
+    if(material.inventoryInitializedAt||(state.inventoryReceipts||[]).some((row)=>String(row.material||row.materialId||'')===String(material.id)))throw new Error('此材料已建立庫存基準或已有入庫紀錄，期初庫存不可再次覆寫');
+    if(!Number.isFinite(value)||value<0)throw new Error('期初庫存必須是 0 以上的有效數量');
+    const now=new Date().toISOString();
+    material.openingStock=value;material.stock=value;material.inventoryInitializedAt=now;material.inventoryUpdatedAt=now;material.updatedAt=now;
+    persist('設定材料期初庫存 '+(material.name||'')+'｜'+value+' '+(material.unit||''),{materialId:material.id,openingStock:value});
+    return materialInventorySummary(material.id);
+  }
+  async function addInventoryReceipt(values) {
+    requireStoreTransactionDraft();
+    const material=state.materials.find((row)=>String(row.id)===String(values.material||values.materialId||'')),quantity=Number(values.quantity);
+    if(!material)throw new Error('請選擇有效材料');
+    if(!material.inventoryInitializedAt)throw new Error('請先設定此材料的期初庫存，再新增入庫');
+    if(!Number.isFinite(quantity)||quantity<=0)throw new Error('入庫數量必須大於 0');
+    const now=new Date().toISOString(),beforeStock=Math.max(0,num(material.stock)),afterStock=beforeStock+quantity;
+    const receipt={id:uid(),date:values.date||businessDate(new Date(now)),material:material.id,materialId:material.id,materialName:material.name||'',vendor:material.vendor||'',vendorName:material.vendorName||'',unit:material.unit||'',model:material.model||'',quantity,beforeStock,afterStock,note:clean(values.note),createdAt:now,updatedAt:now};
+    state.inventoryReceipts.unshift(receipt);material.stock=afterStock;material.inventoryUpdatedAt=now;material.updatedAt=now;
+    persist('材料入庫 '+(material.name||'')+'｜+'+quantity+' '+(material.unit||''),{inventoryReceiptId:receipt.id,materialId:material.id,quantity,beforeStock,afterStock});
+    return receipt;
+  }
   async function saveMaterial(values, id = '') {
     requireStoreTransactionDraft();
     const name=clean(values.name),code=clean(values.code),unit=clean(values.unit),vendor=state.vendors.find((row)=>row.id===values.vendor),unitPrice=Math.max(0,num(values.unitPrice));
@@ -4699,9 +5148,13 @@
     const duplicate=state.materials.find((row)=>row.id!==id&&sameName(row.name,name)&&String(row.vendor||'')===String(vendor.id));
     if(duplicate)throw new Error('此廠商已有相同名稱的材料');
     if(code&&state.materials.some((row)=>row.id!==id&&sameName(row.code,code)))throw new Error('材料代碼已存在');
-    const now=new Date().toISOString(),row=state.materials.find((item)=>item.id===id)||{id:uid(),stock:0,safeStock:0,createdAt:now};
+    const now=new Date().toISOString(),row=state.materials.find((item)=>item.id===id)||{id:uid(),stock:0,openingStock:0,safeStock:0,createdAt:now};
     Object.assign(row,{name,code,vendor:vendor.id,vendorName:vendor.name||'',unit,unitPrice,model:clean(values.model),note:clean(values.note),updatedAt:now});
-    if(!id)state.materials.unshift(row);
+    if(!id){
+      const openingRaw=values.openingStock,opening=openingRaw===undefined||openingRaw===null||String(openingRaw).trim()===''?0:Number(openingRaw);
+      if(!Number.isFinite(opening)||opening<0)throw new Error('期初庫存必須是 0 以上的有效數量');
+      row.openingStock=opening;row.stock=opening;row.inventoryInitializedAt=now;row.inventoryUpdatedAt=now;state.materials.unshift(row);
+    }
     persist(`${id?'修改':'新增'}材料 ${row.name}`); return row;
   }
   async function deleteMaterial(id) {
@@ -4714,14 +5167,22 @@
     const existing=state.materialUsages.find((row)=>row.id===id),project=state.projects.find((row)=>row.id===values.project),material=state.materials.find((row)=>row.id===values.material),vendor=state.vendors.find((row)=>row.id===(values.vendor||material?.vendor));
     const employeeId=String(values.employee||existing?.employee||''),employee=state.employees.find((row)=>String(row.id)===employeeId),quantity=num(values.quantity),unitPrice=num(values.unitPrice);
     if(!project)throw new Error('找不到案場'); if(!material)throw new Error('請選擇既有材料'); if(!vendor)throw new Error('請選擇材料廠商'); if(!existing&&!employee)throw new Error('請選擇補料員工'); if(existing?.employee&&!employee)throw new Error('原補料員工不存在，請重新選擇員工'); if(quantity<=0)throw new Error('數量必須大於 0'); if(unitPrice<0)throw new Error('單價不可小於 0');
+    if(!material.inventoryInitializedAt)throw new Error('此材料尚未建立期初庫存，禁止新增材料使用');
+    const oldMaterial=existing?state.materials.find((row)=>String(row.id)===String(existing.material||'')):null,existingWasDeducted=Boolean(existing?.inventoryDeductedAt);
+    const oldQuantity=existingWasDeducted?Math.max(0,num(existing.quantity)):0,oldAvailable=oldMaterial?Math.max(0,num(oldMaterial.stock))+oldQuantity:0,newAvailable=Math.max(0,num(material.stock))+(existingWasDeducted&&oldMaterial&&String(oldMaterial.id)===String(material.id)?oldQuantity:0);
+    if(newAvailable<quantity)throw new Error(`庫存不足，禁止送出。目前可用 ${newAvailable} ${material.unit||''}，本次需要 ${quantity} ${material.unit||''}`);
     const now=new Date().toISOString(),oldPayable=payableForUsage(existing);
     if(existing&&payableLocked(oldPayable))throw new Error('此材料來源的應付已付款，不能直接修改；請先以正式帳務方式處理');
+    if(existingWasDeducted&&oldMaterial){
+      oldMaterial.stock=oldAvailable;oldMaterial.inventoryUpdatedAt=now;oldMaterial.updatedAt=now;
+    }
+    material.stock=Math.max(0,num(material.stock))-quantity;material.inventoryUpdatedAt=now;material.updatedAt=now;
     const row=existing||{id:uid(),createdAt:now,status:'未付'};
     if(existing&&oldPayable){oldPayable.usageIds=(oldPayable.usageIds||[]).filter((usageId)=>String(usageId)!==String(existing.id));}
-    Object.assign(row,{date:values.date||businessDate(new Date(now)),employee:employee?.id||row.employee||'',employeeName:employee?.name||row.employeeName||'',project:project.id,projectName:project.name,material:material.id,materialName:material.name||'',vendor:vendor.id,vendorName:vendor.name||'',quantity,unitPrice,amount:Math.round(quantity*unitPrice),unit:material.unit||'',model:material.model||'',note:clean(values.note),updatedAt:now,payableId:''});
+    Object.assign(row,{date:values.date||businessDate(new Date(now)),employee:employee?.id||row.employee||'',employeeName:employee?.name||row.employeeName||'',project:project.id,projectName:project.name,material:material.id,materialName:material.name||'',vendor:vendor.id,vendorName:vendor.name||'',quantity,unitPrice,amount:Math.round(quantity*unitPrice),unit:material.unit||'',model:material.model||'',note:clean(values.note),updatedAt:now,payableId:'',inventoryDeductedAt:now,inventoryQuantity:quantity,inventoryMaterialId:material.id});
     if(!existing)state.materialUsages.unshift(row);
     if(oldPayable)syncMaterialPayable(oldPayable); assignMaterialUsage(row);
-    persist(`${id?'修改':'新增'}案場材料 ${project.name}`); return row;
+    persist(`${id?'修改':'新增'}案場材料 ${project.name}`,{materialUsageId:row.id,materialId:material.id,inventoryBefore:newAvailable,inventoryAfter:material.stock,inventoryQuantity:quantity}); return row;
   }
   async function assignMaterialUsageEmployee(id, employeeId) {
     requireStoreTransactionDraft();
@@ -4737,9 +5198,13 @@
   async function deleteMaterialUsage(id) {
     requireStoreTransactionDraft(); const row=state.materialUsages.find((item)=>item.id===id); if(!row)return false;
     const payable=payableForUsage(row); if(payableLocked(payable))throw new Error('此材料來源的應付已有付款紀錄，不能直接刪除');
+    const material=state.materials.find((item)=>String(item.id)===String(row.material||row.inventoryMaterialId||''));
+    if(row.inventoryDeductedAt&&material){
+      material.stock=Math.max(0,num(material.stock))+Math.max(0,num(row.inventoryQuantity??row.quantity));material.inventoryUpdatedAt=new Date().toISOString();material.updatedAt=material.inventoryUpdatedAt;
+    }
     state.materialUsages=state.materialUsages.filter((item)=>item.id!==id);
     if(payable){payable.usageIds=(payable.usageIds||[]).filter((usageId)=>String(usageId)!==String(id));syncMaterialPayable(payable)}
-    persist('刪除案場材料使用'); return true;
+    persist('刪除案場材料使用',{materialUsageId:row.id,inventoryRestored:Boolean(row.inventoryDeductedAt&&material),restoredQuantity:row.inventoryDeductedAt?Math.max(0,num(row.inventoryQuantity??row.quantity)):0}); return true;
   }
   async function saveProjectCost(values, id = '') {
     requireStoreTransactionDraft(); const project=state.projects.find((row)=>row.id===values.project),amount=Math.max(0,Math.round(num(values.amount)));
@@ -4778,16 +5243,19 @@
     const row=project||customer||company;
     return row?{...row,source:project?'project':customer?'customer':'company'}:null;
   }
-  async function saveQuotationPrice(values) {
-    requireStoreTransactionDraft(); const item=clean(values.item),price=Math.max(0,num(values.price)),scope=['company','customer','project'].includes(values.scope)?values.scope:'company';
+  function writeQuotationPrice(values) {
+    const item=clean(values.item),price=Math.max(0,num(values.price)),scope=['company','customer','project'].includes(values.scope)?values.scope:'company';
     if(!item)throw new Error('請輸入施工項目'); if(!clean(values.unit))throw new Error('請輸入單位');
     if(scope==='customer'&&!values.customerId)throw new Error('請選擇客戶'); if(scope==='project'&&!values.projectId)throw new Error('請選擇案場');
     const backupValue=values.isBackupPrice,isBackupPrice=backupValue===true||['true','1','on'].includes(String(backupValue??'').toLowerCase());
     const row={id:uid(),scope,customerId:scope==='company'?'':values.customerId||'',projectId:scope==='project'?values.projectId||'':'',item,unit:clean(values.unit),price,isBackupPrice,effectiveDate:values.effectiveDate||businessDate(),createdSource:clean(values.createdSource)||'manual',createdAt:new Date().toISOString()};
-    state.quotationPrices.unshift(row); persist(`新增報價價格歷史 ${item}`); return row;
+    state.quotationPrices.unshift(row);return row;
   }
-  async function saveQuotation(values, id = '') {
-    requireStoreTransactionDraft(); const customer=state.customers.find((row)=>String(row.id)===String(values.customer)),project=state.projects.find((row)=>String(row.id)===String(values.project));
+  async function saveQuotationPrice(values) {
+    requireStoreTransactionDraft();const row=writeQuotationPrice(values);persist(`新增報價價格歷史 ${row.item}`);return row;
+  }
+  function writeQuotation(values, id = '') {
+    const customer=state.customers.find((row)=>String(row.id)===String(values.customer)),project=state.projects.find((row)=>String(row.id)===String(values.project));
     if(!customer)throw new Error('請選擇客戶／建設公司'); if(!project)throw new Error('請選擇案場');
     const mode=pricingMode(values.pricingMode)||pricingMode(project.defaultPricingMode)||(String(values.sourceType||'').startsWith('import-')?'actual':'');if(!mode)throw new Error('請選擇計價方式');
     const lines=(values.lines||[]).filter((line)=>clean(line.item)).map((line)=>{const type=mode==='mixed'?(line.pricingType==='lump_sum'?'lump_sum':'actual'):mode,qty=String(line.qty??'').trim()===''?null:Math.max(0,num(line.qty)),price=Math.max(0,num(line.price)),enteredLump=Number(line.lumpSumAmount),hasEnteredLump=String(line.lumpSumAmount??'').trim()!==''&&Number.isFinite(enteredLump)&&enteredLump>=0,lumpSumAmount=type==='lump_sum'?Math.max(0,hasEnteredLump?enteredLump:qty!==null&&price>0?Math.round(qty*price):0):0;return {id:line.id||uid(),house:clean(line.house),item:clean(line.item),spec:clean(line.spec),unit:clean(line.unit)||'式',pricingType:type,qty,estimatedQty:qty,price,lumpSumAmount,subtotal:type==='lump_sum'?Math.round(lumpSumAmount):qty===null?0:Math.round(qty*price),priceSource:line.priceSource||'manual',priceId:line.priceId||'',scope:clean(line.scope),note:clean(line.note)};});
@@ -4797,7 +5265,10 @@
     const lumpSumTotal=mode==='lump_sum'?Math.max(0,num(values.lumpSumTotal)):0;if(mode==='lump_sum'&&lumpSumTotal<=0)throw new Error('請輸入合約／報價總價');
     const totals=quotationTotals(lines,values.taxMode,mode,lumpSumTotal),row=existing||{id:uid(),number:nextQuotationNumber(values.date),createdAt:now};
     Object.assign(row,{customer:customer.id,customerName:customer.name,project:project.id,projectName:project.name,date:values.date||businessDate(new Date(now)),dueDate:values.dueDate||'',pricingMode:mode,lumpSumTotal,billingPlan:values.billingPlan||row.billingPlan||'one_time',billingMilestones:Array.isArray(row.billingMilestones)?row.billingMilestones:[],taxMode:values.taxMode==='含稅'?'含稅':'未稅',lines,amount:totals.amount,tax:totals.tax,total:totals.total,status:['草稿','已送出','已確認','作廢'].includes(values.status)?values.status:(row.status||'草稿'),internalNote:clean(values.internalNote),publicNote:clean(values.publicNote),note:clean(values.publicNote),sourceType:values.sourceType||row.sourceType||'manual',importTemplateId:values.importTemplateId||row.importTemplateId||'',updatedAt:now});
-    if(!existing)state.quotations.unshift(row); mergeQuotationUnitPresets(lines.map((line)=>line.unit)); persist(`${id?'修改':'新增'}報價單 ${row.number}`); return row;
+    if(!existing)state.quotations.unshift(row);mergeQuotationUnitPresets(lines.map((line)=>line.unit));return row;
+  }
+  async function saveQuotation(values,id='') {
+    requireStoreTransactionDraft();const row=writeQuotation(values,id);persist(`${id?'修改':'新增'}報價單 ${row.number}`);return row;
   }
   async function setQuotationStatus(id,status) {
     requireStoreTransactionDraft(); const row=state.quotations.find((item)=>item.id===id); if(!row)throw new Error('找不到報價單');
@@ -4828,11 +5299,24 @@
     const rootId=source.revisionOf||source.id,siblings=state.quotations.filter((row)=>String(row.revisionOf||'')===String(rootId)),revisionNumber=Math.max(0,...siblings.map((row)=>num(row.revisionNumber)))+1,now=new Date().toISOString(),row={...source,id:uid(),number:`${String(source.number||'報價單').replace(/\s+Rev\.\d+$/i,'')} Rev.${revisionNumber}`,status:'草稿',revisionOf:rootId,revisionNumber,lines:(source.lines||[]).map((line)=>({...line,id:uid()})),createdAt:now,updatedAt:now};
     state.quotations.unshift(row);persist(`建立報價修訂版 ${row.number}`);return row;
   }
-  async function saveQuotationTemplate(values,id='') {
-    requireStoreTransactionDraft(); const customer=state.customers.find((row)=>row.id===values.customerId);if(!customer)throw new Error('請選擇客戶／建設公司');if(!clean(values.name))throw new Error('請輸入模板名稱');
+  function writeQuotationTemplate(values,id='') {
+    const customer=state.customers.find((row)=>row.id===values.customerId);if(!customer)throw new Error('請選擇客戶／建設公司');if(!clean(values.name))throw new Error('請輸入模板名稱');
     const now=new Date().toISOString(),row=state.quotationTemplates.find((item)=>item.id===id)||{id:uid(),createdAt:now};
     Object.assign(row,{name:clean(values.name),customerId:customer.id,customerName:customer.name,fileFormat:clean(values.fileFormat)||'excel',headerRow:Math.max(1,num(values.headerRow)||1),detailStartRow:Math.max(1,num(values.detailStartRow)||2),mapping:{house:clean(values.mapping?.house),item:clean(values.mapping?.item),unit:clean(values.mapping?.unit),qty:clean(values.mapping?.qty),price:clean(values.mapping?.price),amount:clean(values.mapping?.amount),note:clean(values.mapping?.note)},updatedAt:now});
-    if(!id)state.quotationTemplates.unshift(row);persist(`${id?'修改':'新增'}報價模板 ${row.name}`);return row;
+    if(!id)state.quotationTemplates.unshift(row);return row;
+  }
+  async function saveQuotationTemplate(values,id='') {
+    requireStoreTransactionDraft();const row=writeQuotationTemplate(values,id);persist(`${id?'修改':'新增'}報價模板 ${row.name}`);return row;
+  }
+  async function saveQuotationBundle(values,id='',extras={}) {
+    requireStoreTransactionDraft();
+    const quotation=writeQuotation(values,id),priceRows=[];
+    const requestedPrices=Array.isArray(extras.projectPrices)?extras.projectPrices:[];
+    requestedPrices.forEach((price)=>priceRows.push(writeQuotationPrice({...price,customerId:price.customerId||quotation.customer,projectId:price.projectId||quotation.project,effectiveDate:price.effectiveDate||quotation.date,createdSource:price.createdSource||`${extras.priceSourcePrefix||'quotation'}:${quotation.id}`})));
+    let template=null;
+    if(extras.template){template=writeQuotationTemplate({...extras.template,customerId:extras.template.customerId||quotation.customer},extras.templateId||'')}
+    persist(`${id?'修改':'新增'}報價單 ${quotation.number}${priceRows.length?`｜價格 ${priceRows.length} 筆`:''}${template?'｜含模板':''}`);
+    return {quotation,priceRows,template};
   }
   function confirmedQuotationItems(projectId, customerId) {
     const rows=[],seen=new Set();
@@ -4948,7 +5432,7 @@
   }
   function validateReplacementSnapshot(value) {
     if(!value||typeof value!=='object'||Array.isArray(value)||!value.settings||typeof value.settings!=='object'||Array.isArray(value.settings)||!value.meta||typeof value.meta!=='object'||Array.isArray(value.meta))throw storeError('還原快照格式不完整','SNAPSHOT_INVALID');
-    const collections=['customers','projects','vendors','materials','employees','banks','quotations','dailyLogs','attendance','commissions','billings','receivables','receipts','retentionReceipts','payables','payments','salaryPayments','bankTransactions','payroll','materialUsages','projectCosts','invoices','audit'];
+    const collections=['customers','projects','vendors','materials','employees','banks','quotations','dailyLogs','attendance','commissions','billings','receivables','receipts','retentionReceipts','payables','payments','salaryPayments','commissionSettlements','bankTransactions','payroll','materialUsages','projectCosts','invoices','audit'];
     collections.forEach(key=>{if(value[key]!==undefined&&!Array.isArray(value[key]))throw storeError(`還原快照 ${key} 格式錯誤`,'SNAPSHOT_INVALID')});
     const cloned=JSON.parse(JSON.stringify(value));
     if(storeStateFingerprint(cloned)!==storeStateFingerprint(value))throw storeError('還原快照不是可完整保存的 JSON','SNAPSHOT_INVALID');
@@ -5395,9 +5879,9 @@
     'saveCommission','deleteCommission','saveDailyBatch','deleteDailyBatch','saveInvoice','createBilling','updateBilling','deleteBilling',
     'addReceipt','updateReceipt','deleteReceipt','completeEmployeeCashHandover','cancelEmployeeCashHandover','addRetentionReceipt','updateRetentionReceipt','deleteRetentionReceipt','deleteReceivableAccounting',
     'savePayable','deletePayable','cleanupMaterialPayableTestData','repairMergedPayableHistory','addPayablePayment','updatePayablePayment','deletePayablePayment',
-    'updatePayrollAdjustments','addSalaryPayment','updateSalaryPayment','deleteSalaryPayment','updateBillingInvoice',
-    'saveCustomer','deleteCustomer','saveProject','deleteProject','mergeProject','saveEmployee','deleteEmployee','saveMaterial','deleteMaterial',
-    'saveMaterialUsage','assignMaterialUsageEmployee','deleteMaterialUsage','saveProjectCost','deleteProjectCost','saveQuotationPrice','saveQuotation','setQuotationStatus','deleteQuotation',
+    'updatePayrollAdjustments','addSalaryPayment','updateSalaryPayment','deleteSalaryPayment','addProjectCommissionSettlement','deleteProjectCommissionSettlement','updateBillingInvoice',
+    'saveCustomer','deleteCustomer','saveProject','deleteProject','mergeProject','saveEmployee','deleteEmployee','saveVendor','saveMaterial','deleteMaterial','setMaterialOpeningStock','addInventoryReceipt',
+    'saveMaterialUsage','assignMaterialUsageEmployee','deleteMaterialUsage','saveProjectCost','deleteProjectCost','saveQuotationPrice','saveQuotation','saveQuotationBundle','setQuotationStatus','deleteQuotation',
     'cancelQuotationConfirmation','createQuotationRevision','saveQuotationTemplate'
   ]);
   function exposeStoreRead(name,reader) {
@@ -5408,7 +5892,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveMaterial, deleteMaterial, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,

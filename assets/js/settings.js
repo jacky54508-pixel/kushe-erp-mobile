@@ -18,6 +18,10 @@
     return store.getState?.() || {};
   }
 
+  function roleLabel(value) {
+    return ({owner:'負責人／最高權限',admin:'管理員',accounting:'會計',employee:'員工'})[String(value || '')] || '—';
+  }
+
   function businessStamp(value) {
     const raw = String(value || '').trim();
     if (!raw || !Number.isFinite(Date.parse(raw))) return '—';
@@ -71,6 +75,7 @@
     const host = $('#settingsApp');
     if (!host) return;
     const data = state(), s = data.settings || {}, user = window.KusheAuthGate?.user?.() || {};
+    const companyContext = window.KusheAuthGate?.companyContext?.() || null;
     const auto = window.KusheCloudSync?.autoStatus?.() || {};
     const device = window.KusheCloudSync?.deviceSecurityStatus?.() || {mode:'temporary',trusted:false,explicit:false};
     const units = Array.isArray(s.quotationUnitPresets) ? s.quotationUnitPresets.filter(Boolean) : [];
@@ -102,7 +107,14 @@
         <div class="settings-side">
           <article class="commission-panel settings-card">
             <header class="settings-card-head"><div><span class="settings-icon" aria-hidden="true"><i data-icon="user-round"></i></span><div><h2>帳戶安全</h2><p>登入由 Supabase Auth 管理，不保存 ERP 登入密碼。</p></div></div></header>
-            <dl class="settings-kv"><div><dt>目前登入 Email</dt><dd>${esc(user.email || '—')}</dd></div><div><dt>登入方式</dt><dd>Supabase Auth</dd></div></dl>
+            <dl class="settings-kv">
+              <div><dt>目前登入 Email</dt><dd>${esc(user.email || '—')}</dd></div>
+              <div><dt>所屬公司</dt><dd>${esc(companyContext?.companyName || '—')}</dd></div>
+              <div><dt>公司角色</dt><dd>${esc(roleLabel(companyContext?.role))}</dd></div>
+              <div><dt>員工綁定</dt><dd>${esc(companyContext?.employeeId || '尚未綁定員工')}</dd></div>
+              <div><dt>公司身分驗證</dt><dd>${companyContext?.shadowVerified?'Shadow PASS':'—'}</dd></div>
+              <div><dt>登入方式</dt><dd>Supabase Auth</dd></div>
+            </dl>
             <footer class="settings-actions"><button class="commission-secondary" id="settingsPassword" type="button">變更密碼</button></footer>
           </article>
 

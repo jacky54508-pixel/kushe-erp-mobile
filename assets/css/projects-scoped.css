@@ -1190,6 +1190,52 @@
   #projectsView #materialUsageForm .project-form-grid { grid-template-columns: minmax(0,1fr); }
 }
 
+
+/* P20-6C-2 Material usage modal footer recovery for desktop and mobile. */
+.erp-detail-overlay:has(#materialUsageForm){
+  overflow:hidden;
+  overscroll-behavior:contain;
+}
+.erp-detail-card:has(> #materialUsageForm){
+  max-height:calc(100vh - 32px);
+  max-height:calc(100dvh - 32px);
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+.erp-detail-card:has(> #materialUsageForm)>header{
+  flex:0 0 auto;
+}
+#materialUsageForm{
+  flex:1 1 auto;
+  min-width:0;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+#materialUsageForm>.erp-detail-body{
+  flex:1 1 auto;
+  min-width:0;
+  min-height:0;
+  overflow-x:hidden;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+  padding-bottom:24px;
+}
+#materialUsageForm>.erp-detail-body>*{
+  min-width:0;
+  max-width:100%;
+}
+#materialUsageForm>footer{
+  position:sticky;
+  bottom:0;
+  z-index:2;
+  flex:0 0 auto;
+  background:#fff;
+}
+
 /* P19-3B-2A Material usage mobile scroll fix. */
 @media (max-width: 820px) {
   .erp-detail-overlay:has(#materialUsageForm) {

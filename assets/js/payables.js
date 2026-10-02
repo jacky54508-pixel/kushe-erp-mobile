@@ -1,5 +1,19 @@
 (function () {
   'use strict';
+  function committedPresentationWarning(error){
+    const result=store.getLastStoreTransactionResult?.();
+    try{if(result?.status==='COMMITTED_WITH_NOTIFICATION_WARNING'&&window.KusheRecovery?.showResult){window.KusheRecovery.showResult(result);return}}catch(_){}
+    try{window.KushePhase1?.toast('資料已儲存，但畫面更新異常；請重新整理，請勿重送。')}catch(_){}
+  }
+
+  function bindImeSafeSearch(input,commit,refresh,delay=160){
+    if(!input)return;let composing=false,timer=0;
+    const cancel=()=>{window.clearTimeout(timer);timer=0};
+    const run=()=>{cancel();timer=window.setTimeout(()=>{timer=0;refresh()},delay)};
+    input.addEventListener('compositionstart',()=>{composing=true;cancel()});
+    input.addEventListener('input',(event)=>{if(composing||event.isComposing){composing=true;cancel();return}commit(input.value);run()});
+    input.addEventListener('compositionend',()=>{composing=false;commit(input.value);run()});
+  }
 
   const store = window.KuSheERPStore;
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -824,16 +838,12 @@
     [['payableMonth','month'],['payablePaymentMonth','paymentMonth'],['payableVendor','vendor'],['payableProject','project'],['payableCategory','category'],['payableStatus','status']].forEach(([id,key]) => {
       $(`#${id}`).onchange = (event) => { filters[key] = event.target.value; render(); };
     });
-    $('#payableQuery').oninput = (event) => {
-      filters.query = event.target.value;
-      clearTimeout(queryTimer);
-      queryTimer = setTimeout(() => {
-        render();
-        const input = $('#payableQuery');
-        input?.focus();
-        input?.setSelectionRange(input.value.length, input.value.length);
-      }, 140);
-    };
+    bindImeSafeSearch($('#payableQuery'),(value)=>{filters.query=value},()=>{
+      render();
+      const input=$('#payableQuery');
+      input?.focus();
+      input?.setSelectionRange(input.value.length,input.value.length);
+    },140);
     $('#newPayable').onclick = openNewPayable;
     $$('[data-pay]').forEach((button) => { button.onclick = (event) => { event.stopPropagation(); openPayment(button.dataset.pay); }; });
     $$('[data-expand-button]').forEach((button) => { button.onclick = (event) => { event.stopPropagation();toggleDetail(button.dataset.expandButton,modelById.get(String(button.dataset.expandButton)));}; });
@@ -927,17 +937,25 @@
     form.onsubmit = async (event) => {
       event.preventDefault();
       const button = $('button[type="submit"]', form);
+      if(button.disabled)return;
       button.disabled = true;
       try {
         const fd = new FormData(form);
         await store.addPayablePayment({payableId:id,date:fd.get('date'),amount:fd.get('amount'),bankId:fd.get('bankId'),paymentMethod:fd.get('paymentMethod'),fee:fd.get('fee'),feePayer:fd.get('feePayer'),note:fd.get('note'),idempotencyKey:token});
-        closeModal();
-        window.KushePhase1.toast('付款已儲存，應付餘額、銀行與 Dashboard 已同步');
-        render();
-        setTimeout(() => toggleDetail(id), 0);
       } catch (error) {
         window.KushePhase1.toast(error.message || String(error));
         button.disabled = false;
+        return;
+      }
+      try {
+        closeModal();
+        render();
+        setTimeout(() => toggleDetail(id), 0);
+        const result=store.getLastStoreTransactionResult?.();
+        if(result?.status==='COMMITTED_WITH_NOTIFICATION_WARNING')committedPresentationWarning();
+        else window.KushePhase1.toast('付款已儲存，應付餘額、銀行與 Dashboard 已同步');
+      } catch (error) {
+        committedPresentationWarning(error);
       }
     };
   }
@@ -953,7 +971,7 @@
     document.body.appendChild(overlay);$$('[data-close-detail]',overlay).forEach((button)=>{button.onclick=closeModal});
     const form=$('#editPayablePaymentForm',overlay),refresh=()=>{const amount=Math.max(0,Number($('[name="amount"]',form).value)||0),fee=Math.max(0,Number($('[name="fee"]',form).value)||0),company=$('[name="feePayer"]',form).value==='company',debit=company?amount+fee:amount;$('#editPaymentPreviewAmount',overlay).textContent=money(amount);$('#editPaymentPreviewDebit',overlay).textContent=money(debit);$('#editPaymentPreviewOpen',overlay).textContent=money(Math.max(0,row.amount-otherPaid-amount))};
     ['amount','fee','feePayer'].forEach((name)=>{$(`[name="${name}"]`,form).oninput=refresh});
-    form.onsubmit=async(event)=>{event.preventDefault();const button=$('button[type="submit"]',form);button.disabled=true;try{const fd=new FormData(form);await store.updatePayablePayment(id,{date:fd.get('date'),amount:fd.get('amount'),bankId:fd.get('bankId'),paymentMethod:fd.get('paymentMethod'),fee:fd.get('fee'),feePayer:fd.get('feePayer'),note:fd.get('note')});closeModal();render();setTimeout(()=>toggleDetail(payable.id),0);window.KushePhase1.toast('付款與銀行交易已同步更新')}catch(error){window.KushePhase1.toast(error.message||String(error));button.disabled=false}};
+    form.onsubmit=async(event)=>{event.preventDefault();const button=$('button[type="submit"]',form);if(button.disabled)return;button.disabled=true;try{const fd=new FormData(form);await store.updatePayablePayment(id,{date:fd.get('date'),amount:fd.get('amount'),bankId:fd.get('bankId'),paymentMethod:fd.get('paymentMethod'),fee:fd.get('fee'),feePayer:fd.get('feePayer'),note:fd.get('note')})}catch(error){window.KushePhase1.toast(error.message||String(error));button.disabled=false;return}try{closeModal();render();setTimeout(()=>toggleDetail(payable.id),0);const result=store.getLastStoreTransactionResult?.();if(result?.status==='COMMITTED_WITH_NOTIFICATION_WARNING')committedPresentationWarning();else window.KushePhase1.toast('付款與銀行交易已同步更新')}catch(error){committedPresentationWarning(error)}};
   }
   async function activate() {
     active = true;

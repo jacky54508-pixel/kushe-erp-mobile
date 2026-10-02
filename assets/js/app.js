@@ -29,9 +29,16 @@
     requestAnimationFrame(()=>node.classList.add('is-visible')); setTimeout(()=>{node.classList.remove('is-visible');setTimeout(()=>node.remove(),220)},2400);
   }
   function setAuthView(authenticated) {
-    const loginView = $('#loginView'), appShell = $('#appShell');
+    const loginView = $('#loginView'), appShell = $('#appShell'), employeeShell = $('#employeeShellView');
     if (loginView) loginView.hidden = Boolean(authenticated);
     if (appShell) appShell.hidden = !authenticated;
+    if (employeeShell && authenticated) employeeShell.hidden = true;
+  }
+  function setEmployeeShellView(active) {
+    const loginView=$('#loginView'),appShell=$('#appShell'),employeeShell=$('#employeeShellView');
+    if(loginView)loginView.hidden=Boolean(active);
+    if(appShell)appShell.hidden=true;
+    if(employeeShell)employeeShell.hidden=!active;
   }
   function setLoginMessage(message = '', error = false) {
     const status = $('#loginStatus'), alert = $('#loginError');
@@ -46,7 +53,44 @@
     if (message) setLoginMessage(message);
   }
   async function startAuthenticatedApp() {
-    setAuthView(true);
+    setAuthView(false);
+    setLoginMessage('正在確認公司身分與權限…');
+    try {
+      if (!window.KusheAuthGate?.resolveCompanyContext) throw new Error('Company context unavailable');
+      const companyContext = await window.KusheAuthGate.resolveCompanyContext();
+      const isLegacySource=Boolean(companyContext?.legacySourceUserId)&&companyContext.userId===companyContext.legacySourceUserId;
+      if(companyContext?.role==='employee'&&!isLegacySource){
+        window.KusheCloudSync?.stopAutoBackup?.();
+        window.KusheCloudSync?.close?.();
+        window.KuSheERPStore?.clearEphemeralSession?.();
+        setLoginMessage();
+        setEmployeeShellView(true);
+        if(!window.KusheEmployeeShell?.start)throw new Error('Employee shell unavailable');
+        await window.KusheEmployeeShell.start(companyContext);
+        return true;
+      }
+      if (!isLegacySource) {
+        window.KusheCloudSync?.stopAutoBackup?.();
+        window.KusheCloudSync?.close?.();
+        window.KuSheERPStore?.clearEphemeralSession?.();
+        setLoginMessage('公司身分驗證成功；多帳號共用資料尚未啟用，未載入 ERP 業務資料。', true);
+        return false;
+      }
+    } catch (error) {
+      window.KusheCloudSync?.stopAutoBackup?.();
+      window.KuSheERPStore?.clearEphemeralSession?.();
+      const messages = {
+        company_membership_missing: '此帳號尚未加入任何公司，無法進入 ERP。',
+        company_membership_inactive: '此帳號的公司權限已停用，無法進入 ERP。',
+        company_membership_ambiguous: '此帳號目前綁定多個啟用中的公司，請由管理者先確認公司歸屬。',
+        company_membership_invalid: '此帳號的公司權限資料不完整，無法進入 ERP。',
+        company_unavailable: '無法驗證此帳號所屬公司，請由管理者檢查公司設定。',
+        company_state_unavailable: '無法驗證公司 ERP 資料權限，尚未載入任何業務資料。'
+      };
+      setLoginMessage(messages[error?.code] || '公司身分驗證失敗，尚未載入任何 ERP 業務資料。', true);
+      return false;
+    }
+
     setLoginMessage();
     const device=window.KusheCloudSync?.deviceSecurityStatus?.()||{trusted:false};
     try{
@@ -65,13 +109,21 @@
         window.KusheRecovery?.showResult({status:'RECOVERY_REQUIRED',operationId:error.operationId||'',message:error.message});
         await window.KusheRecovery?.open();
       }
-      return;
+      return false;
     }
+    setAuthView(true);
     if (!initialized) {
       init();
       initialized = true;
     }
+    applyRoleNavigationPermissions();
+    const permittedRoute=currentHashRoute();
+    if(decodeURIComponent(window.location.hash.slice(1))!==permittedRoute){
+      history.replaceState({route:permittedRoute},'',`#${permittedRoute}`);
+      renderRoute(permittedRoute,{instant:true});
+    }
     if(device.trusted)try { void Promise.resolve(window.KusheCloudSync?.startAutoBackup?.()).catch(() => {}); } catch (_) {}
+    return true;
   }
   async function handleLogout() {
     if($('#recoveryModal'))$('#recoveryModal').hidden=true;
@@ -80,6 +132,8 @@
     window.KusheCloudSync?.stopAutoBackup?.();
     window.KusheCloudSync?.close();
     window.KuSheERPStore?.clearEphemeralSession?.();
+    window.KusheEmployeeShell?.clear?.();
+    setEmployeeShellView(false);
     closeChangePasswordModal(true);
     try { await window.KusheAuthGate?.logout(); } catch (_) {}
     setAuthView(false);
@@ -199,9 +253,29 @@
   }
   function closePopovers(except) { $$('.topbar-popover.is-open').forEach((node)=>{if(node!==except)node.classList.remove('is-open')}); }
   function togglePopover(id) { const node=$(`#${id}`); if(!node)return; const open=!node.classList.contains('is-open'); closePopovers(node); node.classList.toggle('is-open',open); }
+  function knownRoute(module) {
+    const route=String(module||'').replace(/^#/,'');
+    return route==='dashboard'||config.moduleLabels?.[route]?route:'dashboard';
+  }
+  function firstAllowedRoute() {
+    return window.KusheAuthGate?.firstAllowedRoute?.()||'dashboard';
+  }
   function validRoute(module) {
-    const route = String(module || '').replace(/^#/, '');
-    return route === 'dashboard' || config.moduleLabels?.[route] ? route : 'dashboard';
+    const route=knownRoute(module);
+    if(window.KusheAuthGate?.canView?.(route))return route;
+    const fallback=firstAllowedRoute();
+    return fallback&&window.KusheAuthGate?.canView?.(fallback)?fallback:'dashboard';
+  }
+  function applyRoleNavigationPermissions() {
+    $$('[data-module]').forEach((node)=>{
+      const allowed=Boolean(window.KusheAuthGate?.canView?.(node.dataset.module));
+      node.hidden=!allowed;
+      node.setAttribute('aria-hidden',String(!allowed));
+      if(!allowed&&node.classList.contains('active')){
+        node.classList.remove('active');
+        node.setAttribute('aria-current','false');
+      }
+    });
   }
   function currentHashRoute() { return validRoute(decodeURIComponent(window.location.hash.slice(1))); }
   function renderRoute(module, options = {}) {
@@ -324,7 +398,9 @@
     }
   }
   function navigate(module, options = {}) {
-    const route = validRoute(module);
+    const requested=knownRoute(module);
+    const route = validRoute(requested);
+    if(route!==requested)toast('此帳號沒有此功能的查看權限');
     if (!options.replace && currentHashRoute() !== route) history.pushState({ route }, '', `#${route}`);
     else if (options.replace) history.replaceState({ route }, '', `#${route}`);
     renderRoute(route, options);
@@ -417,6 +493,7 @@
     setupHeader();setupNavigation();setupNavTooltips();setupPeriod();setupSearch();window.KusheDashboard.init();
     navigate(currentHashRoute(), { replace: true, instant: true });
   }
+  window.addEventListener('kushe:employee-logout',()=>void handleLogout());
   window.KushePhase1={navigate,toast,boot};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>{void boot()},{once:true});else void boot();
 }());
