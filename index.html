@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="theme-color" content="#061d3b">
   <title>酷舍 ERP｜首頁總覽</title>
-  <link rel="stylesheet" href="assets/css/app.css?v=20261002-p20-security-1a-mfa1">
+  <link rel="stylesheet" href="assets/css/app.css?v=20261002-p20-security-1a2">
   <link rel="stylesheet" href="assets/css/projects-scoped.css?v=20261001-p20-6c2-material-footer1">
   <link rel="stylesheet" href="assets/css/materials-scoped.css?v=20261001-p20-6h-material-vendors1">
   <link rel="stylesheet" href="assets/css/employees-scoped.css?v=20260921-p18-5b-employees-mobile1">
@@ -20,7 +20,7 @@
 <body>
   <main class="auth-view" id="loginView" aria-labelledby="loginTitle">
     <section class="auth-card">
-      <div class="auth-brand" aria-hidden="true"><span>酷</span></div>
+      <div class="auth-company-logo"><img src="assets/img/kushe-logo.png?v=20261002-p20-security-1a2" alt="酷舍企業有限公司"></div>
       <header>
         <p>酷舍企業有限公司</p>
         <h1 id="loginTitle">酷舍 ERP</h1>
@@ -43,29 +43,41 @@
   </main>
   <main class="auth-view mfa-view" id="mfaView" aria-labelledby="mfaTitle" hidden>
     <section class="auth-card mfa-card">
-      <div class="auth-brand" aria-hidden="true"><span>盾</span></div>
-      <header>
+      <div class="auth-company-logo"><img src="assets/img/kushe-logo.png?v=20261002-p20-security-1a2" alt="酷舍企業有限公司"></div>
+      <header class="mfa-header">
         <p>酷舍企業有限公司</p>
-        <h1 id="mfaTitle">雙重驗證</h1>
-        <span id="mfaSubtitle">正在確認安全驗證狀態…</span>
+        <h1 id="mfaTitle">安全驗證</h1>
+        <span id="mfaSubtitle">為保護公司資料，請完成第二步驗證</span>
       </header>
-      <div class="mfa-enroll" id="mfaEnroll" hidden>
-        <p class="mfa-copy">第一次使用請先用驗證器 App 掃描 QR Code，再輸入 App 顯示的 6 位驗證碼。</p>
-        <div class="mfa-qr-wrap"><img id="mfaQr" alt="酷舍 ERP TOTP QR Code"></div>
-        <div class="mfa-secret-wrap"><span>無法掃描時可手動輸入：</span><code id="mfaSecret"></code></div>
-      </div>
-      <div class="mfa-challenge" id="mfaChallenge" hidden>
-        <p class="mfa-copy">請輸入驗證器 App 目前顯示的驗證碼。</p>
-      </div>
-      <form id="mfaForm">
-        <label>
-          <span>驗證碼</span>
-          <input id="mfaCode" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="8" required>
-        </label>
-        <button id="mfaSubmit" type="submit">驗證並進入 ERP</button>
+      <section class="mfa-enroll" id="mfaEnroll" hidden>
+        <div class="mfa-step-badge">首次設定</div>
+        <h2>綁定驗證器</h2>
+        <p class="mfa-copy">請使用 Google Authenticator、Apple 密碼、1Password 或其他 TOTP 驗證器掃描下方 QR Code。</p>
+        <div class="mfa-qr-wrap"><img id="mfaQr" alt="酷舍 ERP 驗證器 QR Code"></div>
+        <div class="mfa-secret-wrap"><span>無法掃描？可在驗證器手動輸入這組金鑰</span><code id="mfaSecret"></code></div>
+        <p class="mfa-next-hint">綁定完成後，請輸入驗證器目前顯示的 6 位數字。</p>
+      </section>
+      <section class="mfa-challenge" id="mfaChallenge" hidden>
+        <div class="mfa-step-badge">第二步驗證</div>
+        <h2>輸入驗證碼</h2>
+        <p class="mfa-copy">打開你的驗證器 App，輸入「酷舍 ERP」目前顯示的 6 位數字。</p>
+      </section>
+      <form id="mfaForm" novalidate>
+        <fieldset class="mfa-otp-fieldset">
+          <legend>6 位驗證碼</legend>
+          <div class="mfa-otp" id="mfaOtp" aria-label="6 位驗證碼">
+            <input class="mfa-digit" data-mfa-digit="0" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="1" aria-label="第 1 位驗證碼">
+            <input class="mfa-digit" data-mfa-digit="1" type="text" inputmode="numeric" maxlength="1" aria-label="第 2 位驗證碼">
+            <input class="mfa-digit" data-mfa-digit="2" type="text" inputmode="numeric" maxlength="1" aria-label="第 3 位驗證碼">
+            <input class="mfa-digit" data-mfa-digit="3" type="text" inputmode="numeric" maxlength="1" aria-label="第 4 位驗證碼">
+            <input class="mfa-digit" data-mfa-digit="4" type="text" inputmode="numeric" maxlength="1" aria-label="第 5 位驗證碼">
+            <input class="mfa-digit" data-mfa-digit="5" type="text" inputmode="numeric" maxlength="1" aria-label="第 6 位驗證碼">
+          </div>
+        </fieldset>
+        <p class="auth-status mfa-status" id="mfaStatus" aria-live="polite" hidden></p>
+        <p class="auth-error mfa-error" id="mfaError" role="alert" hidden></p>
+        <button class="mfa-primary" id="mfaSubmit" type="submit">驗證並進入 ERP</button>
         <button class="mfa-logout" id="mfaLogout" type="button">取消並安全登出</button>
-        <p class="auth-status" id="mfaStatus" aria-live="polite" hidden></p>
-        <p class="auth-error" id="mfaError" role="alert" hidden></p>
       </form>
     </section>
   </main>
@@ -328,7 +340,7 @@
   </div>
   <script src="assets/js/lucide.min.js?v=20260809-commissions1"></script>
   <script src="assets/js/config.js?v=20260823-auth-p0-1"></script>
-  <script src="assets/js/auth-gate.js?v=20261002-p20-security-1a-mfa1"></script>
+  <script src="assets/js/auth-gate.js?v=20261002-p20-security-1a2"></script>
   <script src="assets/js/legacy-adapter.js?v=20260809-nav4"></script>
   <script src="assets/js/erp-store.js?v=20261002-p20-8d1-audit-v2"></script>
   <script src="assets/js/cloud-sync.js?v=20260930-p19-3b2d-trusted-priority-resolution1"></script>
@@ -354,6 +366,6 @@
   <script src="assets/js/reports.js?v=20260929-p18-5e1a-reports-foundation1"></script>
   <script src="assets/js/settings.js?v=20260930-p20-2-shadow-company1"></script>
   <script src="assets/js/employee-shell.js?v=20261001-p20-4b2a-employee-shell1"></script>
-  <script src="assets/js/app.js?v=20261002-p20-security-1a-mfa1"></script>
+  <script src="assets/js/app.js?v=20261002-p20-security-1a2"></script>
 </body>
 </html>

@@ -1572,18 +1572,48 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
 }
 
 
-/* P20 Security-1A — mandatory TOTP MFA gate */
-.mfa-card{max-width:460px}
-.mfa-card .mfa-copy{margin:0 0 16px;color:#546174;font-size:14px;line-height:1.65}
-.mfa-qr-wrap{display:flex;justify-content:center;align-items:center;margin:10px auto 14px;padding:14px;background:#fff;border:1px solid #dce3eb;border-radius:18px;width:min(240px,100%)}
-.mfa-qr-wrap img{display:block;width:210px;max-width:100%;height:auto}
-.mfa-secret-wrap{display:grid;gap:6px;margin:0 0 16px;padding:12px 14px;background:#f6f8fb;border:1px solid #e1e6ed;border-radius:12px;color:#526072;font-size:12px}
-.mfa-secret-wrap code{display:block;overflow-wrap:anywhere;font-size:13px;font-weight:700;color:#17263c;user-select:all}
-.mfa-card form{margin-top:14px}
-.mfa-card input#mfaCode{letter-spacing:.18em}
-.mfa-logout{margin-top:10px;background:transparent!important;color:#607086!important;border:1px solid #d8e0e9!important}
+/* P20 Security-1A-2 — branded mandatory TOTP MFA gate */
+.auth-company-logo{width:92px;height:92px;margin:0 auto 14px;display:grid;place-items:center;border-radius:24px;background:#fff;box-shadow:0 16px 36px rgba(6,29,59,.12);border:1px solid rgba(16,47,91,.08)}
+.auth-company-logo img{display:block;width:70px;height:70px;object-fit:contain}
+.mfa-card{width:min(520px,calc(100% - 32px));max-width:520px;padding:38px 42px 34px}
+.mfa-header{text-align:center;margin-bottom:22px}
+.mfa-header p{margin-bottom:6px}
+.mfa-header h1{font-size:32px;letter-spacing:.02em;margin:0 0 6px}
+.mfa-header span{display:block;color:#607086;font-size:14px;line-height:1.5}
+.mfa-enroll,.mfa-challenge{margin:8px 0 18px;padding:18px;border:1px solid #e2e8f0;border-radius:18px;background:#f8fafc}
+.mfa-enroll h2,.mfa-challenge h2{margin:7px 0 8px;font-size:18px;color:#0b2d55}
+.mfa-step-badge{display:inline-flex;align-items:center;min-height:26px;padding:0 9px;border-radius:999px;background:#e8f1ff;color:#1558a6;font-size:12px;font-weight:800;letter-spacing:.04em}
+.mfa-copy,.mfa-next-hint{margin:0;color:#59697c;font-size:14px;line-height:1.65}
+.mfa-next-hint{margin-top:12px;font-weight:700;color:#294867}
+.mfa-qr-wrap{display:flex;justify-content:center;align-items:center;margin:16px auto 14px;padding:14px;background:#fff;border:1px solid #dce4ee;border-radius:18px;width:236px;min-height:236px}
+.mfa-qr-wrap img{display:block;width:208px;max-width:100%;height:auto}
+.mfa-secret-wrap{display:grid;gap:7px;margin:0;padding:12px 14px;background:#fff;border:1px solid #e1e7ef;border-radius:12px;color:#68778a;font-size:12px}
+.mfa-secret-wrap code{display:block;overflow-wrap:anywhere;font-size:13px;font-weight:800;color:#152b47;user-select:all}
+.mfa-otp-fieldset{border:0;padding:0;margin:0 0 14px}
+.mfa-otp-fieldset legend{width:100%;margin:0 0 9px;text-align:center;color:#52647a;font-size:13px;font-weight:700}
+.mfa-otp{display:grid;grid-template-columns:repeat(6,1fr);gap:9px;max-width:390px;margin:0 auto}
+.mfa-digit{width:100%;min-width:0;height:58px;padding:0!important;text-align:center!important;border:1.5px solid #cbd6e4!important;border-radius:12px!important;background:#fff!important;color:#0c2f5a!important;font-size:25px!important;font-weight:800!important;line-height:58px!important;box-shadow:none!important}
+.mfa-digit:focus{outline:0!important;border-color:#1769d2!important;box-shadow:0 0 0 3px rgba(23,105,210,.12)!important}
+.mfa-primary{width:100%;min-height:54px;margin-top:4px;border:0;border-radius:13px;background:linear-gradient(135deg,#176fe8,#174fae);color:#fff;font-size:16px;font-weight:800;box-shadow:0 12px 25px rgba(23,91,183,.22)}
+.mfa-primary:disabled{opacity:.65;cursor:wait}
+.mfa-logout{display:block;width:100%;margin-top:10px;padding:10px;border:0!important;background:transparent!important;color:#6f7f92!important;font-size:13px;font-weight:700;box-shadow:none!important}
+.mfa-status,.mfa-error{margin:8px 0 2px!important;padding:10px 12px;border-radius:10px;text-align:center;font-size:13px;line-height:1.5}
+.mfa-status{background:#eef6ff;color:#22598c}
+.mfa-error{background:#fff1f1;color:#bd2f2f}
 @media (max-width:640px){
-  .mfa-card{width:calc(100% - 28px);max-width:none}
-  .mfa-qr-wrap{width:210px;padding:12px}
-  .mfa-qr-wrap img{width:186px}
+  .auth-company-logo{width:78px;height:78px;border-radius:21px;margin-bottom:12px}
+  .auth-company-logo img{width:60px;height:60px}
+  .mfa-card{width:calc(100% - 24px);padding:28px 20px 24px;border-radius:24px}
+  .mfa-header{margin-bottom:16px}
+  .mfa-header h1{font-size:27px}
+  .mfa-enroll,.mfa-challenge{padding:15px;border-radius:15px}
+  .mfa-qr-wrap{width:206px;min-height:206px;padding:11px}
+  .mfa-qr-wrap img{width:184px}
+  .mfa-otp{gap:6px}
+  .mfa-digit{height:52px;border-radius:10px!important;font-size:22px!important;line-height:52px!important}
+}
+@media (max-width:380px){
+  .mfa-card{padding-left:16px;padding-right:16px}
+  .mfa-otp{gap:5px}
+  .mfa-digit{height:48px;font-size:20px!important;line-height:48px!important}
 }

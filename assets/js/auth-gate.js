@@ -125,19 +125,24 @@
     if (options.token) headers.Authorization = `Bearer ${options.token}`;
     if (options.body !== undefined) headers['Content-Type'] = 'application/json';
     let response;
+    const timeoutMs=Math.max(0,Number(options.timeoutMs)||0);
+    const controller=!options.signal&&timeoutMs&&typeof AbortController==='function'?new AbortController():null;
+    const timeout=controller?setTimeout(()=>controller.abort(),timeoutMs):0;
     try {
       response = await fetch(`${url}${path}`, {
         method: options.method || 'GET',
         headers,
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
-        signal: options.signal
+        signal: options.signal||controller?.signal
       });
     } catch (error) {
       throw new AuthRequestError(0, '', error?.name === 'AbortError' ? 'aborted' : 'transport');
+    } finally {
+      if(timeout)clearTimeout(timeout);
     }
     let payload = {};
     try { payload = await response.json(); } catch (_) {}
-    if (!response.ok) throw new AuthRequestError(response.status);
+    if (!response.ok) throw new AuthRequestError(response.status,String(payload?.code||''),'http');
     return payload;
   }
 
@@ -241,7 +246,7 @@
     if(!current?.access_token||!current?.user?.id)throw new AuthRequestError(401,'invalid_session');
     const user=await verifiedUser(current.access_token);
     if(user.id!==current.user.id)throw new AuthRequestError(403,'principal_mismatch');
-    const payload=await requestJson('/auth/v1/factors',{token:current.access_token});
+    const payload=await requestJson('/rest/v1/auth/factors',{token:current.access_token,timeoutMs:8000});
     const factors=normalizeMfaFactors(payload),verifiedTotp=factors.filter((row)=>row.factorType==='totp'&&row.status==='verified');
     return Object.freeze({
       aal:sessionAal(current),
@@ -257,7 +262,7 @@
     if(sessionAal(current)==='aal2')throw new AuthRequestError(409,'mfa_already_verified');
     const payload=await requestJson('/auth/v1/factors',{
       method:'POST',token:current.access_token,
-      body:{factor_type:'totp',friendly_name:'酷舍 ERP'}
+      body:{factor_type:'totp',friendly_name:'酷舍 ERP'},timeoutMs:8000
     });
     const id=String(payload?.id||''),totp=payload?.totp||{},qrCode=String(totp.qr_code||totp.qrCode||''),secret=String(totp.secret||''),uri=String(totp.uri||'');
     if(!id||!qrCode||!secret)throw new AuthRequestError(0,'invalid_mfa_enrollment');
@@ -269,7 +274,7 @@
     if(!current?.access_token||!current?.user?.id)throw new AuthRequestError(401,'invalid_session');
     if(!id)throw new AuthRequestError(400,'invalid_mfa_factor');
     const payload=await requestJson('/auth/v1/factors/'+encodeURIComponent(id)+'/challenge',{
-      method:'POST',token:current.access_token,body:{}
+      method:'POST',token:current.access_token,body:{},timeoutMs:8000
     });
     const challengeId=String(payload?.id||'');
     if(!challengeId)throw new AuthRequestError(0,'invalid_mfa_challenge');
@@ -282,7 +287,7 @@
     if(!id||!challenge||!/^[0-9]{6,8}$/.test(tokenCode))throw new AuthRequestError(400,'invalid_mfa_code');
     const payload=await requestJson('/auth/v1/factors/'+encodeURIComponent(id)+'/verify',{
       method:'POST',token:current.access_token,
-      body:{challenge_id:challenge,code:tokenCode}
+      body:{challenge_id:challenge,code:tokenCode},timeoutMs:8000
     });
     const next=normalizeSession(payload,current.refresh_token);
     next.user=await verifiedUser(next.access_token);

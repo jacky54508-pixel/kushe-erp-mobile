@@ -75,13 +75,18 @@
     if(form)form.setAttribute('aria-busy',String(Boolean(busy)));
     if(message)setMfaMessage(message);
   }
+  function mfaDigits(){return $$('.mfa-digit')}
+  function mfaCode(){return mfaDigits().map((node)=>String(node.value||'').replace(/\D/g,'')).join('').slice(0,6)}
+  function clearMfaDigits(){mfaDigits().forEach((node)=>{node.value=''})}
+  function focusMfaDigit(index=0){mfaDigits()[Math.max(0,Math.min(5,index))]?.focus()}
   function resetMfaUi(){
     mfaFlow={mode:'',factorId:'',challengeId:'',enrollment:null,busy:false};
-    $('#mfaForm')?.reset();setMfaMessage();setMfaBusy(false);
+    $('#mfaForm')?.reset();clearMfaDigits();setMfaMessage();setMfaBusy(false);
     if($('#mfaEnroll'))$('#mfaEnroll').hidden=true;
     if($('#mfaChallenge'))$('#mfaChallenge').hidden=true;
     if($('#mfaQr'))$('#mfaQr').removeAttribute('src');
     if($('#mfaSecret'))$('#mfaSecret').textContent='';
+    if($('#mfaSubtitle'))$('#mfaSubtitle').textContent='為保護公司資料，請完成第二步驗證';
   }
   async function prepareMfaGate(){
     resetMfaUi();
@@ -97,7 +102,7 @@
         if($('#mfaChallenge'))$('#mfaChallenge').hidden=false;
         if($('#mfaSubtitle'))$('#mfaSubtitle').textContent='請完成驗證器第二因素';
         setMfaBusy(false);
-        $('#mfaCode')?.focus();
+        focusMfaDigit();
         return false;
       }
       const enrollment=await window.KusheAuthGate.enrollTotp();
@@ -108,19 +113,21 @@
       if($('#mfaQr'))$('#mfaQr').src=enrollment.qrCode;
       if($('#mfaSecret'))$('#mfaSecret').textContent=enrollment.secret;
       setMfaBusy(false);
-      $('#mfaCode')?.focus();
+      focusMfaDigit();
       return false;
     }catch(error){
       setMfaBusy(false);
-      setMfaMessage('無法啟動雙重驗證，ERP 尚未載入。請安全登出後再試。',true);
+      if($('#mfaSubtitle'))$('#mfaSubtitle').textContent='安全驗證暫時無法啟動';
+      const detail=error?.status===405?'驗證服務路徑不支援。':error?.kind==='aborted'?'驗證服務回應逾時。':'驗證服務暫時無法使用。';
+      setMfaMessage(detail+' ERP 尚未載入，請安全登出後再試。',true);
       return false;
     }
   }
   async function completeMfa(event){
     event.preventDefault();
     if(mfaFlow.busy)return;
-    const code=String($('#mfaCode')?.value||'').replace(/\s+/g,'');
-    if(!/^[0-9]{6,8}$/.test(code)){setMfaMessage('請輸入驗證器 App 顯示的 6 位驗證碼。',true);return}
+    const code=mfaCode();
+    if(!/^[0-9]{6}$/.test(code)){setMfaMessage('請完整輸入驗證器 App 顯示的 6 位數字。',true);focusMfaDigit(code.length);return}
     setMfaBusy(true,'正在驗證第二因素…');
     try{
       await window.KusheAuthGate.verifyMfa(mfaFlow.factorId,mfaFlow.challengeId,code);
@@ -128,7 +135,7 @@
       resetMfaUi();
       await startAuthenticatedApp({skipMfa:true});
     }catch(error){
-      $('#mfaCode').value='';
+      clearMfaDigits();
       try{
         if(mfaFlow.factorId){
           const challenge=await window.KusheAuthGate.createMfaChallenge(mfaFlow.factorId);
@@ -137,7 +144,7 @@
       }catch(_){}
       setMfaBusy(false);
       setMfaMessage('驗證碼不正確或已過期，請查看驗證器後再試一次。',true);
-      $('#mfaCode')?.focus();
+      focusMfaDigit();
     }
   }
   async function startAuthenticatedApp(options={}) {
@@ -327,6 +334,26 @@
       }
     });
     $('#mfaForm')?.addEventListener('submit',completeMfa);
+    $('#mfaOtp')?.addEventListener('input',(event)=>{
+      const input=event.target.closest?.('.mfa-digit');if(!input)return;
+      input.value=String(input.value||'').replace(/\D/g,'').slice(-1);
+      const index=Number(input.dataset.mfaDigit)||0;
+      if(input.value&&index<5)focusMfaDigit(index+1);
+      setMfaMessage();
+    });
+    $('#mfaOtp')?.addEventListener('keydown',(event)=>{
+      const input=event.target.closest?.('.mfa-digit');if(!input)return;
+      const index=Number(input.dataset.mfaDigit)||0;
+      if(event.key==='Backspace'&&!input.value&&index>0){event.preventDefault();focusMfaDigit(index-1)}
+      if(event.key==='ArrowLeft'&&index>0){event.preventDefault();focusMfaDigit(index-1)}
+      if(event.key==='ArrowRight'&&index<5){event.preventDefault();focusMfaDigit(index+1)}
+    });
+    $('#mfaOtp')?.addEventListener('paste',(event)=>{
+      const digits=String(event.clipboardData?.getData('text')||'').replace(/\D/g,'').slice(0,6);
+      if(!digits)return;
+      event.preventDefault();mfaDigits().forEach((node,index)=>{node.value=digits[index]||''});
+      focusMfaDigit(Math.max(0,Math.min(5,digits.length-1)));setMfaMessage();
+    });
     $('#mfaLogout')?.addEventListener('click',()=>void handleLogout());
     $('#changePasswordForm')?.addEventListener('submit', handleChangePassword);
     $('#changePasswordCancel')?.addEventListener('click', () => closeChangePasswordModal());
