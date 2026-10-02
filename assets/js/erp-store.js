@@ -16,6 +16,7 @@
   const DEVICE_TRUST_KEY = 'kushe_erp_device_trust_v1';
   const DEVICE_TRUST_SCHEMA = 'kushe-device-trust-v1';
   let ephemeralSession = null;
+  let ephemeralSessionEpoch = 0;
   let state = null;
   let publishedState = null;
   let db = null;
@@ -2444,12 +2445,17 @@
     const cloud=window.KusheCloudSync;
     if(typeof cloud?.commitTemporarySnapshot!=='function')throw storeError('臨時裝置雲端提交服務尚未就緒','EPHEMERAL_CLOUD_UNAVAILABLE');
     const startedAt=new Date().toISOString(),before=publishedState,beforeFingerprint=storeStateFingerprint(before),beforeRevision=storeRevisionOf(before);
+    const capturedEpoch=ephemeralSessionEpoch,capturedUserId=ephemeralSession.userId;
+    const assertSession=()=>{
+      if(ephemeralSessionEpoch!==capturedEpoch||!isEphemeralMode()||ephemeralSession.userId!==capturedUserId||publishedState!==before)throw storeError('登入或資料來源已變更，舊儲存回應已停止套用；請重新登入核對雲端結果，勿直接重送。','EPHEMERAL_SESSION_CHANGED');
+    };
     let draft=storeStateClone(before),writerResult,writerPending;
     const transaction={operationId,operationType,startedAt,action:'',auditDetails:null,persistenceRequested:false};
     try{
       activeStoreTransaction=transaction;state=draft;
       try{writerPending=writer(...args)}finally{state=publishedState;activeStoreTransaction=null}
       writerResult=await writerPending;
+      assertSession();
       const changed=storeStateFingerprint(draft)!==beforeFingerprint;
       if(changed&&!transaction.persistenceRequested)throw storeError(`${operationType} 修改資料但未宣告提交，已停止操作`,'STORE_UNDECLARED_MUTATION');
       if(!changed){recordStoreTransaction('COMMITTED',{operationId,operationType,code:'STORE_NO_CHANGE',message:'資料未變更，無需寫入',noChange:true,revisionId:beforeRevision.id});return writerResult}
@@ -2468,6 +2474,7 @@
       if(storeStateFingerprint(serial)!==storeStateFingerprint(draft))throw storeError('臨時裝置快照不是可完整驗證的 JSON','STORE_SNAPSHOT_NOT_JSON_SAFE');
       const portable=portableStoreSnapshot(serial);
       const committed=await cloud.commitTemporarySnapshot(portable,{userId:ephemeralSession.userId,operationId,operationType,expectedMemoryBaseline:ephemeralBaseline()});
+      assertSession();
       if(!committed?.data)throw storeError('雲端未回傳可驗證提交結果','EPHEMERAL_CLOUD_VERIFY_FAILED');
       const verified=validateReplacementSnapshot(committed.data);
       if(storeStateFingerprint(verified)!==storeStateFingerprint(portable))throw storeError('雲端驗證內容與本次修改不同','EPHEMERAL_CLOUD_VERIFY_FAILED');
@@ -2504,7 +2511,13 @@
     }
   }
   function runStoreWriter(operationType,writer,args) {
-    if(isEphemeralMode())return enqueueStoreWriter(()=>executeEphemeralStoreTransaction(operationType,writer,args));
+    if(isEphemeralMode()){
+      const requestedEpoch=ephemeralSessionEpoch,requestedUserId=ephemeralSession.userId;
+      return enqueueStoreWriter(()=>{
+        if(requestedEpoch!==ephemeralSessionEpoch||!isEphemeralMode()||ephemeralSession.userId!==requestedUserId)throw storeError('排隊操作所屬登入已結束，未送出舊操作。','EPHEMERAL_SESSION_CHANGED');
+        return executeEphemeralStoreTransaction(operationType,writer,args);
+      });
+    }
     const execute=async()=>{
       const operationId=`store-${uid()}`;
       try{await load()}catch(error){
@@ -3719,7 +3732,7 @@
   function addRetentionReceipt(values) {
     requireStoreTransactionDraft();
     const idempotencyKey=String(values.idempotencyKey||'').trim();
-    if(idempotencyKey){const existing=state.retentionReceipts.find((row)=>row.idempotencyKey===idempotencyKey);if(existing)return existing}
+    const replay=paymentReplay('retention',state.retentionReceipts,values);if(replay.existing)return replay.existing;
     const ar=state.receivables.find((row)=>row.id===values.receivableId);if(!ar)throw new Error('找不到對應應收帳款');
     const billing=state.billings.find((row)=>row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||''));
     const retentionAmount=Math.max(0,num(ar.retentionAmount ?? ar.retention ?? billing?.retentionAmount ?? billing?.retention));
@@ -3729,7 +3742,7 @@
     if(amount>remaining)throw new Error('本次收回金額不可超過剩餘保留款');
     const now=new Date().toISOString(),id=uid(),bankAccountId=String(values.bankAccountId||values.bankId||'');
     if(!state.banks.some((row)=>row.id===bankAccountId))throw new Error('請選擇入帳銀行帳戶');
-    const receipt={id,retentionReceiptId:id,idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:billing?.id||ar.billingId||'',projectId:ar.project||billing?.project||'',customerId:ar.customer||billing?.customer||'',date:values.date||businessDate(new Date(now)),amount,paymentMethod:values.paymentMethod||'銀行轉帳',bankAccountId,bankId:bankAccountId,fee,feePayer,netAmount,note:String(values.note||''),createdAt:now,updatedAt:now};
+    const receipt={id,retentionReceiptId:id,idempotencyKey:idempotencyKey||uid(),requestFingerprint:replay.requestFingerprint,receivableId:ar.id,billingId:billing?.id||ar.billingId||'',projectId:ar.project||billing?.project||'',customerId:ar.customer||billing?.customer||'',date:values.date||businessDate(new Date(now)),amount,paymentMethod:values.paymentMethod||'銀行轉帳',bankAccountId,bankId:bankAccountId,fee,feePayer,netAmount,note:String(values.note||''),createdAt:now,updatedAt:now};
     state.retentionReceipts.unshift(receipt);
     syncRetentionBankTransaction(receipt,ar,billing,now);syncRetentionSummary(ar,billing,now);
     persist(`收回保留款 ${ar.sourceNo}`);return receipt;
@@ -4077,10 +4090,41 @@
       throw error;
     }
   }
+  function paymentIntentFingerprint(kind,values,fallbackDate='') {
+    const targetKey=kind==='payable'?'payableId':kind==='salary'?'payrollId':'receivableId';
+    const target=String(values[targetKey]||'').trim(),bankId=String(values.bankAccountId||values.bankId||'').trim();
+    if(!target||!bankId)throw new Error('付款／收款缺少來源單據或銀行帳戶，已停止操作');
+    if(values.bankAccountId&&values.bankId&&String(values.bankAccountId).trim()!==String(values.bankId).trim())throw new Error('付款／收款銀行帳戶不一致，已停止操作');
+    const amount=strictReceiptMoney(values.amount,'本次金額',{minimum:Number.EPSILON}),fee=strictReceiptMoney(values.fee===undefined||values.fee===''?0:values.fee,'手續費');
+    const allowed=kind==='retention'?['company','counterparty']:['company','recipient'];
+    if(values.feePayer&&!allowed.includes(values.feePayer))throw new Error('手續費負擔方式不正確');
+    const feePayer=values.feePayer||'company',date=String(values.date||fallbackDate||businessDate());
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date+'T00:00:00Z'))||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date)throw new Error('付款／收款日期格式不正確');
+    if(!Number.isSafeInteger(amount+fee))throw new Error('付款／收款合計超出可支援金額範圍');
+    if(kind==='salary'&&values.commissionSelectionKeys!==undefined&&!Array.isArray(values.commissionSelectionKeys))throw new Error('抽成來源選擇格式不正確');
+    const keys=kind==='salary'?[...new Set((values.commissionSelectionKeys||[]).map(value=>String(value||'').trim()).filter(Boolean))].sort():[];
+    return JSON.stringify({version:1,kind,target,bankId,amount,fee,feePayer,date,paymentMethod:String(values.paymentMethod||'銀行轉帳'),note:String(values.note||''),commissionSelectionKeys:keys});
+  }
+  function paymentReplay(kind,rows,values) {
+    const key=String(values.idempotencyKey||'').trim(),matches=key?rows.filter((row)=>String(row.idempotencyKey||'').trim()===key):[];
+    if(matches.length>1)throw storeError('付款／收款識別碼不唯一，已停止重送','IDEMPOTENCY_CONFLICT');
+    const existing=matches[0]||null,requestFingerprint=paymentIntentFingerprint(kind,values,existing?.date||'');
+    if(existing){
+      const stored=paymentIntentFingerprint(kind,existing);
+      // Old records without a fingerprint are compared using their complete persisted intent.
+      // If a committed record was later edited, never acknowledge a stale original request.
+      if(stored!==requestFingerprint||existing.requestFingerprint&&existing.requestFingerprint!==stored)throw storeError('相同付款／收款識別碼的內容不同，已停止重送。請先核對既有紀錄，勿直接再次付款。','IDEMPOTENCY_CONFLICT');
+      if(kind==='payable')payablePaymentMutationPlan(existing);
+      else if(kind==='salary')salaryPaymentDeletionPlan(existing);
+      else retentionMutationPlan(existing);
+    }
+    return {existing,requestFingerprint};
+  }
   async function addPayablePayment(values) {
     requireStoreTransactionDraft();
     const idempotencyKey = String(values.idempotencyKey || '').trim();
-    if (idempotencyKey) { const existing=state.payments.find((row)=>row.idempotencyKey===idempotencyKey); if(existing)return existing; }
+    const replay=paymentReplay('payable',state.payments,values);if(replay.existing)return replay.existing;
+    values={...values,bankId:values.bankAccountId||values.bankId};
     const payable = state.payables.find((row) => row.id === values.payableId);
     if (!payable) throw new Error('找不到這筆應付帳款');
     const amount=Math.round(num(values.amount)),fee=Math.max(0,Math.round(num(values.fee))),outstanding=Math.max(0,num(payable.amount)-num(payable.paid));
@@ -4089,7 +4133,7 @@
     const feePayer=values.feePayer==='recipient'?'recipient':'company';
     if(feePayer==='recipient'&&fee>amount)throw new Error('收款人負擔的手續費不可高於本次付款');
     const actualDebit=feePayer==='company'?amount+fee:amount,now=new Date().toISOString(),paymentId=uid(),transactionId=uid();
-    const payment={id:paymentId,idempotencyKey:idempotencyKey||uid(),payableId:payable.id,date:values.date||businessDate(new Date(now)),amount,fee,actualDebit,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',feePayer,note:values.note||'',bankTransactionId:transactionId,createdAt:now,updatedAt:now};
+    const payment={id:paymentId,idempotencyKey:idempotencyKey||uid(),requestFingerprint:replay.requestFingerprint,payableId:payable.id,date:values.date||businessDate(new Date(now)),amount,fee,actualDebit,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',feePayer,note:values.note||'',bankTransactionId:transactionId,createdAt:now,updatedAt:now};
     state.payments.unshift(payment);
     payable.paid=num(payable.paid)+amount;payable.bankId=bank.id;payable.payDate=payment.date;payable.fee=num(payable.fee)+fee;payable.feeParty=feePayer==='company'?'公司負擔':'收款人負擔';payable.status=payable.paid>=num(payable.amount)?'已付清':'部分付款';payable.updatedAt=now;
     bank.expense=num(bank.expense)+actualDebit;bank.balance=num(bank.openingBalance)+num(bank.income)-num(bank.expense);bank.updatedAt=now;
@@ -4519,7 +4563,8 @@
     if(!existing)state.bankTransactions.unshift(transaction);payment.bankId=bank.id;payment.bankAccountId=bank.id;payment.bankTransactionId=transaction.id;adjustBankExpense(bank,num(payment.actualDebit),now);return transaction;
   }
   async function addSalaryPayment(values) {
-    requireStoreTransactionDraft();const idempotencyKey=String(values.idempotencyKey||'').trim();if(idempotencyKey){const existing=state.salaryPayments.find((row)=>row.idempotencyKey===idempotencyKey);if(existing)return existing}
+    requireStoreTransactionDraft();const idempotencyKey=String(values.idempotencyKey||'').trim();
+    const replay=paymentReplay('salary',state.salaryPayments,values);if(replay.existing)return replay.existing;
     const payroll=state.payroll.find((row)=>row.id===values.payrollId);if(!payroll)throw new Error('找不到薪資紀錄');
     const requestedKeys=Array.isArray(values.commissionSelectionKeys)?values.commissionSelectionKeys:[],plan=salaryPaymentPlan(payroll.id,requestedKeys),amount=Math.round(num(values.amount)),fee=Math.max(0,Math.round(num(values.fee))),feePayer=values.feePayer==='recipient'?'recipient':'company',actualDebit=feePayer==='company'?amount+fee:amount;
     if(!plan.allowed)throw new Error(plan.blockers.map((row)=>row.message).join(' '));
@@ -4529,7 +4574,7 @@
     if(commissionAmount===0&&requestedKeys.length)throw new Error('已勾選抽成來源，但本次付款金額未包含抽成，已停止付款');
     if(commissionAmount>0&&!requestedKeys.length)throw new Error('付款金額包含抽成時，必須明確勾選已收款解鎖的抽成來源');
     if(feePayer==='recipient'&&fee>amount)throw new Error('員工負擔的手續費不可高於本次付款');
-    const bank=state.banks.find((row)=>row.id===String(values.bankAccountId||values.bankId||''));if(!bank)throw new Error('請選擇薪資付款銀行帳戶');const now=new Date().toISOString(),payment={id:uid(),idempotencyKey:idempotencyKey||uid(),paymentAllocationVersion:2,payrollId:payroll.id,date:values.date||businessDate(new Date(now)),amount,baseAmount,commissionAmount,commissionSelectionKeys:commissionAmount>0?[...plan.selectionKeys]:[],fee,feePayer,actualDebit,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:String(values.note||''),createdAt:now,updatedAt:now};
+    const bank=state.banks.find((row)=>row.id===String(values.bankAccountId||values.bankId||''));if(!bank)throw new Error('請選擇薪資付款銀行帳戶');const now=new Date().toISOString(),payment={id:uid(),idempotencyKey:idempotencyKey||uid(),requestFingerprint:replay.requestFingerprint,paymentAllocationVersion:2,payrollId:payroll.id,date:values.date||businessDate(new Date(now)),amount,baseAmount,commissionAmount,commissionSelectionKeys:commissionAmount>0?[...plan.selectionKeys]:[],fee,feePayer,actualDebit,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:String(values.note||''),createdAt:now,updatedAt:now};
     state.salaryPayments.unshift(payment);syncSalaryBankTransaction(payment,payroll,now);syncSalarySummary(payroll,now);persist(`新增薪資付款 ${payroll.month||''}`);return payment;
   }
   async function updateSalaryPayment(id, values={}) {
@@ -5229,9 +5274,39 @@
     }
     return {amount:entered,tax:Math.round(entered * (num(state.settings.defaultTax) || 5) / 100),total:entered + Math.round(entered * (num(state.settings.defaultTax) || 5) / 100)};
   }
+  // Preview is read-only. Reserve the number only inside the serialized Store writer.
+  function quotationSequenceStem(date) {
+    const value=String(date||businessDate()).trim();
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(value)||!Number.isFinite(Date.parse(value+'T00:00:00Z'))||new Date(value+'T00:00:00Z').toISOString().slice(0,10)!==value)throw new Error('報價日期格式不正確');
+    return 'Q-'+value.replaceAll('-','');
+  }
+  function quotationSequenceMax(stem) {
+    const counters=state.meta?.quotationSequenceHighWater||{},stored=counters[stem]??0;
+    if(!Number.isSafeInteger(stored)||stored<0)throw new Error('報價單號流水資料異常，已停止新增');
+    return state.quotations.reduce((max,row)=>{
+      // A revision retains its base number; unrelated or legacy formats are not renumbered.
+      const match=String(row.number||'').trim().match(/^(Q-\d{8})-(\d+)(?:\s+Rev\.\d+)?$/i);
+      if(!match||match[1].toUpperCase()!==stem)return max;
+      const sequence=Number(match[2]);
+      if(!Number.isSafeInteger(sequence)||sequence<1)throw new Error('既有報價單號超出支援範圍，已停止新增');
+      return Math.max(max,sequence);
+    },stored);
+  }
   function nextQuotationNumber(date = businessDate()) {
-    const stem=`Q-${String(date).replaceAll('-','')}`,count=state.quotations.filter((row)=>String(row.number||'').startsWith(stem)).length+1;
-    return `${stem}-${String(count).padStart(3,'0')}`;
+    const stem=quotationSequenceStem(date),sequence=quotationSequenceMax(stem)+1;
+    if(!Number.isSafeInteger(sequence))throw new Error('報價單號已超出支援範圍');
+    const number=stem+'-'+String(sequence).padStart(3,'0');
+    if(state.quotations.some((row)=>String(row.number||'').trim()===number))throw new Error('報價單號已存在，請重新載入後再試');
+    return number;
+  }
+  function rememberQuotationNumber(number) {
+    requireStoreTransactionDraft();
+    const match=String(number||'').trim().match(/^(Q-\d{8})-(\d+)(?:\s+Rev\.\d+)?$/i);
+    if(!match)return; // Never rewrite older/custom numbering formats.
+    const stem=match[1].toUpperCase(),highest=Math.max(quotationSequenceMax(stem),Number(match[2]));
+    if(!Number.isSafeInteger(highest))throw new Error('報價單號超出支援範圍');
+    state.meta=state.meta||{};
+    state.meta.quotationSequenceHighWater={...(state.meta.quotationSequenceHighWater||{}),[stem]:highest};
   }
   function quotationPriceFor({item,customerId='',projectId='',date=''}) {
     const key=clean(item),at=date||businessDate();
@@ -5261,11 +5336,12 @@
     const lines=(values.lines||[]).filter((line)=>clean(line.item)).map((line)=>{const type=mode==='mixed'?(line.pricingType==='lump_sum'?'lump_sum':'actual'):mode,qty=String(line.qty??'').trim()===''?null:Math.max(0,num(line.qty)),price=Math.max(0,num(line.price)),enteredLump=Number(line.lumpSumAmount),hasEnteredLump=String(line.lumpSumAmount??'').trim()!==''&&Number.isFinite(enteredLump)&&enteredLump>=0,lumpSumAmount=type==='lump_sum'?Math.max(0,hasEnteredLump?enteredLump:qty!==null&&price>0?Math.round(qty*price):0):0;return {id:line.id||uid(),house:clean(line.house),item:clean(line.item),spec:clean(line.spec),unit:clean(line.unit)||'式',pricingType:type,qty,estimatedQty:qty,price,lumpSumAmount,subtotal:type==='lump_sum'?Math.round(lumpSumAmount):qty===null?0:Math.round(qty*price),priceSource:line.priceSource||'manual',priceId:line.priceId||'',scope:clean(line.scope),note:clean(line.note)};});
     if(!lines.length)throw new Error('請至少新增一筆報價明細');
     const now=new Date().toISOString(),existing=state.quotations.find((row)=>row.id===id);
+    if(id&&!existing)throw new Error('原報價單已不存在，已停止修改；請重新載入確認');
     if(existing?.status==='已確認'&&values.allowConfirmedEdit!==true)throw new Error('已確認報價不可直接修改歷史內容');
     const lumpSumTotal=mode==='lump_sum'?Math.max(0,num(values.lumpSumTotal)):0;if(mode==='lump_sum'&&lumpSumTotal<=0)throw new Error('請輸入合約／報價總價');
     const totals=quotationTotals(lines,values.taxMode,mode,lumpSumTotal),row=existing||{id:uid(),number:nextQuotationNumber(values.date),createdAt:now};
     Object.assign(row,{customer:customer.id,customerName:customer.name,project:project.id,projectName:project.name,date:values.date||businessDate(new Date(now)),dueDate:values.dueDate||'',pricingMode:mode,lumpSumTotal,billingPlan:values.billingPlan||row.billingPlan||'one_time',billingMilestones:Array.isArray(row.billingMilestones)?row.billingMilestones:[],taxMode:values.taxMode==='含稅'?'含稅':'未稅',lines,amount:totals.amount,tax:totals.tax,total:totals.total,status:['草稿','已送出','已確認','作廢'].includes(values.status)?values.status:(row.status||'草稿'),internalNote:clean(values.internalNote),publicNote:clean(values.publicNote),note:clean(values.publicNote),sourceType:values.sourceType||row.sourceType||'manual',importTemplateId:values.importTemplateId||row.importTemplateId||'',updatedAt:now});
-    if(!existing)state.quotations.unshift(row);mergeQuotationUnitPresets(lines.map((line)=>line.unit));return row;
+    if(!existing){rememberQuotationNumber(row.number);state.quotations.unshift(row)}mergeQuotationUnitPresets(lines.map((line)=>line.unit));return row;
   }
   async function saveQuotation(values,id='') {
     requireStoreTransactionDraft();const row=writeQuotation(values,id);persist(`${id?'修改':'新增'}報價單 ${row.number}`);return row;
@@ -5282,11 +5358,27 @@
     const billingIds=new Set(billings.map((row)=>String(row.id))),receivables=state.receivables.filter((row)=>billingIds.has(String(row.billingId||row.sourceId||''))||String(row.quotationId||row.quoteId||'')===String(id));
     return {used:daily.length>0||billings.length>0||receivables.length>0,dailyCount:daily.length,billingCount:billings.length,receivableCount:receivables.length};
   }
+  function quotationRevisionHighWater(rootId) {
+    const stored=state.meta?.quotationRevisionHighWater?.[rootId]??0;
+    if(!Number.isSafeInteger(stored)||stored<0)throw new Error('報價修訂流水資料異常，已停止新增');
+    return state.quotations.filter(row=>String(row.revisionOf||'')===String(rootId)).reduce((max,row)=>{
+      const suffix=String(row.number||'').match(/\s+Rev\.(\d+)$/i),number=Math.max(num(row.revisionNumber),suffix?Number(suffix[1]):0);
+      if(!Number.isSafeInteger(number)||number<0)throw new Error('既有修訂單號格式異常，已停止新增');
+      return Math.max(max,number);
+    },stored);
+  }
+  function rememberQuotationRevision(row) {
+    requireStoreTransactionDraft();if(!row?.revisionOf)return;
+    const rootId=String(row.revisionOf),highest=quotationRevisionHighWater(rootId);
+    state.meta=state.meta||{};
+    state.meta.quotationRevisionHighWater={...(state.meta.quotationRevisionHighWater||{}),[rootId]:highest};
+  }
   async function deleteQuotation(id) {
     requireStoreTransactionDraft();const row=state.quotations.find((item)=>item.id===id);if(!row)throw new Error('找不到報價單');const usage=quotationUsage(id);
     if(usage.used)throw new Error('此報價已被施工或請款資料使用，為保留歷史紀錄無法刪除。請使用「建立修訂版」。');
     if(row.status==='已確認')throw new Error('已確認報價請先取消確認，再回到草稿刪除');
     if(!['草稿','已送出'].includes(row.status))throw new Error('此狀態的報價不可刪除');
+    rememberQuotationNumber(row.number);rememberQuotationRevision(row);
     state.quotations=state.quotations.filter((item)=>item.id!==id);persist(`刪除報價單 ${row.number}`);return true;
   }
   async function cancelQuotationConfirmation(id) {
@@ -5296,8 +5388,13 @@
   }
   async function createQuotationRevision(id) {
     requireStoreTransactionDraft();const source=state.quotations.find((item)=>item.id===id);if(!source)throw new Error('找不到報價單');if(source.status!=='已確認')throw new Error('只有已確認報價可以建立修訂版');if(!quotationUsage(id).used)throw new Error('此報價尚未被使用，可先取消確認後編輯');
-    const rootId=source.revisionOf||source.id,siblings=state.quotations.filter((row)=>String(row.revisionOf||'')===String(rootId)),revisionNumber=Math.max(0,...siblings.map((row)=>num(row.revisionNumber)))+1,now=new Date().toISOString(),row={...source,id:uid(),number:`${String(source.number||'報價單').replace(/\s+Rev\.\d+$/i,'')} Rev.${revisionNumber}`,status:'草稿',revisionOf:rootId,revisionNumber,lines:(source.lines||[]).map((line)=>({...line,id:uid()})),createdAt:now,updatedAt:now};
-    state.quotations.unshift(row);persist(`建立報價修訂版 ${row.number}`);return row;
+    const rootId=source.revisionOf||source.id,revisionNumber=quotationRevisionHighWater(rootId)+1;
+    if(!Number.isSafeInteger(revisionNumber))throw new Error('報價修訂單號超出支援範圍');
+    const number=`${String(source.number||'報價單').replace(/\s+Rev\.\d+$/i,'')} Rev.${revisionNumber}`;
+    if(state.quotations.some(row=>String(row.number||'').trim()===number))throw new Error('報價修訂單號已存在，已停止新增');
+    const now=new Date().toISOString(),copy=storeStateClone(source),row={...copy,id:uid(),number,status:'草稿',revisionOf:rootId,revisionNumber,lines:(copy.lines||[]).map(line=>({...line,id:uid()})),createdAt:now,updatedAt:now};
+    state.quotations.unshift(row);rememberQuotationNumber(row.number);rememberQuotationRevision(row);
+    persist(`建立報價修訂版 ${row.number}`);return row;
   }
   function writeQuotationTemplate(values,id='') {
     const customer=state.customers.find((row)=>row.id===values.customerId);if(!customer)throw new Error('請選擇客戶／建設公司');if(!clean(values.name))throw new Error('請輸入模板名稱');
@@ -5407,6 +5504,7 @@
     if(!userId||!options.userId||String(options.userId)!==userId)throw storeError('臨時裝置登入帳號驗證失敗','EPHEMERAL_PRINCIPAL_MISMATCH');
     if(storeTrustedForCurrentUser())throw storeError('公司信任裝置不可進入臨時記憶體模式','EPHEMERAL_MODE_REJECTED');
     const candidate=validateReplacementSnapshot(value);
+    ephemeralSessionEpoch+=1;
     publishedState=freezeStoreState(candidate);state=publishedState;storeLoadPromise=null;storeRecoveryBlocked=null;receiptWritesBlocked=null;
     settledStateFingerprint=storeStateFingerprint(candidate);lastSettledMemoryFingerprint=receiptStateFingerprint(candidate);
     ephemeralSession={active:true,userId,remoteSyncVersion:options.syncVersion??null,remoteUpdatedAt:String(options.updatedAt||''),remoteFingerprint:String(options.fingerprint||''),memoryBaseline:''};
@@ -5414,6 +5512,7 @@
     return publishedState;
   }
   function clearEphemeralSession() {
+    ephemeralSessionEpoch+=1;
     if(!ephemeralSession)return false;
     ephemeralSession=null;publishedState=null;state=null;storeLoadPromise=null;settledStateFingerprint='';lastSettledMemoryFingerprint='';
     return true;

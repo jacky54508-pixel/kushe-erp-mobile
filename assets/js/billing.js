@@ -593,11 +593,11 @@
     const app=$('#receivablesApp'),panel=$('.commission-filters',app),list=$('.billing-list-panel',app),state=store.getState();
     if(!panel||!list)return result;
     renderMobileReceivableFilters(panel,state);
-    $('[data-expand-receivable]',app).forEach((rowNode)=>{
+    $$('[data-expand-receivable]',app).forEach((rowNode)=>{
       const id=rowNode.dataset.expandReceivable,actions=$('.receivable-actions',rowNode),historyButton=$('[data-expand-button]',rowNode);
       if(actions&&!actions.querySelector('[data-view-receivable-billing]')){
         const button=document.createElement('button');button.className='commission-link';button.type='button';button.dataset.viewReceivableBilling=id;button.textContent='查看請款單';button.onclick=(event)=>{event.stopPropagation();openReceivableBilling(id)};
-        actions.insertBefore(button,historyButton||null);
+        actions.insertBefore(button,historyButton?.parentNode===actions?historyButton:null);
       }
       if(historyButton){const opened=openReceiptHistories.has(id);historyButton.setAttribute('aria-label',opened?'收合收款歷程':'查看收款歷程');historyButton.textContent=opened?'收合歷程':'收款歷程'}
     });
