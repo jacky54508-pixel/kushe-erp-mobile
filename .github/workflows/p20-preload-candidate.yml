@@ -1,0 +1,77 @@
+name: Build verified P20 preload candidate
+on:
+  push:
+    branches: [p20-preload-build-20261002]
+permissions:
+  contents: write
+concurrency:
+  group: p20-preload-build-20261002
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read isolated build payload
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: control
+          persist-credentials: false
+      - name: Checkout exact beta baseline
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: db4118ee2d1ea33aa11d14cf20a8748f03945cd6
+          path: work
+          fetch-depth: 1
+      - name: Verify baseline, apply five-file patch and verify contents
+        shell: bash
+        working-directory: work
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = db4118ee2d1ea33aa11d14cf20a8748f03945cd6
+          test "$(git ls-remote origin refs/heads/beta | cut -f1)" = db4118ee2d1ea33aa11d14cf20a8748f03945cd6
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = 6b9e17a1ef41ea9b7896cd0e3848536d2c255fb4
+          test -z "$(git status --porcelain)"
+          python - <<'PY'
+          import base64, hashlib, json, lzma, os, pathlib, subprocess
+          source=pathlib.Path('../control/.p20-preload')
+          text=''.join((source/f'part{i}.txt').read_text() for i in range(3))
+          data=json.loads(lzma.decompress(base64.b64decode(text,validate=True)))
+          manifest=data['manifest']; patch=data['patch'].encode()
+          assert hashlib.sha256(patch).hexdigest()=='b89ec1c73e119bc38e9a1192bd6b71e603a39e279936b5be53bbda3ca54627a2'
+          expected={'assets/js/auth-gate.js','assets/js/app.js','assets/js/billing.js','assets/js/erp-store.js','index.html'}
+          assert {row['path'] for row in manifest['files']}==expected
+          for row in manifest['files']:
+              assert hashlib.sha256(pathlib.Path(row['path']).read_bytes()).hexdigest()==row['baseline_sha256']
+              assert subprocess.check_output(['git','hash-object',row['path']],text=True).strip()==row['baseline_blob']
+          target=pathlib.Path(os.environ['RUNNER_TEMP'])/'preload.patch';target.write_bytes(patch)
+          subprocess.run(['git','apply','--check',str(target)],check=True)
+          subprocess.run(['git','apply',str(target)],check=True)
+          for row in manifest['files']:
+              assert hashlib.sha256(pathlib.Path(row['path']).read_bytes()).hexdigest()==row['candidate_sha256']
+              assert subprocess.check_output(['git','hash-object',row['path']],text=True).strip()==row['candidate_blob']
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
+          assert changed==expected
+          assert not subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).strip()
+          for path in pathlib.Path('assets/js').glob('*.js'):
+              subprocess.run(['node','--check',str(path)],check=True)
+          print('Five changed-file hashes and all JavaScript syntax verified. No Supabase requests executed.')
+          PY
+          git diff --check
+          git diff --stat
+      - name: Create candidate commit on isolated output branch only
+        shell: bash
+        working-directory: work
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/beta | cut -f1)" = db4118ee2d1ea33aa11d14cf20a8748f03945cd6
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = 6b9e17a1ef41ea9b7896cd0e3848536d2c255fb4
+          git config user.name 'KuShe ERP Maintenance'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add assets/js/auth-gate.js assets/js/app.js assets/js/billing.js assets/js/erp-store.js index.html
+          git commit -m 'P20 Preload Fix-1: MFA recovery, receivables, quotation sequencing and payment replay guards'
+          test "$(git rev-parse HEAD^)" = db4118ee2d1ea33aa11d14cf20a8748f03945cd6
+          git push origin HEAD:refs/heads/p20-preload-ready-20261002
+          echo "CANDIDATE_SHA=$(git rev-parse HEAD)"
+          echo "Verified candidate: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Only p20-preload-ready-20261002 was written. beta and main were not advanced by this job.' >> "$GITHUB_STEP_SUMMARY"
