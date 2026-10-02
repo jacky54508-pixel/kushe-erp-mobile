@@ -1570,3 +1570,20 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
   border-radius:9px;
   font-size:10px;
 }
+
+
+/* P20 Security-1A — mandatory TOTP MFA gate */
+.mfa-card{max-width:460px}
+.mfa-card .mfa-copy{margin:0 0 16px;color:#546174;font-size:14px;line-height:1.65}
+.mfa-qr-wrap{display:flex;justify-content:center;align-items:center;margin:10px auto 14px;padding:14px;background:#fff;border:1px solid #dce3eb;border-radius:18px;width:min(240px,100%)}
+.mfa-qr-wrap img{display:block;width:210px;max-width:100%;height:auto}
+.mfa-secret-wrap{display:grid;gap:6px;margin:0 0 16px;padding:12px 14px;background:#f6f8fb;border:1px solid #e1e6ed;border-radius:12px;color:#526072;font-size:12px}
+.mfa-secret-wrap code{display:block;overflow-wrap:anywhere;font-size:13px;font-weight:700;color:#17263c;user-select:all}
+.mfa-card form{margin-top:14px}
+.mfa-card input#mfaCode{letter-spacing:.18em}
+.mfa-logout{margin-top:10px;background:transparent!important;color:#607086!important;border:1px solid #d8e0e9!important}
+@media (max-width:640px){
+  .mfa-card{width:calc(100% - 28px);max-width:none}
+  .mfa-qr-wrap{width:210px;padding:12px}
+  .mfa-qr-wrap img{width:186px}
+}

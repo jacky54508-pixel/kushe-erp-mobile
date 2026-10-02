@@ -11,6 +11,7 @@
   const ui = { collapsed: false, mobileOpen: false, route: 'dashboard' };
   let initialized = false;
   let authUiBound = false;
+  let mfaFlow = { mode:'', factorId:'', challengeId:'', enrollment:null, busy:false };
   const moduleIcons = {
     customers: 'contact', projects: 'map-pin', quotations: 'file-text', billings: 'clipboard-list',
     receivables: 'arrow-down-to-line', payables: 'arrow-up-from-line', banks: 'landmark', invoices: 'receipt',
@@ -29,14 +30,23 @@
     requestAnimationFrame(()=>node.classList.add('is-visible')); setTimeout(()=>{node.classList.remove('is-visible');setTimeout(()=>node.remove(),220)},2400);
   }
   function setAuthView(authenticated) {
-    const loginView = $('#loginView'), appShell = $('#appShell'), employeeShell = $('#employeeShellView');
+    const loginView = $('#loginView'), mfaView=$('#mfaView'), appShell = $('#appShell'), employeeShell = $('#employeeShellView');
     if (loginView) loginView.hidden = Boolean(authenticated);
+    if (mfaView) mfaView.hidden = true;
     if (appShell) appShell.hidden = !authenticated;
     if (employeeShell && authenticated) employeeShell.hidden = true;
   }
-  function setEmployeeShellView(active) {
-    const loginView=$('#loginView'),appShell=$('#appShell'),employeeShell=$('#employeeShellView');
+  function setMfaView(active) {
+    const loginView=$('#loginView'),mfaView=$('#mfaView'),appShell=$('#appShell'),employeeShell=$('#employeeShellView');
     if(loginView)loginView.hidden=Boolean(active);
+    if(mfaView)mfaView.hidden=!active;
+    if(appShell)appShell.hidden=true;
+    if(employeeShell)employeeShell.hidden=true;
+  }
+  function setEmployeeShellView(active) {
+    const loginView=$('#loginView'),mfaView=$('#mfaView'),appShell=$('#appShell'),employeeShell=$('#employeeShellView');
+    if(loginView)loginView.hidden=Boolean(active);
+    if(mfaView)mfaView.hidden=true;
     if(appShell)appShell.hidden=true;
     if(employeeShell)employeeShell.hidden=!active;
   }
@@ -52,8 +62,93 @@
     if (form) form.setAttribute('aria-busy', String(Boolean(busy)));
     if (message) setLoginMessage(message);
   }
-  async function startAuthenticatedApp() {
+  function setMfaMessage(message='',error=false){
+    const status=$('#mfaStatus'),alert=$('#mfaError');
+    if(status){status.textContent=error?'':message;status.hidden=error||!message}
+    if(alert){alert.textContent=error?message:'';alert.hidden=!error||!message}
+  }
+  function setMfaBusy(busy,message=''){
+    mfaFlow.busy=Boolean(busy);
+    const form=$('#mfaForm'),submit=$('#mfaSubmit');
+    $('input,button',form||document.createElement('div')).forEach((node)=>{node.disabled=Boolean(busy)});
+    if(submit)submit.textContent=busy?'驗證中…':'驗證並進入 ERP';
+    if(form)form.setAttribute('aria-busy',String(Boolean(busy)));
+    if(message)setMfaMessage(message);
+  }
+  function resetMfaUi(){
+    mfaFlow={mode:'',factorId:'',challengeId:'',enrollment:null,busy:false};
+    $('#mfaForm')?.reset();setMfaMessage();setMfaBusy(false);
+    if($('#mfaEnroll'))$('#mfaEnroll').hidden=true;
+    if($('#mfaChallenge'))$('#mfaChallenge').hidden=true;
+    if($('#mfaQr'))$('#mfaQr').removeAttribute('src');
+    if($('#mfaSecret'))$('#mfaSecret').textContent='';
+  }
+  async function prepareMfaGate(){
+    resetMfaUi();
+    setMfaView(true);
+    setMfaBusy(true,'正在確認雙重驗證狀態…');
+    try{
+      const status=await window.KusheAuthGate.mfaStatus();
+      if(status.aal==='aal2'){setMfaBusy(false);return true}
+      const factor=status.verifiedTotp[0];
+      if(factor){
+        const challenge=await window.KusheAuthGate.createMfaChallenge(factor.id);
+        mfaFlow={mode:'challenge',factorId:factor.id,challengeId:challenge.challengeId,enrollment:null,busy:false};
+        if($('#mfaChallenge'))$('#mfaChallenge').hidden=false;
+        if($('#mfaSubtitle'))$('#mfaSubtitle').textContent='請完成驗證器第二因素';
+        setMfaBusy(false);
+        $('#mfaCode')?.focus();
+        return false;
+      }
+      const enrollment=await window.KusheAuthGate.enrollTotp();
+      const challenge=await window.KusheAuthGate.createMfaChallenge(enrollment.factorId);
+      mfaFlow={mode:'enroll',factorId:enrollment.factorId,challengeId:challenge.challengeId,enrollment,busy:false};
+      if($('#mfaEnroll'))$('#mfaEnroll').hidden=false;
+      if($('#mfaSubtitle'))$('#mfaSubtitle').textContent='首次登入必須先綁定驗證器';
+      if($('#mfaQr'))$('#mfaQr').src=enrollment.qrCode;
+      if($('#mfaSecret'))$('#mfaSecret').textContent=enrollment.secret;
+      setMfaBusy(false);
+      $('#mfaCode')?.focus();
+      return false;
+    }catch(error){
+      setMfaBusy(false);
+      setMfaMessage('無法啟動雙重驗證，ERP 尚未載入。請安全登出後再試。',true);
+      return false;
+    }
+  }
+  async function completeMfa(event){
+    event.preventDefault();
+    if(mfaFlow.busy)return;
+    const code=String($('#mfaCode')?.value||'').replace(/\s+/g,'');
+    if(!/^[0-9]{6,8}$/.test(code)){setMfaMessage('請輸入驗證器 App 顯示的 6 位驗證碼。',true);return}
+    setMfaBusy(true,'正在驗證第二因素…');
+    try{
+      await window.KusheAuthGate.verifyMfa(mfaFlow.factorId,mfaFlow.challengeId,code);
+      if(!await window.KusheAuthGate.requireMfa())throw new Error('MFA assurance not elevated');
+      resetMfaUi();
+      await startAuthenticatedApp({skipMfa:true});
+    }catch(error){
+      $('#mfaCode').value='';
+      try{
+        if(mfaFlow.factorId){
+          const challenge=await window.KusheAuthGate.createMfaChallenge(mfaFlow.factorId);
+          mfaFlow.challengeId=challenge.challengeId;
+        }
+      }catch(_){}
+      setMfaBusy(false);
+      setMfaMessage('驗證碼不正確或已過期，請查看驗證器後再試一次。',true);
+      $('#mfaCode')?.focus();
+    }
+  }
+  async function startAuthenticatedApp(options={}) {
     setAuthView(false);
+    if(!options.skipMfa){
+      const strong=await window.KusheAuthGate?.requireMfa?.().catch?.(()=>false);
+      if(!strong){
+        const ready=await prepareMfaGate();
+        if(!ready)return false;
+      }
+    }
     setLoginMessage('正在確認公司身分與權限…');
     try {
       if (!window.KusheAuthGate?.resolveCompanyContext) throw new Error('Company context unavailable');
@@ -126,6 +221,7 @@
     return true;
   }
   async function handleLogout() {
+    resetMfaUi();
     if($('#recoveryModal'))$('#recoveryModal').hidden=true;
     if($('#storeSafetyBanner'))$('#storeSafetyBanner').hidden=true;
     closePopovers();
@@ -224,6 +320,8 @@
         setLoginBusy(false);
       }
     });
+    $('#mfaForm')?.addEventListener('submit',completeMfa);
+    $('#mfaLogout')?.addEventListener('click',()=>void handleLogout());
     $('#changePasswordForm')?.addEventListener('submit', handleChangePassword);
     $('#changePasswordCancel')?.addEventListener('click', () => closeChangePasswordModal());
     $('#changePasswordClose')?.addEventListener('click', () => closeChangePasswordModal());

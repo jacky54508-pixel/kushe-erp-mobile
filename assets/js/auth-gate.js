@@ -56,6 +56,35 @@
     return { id: String(value.id), email: String(value.email || '') };
   }
 
+  function decodeJwtPayload(token) {
+    const parts=String(token||'').split('.');
+    if(parts.length<2)throw new AuthRequestError(0,'invalid_access_token');
+    try{
+      const base=parts[1].replace(/-/g,'+').replace(/_/g,'/'),padded=base+'='.repeat((4-base.length%4)%4);
+      return JSON.parse(decodeURIComponent(Array.from(atob(padded),char=>'%'+char.charCodeAt(0).toString(16).padStart(2,'0')).join('')));
+    }catch(_){throw new AuthRequestError(0,'invalid_access_token')}
+  }
+
+  function sessionAal(value=readSession()) {
+    if(!value?.access_token)return null;
+    const aal=String(decodeJwtPayload(value.access_token)?.aal||'aal1');
+    return aal==='aal2'?'aal2':'aal1';
+  }
+
+  function normalizeMfaFactors(payload) {
+    const rows=Array.isArray(payload)?payload:Array.isArray(payload?.all)?payload.all:[
+      ...(Array.isArray(payload?.totp)?payload.totp:[]),
+      ...(Array.isArray(payload?.phone)?payload.phone:[])
+    ];
+    return rows.filter((row)=>row&&typeof row==='object').map((row)=>({
+      id:String(row.id||''),
+      factorType:String(row.factor_type||row.factorType||row.type||''),
+      status:String(row.status||''),
+      friendlyName:String(row.friendly_name||row.friendlyName||''),
+      createdAt:String(row.created_at||row.createdAt||'')
+    })).filter((row)=>row.id);
+  }
+
   function normalizeSession(value, fallbackRefreshToken = '') {
     const accessToken = String(value?.access_token || '').trim();
     const refreshToken = String(value?.refresh_token || fallbackRefreshToken || '').trim();
@@ -207,11 +236,76 @@
     return next.user;
   }
 
+  async function mfaStatus() {
+    const current=readSession();
+    if(!current?.access_token||!current?.user?.id)throw new AuthRequestError(401,'invalid_session');
+    const user=await verifiedUser(current.access_token);
+    if(user.id!==current.user.id)throw new AuthRequestError(403,'principal_mismatch');
+    const payload=await requestJson('/auth/v1/factors',{token:current.access_token});
+    const factors=normalizeMfaFactors(payload),verifiedTotp=factors.filter((row)=>row.factorType==='totp'&&row.status==='verified');
+    return Object.freeze({
+      aal:sessionAal(current),
+      userId:user.id,
+      verifiedTotp:Object.freeze(verifiedTotp.map((row)=>Object.freeze({...row}))),
+      factors:Object.freeze(factors.map((row)=>Object.freeze({...row})))
+    });
+  }
+
+  async function enrollTotp() {
+    const current=readSession();
+    if(!current?.access_token||!current?.user?.id)throw new AuthRequestError(401,'invalid_session');
+    if(sessionAal(current)==='aal2')throw new AuthRequestError(409,'mfa_already_verified');
+    const payload=await requestJson('/auth/v1/factors',{
+      method:'POST',token:current.access_token,
+      body:{factor_type:'totp',friendly_name:'酷舍 ERP'}
+    });
+    const id=String(payload?.id||''),totp=payload?.totp||{},qrCode=String(totp.qr_code||totp.qrCode||''),secret=String(totp.secret||''),uri=String(totp.uri||'');
+    if(!id||!qrCode||!secret)throw new AuthRequestError(0,'invalid_mfa_enrollment');
+    return Object.freeze({factorId:id,qrCode,secret,uri});
+  }
+
+  async function createMfaChallenge(factorId) {
+    const current=readSession(),id=String(factorId||'').trim();
+    if(!current?.access_token||!current?.user?.id)throw new AuthRequestError(401,'invalid_session');
+    if(!id)throw new AuthRequestError(400,'invalid_mfa_factor');
+    const payload=await requestJson('/auth/v1/factors/'+encodeURIComponent(id)+'/challenge',{
+      method:'POST',token:current.access_token,body:{}
+    });
+    const challengeId=String(payload?.id||'');
+    if(!challengeId)throw new AuthRequestError(0,'invalid_mfa_challenge');
+    return Object.freeze({factorId:id,challengeId});
+  }
+
+  async function verifyMfa(factorId,challengeId,code) {
+    const current=readSession(),id=String(factorId||'').trim(),challenge=String(challengeId||'').trim(),tokenCode=String(code||'').replace(/\s+/g,'');
+    if(!current?.access_token||!current?.user?.id)throw new AuthRequestError(401,'invalid_session');
+    if(!id||!challenge||!/^[0-9]{6,8}$/.test(tokenCode))throw new AuthRequestError(400,'invalid_mfa_code');
+    const payload=await requestJson('/auth/v1/factors/'+encodeURIComponent(id)+'/verify',{
+      method:'POST',token:current.access_token,
+      body:{challenge_id:challenge,code:tokenCode}
+    });
+    const next=normalizeSession(payload,current.refresh_token);
+    next.user=await verifiedUser(next.access_token);
+    if(next.user.id!==current.user.id)throw new AuthRequestError(403,'principal_mismatch');
+    if(sessionAal(next)!=='aal2')throw new AuthRequestError(403,'mfa_not_elevated');
+    activeCompanyContext=null;
+    saveSession(next);
+    return Object.freeze({aal:'aal2',user:{...next.user}});
+  }
+
+  async function requireMfa() {
+    const current=readSession();
+    if(!current)return false;
+    if(!await requireAuth())return false;
+    return sessionAal(readSession())==='aal2';
+  }
+
   async function resolveCompanyContext() {
     const current = readSession();
     const userId = String(current?.user?.id || '').trim();
     const token = String(current?.access_token || '').trim();
     if (!userId || !token) throw new AuthRequestError(401, 'invalid_session');
+    if (sessionAal(current)!=='aal2') throw new AuthRequestError(403,'mfa_required');
 
     const memberships = await requestJson(
       '/rest/v1/company_members?select=company_id,user_id,employee_id,role,status&user_id=eq.' + encodeURIComponent(userId) + '&order=created_at.asc',
@@ -382,5 +476,5 @@
     return session()?.user || null;
   }
 
-  window.KusheAuthGate = Object.freeze({ requireAuth, login, resolveCompanyContext, companyContext, canView, canWrite, firstAllowedRoute, permissionSnapshot, changePassword, logout, session, user });
+  window.KusheAuthGate = Object.freeze({ requireAuth, requireMfa, mfaStatus, enrollTotp, createMfaChallenge, verifyMfa, login, resolveCompanyContext, companyContext, canView, canWrite, firstAllowedRoute, permissionSnapshot, changePassword, logout, session, user });
 }());
