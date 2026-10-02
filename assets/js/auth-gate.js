@@ -244,10 +244,12 @@
   async function mfaStatus() {
     const current=readSession();
     if(!current?.access_token||!current?.user?.id)throw new AuthRequestError(401,'invalid_session');
-    const user=await verifiedUser(current.access_token);
+    const payload=await requestJson('/auth/v1/user',{token:current.access_token,timeoutMs:8000});
+    const user=storedUser(payload);
+    if(!user)throw new AuthRequestError(0,'invalid_user_payload');
     if(user.id!==current.user.id)throw new AuthRequestError(403,'principal_mismatch');
-    const payload=await requestJson('/rest/v1/auth/factors',{token:current.access_token,timeoutMs:8000});
-    const factors=normalizeMfaFactors(payload),verifiedTotp=factors.filter((row)=>row.factorType==='totp'&&row.status==='verified');
+    const factors=normalizeMfaFactors(Array.isArray(payload?.factors)?payload.factors:[]);
+    const verifiedTotp=factors.filter((row)=>row.factorType==='totp'&&row.status==='verified');
     return Object.freeze({
       aal:sessionAal(current),
       userId:user.id,
