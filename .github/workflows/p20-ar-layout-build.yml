@@ -1,0 +1,74 @@
+name: Build verified P20 receivables layout candidate
+on:
+  push:
+    branches: [p20-ar-layout-build-20261003]
+permissions:
+  contents: write
+concurrency:
+  group: p20-ar-layout-build-20261003
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read isolated build controls
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: control
+          persist-credentials: false
+      - name: Read exact tested baseline
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 770d624453a65b0dea00ce1e483554e7ce4415dc
+          path: work
+          fetch-depth: 1
+      - name: Verify and apply presentation-only patch
+        working-directory: work
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 770d624453a65b0dea00ce1e483554e7ce4415dc
+          test "$(git ls-remote origin refs/heads/beta | cut -f1)" = 770d624453a65b0dea00ce1e483554e7ce4415dc
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = 6b9e17a1ef41ea9b7896cd0e3848536d2c255fb4
+          test -z "$(git status --porcelain)"
+          python - <<'PY'
+          import base64, hashlib, json, lzma, os, pathlib, subprocess
+          raw=pathlib.Path('../control/.p20-ar-layout/payload.txt').read_bytes()
+          assert hashlib.sha256(raw).hexdigest()=='f170f020dc6dbf0eed285380fe47413c480ecac3d61cae74ee7c009b2193c0e3'
+          data=json.loads(lzma.decompress(base64.b64decode(raw,validate=True)))
+          expected={'assets/css/receivables-scoped.css','assets/js/billing.js','index.html'}
+          assert {r['path'] for r in data['files']}==expected
+          for r in data['files']:
+              p=pathlib.Path(r['path'])
+              assert p.exists()!=r['new']
+              assert hashlib.sha256(p.read_bytes() if p.exists() else b'').hexdigest()==r['before']
+          patch=pathlib.Path(os.environ['RUNNER_TEMP'])/'ar-layout.patch'
+          patch.write_text(data['patch'])
+          subprocess.run(['git','apply','--check',str(patch)],check=True)
+          subprocess.run(['git','apply',str(patch)],check=True)
+          for r in data['files']:
+              assert hashlib.sha256(pathlib.Path(r['path']).read_bytes()).hexdigest()==r['after']
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
+          added=set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changed|added==expected
+          assert added=={'assets/css/receivables-scoped.css'}
+          for p in pathlib.Path('assets/js').glob('*.js'):
+              subprocess.run(['node','--check',str(p)],check=True)
+          PY
+          git diff --check
+      - name: Write isolated candidate only
+        working-directory: work
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/beta | cut -f1)" = 770d624453a65b0dea00ce1e483554e7ce4415dc
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = 6b9e17a1ef41ea9b7896cd0e3848536d2c255fb4
+          git config user.name 'KuShe ERP Maintenance'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add assets/css/receivables-scoped.css assets/js/billing.js index.html
+          git commit -m 'P20 AR Layout-1: isolate receivable columns, filters and actions'
+          test "$(git rev-parse HEAD^)" = 770d624453a65b0dea00ce1e483554e7ce4415dc
+          git push origin HEAD:refs/heads/p20-ar-layout-ready-20261003
+          echo "Candidate: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          echo 'beta/main not advanced by this job; no Supabase requests.' >> "$GITHUB_STEP_SUMMARY"
