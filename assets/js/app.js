@@ -79,8 +79,9 @@
   function clearMfaDigits(){mfaDigits().forEach((node)=>{node.value=''})}
   function focusMfaDigit(index=0){mfaDigits()[Math.max(0,Math.min(5,index))]?.focus()}
   function mfaReady() {
-    return mfaCurrent(mfaFlow) && mfaFlow.state === 'ready' && Boolean(mfaFlow.factorId && mfaFlow.challengeId)
-      && (mfaFlow.mode === 'challenge' || (mfaFlow.mode === 'enroll' && mfaFlow.qrReady));
+    // Ready means the user may submit a code; a fresh challenge is created on submit.
+    return mfaCurrent(mfaFlow) && mfaFlow.state === 'ready' && Boolean(mfaFlow.factorId)
+      && (['challenge','resume'].includes(mfaFlow.mode) || (mfaFlow.mode === 'enroll' && mfaFlow.qrReady));
   }
   function renderMfaState() {
     const form=$('#mfaForm'),submit=$('#mfaSubmit'),ready=mfaReady();
@@ -94,7 +95,7 @@
     // Cancellation is independent of enrollment/verification readiness.
     if($('#mfaLogout'))$('#mfaLogout').disabled=logoutPending;
     const resetButton=$('#mfaResetSubmit'),resetAccepted=$('#mfaResetAccepted');
-    const canReset=mfaCurrent(mfaFlow)&&mfaFlow.state==='error'&&Boolean(mfaFlow.pendingResetFactor);
+    const canReset=mfaCurrent(mfaFlow)&&['ready','error'].includes(mfaFlow.state)&&Boolean(mfaFlow.pendingResetFactor);
     if(resetAccepted)resetAccepted.disabled=!canReset;
     if(resetButton)resetButton.disabled=!canReset||!resetAccepted?.checked;
   }
@@ -116,6 +117,9 @@
     mfaFlow={mode:'',factorId:'',challengeId:'',enrollment:null,busy:false,state:'cancelled',epoch:authUiGeneration,userId:'',qrReady:false,cancelQr:null};
     previous.cancelQr?.();
     if($('#mfaResetPanel'))$('#mfaResetPanel').hidden=true;
+    if($('#mfaResetDetails'))$('#mfaResetDetails').open=false;
+    if($('#mfaChallengeTitle'))$('#mfaChallengeTitle').textContent='輸入驗證碼';
+    if($('#mfaChallengeCopy'))$('#mfaChallengeCopy').textContent='打開你的驗證器 App，輸入「酷舍 ERP」目前顯示的 6 位數字。';
     if($('#mfaResetAccepted'))$('#mfaResetAccepted').checked=false;
     if($('#mfaResetTarget'))$('#mfaResetTarget').textContent='';
     $('#mfaForm')?.reset();clearMfaDigits();clearMfaSecrets();setMfaState('cancelled');
@@ -169,7 +173,7 @@
   }
   async function confirmMfaReset(){
     const flow=mfaFlow,target=flow.pendingResetFactor;
-    if(!mfaCurrent(flow)||flow.state!=='error'||!target||!$('#mfaResetAccepted')?.checked)return;
+    if(!mfaCurrent(flow)||!['ready','error'].includes(flow.state)||!target||!$('#mfaResetAccepted')?.checked)return;
     const confirmation={accepted:true,userId:flow.userId,factorId:target.id,createdAt:target.createdAt};
     setMfaState('loading','正在核對並撤銷你確認的未完成綁定…');
     try{
@@ -197,9 +201,7 @@
       if(status.aal==='aal2'){setMfaState('complete');return true}
       const factor=status.verifiedTotp[0];
       if(factor){
-        const challenge=await window.KusheAuthGate.createMfaChallenge(factor.id);
-        if(!mfaCurrent(flow))return false;
-        Object.assign(flow,{mode:'challenge',factorId:factor.id,challengeId:challenge.challengeId});
+        Object.assign(flow,{mode:'challenge',factorId:factor.id,challengeId:''});
         if($('#mfaChallenge'))$('#mfaChallenge').hidden=false;
         if($('#mfaSubtitle'))$('#mfaSubtitle').textContent='請完成驗證器第二因素';
         setMfaState('ready','請輸入驗證器目前顯示的 6 位數字。');
@@ -207,15 +209,29 @@
       }
       const incomplete=status.factors.filter(row=>row.factorType==='totp'&&row.status==='unverified');
       if(incomplete.length){
-        if(incomplete.length===1&&!status.factors.some(row=>row.status==='verified')&&incomplete[0].createdAt)flow.pendingResetFactor={...incomplete[0]};
-        throw Object.assign(new Error('Existing unverified MFA factor'),{code:'mfa_existing_unverified'});
+        // A scanned but unfinished factor may be verified without reading its secret,
+        // deleting it, or creating a replacement. Never pick an ambiguous factor.
+        if(incomplete.length!==1||status.factors.some(row=>row.status==='verified')){
+          throw Object.assign(new Error('Ambiguous MFA factors'),{code:'mfa_existing_unverified'});
+        }
+        const pending=incomplete[0];
+        Object.assign(flow,{mode:'resume',factorId:pending.id,challengeId:''});
+        if(pending.createdAt)flow.pendingResetFactor={...pending};
+        if($('#mfaChallenge'))$('#mfaChallenge').hidden=false;
+        if($('#mfaChallengeTitle'))$('#mfaChallengeTitle').textContent='完成先前的驗證器綁定';
+        if($('#mfaChallengeCopy'))$('#mfaChallengeCopy').textContent='已掃描過 QR Code，不必重新掃描。打開手機「密碼」或驗證器 App，輸入最近一次設定的「酷舍 ERP」6 位驗證碼。';
+        if($('#mfaSubtitle'))$('#mfaSubtitle').textContent='保留原有設定，輸入驗證碼即可繼續';
+        if(flow.pendingResetFactor){
+          if($('#mfaResetPanel'))$('#mfaResetPanel').hidden=false;
+          if($('#mfaResetTarget'))$('#mfaResetTarget').textContent=(window.KusheAuthGate.user()?.email||'目前登入帳號')+'｜綁定編號末八碼 '+pending.id.slice(-8);
+        }
+        setMfaState('ready','請輸入手機目前顯示的 6 位數字。按下驗證時會建立新的請求，不用重新綁定。');
+        focusMfaDigit();return false;
       }
       setMfaState('loading','正在準備首次綁定 QR Code…');
       const enrollment=await window.KusheAuthGate.enrollTotp();
       if(!mfaCurrent(flow))return false;
-      const challenge=await window.KusheAuthGate.createMfaChallenge(enrollment.factorId);
-      if(!mfaCurrent(flow))return false;
-      Object.assign(flow,{mode:'enroll',factorId:enrollment.factorId,challengeId:challenge.challengeId,enrollment});
+      Object.assign(flow,{mode:'enroll',factorId:enrollment.factorId,challengeId:'',enrollment});
       await loadMfaQr(flow,enrollment.qrCode);
       if(!mfaCurrent(flow))return false;
       flow.qrReady=true;
@@ -232,8 +248,13 @@
     if(!mfaReady())return;
     const flow=mfaFlow,epoch=flow.epoch,code=mfaCode();
     if(!/^[0-9]{6}$/.test(code)){setMfaMessage('請完整輸入驗證器 App 顯示的 6 位數字。',true);focusMfaDigit(code.length);return}
-    setMfaState('verifying','正在驗證第二因素…');
+    flow.challengeId='';
+    setMfaState('verifying','正在建立本次驗證請求…');
     try{
+      const challenge=await window.KusheAuthGate.createMfaChallenge(flow.factorId);
+      if(!mfaCurrent(flow))return;
+      flow.challengeId=challenge.challengeId;
+      setMfaMessage('正在驗證第二因素…');
       await window.KusheAuthGate.verifyMfa(flow.factorId,flow.challengeId,code);
       if(!mfaCurrent(flow))return;
       const strong=await window.KusheAuthGate.requireMfa();
@@ -244,17 +265,23 @@
     }catch(error){
       if(!mfaCurrent(flow))return;
       clearMfaDigits();
-      // Only known incorrect/expired-code responses may reopen the same factor.
-      if(!['mfa_verification_failed','mfa_challenge_expired'].includes(error?.code)){failMfa(flow,error);return}
       flow.challengeId='';
-      setMfaState('loading','正在更新驗證請求…');
-      try{
-        const challenge=await window.KusheAuthGate.createMfaChallenge(flow.factorId);
-        if(!mfaCurrent(flow))return;
-        flow.challengeId=challenge.challengeId;
-        setMfaState('ready','驗證碼不正確或已過期，請輸入驗證器目前顯示的 6 位數字。',true);
-        focusMfaDigit();
-      }catch(challengeError){failMfa(flow,challengeError)}
+      // Never auto-replay a submitted OTP. Each deliberate retry gets a new challenge.
+      // Unknown/authorization errors still fail closed and cannot open the ERP.
+      const codeError=['mfa_verification_failed','mfa_challenge_expired'].includes(error?.code);
+      const retryableTransport=['transport','aborted','server'].includes(error?.kind)||error?.status===429;
+      if(!codeError&&!retryableTransport){failMfa(flow,error);return}
+      const message=error?.code==='mfa_challenge_expired'
+        ?'本次驗證請求已過期。請重新輸入手機目前顯示的 6 位數字再試，不必重新掃描 QR Code。'
+        :error?.code==='mfa_verification_failed'
+        ?'驗證碼不正確或已更新。請輸入手機目前顯示的 6 位數字，不必重新綁定。'
+        :error?.status===429
+        ?'驗證次數較多，請稍候再試。原有綁定已保留，不必重新掃碼。'
+        :'連線暫時中斷或服務未回覆，尚未進入 ERP。原有綁定已保留，連線恢復後請重新輸入驗證碼。';
+      setMfaState('ready',message,true);
+      focusMfaDigit();
+    }finally{
+      flow.challengeId='';
     }
   }
 

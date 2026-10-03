@@ -120,7 +120,16 @@
     try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
   }
 
-async function requestJson(path, options = {}) {
+  function responseErrorCode(payload) {
+    // Raw GoTrue responses can contain code: 422 alongside error_code: 'mfa_...'.
+    // The machine-readable string takes precedence; HTTP status is not an error code.
+    for (const candidate of [payload?.error_code, payload?.code]) {
+      if (typeof candidate === 'string' && /^[a-z][a-z0-9_]*$/i.test(candidate.trim())) return candidate.trim();
+    }
+    return '';
+  }
+
+  async function requestJson(path, options = {}) {
     const { url, key } = authConfig();
     const headers = { apikey: key };
     if (options.token) headers.Authorization = `Bearer ${options.token}`;
@@ -152,7 +161,7 @@ async function requestJson(path, options = {}) {
         if (error?.name === 'AbortError') throw error;
         if (response.ok) throw new AuthRequestError(0, 'invalid_json_response');
       }
-      if (!response.ok) throw new AuthRequestError(response.status, String(payload?.code || payload?.error_code || ''));
+      if (!response.ok) throw new AuthRequestError(response.status, responseErrorCode(payload));
       return payload;
     };
     try { return await Promise.race([stopped, work()]); }
@@ -316,7 +325,7 @@ function assertCurrentAuth(current, generation) {
     if(totpEnrollmentPending)throw new AuthRequestError(409,'mfa_enrollment_pending');
     totpEnrollmentPending=true;
     try {
-      // Recheck immediately before enrollment. Never delete/reuse a leftover factor.
+      // Recheck immediately before enrollment. Existing factors require verification or explicit reset, not re-enrollment.
       const status=await mfaStatus();
       assertCurrentAuth(current,generation);
       if(status.verifiedTotp.length)throw new AuthRequestError(409,'mfa_already_verified');
