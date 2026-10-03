@@ -1229,7 +1229,7 @@
       const sourceTypes=isRetention?['retention_receipt','retention-receipt']:['receipt','receivable_receipt'],directId=financialAuditText(receipt.id),retentionId=financialAuditText(receipt.retentionReceiptId),expectedSourceIds=new Set([directId,isRetention?retentionId:''].filter(Boolean)),transactionSourceId=financialAuditText(transaction?.sourceId),transactionReceiptId=financialAuditText(transaction?.receiptId),transactionRetentionId=financialAuditText(transaction?.retentionReceiptId);
       const bankLinkMismatch=Boolean(transaction&&(!sourceTypes.includes(financialAuditText(transaction.sourceType))||!expectedSourceIds.has(transactionSourceId)||!isRetention&&transactionReceiptId&&transactionReceiptId!==directId||isRetention&&transactionRetentionId&&!expectedSourceIds.has(transactionRetentionId)));
       const employeeCashPending=!isRetention&&receipt.collectionType==='employee_cash'&&String(receipt.handoverStatus||'pending')==='pending',employeeCashCompleted=!isRetention&&receipt.collectionType==='employee_cash'&&String(receipt.handoverStatus||'')==='completed';
-      const receiptBankIds=financialAuditUnique([receipt.bankAccountId,receipt.bankId,employeeCashCompleted&&receipt.handoverBankId].map(financialAuditText).filter(Boolean)),transactionBankIds=financialAuditUnique([transaction?.bankAccountId,transaction?.bankId].map(financialAuditText).filter(Boolean)),bankAccountMismatch=Boolean(transaction&&(receiptBankIds.length!==1||transactionBankIds.length!==1||receiptBankIds[0]!==transactionBankIds[0])),expectedBankDate=employeeCashCompleted?financialAuditText(receipt.handedOverAt):financialAuditText(receipt.date),bankDateMismatch=Boolean(transaction&&financialAuditText(transaction.date)!==expectedBankDate);
+      const receiptBankIds=financialAuditUnique([receipt.bankAccountId,receipt.bankId,employeeCashCompleted?receipt.handoverBankId:''].map(financialAuditText).filter(Boolean)),transactionBankIds=financialAuditUnique([transaction?.bankAccountId,transaction?.bankId].map(financialAuditText).filter(Boolean)),bankAccountMismatch=Boolean(transaction&&(receiptBankIds.length!==1||transactionBankIds.length!==1||receiptBankIds[0]!==transactionBankIds[0])),expectedBankDate=employeeCashCompleted?financialAuditText(receipt.handedOverAt):financialAuditText(receipt.date),bankDateMismatch=Boolean(transaction&&financialAuditText(transaction.date)!==expectedBankDate);
       const transactionFinancialLinkMismatch=Boolean(transaction&&(hasAccountingValue(transaction,'receivableId')&&(receivableMatches.length!==1||financialAuditText(transaction.receivableId)!==financialAuditText(receivableMatches[0]?.id))||hasAccountingValue(transaction,'billingId')&&(billingMatches.length!==1||financialAuditText(transaction.billingId)!==financialAuditText(billingMatches[0]?.id))||hasAccountingValue(transaction,'sourceNo')&&receivableMatches.length===1&&financialAuditText(transaction.sourceNo)!==financialAuditText(receivableMatches[0].sourceNo)));
       const amountMismatch=Boolean(transaction&&!financialAuditMoneyEqual(financialAuditFirst(transaction,['receiptAmount'],transaction.amount),cashAmount));
       const expectedNet=num(financialAuditFirst(receipt,['netAmount'],cashAmount-(receipt.feePayer==='company'?num(receipt.fee):0))),netAmountMismatch=Boolean(transaction&&!financialAuditMoneyEqual(financialAuditFirst(transaction,['actualCredit','netAmount','amount'],0),expectedNet));
@@ -4472,16 +4472,55 @@
     if(!group)throw new Error('找不到薪資月份或員工');
     const employeeId=String(group.employeeId||''),month=String(group.month||''),excludePaymentId=String(options.excludePaymentId||''),requested=[...new Set((Array.isArray(selectionKeys)?selectionKeys:[]).map((value)=>String(value||'').trim()).filter(Boolean))];
     const nonCommissionTotal=Math.max(0,Math.round(group.sources.filter((source)=>source.type!=='抽成').reduce((sum,source)=>sum+num(source.amount),0)));
-    const explicitPayments=(state.salaryPayments||[]).filter((payment)=>group.recordIds.some((id)=>String(id)===String(payment.payrollId||''))&&String(payment.id||'')!==excludePaymentId);
+    // Use the same employee/month payment evidence as the displayed payroll summary.
+    // This includes verified legacy bank transfers and employee/month fallback records.
+    // Never rewrite, delete or infer source allocations for historical payments here.
+    const explicitPayments=(group.explicitPayments||[]).filter((payment)=>String(payment.id||'')!==excludePaymentId);
     const legacyPayments=explicitPayments.filter((payment)=>Number(payment.paymentAllocationVersion)!==2&&num(payment.amount)>0),allocatedPayments=explicitPayments.filter((payment)=>Number(payment.paymentAllocationVersion)===2);
-    const basePaid=allocatedPayments.reduce((sum,payment)=>sum+Math.max(0,num(payment.baseAmount)),0),baseOutstanding=Math.max(0,nonCommissionTotal-basePaid);
+    const legacyBankPayments=group.verifiedLegacyTransactions||[],hasUnallocatedPayment=legacyPayments.length>0||legacyBankPayments.length>0;
+    const recordedPaid=(group.history||[]).filter((payment)=>!excludePaymentId||String(payment.id||'')!==excludePaymentId).reduce((sum,payment)=>sum+Math.max(0,num(payment.amount)),0);
+    const truthOutstanding=Math.max(0,Math.round(num(group.total)-recordedPaid)),blockers=[];
+    const block=(code,message)=>{if(!blockers.some((row)=>row.code===code))blockers.push({code,message})};
+    if(group.integrity==='stale-payroll-status'||group.missingBankPaymentIds?.length||group.missingProjectSettlementIds?.length){
+      block('SALARY_PAYMENT_EVIDENCE_INVALID','此月份有未能核對的薪資付款證據，已停止新增付款；請先核對付款紀錄與銀行流水，不要直接刪除舊帳。');
+    }
+    for(const payment of allocatedPayments){
+      const values=[payment.amount,payment.baseAmount,payment.commissionAmount],keys=salaryPaymentCommissionKeys(payment);
+      if(values.some((value)=>value===null||value===''||typeof value==='boolean'||!Number.isFinite(Number(value))||Number(value)<0)
+        ||num(payment.amount)<=0||!financialAuditMoneyEqual(num(payment.baseAmount)+num(payment.commissionAmount),num(payment.amount))
+        ||(num(payment.commissionAmount)>0)!==Boolean(keys.length)){
+        block('SALARY_ALLOCATION_INVALID','既有薪資付款的日薪／抽成分配不一致，已停止新增付款；請先核對來源。');
+      }
+      try{salaryPaymentDeletionPlan(payment)}catch(_){
+        block('SALARY_PAYMENT_EVIDENCE_INVALID','既有薪資付款無法唯一核對銀行帳戶與扣款，已停止新增付款；請先核對，勿重複付款。');
+      }
+    }
+    for(const transaction of legacyBankPayments){
+      const bankIds=[...new Set([transaction.bankAccountId,transaction.bankId].map((value)=>String(value||'').trim()).filter(Boolean))];
+      const wrongEmployee=[transaction.employee,transaction.employeeId].some((value)=>value&&String(value)!==employeeId);
+      const wrongMonth=transaction.month&&String(transaction.month)!==month;
+      if(bankIds.length!==1||state.banks.filter((bank)=>String(bank.id)===bankIds[0]).length!==1
+        ||state.bankTransactions.filter((row)=>String(row.id)===String(transaction.id)).length!==1
+        ||wrongEmployee||wrongMonth||transaction.type==='收入'||transaction.direction==='in'
+        ||!(transaction.type==='支出'||transaction.direction==='out')){
+        block('SALARY_PAYMENT_EVIDENCE_INVALID','歷史薪資付款的員工、月份或銀行證據不一致，已停止新增付款；請先核對舊帳。');
+      }
+    }
+    if(recordedPaid>num(group.total))block('SALARY_PAID_EXCEEDS_TOTAL','此月份付款證據合計超過目前薪資總額，已停止新增付款；請核對來源與歷史紀錄。');
+    if(hasUnallocatedPayment&&truthOutstanding>0)block('LEGACY_PAYMENT_BREAKDOWN','此月份已有歷史薪資付款，尚未能安全拆分日薪與抽成；請先核對付款明細，不會自動清除舊帳或再次發放。');
+    if(!group.sources.length&&truthOutstanding>0)block('SALARY_SOURCE_UNRESOLVED','此月份缺少可核對的薪資來源，已停止新增付款；請先核對歷史薪資明細。');
+    const basePaid=allocatedPayments.reduce((sum,payment)=>sum+Math.max(0,num(payment.baseAmount)),0);
     const pool=commissionReleasePool().filter((row)=>String(row.employeeId||'')===employeeId&&String(row.month||'')===month),available=pool.filter((row)=>row.unlocked&&!row.settled),locked=pool.filter((row)=>!row.unlocked&&!row.settled),settled=pool.filter((row)=>row.settled);
-    const availableMap=new Map(available.map((row)=>[String(row.allocationKey),row])),missing=requested.filter((key)=>!availableMap.has(key)),selected=requested.map((key)=>availableMap.get(key)).filter(Boolean),selectedCommission=Math.round(selected.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0));
-    const availableCommission=Math.round(available.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0)),lockedCommission=Math.round(locked.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0)),settledCommission=Math.round(settled.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0));
-    const currentPayable=Math.max(0,baseOutstanding+availableCommission),selectedPayable=Math.max(0,baseOutstanding+selectedCommission),blockers=[];
-    if(legacyPayments.length)blockers.push({code:'LEGACY_PAYMENT_BREAKDOWN',message:'此月份已有舊式薪資付款，無法安全判定日薪與抽成拆分；請先核對或沖回既有付款。'});
+    const availableMap=new Map(available.map((row)=>[String(row.allocationKey),row])),missing=requested.filter((key)=>!availableMap.has(key)),selected=requested.map((key)=>availableMap.get(key)).filter(Boolean);
     if(missing.length)blockers.push({code:'COMMISSION_SELECTION_UNAVAILABLE',selectionKeys:missing,message:'部分選取抽成已付款、尚未收清或來源已變更，請重新整理後再試。'});
-    return {allowed:blockers.length===0,groupKey:group.key,payrollId:group.primaryPayrollId,employeeId,month,nonCommissionTotal,basePaid,baseOutstanding,availableCommission,lockedCommission,settledCommission,currentPayable,selectedCommission,selectedPayable,available,locked,settled,selected,selectionKeys:selected.map((row)=>row.allocationKey),blockers,legacyPaymentCount:legacyPayments.length};
+    const cannotOffer=blockers.length>0||hasUnallocatedPayment||truthOutstanding===0;
+    const baseOutstanding=cannotOffer?0:Math.min(truthOutstanding,Math.max(0,nonCommissionTotal-basePaid));
+    const selectedCommission=cannotOffer?0:Math.round(selected.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0));
+    const availableCommission=cannotOffer?0:Math.round(available.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0));
+    const lockedCommission=Math.round(locked.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0)),settledCommission=Math.round(settled.reduce((sum,row)=>sum+Math.max(0,num(row.amount)),0));
+    const currentPayable=cannotOffer?0:Math.min(truthOutstanding,Math.max(0,baseOutstanding+availableCommission));
+    const selectedPayable=cannotOffer?0:Math.min(truthOutstanding,Math.max(0,baseOutstanding+selectedCommission));
+    return {allowed:blockers.length===0,groupKey:group.key,payrollId:group.primaryPayrollId,employeeId,month,nonCommissionTotal,basePaid,baseOutstanding,availableCommission,lockedCommission,settledCommission,currentPayable,selectedCommission,selectedPayable,available,locked,settled,selected,selectionKeys:selected.map((row)=>row.allocationKey),blockers,legacyPaymentCount:legacyPayments.length+legacyBankPayments.length,recordedPaid,truthOutstanding};
   }
   function payrollAdjustmentAmount(value, label) {
     const text=String(value??'').trim();if(!text)return 0;const amount=Number(text);
