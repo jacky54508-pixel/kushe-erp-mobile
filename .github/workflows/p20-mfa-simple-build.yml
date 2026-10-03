@@ -1,0 +1,75 @@
+name: Build verified P20 MFA simple candidate
+on:
+  push:
+    branches: [p20-mfa-simple-build-20261003]
+permissions:
+  contents: write
+concurrency:
+  group: p20-mfa-simple-build-20261003
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read isolated patch payload
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: control
+          persist-credentials: false
+      - name: Checkout exact tested baseline
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 19e80f83912d98f12bd6dad151e5c09f8e7b763f
+          path: work
+          fetch-depth: 1
+      - name: Check baseline and apply tested three-file patch
+        working-directory: work
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 19e80f83912d98f12bd6dad151e5c09f8e7b763f
+          test "$(git ls-remote origin refs/heads/beta | cut -f1)" = 19e80f83912d98f12bd6dad151e5c09f8e7b763f
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = 6b9e17a1ef41ea9b7896cd0e3848536d2c255fb4
+          test -z "$(git status --porcelain)"
+          python - <<'PY'
+          import base64, hashlib, json, lzma, os, pathlib, subprocess
+          encoded=pathlib.Path('../control/.p20-mfa-simple/payload.b64').read_text().strip()
+          raw=lzma.decompress(base64.b64decode(encoded,validate=True))
+          assert hashlib.sha256(raw).hexdigest()=='df51e7bfc027505dfbe05340db2a3f8f2cc1083df43213e64539413a194fe1a0'
+          data=json.loads(raw); manifest=data['manifest']
+          assert manifest['base']=='19e80f83912d98f12bd6dad151e5c09f8e7b763f'
+          assert manifest['main']=='6b9e17a1ef41ea9b7896cd0e3848536d2c255fb4'
+          expected={'assets/js/auth-gate.js','assets/js/app.js','index.html'}
+          assert set(manifest['changed'])==expected
+          for path, row in manifest['changed'].items():
+              assert subprocess.check_output(['git','hash-object',path],text=True).strip()==row['before']
+          patch=pathlib.Path(os.environ['RUNNER_TEMP'])/'mfa-simple.patch';patch.write_text(data['patch'])
+          subprocess.run(['git','apply','--check','--whitespace=error-all',str(patch)],check=True)
+          subprocess.run(['git','apply',str(patch)],check=True)
+          for path, row in manifest['changed'].items():
+              assert subprocess.check_output(['git','hash-object',path],text=True).strip()==row['after']
+          assert set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())==expected
+          assert not subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).strip()
+          for path in pathlib.Path('assets/js').glob('*.js'):
+              subprocess.run(['node','--check',str(path)],check=True)
+          print('Three tested file hashes and all JS syntax verified. No live Supabase access.')
+          PY
+          git diff --check
+          git diff --stat
+      - name: Publish isolated candidate only
+        working-directory: work
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/beta | cut -f1)" = 19e80f83912d98f12bd6dad151e5c09f8e7b763f
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = 6b9e17a1ef41ea9b7896cd0e3848536d2c255fb4
+          test -z "$(git ls-remote origin refs/heads/p20-mfa-simple-ready-20261003)"
+          git config user.name 'KuShe ERP Maintenance'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add assets/js/auth-gate.js assets/js/app.js index.html
+          git commit -m 'P20 MFA Simple-1: fresh submit challenge, safe enrollment resume and raw error codes'
+          test "$(git rev-parse HEAD^)" = 19e80f83912d98f12bd6dad151e5c09f8e7b763f
+          git push origin HEAD:refs/heads/p20-mfa-simple-ready-20261003
+          echo "CANDIDATE_SHA=$(git rev-parse HEAD)"
+          echo "Candidate $(git rev-parse HEAD). beta and main were not changed by this job." >> "$GITHUB_STEP_SUMMARY"
