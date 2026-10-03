@@ -199,7 +199,7 @@
   const receiptDetailMarkupWithoutPanel=receiptDetailMarkup;
   receiptDetailMarkup=function(id,state){return receiptDetailMarkupWithoutPanel(id,state).replace('<td colspan="12">','<td colspan="7"><div class="receivable-detail-panel">').replace(/<\/td><\/tr>$/,'</div></td></tr>')};
   function compactReceivableTable(){
-    const table=$('#receivablesApp .receivable-table');if(!table)return;const header=$(':scope>thead>tr',table);if(header)header.innerHTML='<th>請款資訊</th><th>客戶／案場</th><th class="num">本期應收</th><th>收款進度</th><th class="num">保留款</th><th>狀態</th><th>操作</th>';$$('tbody>tr>td[colspan]',table).forEach((cell)=>{cell.colSpan=7});const state=store.getState();
+    const table=$('#receivablesApp .receivable-table');if(!table)return;const header=$(':scope>thead>tr',table);if(header)header.innerHTML='<th>請款資訊</th><th>客戶／案場</th><th class="num">本期應收</th><th>收款進度</th><th class="num">保留款</th><th>狀態</th><th>操作</th>';$$(':scope>tbody>tr>td[colspan]',table).forEach((cell)=>{cell.colSpan=7});const state=store.getState();
     $$('.receivable-main-row',table).forEach((row)=>{const cells=[...row.children];if(cells.length!==12)return;const id=row.dataset.expandReceivable,source=state.receivables.find((item)=>item.id===id),view=source?receivableView(source,state):null,make=(className)=>{const td=document.createElement('td');td.className=className;return td};
       const billingInfo=make('receivable-billing-info'),billingTop=document.createElement('div'),sourceNo=$('b',cells[0]),receiptCount=$('.receipt-count-badge',cells[0]),billingDate=document.createElement('small'),billingMeta=document.createElement('div'),due=$('.receivable-due',cells[0]);billingTop.className='receivable-billing-top';billingDate.className='receivable-billing-date';billingMeta.className='receivable-billing-meta';if(sourceNo)billingTop.append(sourceNo);billingDate.textContent=cells[3].textContent.trim();if(receiptCount){receiptCount.classList.add('receivable-billing-chip');billingMeta.append(receiptCount)}if(due){due.classList.add('receivable-billing-chip','is-due');billingMeta.append(due)}billingInfo.append(billingTop,billingDate,billingMeta);
       const party=make('receivable-party');party.innerHTML=`<strong>${esc(cells[1].textContent.trim())}</strong><small>${esc(cells[2].textContent.trim())}</small>`;
@@ -595,7 +595,7 @@
     renderMobileReceivableFilters(panel,state);
     $$('[data-expand-receivable]',app).forEach((rowNode)=>{
       const id=rowNode.dataset.expandReceivable,actions=$('.receivable-actions',rowNode),historyButton=$('[data-expand-button]',rowNode);
-      if(actions&&!actions.querySelector('[data-view-receivable-billing]')){
+      if(actions&&!rowNode.querySelector('[data-view-receivable-billing]')){
         const button=document.createElement('button');button.className='commission-link';button.type='button';button.dataset.viewReceivableBilling=id;button.textContent='查看請款單';button.onclick=(event)=>{event.stopPropagation();openReceivableBilling(id)};
         actions.insertBefore(button,historyButton?.parentNode===actions?historyButton:null);
       }

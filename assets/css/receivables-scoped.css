@@ -1,0 +1,165 @@
+/* P20 AR Layout-1: presentation only; retain native table cells and all actions.
+   The existing mobile pilot switches at 620px. Keep that boundary unchanged. */
+@media (min-width: 621px) {
+  #receivablesApp .receivable-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    align-items: end;
+  }
+  #receivablesApp .receivable-filter-grid > label { min-width: 0; }
+  #receivablesApp .receivable-filter-grid .receivable-search { grid-column: auto; }
+  #receivablesApp .receivable-filter-grid input,
+  #receivablesApp .receivable-filter-grid select {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    height: 40px;
+    font-size: 12px;
+  }
+  #receivablesApp .receivable-view-switch { flex-wrap: wrap; gap: 8px; }
+
+  #receivablesApp .billing-list-panel > .commission-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+  #receivablesApp .receivable-table {
+    width: 100%;
+    min-width: 960px;
+    table-layout: fixed;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(1) { width: 17%; }
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(2) { width: 18%; }
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(3) { width: 14%; }
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(4) { width: 15%; }
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(5) { width: 9%; }
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(6) { width: 9%; }
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(7) { width: 18%; }
+
+  /* Old 12-column sticky rules must not cover the compact 7-column table. */
+  #receivablesApp .receivable-table > thead > tr > th,
+  #receivablesApp .receivable-table > tbody > .receivable-main-row > td {
+    box-sizing: border-box;
+    position: static;
+    left: auto;
+    right: auto;
+    z-index: auto;
+    box-shadow: none;
+    padding: 14px 10px !important;
+    vertical-align: middle !important;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  #receivablesApp .receivable-table > tbody > .receivable-main-row > td {
+    display: table-cell !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+  #receivablesApp .receivable-billing-top { display: block; }
+  #receivablesApp .receivable-billing-top > b {
+    display: block;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  #receivablesApp .receivable-billing-meta { flex-wrap: wrap; gap: 5px; }
+  #receivablesApp .receivable-party > strong,
+  #receivablesApp .receivable-party > small {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  #receivablesApp .receivable-party > strong { font-size: 12px; }
+  #receivablesApp .receivable-party > small { font-size: 11px; }
+  #receivablesApp .receivable-period-amount > strong,
+  #receivablesApp .receivable-retention > .retention-amount {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  #receivablesApp .receivable-period-amount > small {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.5;
+  }
+  #receivablesApp .receivable-progress.is-open > strong {
+    display: inline-block !important;
+    box-sizing: border-box;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.5;
+  }
+  #receivablesApp .receivable-status-stack > span,
+  #receivablesApp .receivable-retention > .retention-status-badge {
+    box-sizing: border-box;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #receivablesApp .receivable-status-stack > span {
+    padding: 4px 6px;
+    font-size: 10px;
+    line-height: 1.4;
+  }
+
+  /* Clear inherited fixed grid tracks; each row contains only its real actions. */
+  #receivablesApp .receivable-actions {
+    display: flex !important;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    max-width: none;
+    min-height: 0 !important;
+    margin: 0;
+    white-space: normal;
+  }
+  #receivablesApp .receivable-action-primary-row,
+  #receivablesApp .receivable-action-secondary-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-height: 0;
+  }
+  #receivablesApp .receivable-action-primary-row > button {
+    flex: 0 0 auto;
+    width: auto;
+    height: 34px;
+    min-height: 34px;
+    margin: 0;
+    padding: 0 10px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  #receivablesApp .receivable-action-secondary-row > button {
+    flex: 0 0 auto;
+    width: auto !important;
+    height: auto !important;
+    min-height: 28px !important;
+    margin: 0;
+    padding: 4px 0 !important;
+    font-size: 11px;
+    line-height: 20px;
+    white-space: nowrap;
+  }
+  /* Retention status already has its own column; this was an inert spacer. */
+  #receivablesApp .receivable-action-retention-empty { display: none; }
+  #receivablesApp .receivable-action-primary-row:not(:has(button)) { display: none; }
+}
+@media (min-width: 621px) and (max-width: 1100px) {
+  #receivablesApp .receivable-filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  #receivablesApp .receivable-filter-grid .receivable-search { grid-column: span 2; }
+}
+@media (min-width: 621px) and (max-width: 880px) {
+  #receivablesApp .receivable-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #receivablesApp .receivable-filter-grid .receivable-search { grid-column: auto; }
+}
