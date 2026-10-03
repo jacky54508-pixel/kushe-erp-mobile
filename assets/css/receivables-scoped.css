@@ -108,52 +108,15 @@
     line-height: 1.4;
   }
 
-  /* Clear inherited fixed grid tracks; each row contains only its real actions. */
-  #receivablesApp .receivable-actions {
-    display: flex !important;
-    flex-direction: column;
-    align-items: stretch;
-    justify-content: center;
-    gap: 8px;
-    width: 100%;
-    max-width: none;
-    min-height: 0 !important;
-    margin: 0;
-    white-space: normal;
+  /* Fixed action width + flexible customer/source columns prevent row drift. */
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(1),
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(2) { width: auto; }
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(7) { width: 210px; }
+  #receivablesApp .receivable-table > tbody > .receivable-main-row > td {
+    padding-top: 10px !important;
+    padding-bottom: 10px !important;
   }
-  #receivablesApp .receivable-action-primary-row,
-  #receivablesApp .receivable-action-secondary-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-    min-height: 0;
-  }
-  #receivablesApp .receivable-action-primary-row > button {
-    flex: 0 0 auto;
-    width: auto;
-    height: 34px;
-    min-height: 34px;
-    margin: 0;
-    padding: 0 10px;
-    font-size: 11px;
-    white-space: nowrap;
-  }
-  #receivablesApp .receivable-action-secondary-row > button {
-    flex: 0 0 auto;
-    width: auto !important;
-    height: auto !important;
-    min-height: 28px !important;
-    margin: 0;
-    padding: 4px 0 !important;
-    font-size: 11px;
-    line-height: 20px;
-    white-space: nowrap;
-  }
-  /* Retention status already has its own column; this was an inert spacer. */
-  #receivablesApp .receivable-action-retention-empty { display: none; }
-  #receivablesApp .receivable-action-primary-row:not(:has(button)) { display: none; }
+
 }
 @media (min-width: 621px) and (max-width: 1100px) {
   #receivablesApp .receivable-filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -162,4 +125,148 @@
 @media (min-width: 621px) and (max-width: 880px) {
   #receivablesApp .receivable-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #receivablesApp .receivable-filter-grid .receivable-search { grid-column: auto; }
+}
+
+/* P20 AR Actions-2: uniform controls, regardless of outstanding / retention state. */
+#receivablesApp .receivable-actions {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: auto auto !important;
+  gap: 6px;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  min-height: 0 !important;
+  margin: 0;
+  white-space: normal;
+}
+#receivablesApp .receivable-action-primary-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  grid-template-rows: auto;
+  gap: 8px;
+}
+#receivablesApp .receivable-action-primary-row > button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  grid-column: auto !important;
+  grid-row: auto !important;
+  height: 40px;
+  min-height: 40px;
+  margin: 0;
+  padding: 0 5px;
+  border: 1px solid #cddded;
+  border-radius: 9px;
+  background: #fff;
+  color: #204f79;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+  box-shadow: none;
+  cursor: pointer;
+}
+#receivablesApp .receivable-action-primary-row > .receivable-action-collect:not(:disabled) {
+  border-color: #075bd8;
+  background: #075bd8;
+  color: #fff;
+  box-shadow: 0 3px 8px rgba(7,91,216,.10);
+}
+#receivablesApp .receivable-action-primary-row > button:not(:disabled):hover { filter: brightness(.96); }
+#receivablesApp .receivable-action-primary-row > button:disabled {
+  opacity: 1;
+  border-color: #e4ebf2;
+  background: #f6f8fb;
+  color: #758496;
+  box-shadow: none;
+  cursor: default;
+  filter: none;
+}
+#receivablesApp .receivable-action-secondary-row {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 5fr) minmax(0, 3fr);
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+}
+#receivablesApp .receivable-action-secondary-row > button,
+#receivablesApp .receivable-more-toggle {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100% !important;
+  min-width: 0;
+  height: 30px !important;
+  min-height: 30px !important;
+  margin: 0;
+  padding: 0 !important;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #45617e;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.3;
+  text-decoration: none;
+  white-space: nowrap;
+  box-shadow: none;
+  cursor: pointer;
+}
+#receivablesApp .receivable-action-secondary-row > button:hover,
+#receivablesApp .receivable-more-toggle:hover,
+#receivablesApp .receivable-more-toggle[aria-expanded="true"] { color: #075bd8; background: #edf4fc; }
+#receivablesApp .receivable-more-actions { min-width: 0; }
+#receivablesApp .receivable-more-toggle { gap: 4px; }
+#receivablesApp .receivable-more-toggle::after {
+  content: ''; width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg);
+}
+#receivablesApp .receivable-actions button:focus-visible,
+.receivable-more-panel button:focus-visible { outline: 2px solid #075bd8; outline-offset: 2px; }
+/* This panel is temporarily attached to body to escape the table scroll clip. */
+.receivable-more-panel {
+  box-sizing: border-box;
+  position: fixed;
+  z-index: 1200;
+  padding: 6px;
+  border: 1px solid #dce6ef;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(16,47,86,.16);
+  color: #274b6d;
+  text-align: left;
+}
+.receivable-more-panel[hidden] { display: none !important; }
+.receivable-more-panel > button {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: #fff;
+  color: #b42318;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.receivable-more-panel > button:hover { background: #fff1f0; }
+.receivable-more-panel > small { display: block; padding: 2px 12px 6px; color: #687a8f; font-size: 11px; line-height: 1.5; }
+@media (max-width: 620px) {
+  #receivablesApp .receivable-actions--mobile { gap: 6px; margin-top: 8px; }
+  #receivablesApp .receivable-actions--mobile .receivable-action-primary-row { grid-template-columns: minmax(0, 1fr); }
+  #receivablesApp .receivable-actions--mobile .receivable-action-primary-row > button { min-height: 44px; height: 44px; font-size: 13px; }
+  #receivablesApp .receivable-actions--mobile .receivable-action-secondary-row > button,
+  #receivablesApp .receivable-actions--mobile .receivable-more-toggle { min-height: 44px !important; height: 44px !important; font-size: 12px; }
 }

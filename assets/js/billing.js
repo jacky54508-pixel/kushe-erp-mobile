@@ -198,6 +198,66 @@
   renderReceivables=function(){renderReceivablesWithSafeAccountingDelete();if(!receivableActive)return;$$('[data-expand-receivable]').forEach((tr)=>{const id=tr.dataset.expandReceivable,actions=$('.receivable-actions',tr);if(!actions||$('[data-delete-accounting]',actions))return;const button=document.createElement('button');button.type='button';button.className='commission-secondary compact danger';button.dataset.deleteAccounting=id;button.textContent='刪除整筆帳務';button.title='刪除前將檢查收款、銀行與請款關聯';actions.insertBefore(button,$('[data-expand-button]',actions));button.onclick=(event)=>{event.stopPropagation();openAccountingDelete(id)}})};
   const receiptDetailMarkupWithoutPanel=receiptDetailMarkup;
   receiptDetailMarkup=function(id,state){return receiptDetailMarkupWithoutPanel(id,state).replace('<td colspan="12">','<td colspan="7"><div class="receivable-detail-panel">').replace(/<\/td><\/tr>$/,'</div></td></tr>')};
+  // P20 AR Actions-2: presentation only. Keep all original accounting handlers.
+  let receivableMoreClose=null,receivableMoreSerial=0;
+  function closeReceivableMore(restoreFocus=false){receivableMoreClose?.(restoreFocus)}
+  function inactiveReceivableAction(text,className){
+    const button=document.createElement('button');
+    button.type='button';button.className=className;button.disabled=true;button.textContent=text;
+    return button;
+  }
+  function receivableMoreActions(deleteButton){
+    const wrapper=document.createElement('div'),trigger=document.createElement('button'),panel=document.createElement('div');
+    wrapper.className='receivable-more-actions';trigger.type='button';trigger.className='receivable-more-toggle';trigger.textContent='更多';
+    panel.className='receivable-more-panel';panel.id='receivable-more-'+(++receivableMoreSerial);panel.hidden=true;
+    panel.setAttribute('role','group');panel.setAttribute('aria-label','帳務進階操作');
+    trigger.setAttribute('aria-expanded','false');trigger.setAttribute('aria-controls',panel.id);trigger.setAttribute('aria-label','更多帳務操作');
+    const originalDelete=deleteButton.onclick;
+    deleteButton.className='receivable-action-delete';deleteButton.textContent='刪除帳務';
+    deleteButton.onclick=(event)=>{closeReceivableMore();return originalDelete?.call(deleteButton,event)};
+    const note=document.createElement('small');note.textContent='刪除前仍須通過原有確認';
+    panel.append(deleteButton,note);wrapper.append(trigger,panel);
+    trigger.onclick=(event)=>{
+      event.preventDefault();event.stopPropagation();
+      const wasOpen=trigger.getAttribute('aria-expanded')==='true';closeReceivableMore();if(wasOpen)return;
+      // Portal avoids clipping at the table's horizontal scroll boundary / last row.
+      document.body.append(panel);panel.hidden=false;trigger.setAttribute('aria-expanded','true');
+      const box=trigger.getBoundingClientRect(),viewportWidth=document.documentElement.clientWidth,viewportHeight=window.innerHeight;
+      panel.style.width=Math.min(204,Math.max(0,viewportWidth-16))+'px';
+      const bounds=panel.getBoundingClientRect();
+      panel.style.left=Math.max(8,Math.min(box.right-bounds.width,viewportWidth-bounds.width-8))+'px';
+      panel.style.top=Math.max(8,Math.min(box.bottom+bounds.height+6<=viewportHeight-8?box.bottom+6:box.top-bounds.height-6,viewportHeight-bounds.height-8))+'px';
+      const close=(restoreFocus=false)=>{
+        if(receivableMoreClose!==close)return;
+        receivableMoreClose=null;trigger.setAttribute('aria-expanded','false');panel.hidden=true;wrapper.append(panel);
+        document.removeEventListener('pointerdown',outside,true);document.removeEventListener('keydown',key,true);
+        document.removeEventListener('focusin',focusOutside,true);document.removeEventListener('scroll',scrolled,true);window.removeEventListener('resize',scrolled);
+        if(restoreFocus&&trigger.isConnected)trigger.focus({preventScroll:true});
+      };
+      const outside=(e)=>{if(!panel.contains(e.target)&&!trigger.contains(e.target))close()};
+      const focusOutside=(e)=>{if(!panel.contains(e.target)&&e.target!==trigger)close()};
+      const scrolled=()=>{
+        const now=trigger.getBoundingClientRect();
+        // Ignore a queued scroll event from bringing the trigger into view.
+        if(Math.abs(now.left-box.left)>1||Math.abs(now.top-box.top)>1||document.documentElement.clientWidth!==viewportWidth||window.innerHeight!==viewportHeight)close();
+      };
+      const key=(e)=>{
+        if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close(true)}
+        else if(e.key==='Tab'&&panel.contains(document.activeElement)){
+          e.preventDefault();const backwards=e.shiftKey;close(true);
+          if(!backwards){
+            const targets=[...document.querySelectorAll('a[href],button,input,select,textarea,[tabindex]')].filter(node=>!node.disabled&&node.tabIndex>=0&&node.getClientRects().length&&!node.closest('[hidden],[inert]'));
+            targets[targets.indexOf(trigger)+1]?.focus();
+          }
+        }
+      };
+      receivableMoreClose=close;
+      document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',key,true);
+      document.addEventListener('focusin',focusOutside,true);document.addEventListener('scroll',scrolled,true);window.addEventListener('resize',scrolled);
+      deleteButton.focus({preventScroll:true});
+    };
+    return wrapper;
+  }
   function compactReceivableTable(){
     const table=$('#receivablesApp .receivable-table');if(!table)return;const header=$(':scope>thead>tr',table);if(header)header.innerHTML='<th>請款資訊</th><th>客戶／案場</th><th class="num">本期應收</th><th>收款進度</th><th class="num">保留款</th><th>狀態</th><th>操作</th>';$$(':scope>tbody>tr>td[colspan]',table).forEach((cell)=>{cell.colSpan=7});const state=store.getState();
     $$('.receivable-main-row',table).forEach((row)=>{const cells=[...row.children];if(cells.length!==12)return;const id=row.dataset.expandReceivable,source=state.receivables.find((item)=>item.id===id),view=source?receivableView(source,state):null,make=(className)=>{const td=document.createElement('td');td.className=className;return td};
@@ -206,7 +266,25 @@
       const amount=make('receivable-period-amount num');amount.innerHTML=`<strong>${esc(cells[5].textContent.trim())}</strong><small>請款總額 ${esc(cells[4].textContent.trim())}</small>`;
       const progress=make(`receivable-progress ${view&&view.outstanding>0?'is-open':'is-settled'}`);progress.innerHTML=view&&view.outstanding>0?`<strong>未收 ${esc(cells[7].textContent.trim())}</strong><small>已收 ${esc(cells[6].textContent.trim())}</small>`:`<span class="receivable-paid-badge">已收清</span><small>已收 ${esc(cells[6].textContent.trim())}</small>`;
       const retention=cells[8];retention.className='receivable-retention num';if(!$('.retention-amount',retention)){const zero=document.createElement('span');zero.className='retention-amount';zero.textContent=money(0);retention.prepend(zero)}const status=make('receivable-status-stack'),invoiceBadge=$('.invoice-status-badge',cells[9]),collectionBadge=$('.commission-status',cells[10]);if(invoiceBadge){if(invoiceBadge.classList.contains('no_invoice'))invoiceBadge.textContent='不開發票';status.append(invoiceBadge)}if(collectionBadge)status.append(collectionBadge);
-      const actions=cells[11];actions.className='receivable-actions-cell';const actionGroup=$('.receivable-actions',actions);if(actionGroup){const collectButton=$('[data-receive]',actionGroup),retentionButton=$('[data-retention-receive]',actionGroup),expandButton=$('[data-expand-button]',actionGroup),deleteButton=$('[data-delete-accounting]',actionGroup),primaryRow=document.createElement('div'),secondaryRow=document.createElement('div');primaryRow.className='receivable-action-primary-row';secondaryRow.className='receivable-action-secondary-row';if(collectButton){collectButton.classList.add('receivable-action-collect');primaryRow.append(collectButton)}if(retentionButton){retentionButton.classList.add('receivable-action-retention');retentionButton.textContent='收保留款';primaryRow.append(retentionButton)}else{const empty=document.createElement('span');empty.className='receivable-action-retention-empty';empty.textContent='無保留款';primaryRow.append(empty)}if(expandButton){const historyButton=document.createElement('button');historyButton.type='button';historyButton.className='commission-link receivable-history-link';historyButton.dataset.expandButton=id;historyButton.textContent=openReceiptHistories.has(id)?'收合歷程':'收款歷程';historyButton.setAttribute('aria-label',openReceiptHistories.has(id)?'收合收款歷程':'查看收款歷程');historyButton.setAttribute('aria-expanded',String(openReceiptHistories.has(id)));historyButton.onclick=(event)=>{event.stopPropagation();toggleReceivableDetail(id)};secondaryRow.append(historyButton);expandButton.removeAttribute('data-expand-button');expandButton.dataset.viewReceivableBilling=id;expandButton.className='receivable-detail-link';expandButton.textContent='查看請款單';expandButton.setAttribute('aria-label','查看對應請款單');expandButton.removeAttribute('aria-expanded');expandButton.onclick=(event)=>{event.stopPropagation();openReceivableBilling(id)};billingMeta.append(expandButton)}if(deleteButton){deleteButton.className='receivable-action-delete';deleteButton.textContent='刪除帳務';deleteButton.title='刪除整筆請款／應收／收款關聯帳務';deleteButton.onclick=(event)=>{event.stopPropagation();openAccountingDelete(id)};secondaryRow.append(deleteButton)}actionGroup.replaceChildren(primaryRow,secondaryRow)}
+      const actions=cells[11];actions.className='receivable-actions-cell';const actionGroup=$('.receivable-actions',actions);
+      if(actionGroup){
+        const collectButton=$('[data-receive]',actionGroup),retentionButton=$('[data-retention-receive]',actionGroup),expandButton=$('[data-expand-button]',actionGroup),deleteButton=$('[data-delete-accounting]',actionGroup);
+        const primaryRow=document.createElement('div'),secondaryRow=document.createElement('div');
+        primaryRow.className='receivable-action-primary-row';secondaryRow.className='receivable-action-secondary-row';
+        if(collectButton){collectButton.classList.add('receivable-action-collect');primaryRow.append(collectButton)}
+        else primaryRow.append(inactiveReceivableAction('本期已收清','receivable-action-collect'));
+        if(retentionButton){retentionButton.classList.add('receivable-action-retention');retentionButton.textContent='收保留款';primaryRow.append(retentionButton)}
+        else primaryRow.append(inactiveReceivableAction(view&&view.retention>0?'保留款已收':'無保留款','receivable-action-retention'));
+        if(expandButton){
+          const historyButton=document.createElement('button');historyButton.type='button';historyButton.className='receivable-history-link';historyButton.dataset.expandButton=id;
+          historyButton.textContent=openReceiptHistories.has(id)?'收合歷程':'收款歷程';historyButton.setAttribute('aria-label',openReceiptHistories.has(id)?'收合收款歷程':'查看收款歷程');historyButton.setAttribute('aria-expanded',String(openReceiptHistories.has(id)));
+          historyButton.onclick=(event)=>{event.stopPropagation();toggleReceivableDetail(id)};secondaryRow.append(historyButton);
+          expandButton.removeAttribute('data-expand-button');expandButton.dataset.viewReceivableBilling=id;expandButton.className='receivable-detail-link';expandButton.textContent='查看請款單';expandButton.setAttribute('aria-label','查看對應請款單');expandButton.removeAttribute('aria-expanded');
+          expandButton.onclick=(event)=>{event.stopPropagation();openReceivableBilling(id)};secondaryRow.append(expandButton);
+        }
+        if(deleteButton)secondaryRow.append(receivableMoreActions(deleteButton));
+        actionGroup.replaceChildren(primaryRow,secondaryRow);
+      }
       row.replaceChildren(billingInfo,party,amount,progress,retention,status,actions)
     })
   }
@@ -613,19 +691,20 @@
       const meta=mobileReceivableNode('div','mobile-card-grid');
       [['請款單號',model.sourceNo],['請款日期',model.billingDate],['到期日',model.dueDate],['已沖銷',money(model.received)],['保留款',model.retention>0?money(model.retention):''],['發票狀態',invoiceLabel(model.invoiceStatus)],['收款紀錄',model.payments.length?model.payments.length+' 次收款':'']].forEach(([label,value])=>{const field=mobileReceivableField(label,value);if(field)meta.append(field)});
       card.append(meta);
-      const actions=mobileReceivableNode('div','mobile-action-layout');
-      const primaryActions=mobileReceivableNode('div','mobile-action-primary');
-      const viewBilling=mobileReceivableNode('button','mobile-primary-action','查看請款單');
-      viewBilling.type='button';viewBilling.onclick=()=>openReceivableBilling(row.id);primaryActions.append(viewBilling);
-      const expand=mobileReceivableNode('button','mobile-secondary-action',openReceiptHistories.has(row.id)?'收合歷程':'收款歷程');
+      const actions=mobileReceivableNode('div','receivable-actions receivable-actions--mobile');
+      const primaryActions=mobileReceivableNode('div','receivable-action-primary-row');
+      const secondaryActions=mobileReceivableNode('div','receivable-action-secondary-row');
+      if(model.outstanding>0){const collect=mobileReceivableNode('button','receivable-action-collect','收款');collect.type='button';collect.onclick=()=>openReceipt(row.id);primaryActions.append(collect)}
+      else primaryActions.append(inactiveReceivableAction('本期已收清','receivable-action-collect'));
+      if(model.retentionOutstanding>0){const retention=mobileReceivableNode('button','receivable-action-retention','收保留款');retention.type='button';retention.onclick=()=>openRetentionReceipt(row.id);primaryActions.append(retention)}
+      else primaryActions.append(inactiveReceivableAction(model.retention>0?'保留款已收':'無保留款','receivable-action-retention'));
+      const expand=mobileReceivableNode('button','receivable-history-link',openReceiptHistories.has(row.id)?'收合歷程':'收款歷程');
       expand.type='button';expand.dataset.mobileExpand='';expand.setAttribute('aria-expanded',String(openReceiptHistories.has(row.id)));
-      expand.onclick=()=>toggleReceivableDetail(row.id);primaryActions.append(expand);
-      if(model.outstanding>0){const collect=mobileReceivableNode('button','mobile-primary-action','收款');collect.type='button';collect.onclick=()=>openReceipt(row.id);primaryActions.append(collect)}
-      if(model.retentionOutstanding>0){const retention=mobileReceivableNode('button','mobile-secondary-action','收保留款');retention.type='button';retention.onclick=()=>openRetentionReceipt(row.id);primaryActions.append(retention)}
-      const more=mobileReceivableNode('details','mobile-action-more');
-      const deletion=mobileReceivableNode('button','mobile-danger-action','刪除整筆帳務');deletion.type='button';deletion.onclick=()=>openAccountingDelete(row.id);
-      const morePanel=mobileReceivableNode('div','mobile-action-more-panel');morePanel.append(deletion);
-      more.append(mobileReceivableNode('summary','mobile-action-more-toggle','更多操作'),morePanel);actions.append(primaryActions,more);
+      expand.onclick=()=>toggleReceivableDetail(row.id);secondaryActions.append(expand);
+      const viewBilling=mobileReceivableNode('button','receivable-detail-link','查看請款單');
+      viewBilling.type='button';viewBilling.onclick=()=>openReceivableBilling(row.id);secondaryActions.append(viewBilling);
+      const deletion=mobileReceivableNode('button','receivable-action-delete','刪除帳務');deletion.type='button';deletion.onclick=(event)=>{event.stopPropagation();openAccountingDelete(row.id)};
+      secondaryActions.append(receivableMoreActions(deletion));actions.append(primaryActions,secondaryActions);
       card.append(actions);const detail=mobileReceivableNode('div','mobile-receivable-detail');detail.hidden=true;card.append(detail);mobile.append(card);
       if(openReceiptHistories.has(row.id))renderMobileReceivableDetail(row.id);
     });
@@ -708,13 +787,14 @@
   }
   const renderReceivablesBeforeEmployeeCashManagement=renderReceivables;
   renderReceivables=function(){
+    closeReceivableMore();
     const result=renderReceivablesBeforeEmployeeCashManagement();if(!receivableActive)return result;
     const panel=$('#receivablesApp .commission-filters'),switcher=panel&&$('.receivable-view-switch',panel);
     if(switcher&&!$('[data-receivable-view="employee_cash"]',switcher)){const button=document.createElement('button');button.type='button';button.dataset.receivableView='employee_cash';button.textContent='員工代收款';button.setAttribute('aria-pressed',String(receivableFilters.view==='employee_cash'));button.classList.toggle('is-active',receivableFilters.view==='employee_cash');button.onclick=()=>{receivableFilters.view='employee_cash';renderReceivables()};switcher.append(button)}
     if(receivableFilters.view==='employee_cash')renderEmployeeCashPanel();else enhanceEmployeeCashReceivableRows();
     return result;
   };
-  async function activateReceivables(){receivableActive=true;if(!ready){await store.load();ready=true}renderReceivables()}function deactivateReceivables(){receivableActive=false}
+  async function activateReceivables(){receivableActive=true;if(!ready){await store.load();ready=true}renderReceivables()}function deactivateReceivables(){closeReceivableMore();receivableActive=false}
   window.addEventListener('kushe:data-updated',()=>{if(billingActive)renderBillingList();if(receivableActive)renderReceivables()});
   window.KusheBilling={activate:activateBilling,deactivate:deactivateBilling,activateDraft,deactivateDraft,startDraft,render:renderBillingList,openDetail:openBillingDetail};
   window.KusheReceivables={activate:activateReceivables,deactivate:deactivateReceivables,render:renderReceivables};
