@@ -545,11 +545,11 @@
   function workforceKpis(view) {
     const {totalWork, totalCommission, unpaidPayrollRows, unpaidPayrollEmployees, todayEmployees, monthProjects} = view;
     return `<section class="commission-kpis workforce-kpis" aria-label="出勤與業績統計摘要">
-        <article><span>今日作業人數</span><strong>${todayEmployees.size} 人</strong><small>依實際作業與出勤員工去重</small></article>
-        <article><span>本月點工薪資</span><strong>${money(totalWork)}</strong><small>依正式點工薪資來源</small></article>
-        <article><span>本月抽成</span><strong>${money(totalCommission)}</strong><small>依正式抽成來源</small></article>
-        <article class="is-warning"><span>未付款薪資</span><strong>${unpaidPayrollEmployees.size} 人</strong><small>尚有 ${unpaidPayrollRows.length} 筆薪資待付款</small></article>
-        <article class="is-success"><span>本月作業案場</span><strong>${monthProjects.size} 處</strong><small>依實際作業來源去重</small></article>
+        <article data-kpi="workforce.today" role="button" tabindex="0" aria-label="查看今日作業人數對應明細" aria-expanded="false"><span>今日作業人數</span><strong>${todayEmployees.size} 人</strong><small>依實際作業與出勤員工去重</small></article>
+        <article data-kpi="workforce.attendance" role="button" tabindex="0" aria-label="查看本月點工薪資對應明細" aria-expanded="false"><span>本月點工薪資</span><strong>${money(totalWork)}</strong><small>依正式點工薪資來源</small></article>
+        <article data-kpi="workforce.commission" role="button" tabindex="0" aria-label="查看本月抽成對應明細" aria-expanded="false"><span>本月抽成</span><strong>${money(totalCommission)}</strong><small>依正式抽成來源</small></article>
+        <article class="is-warning" data-kpi="workforce.unpaid" role="button" tabindex="0" aria-label="查看未付款薪資對應明細" aria-expanded="false"><span>未付款薪資</span><strong>${unpaidPayrollEmployees.size} 人</strong><small>尚有 ${unpaidPayrollRows.length} 筆薪資待付款</small></article>
+        <article class="is-success" data-kpi="workforce.projects" role="button" tabindex="0" aria-label="查看本月作業案場對應明細" aria-expanded="false"><span>本月作業案場</span><strong>${monthProjects.size} 處</strong><small>依實際作業來源去重</small></article>
       </section>`;
   }
   function render() {
@@ -1201,4 +1201,16 @@
   }
   window.addEventListener('kushe:data-updated', () => { if (active && !quickProjectSaveActive && !dailySubmitInFlight && !dailyEditorActive && !manualDrawerActive && !settlementDrawerActive) refreshWorkforceResults(); });
   window.KusheCommissions = { activate, deactivate, render };
+
+  // P21: read-only KPI destinations; original calculations and save paths are unchanged.
+
+  window.KusheKpi.register('workforce',{anchor:'.workforce-kpis',active:()=>active,read(action){
+    const v=workforceSnapshot(),name=id=>v.state.employees.find(e=>String(e.id)===String(id))?.name||id,project=id=>v.state.projects.find(p=>String(p.id)===String(id))?.name||id;
+    if(action==='today')return {title:'今日作業員工',scope:today()+'；與字卡相同，依員工／案場篩選並去重。',columns:['日期','員工'],rows:[...v.todayEmployees].map(id=>({id,cells:[today(),name(id)]}))};
+    if(action==='projects')return {title:'本月作業案場',scope:'沿用目前月份與員工／案場篩選；每日作業與點工來源去重。',columns:['案場'],rows:[...v.monthProjects].map(id=>({id,cells:[project(id)]}))};
+    if(action==='unpaid')return {title:'未付款薪資來源',scope:'沿用字卡的月份／員工範圍；一位員工可能有多筆薪資来源，不執行付款。',columns:['月份','員工','金額','狀態'],rows:v.unpaidPayrollRows.map(r=>({id:r.id,cells:[r.month,name(employeeIdOf(r)),money(r.total),r.status]}))};
+    if(action==='attendance')return {title:'本月點工薪資明細',scope:'沿用目前篩選與正式點工來源，不重複加總每日施工衍生紀錄。',columns:['日期','員工','案場','金額'],rows:v.attendanceRows.map(r=>({id:r.id,cells:[r.date,name(employeeIdOf(r)),project(projectIdOf(r)),money(r.amount)]}))};
+    if(action==='commission')return {title:'本月抽成明細',scope:'沿用目前篩選與正式抽成來源；不變更抽成比例或付款狀態。',columns:['日期','員工','案場','業績','抽成'],rows:v.rows.map(r=>({id:r.id,cells:[r.date,name(employeeIdOf(r)),project(projectIdOf(r)),money(r.performance),money(r.commission)]}))};return null;
+  }});
+
 }());

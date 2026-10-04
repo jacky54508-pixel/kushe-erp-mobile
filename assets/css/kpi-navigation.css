@@ -1,0 +1,35 @@
+/* P21 KPI navigation: no metric sizing or existing business UI rules changed. */
+[data-kpi]{cursor:pointer;touch-action:manipulation;transition:box-shadow .16s,border-color .16s}
+[data-kpi]:hover{box-shadow:0 5px 18px rgba(20,74,140,.12)}
+[data-kpi]:focus-visible{outline:3px solid #1467dc;outline-offset:3px}
+[data-kpi][aria-expanded="true"]{box-shadow:0 0 0 2px #1467dc}
+.kpi-readonly-detail{margin:16px 0 22px;scroll-margin-top:20px;border:1px solid #bbd3f5;border-radius:16px;background:#fff;overflow:hidden}
+.kpi-readonly-detail:focus{outline:2px solid #3375c9;outline-offset:2px}
+.kpi-detail-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:20px 22px;border-bottom:1px solid #e1eaf5}
+.kpi-detail-head h2{font-size:19px;margin:8px 0;color:#123960}
+.kpi-detail-head p{font-size:13px;line-height:1.7;color:#60738c;margin:0;max-width:850px}
+.kpi-readonly-badge{font-size:12px;font-weight:700;color:#1759a0;background:#edf5ff;border-radius:6px;padding:4px 8px}
+.kpi-detail-head button{flex-shrink:0;min-height:42px}
+.kpi-detail-table-wrap{overflow-x:auto}
+.kpi-readonly-detail table{border-collapse:collapse;width:100%;font-size:14px}
+.kpi-readonly-detail th,.kpi-readonly-detail td{padding:12px 16px;border-bottom:1px solid #e8eef6;text-align:left;overflow-wrap:anywhere}
+.kpi-readonly-detail th{background:#f7faff;color:#4c6480;white-space:nowrap}
+.kpi-readonly-detail td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.kpi-detail-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 22px;font-size:13px;color:#576e86}
+.kpi-detail-footer>div{display:flex;gap:8px}
+.kpi-detail-footer button{min-height:40px;padding:8px 14px;border:1px solid #d2dfee;border-radius:8px;background:#fff;color:#204c7d;cursor:pointer}
+.kpi-detail-footer button:disabled{opacity:.45;cursor:default}
+.kpi-detail-empty{padding:26px 22px;color:#61748d}
+.kpi-detail-mobile{display:none}
+@media(max-width:640px){
+ .kpi-detail-head{padding:16px;gap:10px}.kpi-detail-head h2{font-size:17px}
+ .kpi-detail-head button{padding:8px 10px;font-size:12px}
+ .kpi-detail-table-wrap{display:none}.kpi-detail-mobile{display:block;padding:0 16px}
+ .kpi-detail-record{padding:12px 0;border-bottom:1px solid #e5edf7}
+ .kpi-detail-record dl{margin:0;display:grid;gap:9px}
+ .kpi-detail-record dl>div{display:grid;grid-template-columns:minmax(80px,1fr) minmax(0,2fr);gap:12px}
+ .kpi-detail-record dt{color:#6b7d93;font-size:12px}.kpi-detail-record dd{margin:0;overflow-wrap:anywhere;font-size:14px;text-align:right;color:#153859}
+ .kpi-detail-footer{padding:12px 16px;flex-wrap:wrap}.kpi-detail-footer>div{margin-left:auto}
+}
+@media(prefers-reduced-motion:reduce){[data-kpi]{transition:none}}
+@media print{.kpi-readonly-detail{display:none!important}}

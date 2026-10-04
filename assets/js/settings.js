@@ -140,7 +140,7 @@
 
           <article class="commission-panel settings-card">
             <header class="settings-card-head"><div><span class="settings-icon" aria-hidden="true"><i data-icon="file-text"></i></span><div><h2>報價預設值</h2><p>共用單位與常用對外備註由報價單模組維護。</p></div></div></header>
-            <div class="settings-stats"><article><span>單位範本</span><strong>${units.length}</strong><small>筆</small></article><article><span>常用對外備註</span><strong>${notes.length}</strong><small>筆</small></article></div>
+            <div class="settings-stats"><article data-kpi="settings.units" role="button" tabindex="0" aria-label="查看單位範本對應明細" aria-expanded="false"><span>單位範本</span><strong>${units.length}</strong><small>筆</small></article><article data-kpi="settings.notes" role="button" tabindex="0" aria-label="查看常用對外備註對應明細" aria-expanded="false"><span>常用對外備註</span><strong>${notes.length}</strong><small>筆</small></article></div>
             <div class="settings-tags">${units.map((unit)=>`<span>${esc(unit)}</span>`).join('') || '<span>尚無單位範本</span>'}</div>
             <footer class="settings-actions"><button class="commission-secondary" id="settingsQuotation" type="button">前往報價單管理</button></footer>
           </article>
@@ -234,4 +234,13 @@
   window.addEventListener('kushe:device-trust-changed', () => { if (active) render(); });
   window.addEventListener('storage', () => { if (active) render(); });
   window.KusheSettings = Object.freeze({ activate, deactivate, render });
+
+  // P21: read-only KPI destinations; original calculations and save paths are unchanged.
+
+  window.KusheKpi.register('settings',{anchor:'.settings-stats',active:()=>active,read(action){
+    const s=window.KuSheERPStore.getState().settings||{};
+    if(action==='units')return {title:'報價單位範本',scope:'查看目前範本，不修改共用設定。',columns:['單位'],rows:(Array.isArray(s.quotationUnitPresets)?s.quotationUnitPresets.filter(Boolean):[]).map((r,i)=>({id:String(i),cells:[typeof r==='object'?r.name||r.unit||r.value||'未命名':r]}))};
+    if(action==='notes')return {title:'常用對外備註',scope:'只顯示現有範本，不修改請款或報價單。',columns:['備註'],rows:(Array.isArray(s.quotationPublicNotePresets)?s.quotationPublicNotePresets:[]).map((r,i)=>({id:String(i),cells:[typeof r==='object'?r.text||r.note||r.content||r.name||'未命名':r]}))};return null;
+  }});
+
 }());

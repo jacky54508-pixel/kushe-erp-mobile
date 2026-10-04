@@ -45,10 +45,10 @@
     return rows.map((row) => `<article class="reports-project-card"><header><div><span>案場</span><h3>${esc(row.name)}</h3><p>${esc(row.customer || '—')}</p></div><strong class="${row.profit < 0 ? 'negative' : 'positive'}">${money(row.profit)}</strong></header><dl><div><dt>未稅請款</dt><dd>${money(row.billed)}</dd></div><div><dt>材料</dt><dd>${money(row.material)}</dd></div><div><dt>人工／抽成</dt><dd>${money(row.labor)}</dd></div><div><dt>其他成本</dt><dd>${money(row.other)}</dd></div><div><dt>客戶扣款</dt><dd>${money(row.customerDeduction)}</dd></div><div><dt>總成本</dt><dd>${money(row.totalCost)}</dd></div></dl><footer><span>毛利率</span><b>${store.num(row.margin).toFixed(1)}%</b></footer></article>`).join('') || '<p class="reports-empty">目前沒有可彙整的案場財務資料。</p>';
   }
   function invoiceCards(summary) {
-    const card = (title, value) => `<article><span>${title}</span><strong>${money(value)}</strong></article>`;
+    const card = (title, value, key) => `<article${window.KusheKpi.attrs('reports.'+key,title)}><span>${title}</span><strong>${money(value)}</strong></article>`;
     return [
-      card('銷項未稅',summary.output.net), card('銷項稅額',summary.output.tax), card('銷項含稅',summary.output.gross),
-      card('進項未稅',summary.input.net), card('進項稅額',summary.input.tax), card('進項含稅',summary.input.gross)
+      card('銷項未稅',summary.output.net,'output-net'), card('銷項稅額',summary.output.tax,'output-tax'), card('銷項含稅',summary.output.gross,'output-gross'),
+      card('進項未稅',summary.input.net,'input-net'), card('進項稅額',summary.input.tax,'input-tax'), card('進項含稅',summary.input.gross,'input-gross')
     ].join('');
   }
   function render() {
@@ -67,12 +67,12 @@
         <label class="reports-month"><span>報表月份</span><input id="reportsMonth" type="month" value="${esc(selectedMonth)}"></label>
       </section>
       <section class="commission-kpis reports-kpis" aria-label="本期營運總覽">
-        <article><span>本期未稅營業額</span><strong>${money(snapshot.revenue)}</strong><small>${esc(selectedMonth)} 請款未稅</small></article>
-        <article class="is-success"><span>本期實收本金</span><strong>${money(snapshot.collected)}</strong><small>依正式收款辨識</small></article>
-        <article><span>本期薪資總額</span><strong>${money(payroll.total)}</strong><small>${payroll.count} 組員工月份</small></article>
-        <article class="is-warning"><span>本期薪資未付</span><strong>${money(payroll.outstanding)}</strong><small>已付 ${money(payroll.paid)}</small></article>
-        <article class="is-warning"><span>目前未收帳款</span><strong>${money(snapshot.outstandingAR)}</strong><small>即時餘額，不是月底快照</small></article>
-        <article class="is-warning"><span>目前未付帳款</span><strong>${money(snapshot.outstandingAP)}</strong><small>即時餘額，不是月底快照</small></article>
+        <article data-kpi="reports.revenue" role="button" tabindex="0" aria-label="查看本期未稅營業額對應明細" aria-expanded="false"><span>本期未稅營業額</span><strong>${money(snapshot.revenue)}</strong><small>${esc(selectedMonth)} 請款未稅</small></article>
+        <article class="is-success" data-kpi="reports.received" role="button" tabindex="0" aria-label="查看本期實收本金對應明細" aria-expanded="false"><span>本期實收本金</span><strong>${money(snapshot.collected)}</strong><small>依正式收款辨識</small></article>
+        <article data-kpi="reports.payroll" role="button" tabindex="0" aria-label="查看本期薪資總額對應明細" aria-expanded="false"><span>本期薪資總額</span><strong>${money(payroll.total)}</strong><small>${payroll.count} 組員工月份</small></article>
+        <article class="is-warning" data-kpi="reports.unpaid" role="button" tabindex="0" aria-label="查看本期薪資未付對應明細" aria-expanded="false"><span>本期薪資未付</span><strong>${money(payroll.outstanding)}</strong><small>已付 ${money(payroll.paid)}</small></article>
+        <article class="is-warning" data-kpi="reports.ar" role="button" tabindex="0" aria-label="查看目前未收帳款對應明細" aria-expanded="false"><span>目前未收帳款</span><strong>${money(snapshot.outstandingAR)}</strong><small>即時餘額，不是月底快照</small></article>
+        <article class="is-warning" data-kpi="reports.ap" role="button" tabindex="0" aria-label="查看目前未付帳款對應明細" aria-expanded="false"><span>目前未付帳款</span><strong>${money(snapshot.outstandingAP)}</strong><small>即時餘額，不是月底快照</small></article>
       </section>
       <section class="commission-panel reports-section">
         <header class="reports-section-head"><div><h2>案場累計毛利</h2><p>沿用首頁營運毛利口徑；依累計未稅請款與即時成本計算。</p></div><span>累計／即時</span></header>
@@ -101,4 +101,17 @@
   window.addEventListener('kushe:data-updated', () => { if (active) render(); });
   window.addEventListener('storage', () => { if (active) render(); });
   window.KusheReports = Object.freeze({ activate, deactivate, render });
+
+  // P21: read-only KPI destinations; original calculations and save paths are unchanged.
+
+  window.KusheKpi.register('reports',{anchor:'.reports-kpis,.reports-tax-grid',active:()=>active,read(action){
+    const data=window.KuSheERPStore.getState();
+    if(/^(output|input)-(net|tax|gross)$/.test(action))return window.KusheKpi.model('invoices.'+action,{month:selectedMonth});
+    if(action==='received')return window.KusheKpi.model('collection.month',{month:selectedMonth});
+    if(action==='ar')return window.KusheKpi.model('ar.open');
+    if(action==='ap')return window.KusheKpi.model('ap.open');
+    if(action==='payroll'||action==='unpaid')return {title:selectedMonth+' '+(action==='unpaid'?'未付薪資':'薪資彙總'),scope:'按同一員工／月份彙整，與本期薪資字卡相同；不付款、不修改歷史。',columns:['月份','員工','薪資總額','已付','未付'],rows:store.monthlyPayrollGroups().filter(r=>String(r.month||'')===selectedMonth&&(action!=='unpaid'||r.outstanding>0)).map(r=>({id:r.key,cells:[r.month,r.employeeName,money(r.total),money(r.paid),money(r.outstanding)]}))};
+    if(action==='revenue')return {title:selectedMonth+' 未稅營業額來源',scope:'按請款日期月份，列出對應請款來源；不把請款當成已收款。',columns:['日期','請款單','客戶','案場','未稅請款'],rows:data.billings.filter(r=>monthOf(r.date)===selectedMonth).map(r=>({id:r.id,cells:[r.date,r.number,r.customerName,r.projectName,money(r.amount??r.untaxedAmount??r.total)]}))};return null;
+  }});
+
 }());

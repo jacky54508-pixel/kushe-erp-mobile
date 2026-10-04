@@ -381,4 +381,77 @@
     return derive(dashboardData(), selected);
   }
   window.KusheDashboard = { init, refresh, render, readSnapshot, getState: () => activeVm };
+
+  // P21: read-only KPI destinations; original calculations and save paths are unchanged.
+  function kpiLegacyCollectionRows(data, month) {
+    const receivables = Array.isArray(data.receivables) ? data.receivables : [];
+    const receipts = Array.isArray(data.receipts) ? data.receipts : [];
+    const retentionReceipts = Array.isArray(data.retentionReceipts) ? data.retentionReceipts : [];
+    const transactions = Array.isArray(data.bankTransactions) ? data.bankTransactions : [];
+    const receiptIds = new Set(receipts.flatMap((row) => [text(row.id), text(row.receiptId)]).filter(Boolean));
+    const receiptTransactionIds = new Set(receipts.map((row) => text(row.bankTransactionId)).filter(Boolean));
+    const retentionIds = new Set(retentionReceipts.flatMap((row) => [text(row.id), text(row.retentionReceiptId)]).filter(Boolean));
+    const retentionTransactionIds = new Set(retentionReceipts.map((row) => text(row.bankTransactionId)).filter(Boolean));
+    const usedTransactionIds = new Set();
+    const isModernReceiptTransaction = (row) => receiptTransactionIds.has(text(row.id))
+      || receiptIds.has(text(row.receiptId))
+      || receiptIds.has(text(row.sourceId)) && ['receipt', 'receivable_receipt'].includes(text(row.sourceType).toLowerCase());
+    const isRetentionTransaction = (row) => retentionTransactionIds.has(text(row.id))
+      || retentionIds.has(text(row.retentionReceiptId))
+      || retentionIds.has(text(row.sourceId))
+      || text(row.sourceType).toLowerCase() === 'retention_receipt'
+      || /保留款/.test(`${row.category || ''} ${row.description || ''} ${row.note || ''}`);
+    const isReceivableIncome = (row) => {
+      const direction = text(row.direction).toLowerCase();
+      const type = text(row.type).toLowerCase();
+      const sourceType = text(row.sourceType).toLowerCase();
+      const semantic = `${sourceType} ${row.category || ''} ${row.description || ''} ${row.note || ''}`;
+      if (direction && direction !== 'in' || /expense|支出|付款/.test(type)) return false;
+      if (!direction && !['income', '收入', '收款', '入帳'].some((value) => type.includes(value))) return false;
+      if (/payable|salary|payroll|manual|應付|薪資|廠商付款/i.test(semantic)) return false;
+      return /receivable|receipt|應收|收款|入帳/i.test(semantic);
+    };
+    const principalMatches = (row, principal) => {
+      const fee = Math.max(0, number(row.fee));
+      const values = [row.receiptAmount, row.amount, row.actualCredit, row.netAmount]
+        .filter((value) => value !== undefined && value !== null && value !== '')
+        .map(number);
+      return values.some((value) => value === principal || row.feePayer === 'company' && value + fee === principal);
+    };
+    const eligible = (row, receivable, principal) => {
+      const id = text(receivable.id);
+      const sourceType = text(row.sourceType).toLowerCase();
+      if (!text(row.id) || isModernReceiptTransaction(row) || isRetentionTransaction(row) || !isReceivableIncome(row) || !principalMatches(row, principal)) return false;
+      if (row.receivableId && text(row.receivableId) !== id) return false;
+      if (sourceType === 'receivable' && row.sourceId && text(row.sourceId) !== id) return false;
+      return true;
+    };
+    return receivables.reduce((total, receivable) => {
+      const principal = number(receivable.legacyReceived);
+      const id = text(receivable.id);
+      if (principal <= 0 || !id) return total;
+      let candidates = transactions.filter((row) => eligible(row, receivable, principal)
+        && (text(row.receivableId) === id || text(row.sourceType).toLowerCase() === 'receivable' && text(row.sourceId) === id));
+      if (candidates.length > 1) return total;
+      if (candidates.length === 0) {
+        const sourceNo = text(receivable.sourceNo);
+        if (!sourceNo || receivables.filter((row) => text(row.sourceNo) === sourceNo).length !== 1) return total;
+        candidates = transactions.filter((row) => eligible(row, receivable, principal) && text(row.sourceNo) === sourceNo);
+      }
+      if (candidates.length !== 1) return total;
+      const transaction = candidates[0];
+      const transactionId = text(transaction.id);
+      if (usedTransactionIds.has(transactionId) || monthOf(transaction) !== month) return total;
+      usedTransactionIds.add(transactionId);
+      total.push({id:transactionId,cells:[transaction.date,receivable.sourceNo,receivable.customerName,receivable.projectName,'歷史已核對本金',money(principal)]});return total;
+    }, []);
+  }
+
+  window.KusheKpi.register('collection',{anchor:'#kpiGrid',read(action,options={}){
+    if(action!=='month')return null;const data=dashboardData(),month=options.month||selectedMonth(),used=new Set(),rows=[];
+    const add=(r,retention=false)=>{if(actualCollectionMonth(data,r,retention)!==month)return;const keys=collectionIdentityKeys(data,r,retention);if([...keys].some(k=>used.has(k)))return;keys.forEach(k=>used.add(k));const ar=data.receivables.find(a=>text(a.id)===text(r.receivableId))||{};const transaction=collectionTransaction(data,r,retention);rows.push({id:r.id,cells:[transaction?.date||r.date,ar.sourceNo,ar.customerName,ar.projectName,retention?'保留款本金':'收款本金',money(r.amount)]})};
+    data.receipts.forEach(r=>add(r));(data.retentionReceipts||[]).forEach(r=>add(r,true));rows.push(...kpiLegacyCollectionRows(data,month));
+    return {title:month+' 實收本金來源',scope:'沿用報表既有正式來源辨識與銀行日期月份；本金與銀行扣除手續費後的入帳額不同。',columns:['入帳／收款日期','請款單','客戶','案場','來源','本金'],rows};
+  }});
+
 }());

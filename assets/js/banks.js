@@ -495,12 +495,12 @@
   function renderSummary(view) {
     const closingLabel = view.month === businessMonth() ? '本月期末／目前餘額' : '該月底餘額';
     const cards = [
-      ['月初餘額', view.monthOpening, `${monthLabel(view.month)}開始時`],
-      ['本月收入', view.monthIncome, `${view.rows.filter((item) => item.direction === 'in').length} 筆收入`, 'is-income'],
-      ['本月支出', view.monthExpense, `${view.rows.filter((item) => item.direction === 'out').length} 筆支出`, 'is-expense'],
-      [closingLabel, view.monthClosing, `${monthLabel(view.month)}結束時`, 'is-closing']
+      ['月初餘額', view.monthOpening, `${monthLabel(view.month)}開始時`, '', 'opening'],
+      ['本月收入', view.monthIncome, `${view.rows.filter((item) => item.direction === 'in').length} 筆收入`, 'is-income', 'income'],
+      ['本月支出', view.monthExpense, `${view.rows.filter((item) => item.direction === 'out').length} 筆支出`, 'is-expense', 'expense'],
+      [closingLabel, view.monthClosing, `${monthLabel(view.month)}結束時`, 'is-closing', 'closing']
     ];
-    return `<section class="bank-month-summary" aria-label="${esc(monthLabel(view.month))}銀行摘要">${cards.map(([label, amount, note, className = '']) => `<article class="${className}"><span>${esc(label)}</span><strong>${money(amount)}</strong><small>${esc(note)}</small></article>`).join('')}</section>`;
+    return `<section class="bank-month-summary" aria-label="${esc(monthLabel(view.month))}銀行摘要">${cards.map(([label, amount, note, className = '', key]) => `<article class="${className}"${window.KusheKpi.attrs('banks.'+key,label)}><span>${esc(label)}</span><strong>${money(amount)}</strong><small>${esc(note)}</small></article>`).join('')}</section>`;
   }
 
   function renderRows(view) {
@@ -691,13 +691,13 @@
 
   function renderReconciliationSummary(view) {
     const cards = [
-      ['需要處理', view.abnormalCount, view.abnormalCount ? '請查看下方需要確認的項目' : '目前沒有需要處理的銀行對帳問題', 'is-abnormal'],
-      ['歷史紀錄', view.attentionCount, '舊系統留下的紀錄，僅供查帳', 'is-attention'],
-      ['已核對正常', view.normalCount, '銀行金額已核對', 'is-normal']
+      ['需要處理', view.abnormalCount, view.abnormalCount ? '請查看下方需要確認的項目' : '目前沒有需要處理的銀行對帳問題', 'is-abnormal', 'issues'],
+      ['歷史紀錄', view.attentionCount, '舊系統留下的紀錄，僅供查帳', 'is-attention', 'history'],
+      ['已核對正常', view.normalCount, '銀行金額已核對', 'is-normal', 'normal-group']
     ];
-    const breakdown = Object.entries(RECONCILIATION_STATUSES).map(([status, meta]) => `<div><span>${esc(meta.label)}</span><strong>${view.counts[status] || 0}</strong></div>`).join('');
+    const breakdown = Object.entries(RECONCILIATION_STATUSES).map(([status, meta]) => `<div${window.KusheKpi.attrs('reconciliation.'+status,meta.label)}><span>${esc(meta.label)}</span><strong>${view.counts[status] || 0}</strong></div>`).join('');
     return `<section class="bank-reconciliation-summary" aria-label="銀行對帳摘要" data-normal-count="${view.normalCount}" data-attention-count="${view.attentionCount}" data-abnormal-count="${view.abnormalCount}">
-      ${cards.map(([label, count, note, className]) => `<article class="${className}"><span>${label}</span><strong>${count}</strong><small>${note}</small></article>`).join('')}
+      ${cards.map(([label, count, note, className, key]) => `<article class="${className}"${window.KusheKpi.attrs('reconciliation.'+key,label)}><span>${label}</span><strong>${count}</strong><small>${note}</small></article>`).join('')}
     </section>
     <details class="bank-reconciliation-breakdown-details">
       <summary>查看詳細統計 <span aria-hidden="true">▾</span></summary>
@@ -1084,4 +1084,19 @@
 
   window.addEventListener('kushe:data-updated', render);
   window.KusheBanks = { activate, deactivate, render };
+
+  // P21: read-only KPI destinations; original calculations and save paths are unchanged.
+
+  window.KusheKpi.register('banks',{anchor:'.bank-month-summary',active:()=>active,read(action){
+    const data=store.getState(),month=selectedMonth,view=bankMonthView(data,month);
+    if(['opening','closing'].includes(action))return {title:month+' 各銀行餘額明細',scope:'沿用月初＋本月收入－本月支出；不是修改銀行餘額。',columns:['銀行','月初餘額','本月收入','本月支出','期末餘額'],rows:data.banks.map(bank=>{const v=bankMonthView({...data,banks:[bank]},month);return {id:bank.id,cells:[bankName(bank),money(v.monthOpening),money(v.monthIncome),money(v.monthExpense),money(v.monthClosing)]}})};
+    if(!['income','expense'].includes(action))return null;
+    return {title:month+' '+(action==='income'?'銀行收入':'銀行支出')+'流水',scope:'與銀行摘要同一月份及正式銀行帳戶；只查看，不新增入帳。',columns:['日期','銀行','來源','對象','案場','說明','金額'],rows:view.rows.filter(r=>r.direction===(action==='income'?'in':'out')).map(({row,bank})=>({id:row.id,cells:[row.date,bankName(bank),sourceLabel(row),row.customerName||row.vendorName||row.employeeName,row.projectName,descriptionLabel(row),money(row.amount)]}))};
+  }});
+  window.KusheKpi.register('reconciliation',{anchor:'.bank-reconciliation-summary,.bank-reconciliation-breakdown',active:()=>active,read(action){
+    const v=bankReconciliationView(store.getState()),tests={issues:r=>r.statusGroup==='abnormal',history:r=>r.status==='history-pending','normal-group':r=>r.status==='normal'||r.status==='history-normal'};
+    const test=tests[action]||(Object.hasOwn(RECONCILIATION_STATUSES,action)?r=>r.status===action:null);if(!test)return null;
+    return {title:'銀行對帳來源明細',scope:'與對帳字卡相同的完整資料範圍；只是查詢，不修復、不刪除或新增銀行交易。',columns:['日期','來源','單號','對象','案場','狀態','帳務金額','銀行金額','差額'],rows:v.items.filter(test).map(r=>({id:r.id,cells:[r.date,r.sourceLabel,r.sourceNo,r.party,r.project,r.statusLabel,r.accountingAmount==null?'—':money(r.accountingAmount),r.bankAmount==null?'—':money(r.bankAmount),r.difference==null?'—':money(r.difference)]}))};
+  }});
+
 }());

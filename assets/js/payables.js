@@ -879,7 +879,7 @@
     const monthAdded = all.filter((row) => monthOf(row.date) === month).reduce((sum, row) => sum + row.amount, 0);
     const categories = [...new Set(all.map((row) => row.category).filter(Boolean))].sort();
     $('#payablesApp').innerHTML = `<section class="commissions-heading"><div><h1>應付帳款</h1><p>管理廠商款項、分次付款與銀行實際扣款</p></div><button class="commission-primary" id="newPayable" type="button">＋ 新增應付</button></section>
-      <section class="commission-kpis payable-kpis"><article><span>應付總額</span><strong>${money(total)}</strong><small>${all.length} 筆應付</small></article><article class="is-success"><span>本月已付</span><strong>${money(monthPaid)}</strong><small>${esc(month)} 付款</small></article><article class="is-warning"><span>未付帳款</span><strong>${money(open)}</strong><small>含部分付款餘額</small></article><article class="is-warning"><span>逾期應付</span><strong>${money(overdue)}</strong><small>已超過到期日</small></article><article><span>本月新增應付</span><strong>${money(monthAdded)}</strong><small>${esc(month)} 新增</small></article></section>
+      <section class="commission-kpis payable-kpis"><article data-kpi="ap.total" role="button" tabindex="0" aria-label="查看應付總額對應明細" aria-expanded="false"><span>應付總額</span><strong>${money(total)}</strong><small>${all.length} 筆應付</small></article><article class="is-success" data-kpi="ap.paid" role="button" tabindex="0" aria-label="查看本月已付對應明細" aria-expanded="false"><span>本月已付</span><strong>${money(monthPaid)}</strong><small>${esc(month)} 付款</small></article><article class="is-warning" data-kpi="ap.open" role="button" tabindex="0" aria-label="查看未付帳款對應明細" aria-expanded="false"><span>未付帳款</span><strong>${money(open)}</strong><small>含部分付款餘額</small></article><article class="is-warning" data-kpi="ap.overdue" role="button" tabindex="0" aria-label="查看逾期應付對應明細" aria-expanded="false"><span>逾期應付</span><strong>${money(overdue)}</strong><small>已超過到期日</small></article><article data-kpi="ap.month" role="button" tabindex="0" aria-label="查看本月新增應付對應明細" aria-expanded="false"><span>本月新增應付</span><strong>${money(monthAdded)}</strong><small>${esc(month)} 新增</small></article></section>
       <section class="commission-panel commission-filters"><div class="payable-filter-grid"><label><span>應付月份</span><input id="payableMonth" type="month" value="${esc(filters.month)}"></label><label><span>付款月份</span><input id="payablePaymentMonth" type="month" value="${esc(filters.paymentMonth)}"></label><label><span>廠商／收款人</span><select id="payableVendor">${selectOptions(state.vendors,filters.vendor,'全部廠商／收款人')}</select></label><label><span>案場</span><select id="payableProject">${selectOptions(state.projects,filters.project,'全部案場')}</select></label><label><span>類別</span><select id="payableCategory"><option value="">全部類別</option>${categories.map((value) => `<option ${filters.category === value ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select></label><label><span>付款狀態</span><select id="payableStatus"><option value="">全部狀態</option>${['未付款','部分付款','已付清'].map((value) => `<option ${filters.status === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label class="payable-search" style="grid-column:1/-1"><span>關鍵字</span><input id="payableQuery" type="search" value="${esc(filters.query)}" placeholder="廠商、案場、材料或費用"></label></div><p class="payable-filter-note" style="margin:10px 0 0;color:#718096;font-size:12px">應付月份＝帳款建立月份｜付款月份＝實際付款月份</p></section>
       <section class="commission-panel billing-list-panel"><div class="commission-table-wrap"><table class="commission-table payable-table"><thead><tr><th>日期</th><th>廠商／收款人</th><th>案場</th><th>類別／來源</th><th class="num">應付金額</th><th class="num">已付</th><th class="num">未付</th><th>狀態</th><th>操作</th></tr></thead><tbody>${models.map((row) => `<tr class="payable-main-row" data-expand-payable="${esc(row.id)}" tabindex="0" aria-expanded="false"><td>${esc(row.date || '—')}</td><td><b>${esc(row.vendorName)}</b>${row.payments.count ? `<span class="receipt-count-badge">${row.payments.count} 次付款</span>` : ''}</td><td><b>${esc(row.project)}</b></td><td><span class="payable-category">${esc(row.category)}</span><small class="payable-source-label">${esc(row.sourceLabel)}</small></td><td class="num"><span class="payable-net-amount">${money(row.amount)}</span>${row.taxPayment?.verified ? `<small class="payable-tax-paid">含稅實付 ${money(row.taxPayment.bankAmount)}</small>` : ''}</td><td class="num">${money(row.paid)}</td><td class="num"><b>${money(row.outstanding)}</b></td><td><span class="commission-status ${row.baseStatus === '已付清' ? 'settled' : row.baseStatus === '部分付款' ? 'partial' : row.overdue ? 'overdue' : ''}">${esc(row.status)}</span></td><td><div class="receivable-actions payable-row-actions">${row.canPay ? `<button class="commission-primary compact" type="button" data-pay="${esc(row.id)}">付款</button>` : ''}<button class="receivable-expand" type="button" data-expand-button="${esc(row.id)}" aria-label="展開應付明細" aria-expanded="false"><span aria-hidden="true">⌄</span></button><div class="payable-more"><button class="payable-more-toggle" type="button" data-payable-more="${esc(row.id)}" aria-label="更多操作" aria-expanded="false">⋯</button></div></div></td></tr>`).join('') || '<tr><td colspan="9" class="billing-empty">此篩選條件下沒有應付帳款。</td></tr>'}</tbody></table></div><div class="mobile-payables">${models.map(mobilePayableCardMarkup).join('')||'<p class="mobile-detail-item">此篩選條件下沒有應付帳款。</p>'}</div></section>`;
     bindListEvents(models);
@@ -985,4 +985,74 @@
   }
   window.addEventListener('kushe:data-updated', () => { if (active) render(); });
   window.KushePayables = {activate,deactivate,render,historicalTaxPaymentTruth};
+
+  // P21: read-only KPI destinations; original calculations and save paths are unchanged.
+  function kpiMonthlyPaymentRows(state, month) {
+    const payables = Array.isArray(state?.payables) ? state.payables : [];
+    const payments = Array.isArray(state?.payments) ? state.payments : [];
+    const bankTransactions = Array.isArray(state?.bankTransactions) ? state.bankTransactions : [];
+    const payableIds = new Set(payables.map((row) => String(row.id || '')).filter(Boolean));
+    const paymentIdCounts = payments.reduce((map, row) => {
+      const id = String(row.id || '');
+      if (id) map.set(id, (map.get(id) || 0) + 1);
+      return map;
+    }, new Map());
+    const countedPaymentIds = new Set();
+    const countedBankTransactionIds = new Set();
+    const payablesWithFormalPayments = new Set(payments.filter((payment) => {
+      const id = String(payment.id || '');
+      const payableId = String(payment.payableId || '');
+      return id
+        && payment.legacy !== true
+        && !/^legacy-/i.test(id)
+        && payableIds.has(payableId);
+    }).map((payment) => String(payment.payableId || '')));
+    const matched = [];
+
+    payments.forEach((payment) => {
+      const id = String(payment.id || '');
+      const payableId = String(payment.payableId || '');
+      if (!id || paymentIdCounts.get(id) !== 1 || countedPaymentIds.has(id)) return;
+      if (payment.legacy === true || /^legacy-/i.test(id)) return;
+      if (!payableIds.has(payableId) || monthOf(payment.date) !== month) return;
+      const bankTransactionId = String(payment.bankTransactionId || '');
+      const linkedTransactions = bankTransactions.filter((transaction) => {
+        const transactionId = String(transaction.id || '');
+        const sourceId = String(transaction.sourceId || '');
+        return (bankTransactionId && transactionId === bankTransactionId) || sourceId === id;
+      });
+      if (linkedTransactions.some((row) => !String(row.id || ''))) return;
+      const uniqueTransactions = [...new Map(linkedTransactions.map((row) => [String(row.id), row])).values()];
+      if (uniqueTransactions.length > 1 || (bankTransactionId && uniqueTransactions.length !== 1)) return;
+      const linkedTransactionId = String(uniqueTransactions[0]?.id || '');
+      if (linkedTransactionId && countedBankTransactionIds.has(linkedTransactionId)) return;
+      const amount = Math.max(0, store.num(payment.amount));
+      if (!amount) return;
+      countedPaymentIds.add(id);
+      if (linkedTransactionId) countedBankTransactionIds.add(linkedTransactionId);
+      matched.push({id:payment.id,date:payment.date,payableId,amount,kind:'正式付款'});
+    });
+
+    payables.forEach((payable) => {
+      const payableId = String(payable.id || '');
+      if (!payableId || payablesWithFormalPayments.has(payableId)) return;
+      const truth = historicalTaxPaymentTruth(payable, state);
+      if (!truth?.verified || monthOf(truth.bankDate) !== month) return;
+      const bankTransactionId = String(truth.bankTransaction?.id || '');
+      if (!bankTransactionId || countedBankTransactionIds.has(bankTransactionId)) return;
+      const amount = Math.max(0, store.num(truth.netAmount));
+      if (!amount) return;
+      countedBankTransactionIds.add(bankTransactionId);
+      matched.push({id:bankTransactionId,date:truth.bankDate,payableId,amount,kind:'已核對歷史付款'});
+    });
+    return matched;
+  }
+
+  window.KusheKpi.register('ap',{anchor:'.payable-kpis',active:()=>active,read(action,options={}){
+    const data=store.getState(),month=options.month||monthOf(today());
+    if(action==='paid')return {title:month+' 已付本金明細',scope:'沿用現有付款去重與歷史證據判定；按付款日期，不按應付建立日期。',columns:['付款日期','應付單','廠商','來源','付款本金'],rows:kpiMonthlyPaymentRows(data,month).map(r=>{const p=data.payables.find(x=>x.id===r.payableId)||{};return {id:r.id,cells:[r.date,p.payableNo||p.sourceNo,p.vendorName,r.kind,money(r.amount)]}})};
+    const tests={total:()=>true,open:r=>r.outstanding>0,overdue:r=>r.overdue,month:r=>monthOf(r.date)===month};if(!tests[action])return null;
+    return {title:({total:'全部應付來源',open:'未付帳款',overdue:'逾期應付',month:month+' 新增應付'})[action],scope:'與字卡同一範圍，排除薪資應付；僅供查帳，不執行付款。',columns:['日期','應付單','廠商','案場','應付金額','已付','未付'],rows:allRows().filter(tests[action]).map(r=>({id:r.id,cells:[r.date,r.payableNo||r.sourceNo,r.vendorName,r.projectName,money(r.amount),money(r.paid),money(r.outstanding)]}))};
+  }});
+
 }());
