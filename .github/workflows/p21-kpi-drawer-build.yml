@@ -1,0 +1,50 @@
+name: Build verified read-only KPI drawer candidate
+on:
+  push:
+    branches: [p21-kpi-drawer-build-20261004]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply only the tested presentation patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, pathlib, subprocess, zlib
+          base = '58c76afafee35f7cb77cc7b4363ca2aa5d723bc2'
+          main = '9afba782ef2506f1f272cc259fe1e77ed3ae3e6f'
+          expected = {
+              'assets/js/kpi-navigation.js': '5f38cde3656b1716050c5da5d3886e0274d0bf6c',
+              'assets/css/kpi-navigation.css': '69d4d0eff1a2a95dbeb691660e71ce99d4b202bc',
+              'assets/js/billing.js': '25d77ea4796b3ee3cca1c614471785bc0b045934',
+              'index.html': '9b498a4d39886f587e0251c9943f8b26a30d4cd1',
+          }
+          patch = zlib.decompress(base64.b64decode(pathlib.Path('tools/p21-kpi-drawer.patch.b64').read_text(), validate=True))
+          assert hashlib.sha256(patch).hexdigest() == 'e1d4d603dd5ed13fc07d4d10de976de9120fb0eda8d682b9aa138d4a41cd323d', 'Patch transport mismatch'
+          def output(*args):
+              return subprocess.check_output(args, text=True).strip()
+          for branch, sha in [('beta', base), ('main', main)]:
+              assert output('git', 'ls-remote', 'origin', 'refs/heads/' + branch).split()[0] == sha, 'Concurrent branch change'
+          subprocess.run(['git', 'fetch', '--depth=1', 'origin', base], check=True)
+          subprocess.run(['git', 'checkout', '--detach', base], check=True)
+          subprocess.run(['git', 'apply', '--check', '-'], input=patch, check=True)
+          subprocess.run(['git', 'apply', '--whitespace=error', '-'], input=patch, check=True)
+          subprocess.run(['git', 'diff', '--check'], check=True)
+          assert set(output('git', 'diff', '--name-only').splitlines()) == set(expected), 'Unexpected changed files'
+          for path, sha in expected.items():
+              assert output('git', 'hash-object', path) == sha, 'Tested file mismatch: ' + path
+              if path.endswith('.js'):
+                  subprocess.run(['node', '--check', path], check=True)
+          subprocess.run(['git', 'config', 'user.name', 'KuShe ERP Maintenance'], check=True)
+          subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
+          subprocess.run(['git', 'add', '--', *expected], check=True)
+          subprocess.run(['git', 'commit', '-m', 'P21 KPI-2: read-only desktop drawer and full-screen mobile details'], check=True)
+          print('CANDIDATE_COMMIT=' + output('git', 'rev-parse', 'HEAD'))
+          print('CANDIDATE_TREE=' + output('git', 'rev-parse', 'HEAD^{tree}'))
+          subprocess.run(['git', 'push', 'origin', 'HEAD:refs/heads/p21-kpi-drawer-ready-20261004'], check=True)
+          PY
