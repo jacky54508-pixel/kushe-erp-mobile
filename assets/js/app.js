@@ -11,6 +11,9 @@
   const ui = { collapsed: false, mobileOpen: false, route: 'dashboard' };
   let initialized = false;
   let authUiBound = false;
+  let authUiGeneration = 0;
+  let logoutPending = false;
+  let mfaFlow = { mode:'', factorId:'', challengeId:'', enrollment:null, busy:false, state:'cancelled', epoch:0, userId:'', qrReady:false, cancelQr:null };
   const moduleIcons = {
     customers: 'contact', projects: 'map-pin', quotations: 'file-text', billings: 'clipboard-list',
     receivables: 'arrow-down-to-line', payables: 'arrow-up-from-line', banks: 'landmark', invoices: 'receipt',
@@ -29,14 +32,23 @@
     requestAnimationFrame(()=>node.classList.add('is-visible')); setTimeout(()=>{node.classList.remove('is-visible');setTimeout(()=>node.remove(),220)},2400);
   }
   function setAuthView(authenticated) {
-    const loginView = $('#loginView'), appShell = $('#appShell'), employeeShell = $('#employeeShellView');
+    const loginView = $('#loginView'), mfaView=$('#mfaView'), appShell = $('#appShell'), employeeShell = $('#employeeShellView');
     if (loginView) loginView.hidden = Boolean(authenticated);
+    if (mfaView) mfaView.hidden = true;
     if (appShell) appShell.hidden = !authenticated;
     if (employeeShell && authenticated) employeeShell.hidden = true;
   }
-  function setEmployeeShellView(active) {
-    const loginView=$('#loginView'),appShell=$('#appShell'),employeeShell=$('#employeeShellView');
+  function setMfaView(active) {
+    const loginView=$('#loginView'),mfaView=$('#mfaView'),appShell=$('#appShell'),employeeShell=$('#employeeShellView');
     if(loginView)loginView.hidden=Boolean(active);
+    if(mfaView)mfaView.hidden=!active;
+    if(appShell)appShell.hidden=true;
+    if(employeeShell)employeeShell.hidden=true;
+  }
+  function setEmployeeShellView(active) {
+    const loginView=$('#loginView'),mfaView=$('#mfaView'),appShell=$('#appShell'),employeeShell=$('#employeeShellView');
+    if(loginView)loginView.hidden=Boolean(active);
+    if(mfaView)mfaView.hidden=true;
     if(appShell)appShell.hidden=true;
     if(employeeShell)employeeShell.hidden=!active;
   }
@@ -52,12 +64,244 @@
     if (form) form.setAttribute('aria-busy', String(Boolean(busy)));
     if (message) setLoginMessage(message);
   }
-  async function startAuthenticatedApp() {
+  function setMfaMessage(message='',error=false){
+    const status=$('#mfaStatus'),alert=$('#mfaError');
+    if(status){status.textContent=error?'':message;status.hidden=error||!message}
+    if(alert){alert.textContent=error?message:'';alert.hidden=!error||!message}
+  }
+  function authUiCurrent(epoch) { return epoch === authUiGeneration && !logoutPending; }
+  function mfaCurrent(flow) {
+    return flow === mfaFlow && authUiCurrent(flow.epoch) && flow.state !== 'cancelled'
+      && Boolean(flow.userId) && window.KusheAuthGate?.user?.()?.id === flow.userId;
+  }
+  function mfaDigits(){return $$('.mfa-digit')}
+  function mfaCode(){return mfaDigits().map((node)=>String(node.value||'').replace(/\D/g,'')).join('').slice(0,6)}
+  function clearMfaDigits(){mfaDigits().forEach((node)=>{node.value=''})}
+  function focusMfaDigit(index=0){mfaDigits()[Math.max(0,Math.min(5,index))]?.focus()}
+  function mfaReady() {
+    // Ready means the user may submit a code; a fresh challenge is created on submit.
+    return mfaCurrent(mfaFlow) && mfaFlow.state === 'ready' && Boolean(mfaFlow.factorId)
+      && (['challenge','resume'].includes(mfaFlow.mode) || (mfaFlow.mode === 'enroll' && mfaFlow.qrReady));
+  }
+  function renderMfaState() {
+    const form=$('#mfaForm'),submit=$('#mfaSubmit'),ready=mfaReady();
+    mfaFlow.busy=['loading','verifying'].includes(mfaFlow.state);
+    mfaDigits().forEach(node=>{node.disabled=!ready});
+    if(submit){
+      submit.disabled=!ready||!/^[0-9]{6}$/.test(mfaCode());
+      submit.textContent=mfaFlow.state==='loading'?'準備驗證中…':mfaFlow.state==='verifying'?'驗證中…':mfaFlow.state==='error'?'驗證尚未就緒':'驗證並進入 ERP';
+    }
+    if(form){form.setAttribute('aria-busy',String(mfaFlow.busy));form.dataset.mfaState=mfaFlow.state}
+    // Cancellation is independent of enrollment/verification readiness.
+    if($('#mfaLogout'))$('#mfaLogout').disabled=logoutPending;
+    const resetButton=$('#mfaResetSubmit'),resetAccepted=$('#mfaResetAccepted');
+    const canReset=mfaCurrent(mfaFlow)&&['ready','error'].includes(mfaFlow.state)&&Boolean(mfaFlow.pendingResetFactor);
+    if(resetAccepted)resetAccepted.disabled=!canReset;
+    if(resetButton)resetButton.disabled=!canReset||!resetAccepted?.checked;
+  }
+  function setMfaState(state,message='',error=false) {
+    mfaFlow.state=state;
+    renderMfaState();
+    setMfaMessage(message,error);
+  }
+  function clearMfaSecrets() {
+    const image=$('#mfaQr');
+    if(image){image.removeAttribute('src');image.hidden=true}
+    if($('#mfaSecret'))$('#mfaSecret').textContent='';
+    if($('#mfaSecretDetails'))$('#mfaSecretDetails').open=false;
+    mfaFlow.enrollment=null;
+    mfaFlow.qrReady=false;
+  }
+  function resetMfaUi(){
+    const previous=mfaFlow;
+    mfaFlow={mode:'',factorId:'',challengeId:'',enrollment:null,busy:false,state:'cancelled',epoch:authUiGeneration,userId:'',qrReady:false,cancelQr:null};
+    previous.cancelQr?.();
+    if($('#mfaResetPanel'))$('#mfaResetPanel').hidden=true;
+    if($('#mfaResetDetails'))$('#mfaResetDetails').open=false;
+    if($('#mfaChallengeTitle'))$('#mfaChallengeTitle').textContent='輸入驗證碼';
+    if($('#mfaChallengeCopy'))$('#mfaChallengeCopy').textContent='打開你的驗證器 App，輸入「酷舍 ERP」目前顯示的 6 位數字。';
+    if($('#mfaResetAccepted'))$('#mfaResetAccepted').checked=false;
+    if($('#mfaResetTarget'))$('#mfaResetTarget').textContent='';
+    $('#mfaForm')?.reset();clearMfaDigits();clearMfaSecrets();setMfaState('cancelled');
+    if($('#mfaEnroll'))$('#mfaEnroll').hidden=true;
+    if($('#mfaChallenge'))$('#mfaChallenge').hidden=true;
+    if($('#mfaSubtitle'))$('#mfaSubtitle').textContent='為保護公司資料，請完成第二步驗證';
+  }
+  function loadMfaQr(flow,src) {
+    return new Promise((resolve,reject)=>{
+      const image=$('#mfaQr');
+      if(!image){reject(Object.assign(new Error('MFA QR unavailable'),{code:'invalid_mfa_qr'}));return}
+      let settled=false,timer=0;
+      const finish=(error)=>{
+        if(settled)return;
+        settled=true;clearTimeout(timer);
+        image.removeEventListener('load',onLoad);image.removeEventListener('error',onError);
+        flow.cancelQr=null;
+        if(error)reject(error);else resolve();
+      };
+      const onLoad=()=>{
+        if(!mfaCurrent(flow)){finish(Object.assign(new Error('Stale MFA UI'),{kind:'stale'}));return}
+        if(image.getAttribute('src')===src&&image.complete&&image.naturalWidth>0)finish();
+      };
+      const onError=()=>finish(Object.assign(new Error('MFA QR load failed'),{code:'invalid_mfa_qr'}));
+      flow.cancelQr=()=>finish(Object.assign(new Error('Stale MFA UI'),{kind:'stale'}));
+      image.addEventListener('load',onLoad);image.addEventListener('error',onError);
+      timer=setTimeout(()=>finish(Object.assign(new Error('MFA QR timeout'),{kind:'aborted',code:'mfa_qr_timeout'})),8000);
+      image.hidden=true;image.src=src;
+      onLoad();
+    });
+  }
+  function failMfa(flow,error) {
+    if(!mfaCurrent(flow))return;
+    clearMfaSecrets();
+    if($('#mfaEnroll'))$('#mfaEnroll').hidden=true;
+    if($('#mfaChallenge'))$('#mfaChallenge').hidden=true;
+    if($('#mfaSubtitle'))$('#mfaSubtitle').textContent='安全驗證尚未完成';
+    const message=error?.code==='mfa_existing_unverified'
+      ?'偵測到尚未完成的驗證器綁定，已停止重複設定。舊綁定尚未刪除，請先安全登出，待確認後再重新設定。'
+      :error?.code==='invalid_mfa_qr'||error?.code==='mfa_qr_timeout'
+      ?'QR Code 未能正常載入，尚未開放驗證。請安全登出後再處理，勿重複建立綁定。'
+      :error?.kind==='aborted'
+      ?'驗證服務回應逾時。ERP 尚未載入，請安全登出後再試。'
+      :'驗證服務暫時無法使用。ERP 尚未載入，請安全登出後再試。';
+    setMfaState('error',message,true);
+    if(error?.code==='mfa_existing_unverified'&&flow.pendingResetFactor){
+      if($('#mfaResetPanel'))$('#mfaResetPanel').hidden=false;
+      if($('#mfaResetTarget'))$('#mfaResetTarget').textContent=(window.KusheAuthGate.user()?.email||'目前登入帳號')+'｜綁定編號末八碼 '+flow.pendingResetFactor.id.slice(-8);
+      setMfaMessage('偵測到未完成綁定，舊綁定尚未刪除。確認下方內容後，才可撤銷並產生新的 QR Code。',true);
+    }
+  }
+  async function confirmMfaReset(){
+    const flow=mfaFlow,target=flow.pendingResetFactor;
+    if(!mfaCurrent(flow)||!['ready','error'].includes(flow.state)||!target||!$('#mfaResetAccepted')?.checked)return;
+    const confirmation={accepted:true,userId:flow.userId,factorId:target.id,createdAt:target.createdAt};
+    setMfaState('loading','正在核對並撤銷你確認的未完成綁定…');
+    try{
+      await window.KusheAuthGate.removeUnverifiedTotp(target.id,confirmation);
+      if(!mfaCurrent(flow))return;
+      await prepareMfaGate(flow.epoch);
+    }catch(error){
+      if(!mfaCurrent(flow))return;
+      flow.pendingResetFactor=null;
+      if($('#mfaResetPanel'))$('#mfaResetPanel').hidden=true;
+      failMfa(flow,error);
+      setMfaMessage('無法確認重新設定的結果，已停止重送。請安全登出再登入，讓系統重新核對綁定；勿使用舊金鑰。',true);
+    }
+  }
+  async function prepareMfaGate(epoch=authUiGeneration){
+    if(!authUiCurrent(epoch))return false;
+    resetMfaUi();
+    const flow=mfaFlow;
+    flow.epoch=epoch;flow.userId=window.KusheAuthGate?.user?.()?.id||'';
+    setMfaView(true);setMfaState('loading','正在確認雙重驗證狀態…');
+    try{
+      const status=await window.KusheAuthGate.mfaStatus();
+      if(!mfaCurrent(flow))return false;
+      if(status.userId!==flow.userId)throw new Error('MFA principal mismatch');
+      if(status.aal==='aal2'){setMfaState('complete');return true}
+      const factor=status.verifiedTotp[0];
+      if(factor){
+        Object.assign(flow,{mode:'challenge',factorId:factor.id,challengeId:''});
+        if($('#mfaChallenge'))$('#mfaChallenge').hidden=false;
+        if($('#mfaSubtitle'))$('#mfaSubtitle').textContent='請完成驗證器第二因素';
+        setMfaState('ready','請輸入驗證器目前顯示的 6 位數字。');
+        focusMfaDigit();return false;
+      }
+      const incomplete=status.factors.filter(row=>row.factorType==='totp'&&row.status==='unverified');
+      if(incomplete.length){
+        // A scanned but unfinished factor may be verified without reading its secret,
+        // deleting it, or creating a replacement. Never pick an ambiguous factor.
+        if(incomplete.length!==1||status.factors.some(row=>row.status==='verified')){
+          throw Object.assign(new Error('Ambiguous MFA factors'),{code:'mfa_existing_unverified'});
+        }
+        const pending=incomplete[0];
+        Object.assign(flow,{mode:'resume',factorId:pending.id,challengeId:''});
+        if(pending.createdAt)flow.pendingResetFactor={...pending};
+        if($('#mfaChallenge'))$('#mfaChallenge').hidden=false;
+        if($('#mfaChallengeTitle'))$('#mfaChallengeTitle').textContent='完成先前的驗證器綁定';
+        if($('#mfaChallengeCopy'))$('#mfaChallengeCopy').textContent='已掃描過 QR Code，不必重新掃描。打開手機「密碼」或驗證器 App，輸入最近一次設定的「酷舍 ERP」6 位驗證碼。';
+        if($('#mfaSubtitle'))$('#mfaSubtitle').textContent='保留原有設定，輸入驗證碼即可繼續';
+        if(flow.pendingResetFactor){
+          if($('#mfaResetPanel'))$('#mfaResetPanel').hidden=false;
+          if($('#mfaResetTarget'))$('#mfaResetTarget').textContent=(window.KusheAuthGate.user()?.email||'目前登入帳號')+'｜綁定編號末八碼 '+pending.id.slice(-8);
+        }
+        setMfaState('ready','請輸入手機目前顯示的 6 位數字。按下驗證時會建立新的請求，不用重新綁定。');
+        focusMfaDigit();return false;
+      }
+      setMfaState('loading','正在準備首次綁定 QR Code…');
+      const enrollment=await window.KusheAuthGate.enrollTotp();
+      if(!mfaCurrent(flow))return false;
+      Object.assign(flow,{mode:'enroll',factorId:enrollment.factorId,challengeId:'',enrollment});
+      await loadMfaQr(flow,enrollment.qrCode);
+      if(!mfaCurrent(flow))return false;
+      flow.qrReady=true;
+      if($('#mfaQr'))$('#mfaQr').hidden=false;
+      if($('#mfaSecret'))$('#mfaSecret').textContent=enrollment.secret;
+      if($('#mfaEnroll'))$('#mfaEnroll').hidden=false;
+      if($('#mfaSubtitle'))$('#mfaSubtitle').textContent='首次登入必須先綁定驗證器';
+      setMfaState('ready','QR Code 已準備完成。請先用驗證器掃描，再輸入 6 位數字。');
+      focusMfaDigit();return false;
+    }catch(error){failMfa(flow,error);return false}
+  }
+  async function completeMfa(event){
+    event.preventDefault();
+    if(!mfaReady())return;
+    const flow=mfaFlow,epoch=flow.epoch,code=mfaCode();
+    if(!/^[0-9]{6}$/.test(code)){setMfaMessage('請完整輸入驗證器 App 顯示的 6 位數字。',true);focusMfaDigit(code.length);return}
+    flow.challengeId='';
+    setMfaState('verifying','正在建立本次驗證請求…');
+    try{
+      const challenge=await window.KusheAuthGate.createMfaChallenge(flow.factorId);
+      if(!mfaCurrent(flow))return;
+      flow.challengeId=challenge.challengeId;
+      setMfaMessage('正在驗證第二因素…');
+      await window.KusheAuthGate.verifyMfa(flow.factorId,flow.challengeId,code);
+      if(!mfaCurrent(flow))return;
+      const strong=await window.KusheAuthGate.requireMfa();
+      if(!mfaCurrent(flow))return;
+      if(!strong)throw new Error('MFA assurance not elevated');
+      resetMfaUi();
+      await startAuthenticatedApp({skipMfa:true,authEpoch:epoch});
+    }catch(error){
+      if(!mfaCurrent(flow))return;
+      clearMfaDigits();
+      flow.challengeId='';
+      // Never auto-replay a submitted OTP. Each deliberate retry gets a new challenge.
+      // Unknown/authorization errors still fail closed and cannot open the ERP.
+      const codeError=['mfa_verification_failed','mfa_challenge_expired'].includes(error?.code);
+      const retryableTransport=['transport','aborted','server'].includes(error?.kind)||error?.status===429;
+      if(!codeError&&!retryableTransport){failMfa(flow,error);return}
+      const message=error?.code==='mfa_challenge_expired'
+        ?'本次驗證請求已過期。請重新輸入手機目前顯示的 6 位數字再試，不必重新掃描 QR Code。'
+        :error?.code==='mfa_verification_failed'
+        ?'驗證碼不正確或已更新。請輸入手機目前顯示的 6 位數字，不必重新綁定。'
+        :error?.status===429
+        ?'驗證次數較多，請稍候再試。原有綁定已保留，不必重新掃碼。'
+        :'連線暫時中斷或服務未回覆，尚未進入 ERP。原有綁定已保留，連線恢復後請重新輸入驗證碼。';
+      setMfaState('ready',message,true);
+      focusMfaDigit();
+    }finally{
+      flow.challengeId='';
+    }
+  }
+
+  async function startAuthenticatedApp(options={}) {
+    const epoch=options.authEpoch??authUiGeneration,userId=window.KusheAuthGate?.user?.()?.id;
+    const current=()=>authUiCurrent(epoch)&&Boolean(userId)&&window.KusheAuthGate?.user?.()?.id===userId;
+    if(!current())return false;
     setAuthView(false);
+    const strong=await window.KusheAuthGate?.requireMfa?.().catch?.(()=>false);
+    if(!current())return false;
+    if(!strong){
+      if(options.skipMfa)return false;
+      const ready=await prepareMfaGate(epoch);
+      if(!current()||!ready)return false;
+    }
     setLoginMessage('正在確認公司身分與權限…');
     try {
       if (!window.KusheAuthGate?.resolveCompanyContext) throw new Error('Company context unavailable');
       const companyContext = await window.KusheAuthGate.resolveCompanyContext();
+      if(!current())return false;
       const isLegacySource=Boolean(companyContext?.legacySourceUserId)&&companyContext.userId===companyContext.legacySourceUserId;
       if(companyContext?.role==='employee'&&!isLegacySource){
         window.KusheCloudSync?.stopAutoBackup?.();
@@ -67,7 +311,7 @@
         setEmployeeShellView(true);
         if(!window.KusheEmployeeShell?.start)throw new Error('Employee shell unavailable');
         await window.KusheEmployeeShell.start(companyContext);
-        return true;
+        return current();
       }
       if (!isLegacySource) {
         window.KusheCloudSync?.stopAutoBackup?.();
@@ -77,6 +321,7 @@
         return false;
       }
     } catch (error) {
+      if(!current())return false;
       window.KusheCloudSync?.stopAutoBackup?.();
       window.KuSheERPStore?.clearEphemeralSession?.();
       const messages = {
@@ -96,12 +341,15 @@
     try{
       if(device.trusted){
         window.KuSheERPStore?.clearEphemeralSession?.();
-        await window.KuSheERPStore.load();await window.KuSheERPStore.readCommittedSnapshot();
+        await window.KuSheERPStore.load();
+        if(!current())return false;
+        await window.KuSheERPStore.readCommittedSnapshot();
       }else{
         await window.KusheCloudSync?.bootstrapTemporarySession?.();
       }
     }
     catch(error){
+      if(!current())return false;
       window.KusheCloudSync?.stopAutoBackup?.();
       setAuthView(false);
       setLoginMessage(device.trusted?'ERP 本機資料安全檢查未通過，請使用恢復工具核對。':'無法安全載入公司雲端資料，未在此裝置保存 ERP 業務資料。',true);
@@ -111,6 +359,7 @@
       }
       return false;
     }
+    if(!current())return false;
     setAuthView(true);
     if (!initialized) {
       init();
@@ -126,22 +375,33 @@
     return true;
   }
   async function handleLogout() {
+    if(logoutPending)return;
+    logoutPending=true;
+    const epoch=++authUiGeneration;
+    resetMfaUi();
+    // Clear local credentials synchronously before any remote logout wait.
+    let remoteLogout;
+    try { remoteLogout=window.KusheAuthGate?.logout(); } catch (_) {}
     if($('#recoveryModal'))$('#recoveryModal').hidden=true;
     if($('#storeSafetyBanner'))$('#storeSafetyBanner').hidden=true;
     closePopovers();
     window.KusheCloudSync?.stopAutoBackup?.();
-    window.KusheCloudSync?.close();
+    window.KusheCloudSync?.close?.();
     window.KuSheERPStore?.clearEphemeralSession?.();
     window.KusheEmployeeShell?.clear?.();
     setEmployeeShellView(false);
     closeChangePasswordModal(true);
-    try { await window.KusheAuthGate?.logout(); } catch (_) {}
     setAuthView(false);
     $('#loginForm')?.reset();
+    setLoginBusy(true,'正在安全登出…');
+    try { await remoteLogout; } catch (_) {}
+    logoutPending=false;
+    if(epoch!==authUiGeneration)return;
     setLoginBusy(false);
     setLoginMessage('已安全登出。');
     $('#loginEmail')?.focus();
   }
+
   function setChangePasswordError(message = '') {
     const node = $('#changePasswordError');
     if (!node) return;
@@ -209,21 +469,58 @@
     $('#recoveryLogout')?.addEventListener('click',()=>void handleLogout());
     $('#loginForm')?.addEventListener('submit', async (event) => {
       event.preventDefault();
+      if(logoutPending||$('#loginForm')?.getAttribute('aria-busy')==='true')return;
+      const epoch=++authUiGeneration;
+      resetMfaUi();
       const email = $('#loginEmail'), password = $('#loginPassword');
       setLoginMessage();
       setLoginBusy(true, '正在驗證登入資訊…');
       try {
         if (!window.KusheAuthGate) throw new Error('Auth gate unavailable');
         await window.KusheAuthGate.login(email?.value, password?.value);
-        if (password) password.value = '';
-        await startAuthenticatedApp();
       } catch (_) {
+        if(!authUiCurrent(epoch))return;
         if (password) password.value = '';
         setLoginMessage('登入失敗，請確認 Email 與密碼後再試一次。', true);
-      } finally {
         setLoginBusy(false);
+        return;
+      }
+      if(!authUiCurrent(epoch))return;
+      if (password) password.value = '';
+      try {
+        await startAuthenticatedApp({authEpoch:epoch});
+      } catch (_) {
+        if(!authUiCurrent(epoch))return;
+        setLoginMessage('登入資訊已驗證，但安全驗證流程發生錯誤；ERP 尚未載入，請重新整理後再試。', true);
+      } finally {
+        if(authUiCurrent(epoch))setLoginBusy(false);
       }
     });
+    $('#mfaResetAccepted')?.addEventListener('change',renderMfaState);
+    $('#mfaResetSubmit')?.addEventListener('click',()=>void confirmMfaReset());
+    $('#mfaForm')?.addEventListener('submit',completeMfa);
+    $('#mfaOtp')?.addEventListener('input',(event)=>{
+      const input=event.target.closest?.('.mfa-digit');if(!input||!mfaReady())return;
+      input.value=String(input.value||'').replace(/\D/g,'').slice(-1);
+      const index=Number(input.dataset.mfaDigit)||0;
+      if(input.value&&index<5)focusMfaDigit(index+1);
+      setMfaMessage();renderMfaState();
+    });
+    $('#mfaOtp')?.addEventListener('keydown',(event)=>{
+      const input=event.target.closest?.('.mfa-digit');if(!input||!mfaReady())return;
+      const index=Number(input.dataset.mfaDigit)||0;
+      if(event.key==='Backspace'&&!input.value&&index>0){event.preventDefault();focusMfaDigit(index-1)}
+      if(event.key==='ArrowLeft'&&index>0){event.preventDefault();focusMfaDigit(index-1)}
+      if(event.key==='ArrowRight'&&index<5){event.preventDefault();focusMfaDigit(index+1)}
+    });
+    $('#mfaOtp')?.addEventListener('paste',(event)=>{
+      if(!mfaReady()){event.preventDefault();return}
+      const digits=String(event.clipboardData?.getData('text')||'').replace(/\D/g,'').slice(0,6);
+      if(!digits)return;
+      event.preventDefault();mfaDigits().forEach((node,index)=>{node.value=digits[index]||''});
+      focusMfaDigit(Math.max(0,Math.min(5,digits.length-1)));setMfaMessage();renderMfaState();
+    });
+    $('#mfaLogout')?.addEventListener('click',()=>void handleLogout());
     $('#changePasswordForm')?.addEventListener('submit', handleChangePassword);
     $('#changePasswordCancel')?.addEventListener('click', () => closeChangePasswordModal());
     $('#changePasswordClose')?.addEventListener('click', () => closeChangePasswordModal());
@@ -231,7 +528,10 @@
     document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !$('#changePasswordModal')?.hidden) closeChangePasswordModal(); });
   }
   async function boot() {
+    if(logoutPending)return false;
+    const epoch=++authUiGeneration;
     bindAuthUi();
+    resetMfaUi();
     setAuthView(false);
     setLoginBusy(true, '正在確認登入狀態…');
     if (!window.KusheAuthGate) {
@@ -241,6 +541,7 @@
     }
     let authenticated = false;
     try { authenticated = await window.KusheAuthGate.requireAuth(); } catch (_) {}
+    if(!authUiCurrent(epoch))return false;
     setLoginBusy(false);
     if (!authenticated) {
       setAuthView(false);
@@ -248,8 +549,7 @@
       $('#loginEmail')?.focus();
       return false;
     }
-    await startAuthenticatedApp();
-    return true;
+    return await startAuthenticatedApp({authEpoch:epoch});
   }
   function closePopovers(except) { $$('.topbar-popover.is-open').forEach((node)=>{if(node!==except)node.classList.remove('is-open')}); }
   function togglePopover(id) { const node=$(`#${id}`); if(!node)return; const open=!node.classList.contains('is-open'); closePopovers(node); node.classList.toggle('is-open',open); }

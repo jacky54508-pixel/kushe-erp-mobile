@@ -1,0 +1,272 @@
+/* P20 AR Layout-1: presentation only; retain native table cells and all actions.
+   The existing mobile pilot switches at 620px. Keep that boundary unchanged. */
+@media (min-width: 621px) {
+  #receivablesApp .receivable-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    align-items: end;
+  }
+  #receivablesApp .receivable-filter-grid > label { min-width: 0; }
+  #receivablesApp .receivable-filter-grid .receivable-search { grid-column: auto; }
+  #receivablesApp .receivable-filter-grid input,
+  #receivablesApp .receivable-filter-grid select {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    height: 40px;
+    font-size: 12px;
+  }
+  #receivablesApp .receivable-view-switch { flex-wrap: wrap; gap: 8px; }
+
+  #receivablesApp .billing-list-panel > .commission-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+  #receivablesApp .receivable-table {
+    width: 100%;
+    min-width: 960px;
+    table-layout: fixed;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(1) { width: 17%; }
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(2) { width: 18%; }
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(3) { width: 14%; }
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(4) { width: 15%; }
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(5) { width: 9%; }
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(6) { width: 9%; }
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(7) { width: 18%; }
+
+  /* Old 12-column sticky rules must not cover the compact 7-column table. */
+  #receivablesApp .receivable-table > thead > tr > th,
+  #receivablesApp .receivable-table > tbody > .receivable-main-row > td {
+    box-sizing: border-box;
+    position: static;
+    left: auto;
+    right: auto;
+    z-index: auto;
+    box-shadow: none;
+    padding: 14px 10px !important;
+    vertical-align: middle !important;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  #receivablesApp .receivable-table > tbody > .receivable-main-row > td {
+    display: table-cell !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+  #receivablesApp .receivable-billing-top { display: block; }
+  #receivablesApp .receivable-billing-top > b {
+    display: block;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  #receivablesApp .receivable-billing-meta { flex-wrap: wrap; gap: 5px; }
+  #receivablesApp .receivable-party > strong,
+  #receivablesApp .receivable-party > small {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  #receivablesApp .receivable-party > strong { font-size: 12px; }
+  #receivablesApp .receivable-party > small { font-size: 11px; }
+  #receivablesApp .receivable-period-amount > strong,
+  #receivablesApp .receivable-retention > .retention-amount {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  #receivablesApp .receivable-period-amount > small {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.5;
+  }
+  #receivablesApp .receivable-progress.is-open > strong {
+    display: inline-block !important;
+    box-sizing: border-box;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.5;
+  }
+  #receivablesApp .receivable-status-stack > span,
+  #receivablesApp .receivable-retention > .retention-status-badge {
+    box-sizing: border-box;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  #receivablesApp .receivable-status-stack > span {
+    padding: 4px 6px;
+    font-size: 10px;
+    line-height: 1.4;
+  }
+
+  /* Fixed action width + flexible customer/source columns prevent row drift. */
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(1),
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(2) { width: auto; }
+  #receivablesApp .receivable-table > thead > tr > th:nth-child(7) { width: 210px; }
+  #receivablesApp .receivable-table > tbody > .receivable-main-row > td {
+    padding-top: 10px !important;
+    padding-bottom: 10px !important;
+  }
+
+}
+@media (min-width: 621px) and (max-width: 1100px) {
+  #receivablesApp .receivable-filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  #receivablesApp .receivable-filter-grid .receivable-search { grid-column: span 2; }
+}
+@media (min-width: 621px) and (max-width: 880px) {
+  #receivablesApp .receivable-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #receivablesApp .receivable-filter-grid .receivable-search { grid-column: auto; }
+}
+
+/* P20 AR Actions-2: uniform controls, regardless of outstanding / retention state. */
+#receivablesApp .receivable-actions {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: auto auto !important;
+  gap: 6px;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  min-height: 0 !important;
+  margin: 0;
+  white-space: normal;
+}
+#receivablesApp .receivable-action-primary-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  grid-template-rows: auto;
+  gap: 8px;
+}
+#receivablesApp .receivable-action-primary-row > button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  grid-column: auto !important;
+  grid-row: auto !important;
+  height: 40px;
+  min-height: 40px;
+  margin: 0;
+  padding: 0 5px;
+  border: 1px solid #cddded;
+  border-radius: 9px;
+  background: #fff;
+  color: #204f79;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+  box-shadow: none;
+  cursor: pointer;
+}
+#receivablesApp .receivable-action-primary-row > .receivable-action-collect:not(:disabled) {
+  border-color: #075bd8;
+  background: #075bd8;
+  color: #fff;
+  box-shadow: 0 3px 8px rgba(7,91,216,.10);
+}
+#receivablesApp .receivable-action-primary-row > button:not(:disabled):hover { filter: brightness(.96); }
+#receivablesApp .receivable-action-primary-row > button:disabled {
+  opacity: 1;
+  border-color: #e4ebf2;
+  background: #f6f8fb;
+  color: #758496;
+  box-shadow: none;
+  cursor: default;
+  filter: none;
+}
+#receivablesApp .receivable-action-secondary-row {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 5fr) minmax(0, 3fr);
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+}
+#receivablesApp .receivable-action-secondary-row > button,
+#receivablesApp .receivable-more-toggle {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100% !important;
+  min-width: 0;
+  height: 30px !important;
+  min-height: 30px !important;
+  margin: 0;
+  padding: 0 !important;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #45617e;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.3;
+  text-decoration: none;
+  white-space: nowrap;
+  box-shadow: none;
+  cursor: pointer;
+}
+#receivablesApp .receivable-action-secondary-row > button:hover,
+#receivablesApp .receivable-more-toggle:hover,
+#receivablesApp .receivable-more-toggle[aria-expanded="true"] { color: #075bd8; background: #edf4fc; }
+#receivablesApp .receivable-more-actions { min-width: 0; }
+#receivablesApp .receivable-more-toggle { gap: 4px; }
+#receivablesApp .receivable-more-toggle::after {
+  content: ''; width: 5px; height: 5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg);
+}
+#receivablesApp .receivable-actions button:focus-visible,
+.receivable-more-panel button:focus-visible { outline: 2px solid #075bd8; outline-offset: 2px; }
+/* This panel is temporarily attached to body to escape the table scroll clip. */
+.receivable-more-panel {
+  box-sizing: border-box;
+  position: fixed;
+  z-index: 1200;
+  padding: 6px;
+  border: 1px solid #dce6ef;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(16,47,86,.16);
+  color: #274b6d;
+  text-align: left;
+}
+.receivable-more-panel[hidden] { display: none !important; }
+.receivable-more-panel > button {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: #fff;
+  color: #b42318;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.receivable-more-panel > button:hover { background: #fff1f0; }
+.receivable-more-panel > small { display: block; padding: 2px 12px 6px; color: #687a8f; font-size: 11px; line-height: 1.5; }
+@media (max-width: 620px) {
+  #receivablesApp .receivable-actions--mobile { gap: 6px; margin-top: 8px; }
+  #receivablesApp .receivable-actions--mobile .receivable-action-primary-row { grid-template-columns: minmax(0, 1fr); }
+  #receivablesApp .receivable-actions--mobile .receivable-action-primary-row > button { min-height: 44px; height: 44px; font-size: 13px; }
+  #receivablesApp .receivable-actions--mobile .receivable-action-secondary-row > button,
+  #receivablesApp .receivable-actions--mobile .receivable-more-toggle { min-height: 44px !important; height: 44px !important; font-size: 12px; }
+}
