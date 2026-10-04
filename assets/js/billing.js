@@ -826,7 +826,29 @@
     const rows=data.receivables.map(r=>receivableView(r,data)).filter(tests[action]);
     return {title:titles[action],scope:'全期資料，與此字卡相同範圍；本期未沖銷與保留款分開顯示，不修改原清單篩選。',columns:['請款日期','請款單','客戶','案場','請款總額','未沖銷應收','保留款待收'],rows:rows.map(r=>({id:r.id,cells:[r.billingDate,r.sourceNo,r.customerName,r.projectName,money(r.billingGross),money(r.outstanding),money(r.retentionOutstanding)]}))};
   }
-  window.KusheKpi.register('ar',{anchor:'.receivable-kpis',active:()=>receivableActive,read:kpiArRows});
+  // P21 KPI-2: drawer-specific projection only; card calculations and saved rows stay unchanged.
+  function kpiArDrawerModel(action,options={}) {
+    const value=kpiArRows(action,options);if(!value)return value;
+    const pair=[{label:'請款單／日期',index:1,secondaryIndex:0},{label:'客戶／案場',index:2,secondaryIndex:3}];
+    const amount=(label,index,emphasis=false)=>({label,index,numeric:true,emphasis});
+    if(action==='cash'){
+      value.drawer={title:'本月實際匯款明細',scopeLabel:(options.month||monthOf(today()))+' · 依收款日期',summaryIndex:5,summaryLabel:'字卡計入金額',columns:[...pair,{label:'來源',index:4},amount('字卡計入金額',5,true),amount('實際現金',6),amount('客戶扣款',7),amount('銀行入帳／狀態',8)]};
+      return value;
+    }
+    const data=store.getState(),byId=new Map(data.receivables.map(row=>[row.id,receivableView(row,data)]));
+    value.rows=value.rows.map(row=>{
+      const view=byId.get(row.id),due=view?.dueDate||'',days=(Date.parse(today()+'T00:00:00Z')-Date.parse(due+'T00:00:00Z'))/86400000;
+      return {...row,dueDate:due,overdueDays:Number.isFinite(days)?Math.max(0,Math.floor(days))+' 天':'—',retentionTotal:money(view?.retention||0),retentionCollected:money(view?.retentionReceived||0)};
+    });
+    const variants={
+      total:{title:'應收總額明細',scopeLabel:'全部期間 · 包含保留款',summaryIndex:4,summaryLabel:'請款總額',columns:[...pair,amount('請款總額',4,true),amount('未沖銷應收',5),amount('保留款待收',6)]},
+      open:{title:'未沖銷應收明細',scopeLabel:'全部期間 · 不含保留款待收',summaryIndex:5,summaryLabel:'未沖銷應收',columns:[...pair,amount('未沖銷應收',5,true),amount('請款總額',4),amount('保留款待收',6)]},
+      overdue:{title:'逾期應收明細',scopeLabel:'全部期間 · 依原到期日判斷',summaryIndex:5,summaryLabel:'逾期未沖銷',columns:[...pair,{label:'到期日／逾期天數',field:'dueDate',secondaryField:'overdueDays'},amount('請款總額',4),amount('未沖銷應收',5,true)]},
+      retention:{title:'保留款待收明細',scopeLabel:'全部期間 · 僅實際設定保留款',summaryIndex:6,summaryLabel:'保留款待收',columns:[...pair,{label:'保留款總額',field:'retentionTotal',numeric:true},{label:'已收回',field:'retentionCollected',numeric:true},amount('尚待收回',6,true)]}
+    };
+    value.drawer=variants[action];return value;
+  }
+  window.KusheKpi.register('ar',{anchor:'.receivable-kpis',active:()=>receivableActive,read:kpiArDrawerModel});
   window.KusheKpi.register('billing',{anchor:'.billing-kpis',active:()=>billingActive,read(action){
     const data=store.getState(),month=billingFilters.month||monthOf(today()),tests={total:()=>true,received:r=>r.receipt.received>0,open:r=>r.receipt.unreceived>0,retention:r=>Math.max(0,store.num(r.sourceRecord.retention)-store.num(r.sourceRecord.retentionReceived))>0};if(!tests[action])return null;
     const rows=data.billings.filter(r=>monthOf(r.date)===month).map(r=>buildBillingPresentation(r,data)).filter(tests[action]);
