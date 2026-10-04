@@ -1,0 +1,50 @@
+name: Build verified P20 daily save candidate
+on:
+  push:
+    branches: [p20-daily-save-build-20261004]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Apply exact tested patch on isolated baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p20-daily-save-build-20261004
+          cp tools/p20-daily-save-build.py "$RUNNER_TEMP/p20-daily-save-build.py"
+          git checkout --detach 7ff9c41f1dad76e72cb048c001534cc39e4123d1
+          python "$RUNNER_TEMP/p20-daily-save-build.py"
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, subprocess
+          expected = {
+            'assets/js/commissions.js':'69aa9934844b4677317b078bcd3c2eb4df8d765c0f2d921fbc64622476ebe760',
+            'assets/css/commissions-scoped.css':'1302d5d14ed6038126e2b4a2d1bad4e490884bf53725f21f1b74a9b0ee703d9c',
+            'index.html':'eca9d154fb83b8cc3e262067406a706770c40f56195a705da8e8399f56a23438'
+          }
+          paths = subprocess.check_output(['git','diff','--name-only'],text=True).splitlines()
+          assert set(paths)==set(expected),paths
+          assert not subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).strip()
+          for name, sha in expected.items():
+            assert hashlib.sha256(Path(name).read_bytes()).hexdigest()==sha,name
+          assert '$$$(' not in Path('assets/js/commissions.js').read_text()
+          print('Exact local-tested three-file candidate hashes: PASS')
+          PY
+          for path in assets/js/*.js; do node --check "$path"; done
+          git diff --check
+      - name: Create candidate branch only (beta and main unchanged)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'KuShe ERP Maintenance'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add assets/js/commissions.js assets/css/commissions-scoped.css index.html
+          git commit -m 'P20 Daily Save-1: fix employee selector and show durable drawer save feedback'
+          test "$(git rev-parse HEAD^)" = 7ff9c41f1dad76e72cb048c001534cc39e4123d1
+          git push origin HEAD:refs/heads/p20-daily-save-ready-20261004
