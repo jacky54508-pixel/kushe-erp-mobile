@@ -1,0 +1,66 @@
+name: Build verified read-only KPI candidate
+on:
+  push:
+    branches: [p21-kpi-build-20261004]
+permissions:
+  contents: write
+jobs:
+  build:
+    if: github.ref == 'refs/heads/p21-kpi-build-20261004'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: control
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 9d702d3224057c1284c54479952e41554e99b4fa
+          path: source
+          persist-credentials: true
+      - name: Apply exact UI-only edits and verify complete tested tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64,gzip,hashlib,json,subprocess
+          source=Path('source')
+          packed=''.join(Path(f'control/.github/p21-kpi/part-{i}').read_text() for i in range(4))
+          assert hashlib.sha256(packed.encode()).hexdigest()=='6ff467e955f7fed1758e66f5772d4f351fcb2b4b2d16738afb51c67e81bbfd3a'
+          payload=json.loads(gzip.decompress(base64.b64decode(packed)))
+          assert payload['base']=='9d702d3224057c1284c54479952e41554e99b4fa'
+          assert subprocess.check_output(['git','rev-parse','HEAD'],cwd=source,text=True).strip()==payload['base']
+          allowed={'assets/css/kpi-navigation.css','assets/js/banks.js','assets/js/billing.js','assets/js/commissions.js','assets/js/dashboard.js','assets/js/employees.js','assets/js/invoices.js','assets/js/kpi-navigation.js','assets/js/materials.js','assets/js/payables.js','assets/js/quotations.js','assets/js/reports.js','assets/js/settings.js','assets/js/unbilled-work.js','index.html'}
+          assert set(payload['files'])==allowed
+          for name,spec in payload['files'].items():
+              path=source/name
+              if spec['before'] is None:
+                  assert not path.exists()
+                  old=''
+              else:
+                  old=path.read_text()
+                  assert hashlib.sha256(old.encode()).hexdigest()==spec['before'],name
+              new=old
+              previous=len(old)+1
+              for start,end,value in reversed(spec['edits']):
+                  assert 0<=start<=end<=len(old) and end<=previous
+                  new=new[:start]+value+new[end:]
+                  previous=start
+              assert hashlib.sha256(new.encode()).hexdigest()==spec['after'],name
+              path.parent.mkdir(parents=True,exist_ok=True)
+              path.write_text(new)
+          subprocess.run(['git','add','--all'],cwd=source,check=True)
+          changed=set(subprocess.check_output(['git','diff','--cached','--name-only'],cwd=source,text=True).splitlines())
+          assert changed==allowed
+          subprocess.run(['git','diff','--cached','--check'],cwd=source,check=True)
+          tree=subprocess.check_output(['git','write-tree'],cwd=source,text=True).strip()
+          assert tree==payload['tree']=='d9a94f8b1857992099f175ff4d3be32596c3e3bf'
+          print('EXACT_TESTED_TREE',tree,'UI_FILES',len(changed))
+          PY
+          cd source
+          find assets/js -name '*.js' -exec node --check {} \;
+          commit=$(git -c user.name='KuShe ERP Maintenance' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit-tree d9a94f8b1857992099f175ff4d3be32596c3e3bf -p 9d702d3224057c1284c54479952e41554e99b4fa -m 'P21 KPI-1: read-only summary card drilldowns and keyboard navigation')
+          git push origin "$commit:refs/heads/p21-kpi-ready-20261004"
+          echo "READY_COMMIT=$commit"
