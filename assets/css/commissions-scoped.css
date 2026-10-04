@@ -423,3 +423,22 @@
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-mobile{display:grid;gap:10px}
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .project-settlement-history-mobile footer{display:flex;gap:8px;flex-wrap:wrap}
 }
+
+/* P20 Daily Save-1: drawer-local durable save/validation feedback. */
+#commissionDrawerLayer #dailyWorkForm > footer { flex-wrap: wrap; }
+#commissionDrawerLayer #dailyWorkForm > footer > .daily-save-feedback {
+  flex: 0 0 100%; grid-column: 1 / -1; box-sizing: border-box;
+  margin: 0; padding: 8px 12px; border: 1px solid #f0c6c6; border-radius: 8px;
+  background: #fff4f4; color: #a52222; font-size: 13px; line-height: 1.5;
+  white-space: normal; overflow-wrap: anywhere; max-height: 100px; overflow-y: auto;
+}
+#commissionDrawerLayer #dailyWorkForm > footer > .daily-save-feedback[hidden] { display: none !important; }
+#commissionDrawerLayer #dailyWorkForm > footer > .daily-save-feedback[data-tone="pending"] {
+  background: #f3f7ff; border-color: #cbdcf7; color: #234d7c;
+}
+#commissionDrawerLayer #dailyWorkForm > footer > .daily-save-feedback[data-tone="success"] {
+  background: #f0faf4; border-color: #bfddcb; color: #236342;
+}
+#commissionDrawerLayer #dailyWorkForm > footer > .daily-save-feedback[data-tone="warning"] {
+  background: #fff8eb; border-color: #ecd7a7; color: #80591c;
+}
