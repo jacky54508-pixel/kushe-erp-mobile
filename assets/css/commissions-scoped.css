@@ -130,9 +130,9 @@
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] #dailyWorkForm>.daily-drawer-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] #dailyWorkForm :is(section,header,footer,div,label,span,b,small,p,input,select,button) { min-width: 0; max-width: 100%; box-sizing: border-box; }
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] #dailyWorkForm :is(span,b,small,p,button) { white-space: normal; overflow-wrap: anywhere; }
-  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] #dailyWorkForm :is(input:not([type="checkbox"]),select) { height: 44px !important; min-height: 44px; font-size: 16px !important; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] #dailyWorkForm :is(input:not([type="checkbox"]):not([type="radio"]),select) { height: 44px !important; min-height: 44px; font-size: 16px !important; }
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] #dailyWorkForm button { min-height: 44px; height: auto; padding: 10px 12px; white-space: normal; overflow-wrap: anywhere; }
-  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] #dailyWorkForm input[type="checkbox"] { width: 20px !important; min-width: 20px; height: 20px !important; flex: 0 0 20px; }
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] #dailyWorkForm :is(input[type="checkbox"],input[type="radio"]) { width: 20px !important; min-width: 20px; height: 20px !important; flex: 0 0 20px; }
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] #dailyWorkForm :is(.daily-employee-choice,.daily-billable,.daily-check) { min-height: 44px; height: auto; display: flex; align-items: center; gap: 8px; }
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] #dailyWorkForm .daily-house-header { grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; gap: 10px; }
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] #dailyWorkForm .daily-house-header>label:first-child { grid-column: 1 / -1; }
@@ -441,4 +441,38 @@
 }
 #commissionDrawerLayer #dailyWorkForm > footer > .daily-save-feedback[data-tone="warning"] {
   background: #fff8eb; border-color: #ecd7a7; color: #80591c;
+}
+
+
+/* P22-1 pure work / repair mode + employee wage-rate UX */
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-entry-mode-grid{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px
+}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-entry-mode-card{
+  display:flex;align-items:flex-start;gap:10px;min-width:0;padding:14px;border:1px solid #d7e4f2;border-radius:12px;background:#fff;cursor:pointer
+}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-entry-mode-card:has(input:checked){
+  border-color:#5b9bea;background:#f2f7ff;box-shadow:0 0 0 3px rgba(7,91,216,.08)
+}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-entry-mode-card input{margin-top:2px}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-entry-mode-card span{
+  display:grid;gap:4px;min-width:0
+}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-entry-mode-card b{font-size:13px;color:#173f6d}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-entry-mode-card small{font-size:11px;line-height:1.45;color:#687b91}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #dailyConstructionSection[hidden],
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp #dailyCommissionToggle[hidden]{display:none!important}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-work-rate-panel{
+  grid-column:1/-1;margin:0;border-color:#cfe0f3;background:#f8fbff
+}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-work-rate-panel .daily-commission-rate-heading{background:#edf6ff}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-commission-rate-row.is-missing-rate{
+  background:#fff8f6
+}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-commission-rate-row.is-missing-rate .daily-commission-rate-employee small{
+  color:#b4472e;font-weight:800
+}
+@media(max-width:620px){
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-entry-mode-grid{grid-template-columns:1fr}
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-entry-mode-card{min-height:58px}
 }
