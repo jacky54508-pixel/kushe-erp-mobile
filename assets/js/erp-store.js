@@ -2702,11 +2702,41 @@
   }
   function validateStrictDailyBatch(values, previous, options) {
     const fail=(message,index,field)=>{const error=new Error(index===undefined?message:`第 ${index+1} 筆施工：${message}`);error.code='DAILY_BATCH_INPUT_INVALID';error.dailyRowIndex=index;error.dailyField=field;throw error};
-    const lines=values.lines;
-    if(!Array.isArray(lines)||!lines.length)fail('請至少填寫一筆施工項目');
     const employees=values.employeeIds;
     if(!Array.isArray(employees)||!employees.length||new Set(employees).size!==employees.length||employees.some(id=>!state.employees.some(row=>String(row.id)===String(id))))fail('請選擇有效且不重複的員工');
     if(typeof values.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(values.date)||!Number.isFinite(Date.parse(values.date))||new Date(values.date).toISOString().slice(0,10)!==values.date)fail('請填寫有效施工日期');
+    const workOnly=values.workOnly===true,workMode=String(values.workMode||'none'),workRates=values.workRates&&typeof values.workRates==='object'&&!Array.isArray(values.workRates)?values.workRates:{};
+    const workRateFor=(employeeId)=>{
+      const employee=state.employees.find(row=>String(row.id)===String(employeeId))||{};
+      const source=hasOwn(workRates,employeeId)?workRates[employeeId]:values.workRate!==undefined?values.workRate:workMode==='hourly'?employee.hourlyRate:employee.dailyRate;
+      return Number(source);
+    };
+    if(workOnly){
+      if(!['daily','hourly'].includes(workMode))fail('純點工／修繕必須選擇日薪或時薪');
+      const qty=Number(values.workQty);
+      if(!Number.isFinite(qty)||qty<=0||qty>Number.MAX_SAFE_INTEGER)fail('請填寫有效的點工天數／時數');
+      if(!String(values.note||'').trim())fail('純點工／修繕請填寫工作內容或地點');
+      if(values.commissionEnabled!==false)fail('純點工／修繕不可計入業績抽成');
+      employees.forEach(employeeId=>{
+        const employee=state.employees.find(row=>String(row.id)===String(employeeId))||{};
+        const rate=workRateFor(employeeId);
+        if(!Number.isFinite(rate)||rate<=0)fail(`員工 ${employee.name||employeeId} 尚未設定有效${workMode==='hourly'?'時薪':'日薪'}，請先至員工主檔設定`);
+      });
+      if(values.lines!==undefined&&(!Array.isArray(values.lines)||values.lines.length))fail('純點工／修繕不可包含施工請款項目');
+      return [];
+    }
+    if(workMode!=='none'){
+      if(!['daily','hourly'].includes(workMode))fail('點工方式不正確');
+      const qty=Number(values.workQty);
+      if(!Number.isFinite(qty)||qty<=0||qty>Number.MAX_SAFE_INTEGER)fail('請填寫有效的點工天數／時數');
+      employees.forEach(employeeId=>{
+        const employee=state.employees.find(row=>String(row.id)===String(employeeId))||{};
+        const rate=workRateFor(employeeId);
+        if(!Number.isFinite(rate)||rate<=0)fail(`員工 ${employee.name||employeeId} 尚未設定有效${workMode==='hourly'?'時薪':'日薪'}，請先至員工主檔設定`);
+      });
+    }
+    const lines=values.lines;
+    if(!Array.isArray(lines)||!lines.length)fail('請至少填寫一筆施工項目');
     const oldItems=new Map();previous.forEach(log=>(log.items||[]).forEach(item=>{if(item.workItemId)oldItems.set(String(item.workItemId),item)}));
     const itemIds=new Set(),rowKeys=new Set();
     if(options.draftRowKeys!==undefined&&(!Array.isArray(options.draftRowKeys)||options.draftRowKeys.length!==lines.length))fail('施工列識別與資料筆數不一致');
@@ -2719,7 +2749,6 @@
       if(workItemId&&(itemIds.has(workItemId)||!oldItem))fail('施工來源識別重複或不屬於目前編輯批次',index,'item');
       if(workItemId)itemIds.add(workItemId);
       if(options.draftRowKeys){const key=options.draftRowKeys[index];if(typeof key!=='string'||!key||rowKeys.has(key))fail('同一施工列被重複提交',index,'item');rowKeys.add(key)}
-      // Historical rows without a house remain editable; new rows must name a house.
       if(typeof line.house!=='string'||!line.house.trim()&&!(oldItem&&!String(oldItem.house||'').trim()))fail('請填寫戶別',index,'house');
       if(typeof line.item!=='string'||!line.item.trim())fail('請填寫施工品項',index,'item');
       const raw=line.qty,validType=typeof raw==='number'||typeof raw==='string'&&/^\d+(?:\.\d+)?$/.test(raw.trim());
@@ -2743,8 +2772,38 @@
     if(previous.some((log)=>dailyLogCommissionSettlementLock(log).locked))throw new Error('此施工紀錄的案場抽成已發放，為保留結算歷史不可修改。');
     previous.forEach((log) => syncDailyLogLinks({...log,performance:0,workMode:'none'}, log));
     if (previous.length) state.dailyLogs = state.dailyLogs.filter((log) => (log.batchId || log.id) !== editingBatchId);
+  
+    const workOnly=values.workOnly===true,workMode=String(values.workMode||'none'),workQty=num(values.workQty);
+    const workRates=values.workRates&&typeof values.workRates==='object'&&!Array.isArray(values.workRates)?values.workRates:{};
+    const workRateFor=(employeeId,employee)=>{
+      const source=hasOwn(workRates,employeeId)?workRates[employeeId]:values.workRate!==undefined?values.workRate:workMode==='hourly'?employee.hourlyRate:employee.dailyRate;
+      const value=Number(source);
+      return Number.isFinite(value)?value:0;
+    };
+    if(!employeeIds.length)throw new Error('請至少選擇一位員工');
+  
+    const batchId = editingBatchId || uid(), now = new Date().toISOString();
+  
+    if(workOnly){
+      if(!['daily','hourly'].includes(workMode)||workQty<=0)throw new Error('純點工／修繕必須選擇日薪或時薪，並填寫有效天數／時數');
+      if(!String(values.note||'').trim())throw new Error('純點工／修繕請填寫工作內容或地點');
+      employeeIds.forEach(employeeId=>{
+        const employee=state.employees.find((row)=>String(row.id)===String(employeeId));
+        if(!employee)throw new Error('找不到選擇的員工');
+        const rate=workRateFor(employeeId,employee);
+        if(rate<=0)throw new Error(`員工 ${employee.name||employeeId} 尚未設定有效${workMode==='hourly'?'時薪':'日薪'}，請先至員工主檔設定`);
+        if(workMode==='daily'&&state.dailyLogs.some((row)=>String(row.employee)===String(employeeId)&&row.date===date&&row.workMode==='daily'&&row.isPrimaryWork!==false))throw new Error(`員工 ${employee.name||employeeId} ${date} 已有日薪點工紀錄，請編輯原紀錄或改用時薪，避免重複計薪`);
+        const prior=previous.find((row)=>String(row.employee)===String(employeeId));
+        const log={id:uid(),batchId,groupId:`${batchId}:work-only`,date,employee:employeeId,employeeName:employee.name||'',customer:'',customerName:'',project:'',projectName:'無固定案場／純點工',payType:'點工',items:[],groupTotal:0,grossTotal:0,billingTotal:0,billable:false,billingStatus:'',billingId:'',billingNo:'',performance:0,untaxedPerformance:0,taxIncludedPerformance:0,commissionBasis:'preTax',commissionBaseAmount:0,commissionEnabled:false,rate:0,commission:0,workMode,workQty,workRate:rate,isPrimaryWork:true,workOnly:true,note:String(values.note||'').trim(),createdAt:prior?.createdAt||previous[0]?.createdAt||now,updatedAt:now};
+        state.dailyLogs.unshift(log);
+        syncDailyLogLinks(log);
+      });
+      persist(`${previous.length?'修改':'新增'}純點工／修繕出勤`);
+      return batchId;
+    }
+  
     const lines = strictLines || (values.lines || []).filter((line) => line.project && line.item && num(line.qty) > 0);
-    if (!employeeIds.length || !lines.length) throw new Error('請至少選擇一位員工並填寫一筆施工項目');
+    if (!lines.length) throw new Error('請至少填寫一筆施工項目');
     const prepared = lines.map((line) => {
       const project=state.projects.find((row)=>String(row.id)===String(line.project))||{};
       const quotationId=line.quotationId||line.quoteId||'',quotationLineId=line.quotationLineId||line.quoteLineId||'';
@@ -2761,7 +2820,6 @@
     });
     const byProject = new Map();
     prepared.forEach((line) => { if (!byProject.has(line.project)) byProject.set(line.project, []); byProject.get(line.project).push(line); });
-    const batchId = editingBatchId || uid(), now = new Date().toISOString();
     const sortedEmployeeIds = [...employeeIds].sort((a, b) => {
       const left = String(a), right = String(b);
       return left < right ? -1 : left > right ? 1 : 0;
@@ -2772,6 +2830,8 @@
       const employee = state.employees.find((row) => row.id === employeeId) || {};
       const rawRate=Object.prototype.hasOwnProperty.call(commissionRates,employeeId)?Number(commissionRates[employeeId]):employee.commissionRate===undefined||employee.commissionRate===null||employee.commissionRate===''?25:Number(employee.commissionRate);
       if(!Number.isFinite(rawRate)||rawRate<0||rawRate>100)throw new Error(`員工 ${employee.name||employeeId} 的本次抽成比例必須介於 0～100`);
+      const employeeWorkRate=workMode==='none'?0:workRateFor(employeeId,employee);
+      if(workMode!=='none'&&employeeWorkRate<=0)throw new Error(`員工 ${employee.name||employeeId} 尚未設定有效${workMode==='hourly'?'時薪':'日薪'}，請先至員工主檔設定`);
       const commissionRate=Math.round(rawRate*100)/100,employeeCommissionBasis=normalizeCommissionBasis(employee.commissionBasis),requestedCommissionBasis=Object.prototype.hasOwnProperty.call(commissionBases,employeeId)?commissionBases[employeeId]:'projectDefault';
       const hasDaily = state.dailyLogs.some((row) => row.employee === employeeId && row.date === date && row.workMode === 'daily' && row.isPrimaryWork !== false);
       let firstProject = true;
@@ -2781,12 +2841,12 @@
         const projectCommissionBasis=normalizeCommissionBasis(project.defaultCommissionBasis??customer.defaultCommissionBasis??employeeCommissionBasis),commissionBasis=requestedCommissionBasis==='projectDefault'?projectCommissionBasis:normalizeCommissionBasis(requestedCommissionBasis);
         const basisAmounts=commissionBasisAmounts(projectLines),total=basisAmounts.preTax,taxIncludedTotal=basisAmounts.taxIncluded;
         const billableTotal = projectLines.filter((line) => line.billable).reduce((sum, line) => sum + num(line.untaxedSubtotal), 0);
-        const canAddWork = firstProject && !(values.workMode === 'daily' && hasDaily);
+        const canAddWork = firstProject && !(workMode === 'daily' && hasDaily);
         const untaxedPerformance=splitPerformanceAmount(total,sortedEmployeeIds.length,performanceIndexByEmployeeId.get(employeeId)),taxIncludedPerformance=splitPerformanceAmount(taxIncludedTotal,sortedEmployeeIds.length,performanceIndexByEmployeeId.get(employeeId)),commissionBaseAmount=commissionBasis==='taxIncluded'?taxIncludedPerformance:untaxedPerformance,performance=untaxedPerformance;
         const commissionEnabledForLog=values.commissionEnabled!==false,commissionAmount=commissionEnabledForLog?Math.round(commissionBaseAmount*commissionRate/100):0;
-        const workMode = canAddWork ? values.workMode : 'none';
+        const resolvedWorkMode = canAddWork ? workMode : 'none';
         const hasCommission=commissionAmount>0;
-        const log = {id:uid(),batchId,groupId:`${batchId}:${projectId}`,date,employee:employeeId,employeeName:employee.name||'',customer:project.customer||'',customerName:customer.name||project.customerName||'',project:projectId,projectName:project.name||'',payType:hasCommission&&workMode!=='none'?'業績抽成／點工':hasCommission?'業績抽成':workMode!=='none'?'點工':'僅業績',items:projectLines.map((line)=>({...line})),groupTotal:total,grossTotal:projectLines.reduce((sum,line)=>sum+num(line.subtotal),0),billingTotal:billableTotal,billable:billableTotal>0,billingStatus:billableTotal>0?'未請款':'',billingId:'',billingNo:'',performance,untaxedPerformance,taxIncludedPerformance,commissionBasis,commissionBaseAmount,commissionEnabled:commissionEnabledForLog,rate:commissionRate,commission:commissionAmount,workMode,workQty:canAddWork?num(values.workQty):0,workRate:canAddWork?num(values.workRate):0,isPrimaryWork:canAddWork,note:values.note||'',createdAt:previous[0]?.createdAt||now,updatedAt:now};
+        const log = {id:uid(),batchId,groupId:`${batchId}:${projectId}`,date,employee:employeeId,employeeName:employee.name||'',customer:project.customer||'',customerName:customer.name||project.customerName||'',project:projectId,projectName:project.name||'',payType:hasCommission&&resolvedWorkMode!=='none'?'業績抽成／點工':hasCommission?'業績抽成':resolvedWorkMode!=='none'?'點工':'僅業績',items:projectLines.map((line)=>({...line})),groupTotal:total,grossTotal:projectLines.reduce((sum,line)=>sum+num(line.subtotal),0),billingTotal:billableTotal,billable:billableTotal>0,billingStatus:billableTotal>0?'未請款':'',billingId:'',billingNo:'',performance,untaxedPerformance,taxIncludedPerformance,commissionBasis,commissionBaseAmount,commissionEnabled:commissionEnabledForLog,rate:commissionRate,commission:commissionAmount,workMode:resolvedWorkMode,workQty:canAddWork?workQty:0,workRate:canAddWork?employeeWorkRate:0,isPrimaryWork:canAddWork,workOnly:false,note:values.note||'',createdAt:previous[0]?.createdAt||now,updatedAt:now};
         state.dailyLogs.unshift(log); syncDailyLogLinks(log); firstProject = false;
       });
     });
@@ -5165,14 +5225,15 @@
   }
   async function saveEmployee(values, id = '') {
     requireStoreTransactionDraft();
-    const existing=state.employees.find((item)=>String(item.id)===String(id)),name=clean(values.name),dailyRate=values.dailyRate===''||values.dailyRate===undefined?0:Number(values.dailyRate),commissionRate=values.commissionRate===''||values.commissionRate===undefined?(existing?num(existing.commissionRate):25):Number(values.commissionRate),commissionBasis=normalizeCommissionBasis(values.commissionBasis??existing?.commissionBasis);
+    const existing=state.employees.find((item)=>String(item.id)===String(id)),name=clean(values.name),dailyRate=values.dailyRate===''||values.dailyRate===undefined?0:Number(values.dailyRate),hourlyRate=values.hourlyRate===''||values.hourlyRate===undefined?0:Number(values.hourlyRate),commissionRate=values.commissionRate===''||values.commissionRate===undefined?(existing?num(existing.commissionRate):25):Number(values.commissionRate),commissionBasis=normalizeCommissionBasis(values.commissionBasis??existing?.commissionBasis);
     if(!name)throw new Error('請輸入員工姓名');
     if(!Number.isFinite(dailyRate)||dailyRate<0)throw new Error('日薪不可小於 0');
+    if(!Number.isFinite(hourlyRate)||hourlyRate<0)throw new Error('時薪不可小於 0');
     if(!Number.isFinite(commissionRate)||commissionRate<0||commissionRate>100)throw new Error('抽成比例必須介於 0～100');
     const duplicate=state.employees.find((row)=>String(row.id)!==String(id)&&sameName(row.name,name));
     if(duplicate)throw new Error('已有同名員工，請直接編輯既有員工');
     const now=new Date().toISOString(),row=existing||{id:uid(),createdAt:now};
-    Object.assign(row,{name,phone:clean(values.phone),role:clean(values.role),dailyRate,commissionRate,commissionBasis,startDate:values.startDate||'',status:clean(values.status)||row.status||'在職',note:clean(values.note),updatedAt:now});
+    Object.assign(row,{name,phone:clean(values.phone),role:clean(values.role),dailyRate,hourlyRate,commissionRate,commissionBasis,startDate:values.startDate||'',status:clean(values.status)||row.status||'在職',note:clean(values.note),updatedAt:now});
     if(!id)state.employees.unshift(row);
     persist(`${id?'修改':'新增'}員工 ${row.name}`); return row;
   }
