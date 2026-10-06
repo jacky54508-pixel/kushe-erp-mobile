@@ -222,9 +222,9 @@
       const projectGroups=new Map();logs.forEach((log)=>{const key=log.groupId||log.id;if(!projectGroups.has(key))projectGroups.set(key,[]);projectGroups.get(key).push(log)});
       let untaxed=0,gross=0,itemCount=0;const projects=[],items=[];
       projectGroups.forEach((members)=>{const first=members[0]||{};projects.push(label(state,'projects',first.project,first.projectName||'—'));const seen=new Set();(first.items||[]).forEach((item,index)=>{const key=item.workItemId||`${first.groupId||first.id}:${index}`;if(seen.has(key))return;seen.add(key);const value=number(item.untaxedSubtotal)||number(item.qty)*number(item.price),shown=number(item.subtotal)||(item.taxMode==='含稅'?store.grossFromUntaxed(value):value);untaxed+=value;gross+=shown;itemCount+=1;items.push(item.item||'')})});
-      const employees=[...new Set(logs.map((log)=>label(state,'employees',log.employee,log.employeeName||'—')))];
+      const employees=[...new Set(logs.map((log)=>label(state,'employees',log.employee,log.employeeName||'—')))],workOnly=logs.length>0&&logs.every((log)=>log.workOnly===true||(!log.project&&!(log.items||[]).length&&log.workMode&&log.workMode!=='none'));
       const billingSummary=buildDailyBillingSummary(state,projectGroups),billingStatus=billingSummary.status,billingAmount=billingSummary.remainingAmount;
-      return {batchId,logs,date:logs[0]?.date||'',employees,projects:[...new Set(projects)],items,untaxed,gross,itemCount,billingAmount,billingStatus,billingSummary,commission:logs.reduce((sum,log)=>sum+number(log.commission),0),work:logs.reduce((sum,log)=>sum+store.dailyWorkAmount(log),0),note:logs[0]?.note||''};
+      return {batchId,logs,date:logs[0]?.date||'',employees,workOnly,projects:workOnly?['無固定案場']:[...new Set(projects)],items:workOnly?['純點工／修繕']:items,untaxed,gross,itemCount,billingAmount,billingStatus,billingSummary,commission:logs.reduce((sum,log)=>sum+number(log.commission),0),work:logs.reduce((sum,log)=>sum+store.dailyWorkAmount(log),0),note:logs[0]?.note||''};
   }
   function dailyBatchById(state,batchId) {
     const logs=(state.dailyLogs||[]).filter((log)=>(log.batchId||log.id)===batchId);
