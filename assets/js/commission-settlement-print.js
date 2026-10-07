@@ -8,12 +8,12 @@
     if(!settlement)return null;
     const employeeId=text(settlement.employeeId||settlement.employee),projectId=text(settlement.projectId||settlement.project),bankId=text(settlement.bankAccountId||settlement.bankId);
     const employee=(state?.employees||[]).find((row)=>text(row.id)===employeeId)||{},project=(state?.projects||[]).find((row)=>text(row.id)===projectId)||{},bank=(state?.banks||[]).find((row)=>text(row.id)===bankId)||{};
-    const allocations=(Array.isArray(settlement.allocations)?settlement.allocations:[]).map((row)=>({
+    const mappedAllocations=(Array.isArray(settlement.allocations)?settlement.allocations:[]).map((row)=>({
       date:text(row.date),
       house:text(row.house)||'未指定戶別',
       untaxedAmount:Math.max(0,number(row.untaxedAmount)),
       amount:Math.max(0,number(row.amount))
-    }));
+    })),allocations=window.KusheDisplaySort?.sortByHouse?window.KusheDisplaySort.sortByHouse(mappedAllocations,(row)=>row.house):mappedAllocations;
     const total=Math.max(0,number(settlement.amount)||allocations.reduce((sum,row)=>sum+row.amount,0));
     return {
       title:'案場抽成結算單',
