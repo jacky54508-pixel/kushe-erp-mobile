@@ -70,7 +70,7 @@
   window.KusheKpi.register('unbilled',{anchor:'.unbilled-summary',active:()=>active,read(action){
     const list=store.unbilledWork(filters);if(!['projects','amount'].includes(action))return null;
     if(action==='projects')return {title:'尚未請款案場',scope:'沿用目前待請款篩選；不變更已勾選的施工月份。',columns:['客戶','案場','可請款來源筆數','待請款金額'],rows:list.map(r=>({id:r.key,cells:[r.customerName,r.projectName,r.count,money(r.amount)]}))};
-    return {title:'待請款施工與合約明細',scope:'實做施工與總價剩餘進度分開標示；不建立請款單，不改變已勾選來源。',columns:['客戶','案場','來源','日期','戶別','項目','數量','金額'],rows:list.flatMap(r=>[...(r.details||[]).map(d=>({id:d.workItemId||d.key,cells:[r.customerName,r.projectName,'每日施工',d.date,d.house,d.item,d.qty,money(d.subtotal)]})),...(r.contractDetails||[]).map(d=>({id:d.contractKey,cells:[r.customerName,r.projectName,'總價剩餘',d.date,'',d.item,'',money(d.remainingAmount)]}))])};
+    return {title:'待請款施工與合約明細',scope:'實做施工與總價剩餘進度分開標示；不建立請款單，不改變已勾選來源。',columns:['客戶','案場','來源','日期','戶別','項目','數量','金額'],rows:list.flatMap(r=>[...(window.KusheDisplaySort?.sortWorkRows?window.KusheDisplaySort.sortWorkRows(r.details||[]):r.details||[]).map(d=>({id:d.workItemId||d.key,cells:[r.customerName,r.projectName,'每日施工',d.date,d.house,d.item,d.qty,money(d.subtotal)]})),...(r.contractDetails||[]).map(d=>({id:d.contractKey,cells:[r.customerName,r.projectName,'總價剩餘',d.date,'',d.item,'',money(d.remainingAmount)]}))])};
   }});
 
 }());
