@@ -11,12 +11,26 @@
     if(!right)return -1;
     return collator.compare(left,right);
   }
+
+  function houseKey(value){
+    const text=clean(value).toUpperCase();
+    if(!text||text==='—'||text==='未指定戶別')return {group:99,text};
+    let match;
+    if((match=/^(\d+)$/.exec(text)))return {group:1,n:Number(match[1]),text};
+    if((match=/^([A-Z]+)$/.exec(text)))return {group:2,a:match[1],text};
+    if((match=/^(\d+)([A-Z]+)$/.exec(text)))return {group:3,n:Number(match[1]),a:match[2],text};
+    if((match=/^([A-Z]+)(\d+)$/.exec(text)))return {group:4,a:match[1],n:Number(match[2]),text};
+    return {group:5,text};
+  }
+
   function compareHouse(a,b){
-    const left=clean(a),right=clean(b),missing=(value)=>!value||value==='—'||value==='未指定戶別';
-    if(missing(left)&&missing(right))return 0;
-    if(missing(left))return 1;
-    if(missing(right))return -1;
-    return compareText(left,right);
+    const left=houseKey(a),right=houseKey(b);
+    if(left.group!==right.group)return left.group-right.group;
+    if(left.group===1)return left.n-right.n;
+    if(left.group===2)return collator.compare(left.a,right.a);
+    if(left.group===3)return left.n-right.n||collator.compare(left.a,right.a);
+    if(left.group===4)return collator.compare(left.a,right.a)||left.n-right.n;
+    return compareText(left.text,right.text);
   }
 
   function sortByHouse(rows,getHouse=(row)=>row?.house){
@@ -37,33 +51,21 @@
       }
       return '';
     };
-    const decorated=source.map((row,originalIndex)=>({
-      row,
-      originalIndex,
-      date:clean(read(row,'date',['date','workDate'])),
-      employee:clean(read(row,'employee',['employees','employeeName','employee'])),
-      house:clean(read(row,'house',['house'])),
-      item:clean(read(row,'item',['item','itemName']))
-    }));
-
-    // Within each date + employee, keep the first-seen item sequence and repeat it for every house.
-    const itemRanks=new Map();
-    decorated.forEach((entry)=>{
-      const scope=entry.date+'\u0000'+entry.employee;
-      if(!itemRanks.has(scope))itemRanks.set(scope,new Map());
-      const ranks=itemRanks.get(scope),item=entry.item||'\uffff';
-      if(!ranks.has(item))ranks.set(item,ranks.size);
-      entry.itemRank=ranks.get(item);
-    });
-
-    decorated.sort((a,b)=>
-      compareText(a.date,b.date)||
-      compareText(a.employee,b.employee)||
-      a.itemRank-b.itemRank||
-      compareHouse(a.house,b.house)||
-      a.originalIndex-b.originalIndex
-    );
-    return decorated.map(({row})=>row);
+    return source
+      .map((row,originalIndex)=>({
+        row,
+        originalIndex,
+        date:clean(read(row,'date',['date','workDate'])),
+        employee:clean(read(row,'employee',['employees','employeeName','employee'])),
+        house:clean(read(row,'house',['house']))
+      }))
+      .sort((a,b)=>
+        compareText(a.date,b.date)||
+        compareText(a.employee,b.employee)||
+        compareHouse(a.house,b.house)||
+        a.originalIndex-b.originalIndex
+      )
+      .map(({row})=>row);
   }
 
   window.KusheDisplaySort=Object.freeze({compareText,compareHouse,sortByHouse,sortWorkRows});
