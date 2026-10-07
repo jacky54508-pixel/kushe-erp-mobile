@@ -60,9 +60,9 @@
         house:clean(read(row,'house',['house']))
       }))
       .sort((a,b)=>
+        compareHouse(a.house,b.house)||
         compareText(a.date,b.date)||
         compareText(a.employee,b.employee)||
-        compareHouse(a.house,b.house)||
         a.originalIndex-b.originalIndex
       )
       .map(({row})=>row);
