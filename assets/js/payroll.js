@@ -43,13 +43,23 @@
     const customer=row.customerName||'—',project=row.projectName||'—',house=row.house||'未指定戶別',billing=(row.billingNumbers||[]).join('、');
     return {customer,project,house,billing:billing||'—'};
   }
+  function releaseDisplayRows(insight){
+    const rows=[...(insight?.releaseRows||[])];
+    if(!window.KusheDisplaySort)return rows;
+    return rows.map((row,originalIndex)=>({row,originalIndex,source:releaseSourceLabel(row)})).sort((a,b)=>
+      window.KusheDisplaySort.compareText(a.source.customer,b.source.customer)||
+      window.KusheDisplaySort.compareText(a.source.project,b.source.project)||
+      window.KusheDisplaySort.compareHouse(a.source.house,b.source.house)||
+      a.originalIndex-b.originalIndex
+    ).map((entry)=>entry.row);
+  }
   function releaseTable(group,insight){
-    if(!insight.releaseRows.length)return '<p class="receipt-history-empty">目前沒有抽成來源。</p>';
-    return `<div class="payroll-release-wrap"><table class="payroll-release-table"><thead><tr><th>建設公司</th><th>案場</th><th>戶別</th><th>請款單</th><th class="num">業績</th><th class="num">抽成</th><th>收款／發放狀態</th></tr></thead><tbody>${insight.releaseRows.map((row)=>{const source=releaseSourceLabel(row);return `<tr><td>${esc(source.customer)}</td><td>${esc(source.project)}</td><td>${esc(source.house)}</td><td>${esc(source.billing)}</td><td class="num">${money(row.untaxedAmount)}</td><td class="num"><b>${money(row.amount)}</b></td><td><span class="commission-status ${releaseStatusClass(row)}">${esc(releaseStatusLabel(row))}</span>${!row.unlocked&&!row.settled?`<small class="payroll-release-note">${esc(row.releaseStatus||'尚未解鎖')}</small>`:''}</td></tr>`}).join('')}</tbody></table></div>`;
+    const rows=releaseDisplayRows(insight);if(!rows.length)return '<p class="receipt-history-empty">目前沒有抽成來源。</p>';
+    return `<div class="payroll-release-wrap"><table class="payroll-release-table"><thead><tr><th>建設公司</th><th>案場</th><th>戶別</th><th>請款單</th><th class="num">業績</th><th class="num">抽成</th><th>收款／發放狀態</th></tr></thead><tbody>${rows.map((row)=>{const source=releaseSourceLabel(row);return `<tr><td>${esc(source.customer)}</td><td>${esc(source.project)}</td><td>${esc(source.house)}</td><td>${esc(source.billing)}</td><td class="num">${money(row.untaxedAmount)}</td><td class="num"><b>${money(row.amount)}</b></td><td><span class="commission-status ${releaseStatusClass(row)}">${esc(releaseStatusLabel(row))}</span>${!row.unlocked&&!row.settled?`<small class="payroll-release-note">${esc(row.releaseStatus||'尚未解鎖')}</small>`:''}</td></tr>`}).join('')}</tbody></table></div>`;
   }
   function releaseMobileCards(insight){
-    if(!insight.releaseRows.length)return '<p class="receipt-history-empty">目前沒有抽成來源。</p>';
-    return '<div class="payroll-release-mobile-list">'+insight.releaseRows.map((row)=>{const source=releaseSourceLabel(row);return '<article class="payroll-release-mobile-card">'+payrollMobileFields([['建設公司',esc(source.customer)],['案場',esc(source.project)],['戶別',esc(source.house)],['請款單',esc(source.billing)],['業績',money(row.untaxedAmount)],['抽成',money(row.amount)]])+'<footer><span class="commission-status '+releaseStatusClass(row)+'">'+esc(releaseStatusLabel(row))+'</span>'+(row.unlocked||row.settled?'':'<small>'+esc(row.releaseStatus||'尚未解鎖')+'</small>')+'</footer></article>'}).join('')+'</div>';
+    const rows=releaseDisplayRows(insight);if(!rows.length)return '<p class="receipt-history-empty">目前沒有抽成來源。</p>';
+    return '<div class="payroll-release-mobile-list">'+rows.map((row)=>{const source=releaseSourceLabel(row);return '<article class="payroll-release-mobile-card">'+payrollMobileFields([['建設公司',esc(source.customer)],['案場',esc(source.project)],['戶別',esc(source.house)],['請款單',esc(source.billing)],['業績',money(row.untaxedAmount)],['抽成',money(row.amount)]])+'<footer><span class="commission-status '+releaseStatusClass(row)+'">'+esc(releaseStatusLabel(row))+'</span>'+(row.unlocked||row.settled?'':'<small>'+esc(row.releaseStatus||'尚未解鎖')+'</small>')+'</footer></article>'}).join('')+'</div>';
   }
   const adjustmentAdditions=[['manualFuel','額外油資'],['meal','餐費'],['overtime','加班'],['bonus','獎金'],['allowance','其他津貼'],['other','其他加項']],adjustmentDeductions=[['advance','預支'],['laborInsurance','勞健保'],['incomeTax','所得稅'],['deduction','其他扣項']];
   const adjustmentDescriptions={other:['otherNote','例如：臨時獎勵、補貼原因'],deduction:['deductionNote','例如：預支沖抵、工具賠償、其他扣款原因']};
