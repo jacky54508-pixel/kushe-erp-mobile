@@ -14,7 +14,7 @@
    if(!groups.has(month))groups.set(month,{month,details:[],count:0,amount:0,dates:[]});
    const group=groups.get(month);group.details.push(detail);group.count+=1;group.amount+=Number(detail.subtotal)||0;if(detail.date)group.dates.push(detail.date);
   });
-  return [...groups.values()].map((group)=>{const dates=[...group.dates].sort();return {...group,details:[...group.details].sort((a,b)=>String(a.date).localeCompare(String(b.date))),earliest:dates[0]||'',latest:dates.at(-1)||''}}).sort((a,b)=>String(a.month).localeCompare(String(b.month)));
+  return [...groups.values()].map((group)=>{const dates=[...group.dates].sort(),details=window.KusheDisplaySort?.sortWorkRows?window.KusheDisplaySort.sortWorkRows(group.details):[...group.details].sort((a,b)=>String(a.date).localeCompare(String(b.date)));return {...group,details,earliest:dates[0]||'',latest:dates.at(-1)||''}}).sort((a,b)=>String(a.month).localeCompare(String(b.month)));
  }
  function selectedMonths(row){const key=typeof row==='string'?row:row.key;if(!monthSelections.has(key))monthSelections.set(key,new Set());return monthSelections.get(key)}
  function selectedActualDetails(row){const selected=selectedMonths(row);return (row.details||[]).filter((detail)=>selected.has(monthOf(detail.date)))}
