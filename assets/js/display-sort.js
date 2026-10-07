@@ -59,8 +59,8 @@
     decorated.sort((a,b)=>
       compareText(a.date,b.date)||
       compareText(a.employee,b.employee)||
-      compareHouse(a.house,b.house)||
       a.itemRank-b.itemRank||
+      compareHouse(a.house,b.house)||
       a.originalIndex-b.originalIndex
     );
     return decorated.map(({row})=>row);
