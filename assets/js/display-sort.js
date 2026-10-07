@@ -11,7 +11,13 @@
     if(!right)return -1;
     return collator.compare(left,right);
   }
-  function compareHouse(a,b){return compareText(a,b)}
+  function compareHouse(a,b){
+    const left=clean(a),right=clean(b),missing=(value)=>!value||value==='—'||value==='未指定戶別';
+    if(missing(left)&&missing(right))return 0;
+    if(missing(left))return 1;
+    if(missing(right))return -1;
+    return compareText(left,right);
+  }
 
   function sortByHouse(rows,getHouse=(row)=>row?.house){
     return (Array.isArray(rows)?rows:[])
