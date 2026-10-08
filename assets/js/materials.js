@@ -12,13 +12,21 @@
   const monthOf=(value)=>String(value||'').slice(0,7);
   function masterName(key,id,fallback='—'){const row=(state()[key]||[]).find((item)=>String(item.id)===String(id||''));return row?.name||fallback||'—'}
   function inventoryReceiptRows(data){
-    return (data.inventoryReceipts||[]).map((row)=>({source:row,id:row.id,date:row.date||'',material:row.material||row.materialId||'',materialName:masterName('materials',row.material||row.materialId,row.materialName||'—'),quantity:store.num(row.quantity),unit:row.unit||data.materials.find((item)=>String(item.id)===String(row.material||row.materialId||''))?.unit||'—',beforeStock:store.num(row.beforeStock),afterStock:store.num(row.afterStock),note:row.note||''})).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||String(b.source.createdAt||'').localeCompare(String(a.source.createdAt||'')));
+    return (data.inventoryReceipts||[]).map((row)=>{
+      const material=data.materials.find((item)=>String(item.id)===String(row.material||row.materialId||''))||{},payable=data.payables.find((item)=>item.id===row.payableId||item.sourceType==='inventory-receipt'&&item.sourceId===row.id),preview=store.inventoryReceiptPayablePreview(row.id);
+      return {source:row,id:row.id,date:row.date||'',materialName:row.materialName||material.name||'—',quantity:store.num(row.quantity),unit:row.unit||material.unit||'—',beforeStock:store.num(row.beforeStock),afterStock:store.num(row.afterStock),note:row.note||'',unitPrice:row.unitPrice,amount:row.amount,payable,preview};
+    }).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||String(b.source.createdAt||'').localeCompare(String(a.source.createdAt||'')));
+  }
+  function receiptAccountingMarkup(row){
+    if(row.payable)return '<span class="material-receipt-linked">'+esc(row.payable.payableNo||'已建立應付')+'</span>';
+    if(row.preview.allowed)return '<button type="button" class="commission-secondary compact" data-receipt-payable="'+esc(row.id)+'">補登應付</button>';
+    return '<span class="material-receipt-review">'+esc(row.preview.reason||'需核對')+'</span>';
   }
   function inventorySection(data){
-    const receipts=inventoryReceiptRows(data);
-    const desktop=receipts.map((row)=>'<tr><td>'+esc(row.date||'—')+'</td><td><b>'+esc(row.materialName)+'</b></td><td class="num">+'+esc(row.quantity)+' '+esc(row.unit)+'</td><td class="num">'+esc(row.beforeStock)+' '+esc(row.unit)+'</td><td class="num"><b>'+esc(row.afterStock)+' '+esc(row.unit)+'</b></td><td>'+esc(row.note||'—')+'</td></tr>').join('')||'<tr><td colspan="6" class="billing-empty">尚無正式材料入庫紀錄。</td></tr>';
-    const mobile=receipts.map((row)=>'<article class="material-usage-mobile-card"><header><div><span>材料入庫</span><h3>'+esc(row.materialName)+'</h3></div><strong>+'+esc(row.quantity)+' '+esc(row.unit)+'</strong></header><dl class="material-usage-mobile-meta"><div><dt>日期</dt><dd>'+esc(row.date||'—')+'</dd></div><div><dt>入庫前</dt><dd>'+esc(row.beforeStock)+' '+esc(row.unit)+'</dd></div><div><dt>入庫後</dt><dd>'+esc(row.afterStock)+' '+esc(row.unit)+'</dd></div></dl>'+(row.note?'<p class="material-usage-mobile-note"><span>備註</span><strong>'+esc(row.note)+'</strong></p>':'')+'</article>').join('')||'<p class="materials-mobile-empty">尚無正式材料入庫紀錄。</p>';
-    return '<section class="commission-panel material-inventory-ledger"><header><div><h2>材料入庫紀錄</h2><p>期初庫存建立後，每次入庫追加歷史並增加目前庫存；入庫歷史不直接覆寫。</p></div></header><div class="commission-table-wrap material-inventory-desktop"><table class="commission-table"><thead><tr><th>日期</th><th>材料</th><th class="num">入庫數量</th><th class="num">入庫前</th><th class="num">入庫後</th><th>備註</th></tr></thead><tbody>'+desktop+'</tbody></table></div><div class="material-inventory-mobile">'+mobile+'</div></section>';
+    const receipts=inventoryReceiptRows(data),pending=receipts.filter((row)=>!row.payable).length;
+    const desktop=receipts.map((row)=>`<tr><td>${esc(row.date||'—')}</td><td><b>${esc(row.materialName)}</b></td><td class="num">+${esc(row.quantity)} ${esc(row.unit)}</td><td class="num">${row.unitPrice===undefined?'待確認':money(row.unitPrice)}</td><td class="num"><b>${row.amount===undefined?'待確認':money(row.amount)}</b></td><td>${receiptAccountingMarkup(row)}</td><td class="num">${esc(row.beforeStock)} → ${esc(row.afterStock)}</td><td>${esc(row.note||'—')}</td></tr>`).join('')||'<tr><td colspan="8" class="billing-empty">尚無正式材料入庫紀錄。</td></tr>';
+    const mobile=receipts.map((row)=>`<article class="material-usage-mobile-card"><header><div><span>材料入庫</span><h3>${esc(row.materialName)}</h3></div><strong>+${esc(row.quantity)} ${esc(row.unit)}</strong></header><dl class="material-usage-mobile-meta"><div><dt>日期</dt><dd>${esc(row.date||'—')}</dd></div><div><dt>進貨單價</dt><dd>${row.unitPrice===undefined?'待確認':money(row.unitPrice)}</dd></div><div><dt>應付金額</dt><dd>${row.amount===undefined?'待確認':money(row.amount)}</dd></div><div><dt>庫存變化</dt><dd>${esc(row.beforeStock)} → ${esc(row.afterStock)} ${esc(row.unit)}</dd></div></dl><div class="material-receipt-accounting">${receiptAccountingMarkup(row)}</div>${row.note?`<p class="material-usage-mobile-note"><span>備註</span><strong>${esc(row.note)}</strong></p>`:''}</article>`).join('')||'<p class="materials-mobile-empty">尚無正式材料入庫紀錄。</p>';
+    return `<section class="commission-panel material-inventory-ledger"><header><div><h2>材料入庫紀錄</h2><p>採購入庫同時增加庫存並建立廠商應付；付款請至應付帳款辦理。</p>${pending?`<p class="material-receipt-pending">${pending} 筆舊入庫待核對應付；確認成交單價後可逐筆補登，庫存不會重複增加。</p>`:''}</div></header><div class="commission-table-wrap material-inventory-desktop"><table class="commission-table"><thead><tr><th>日期</th><th>材料</th><th class="num">入庫數量</th><th class="num">進貨單價</th><th class="num">應付金額</th><th>應付紀錄</th><th class="num">庫存前 → 後</th><th>備註</th></tr></thead><tbody>${desktop}</tbody></table></div><div class="material-inventory-mobile">${mobile}</div></section>`;
   }
   function usageRows(data){
     const keyword=usageFilters.query.trim().toLocaleLowerCase('zh-Hant');
@@ -88,6 +96,7 @@
     $('#newMaterial').onclick=()=>openForm();$('#materialVendorManager').onclick=openVendorManager;bindSearch($('#materialQuery',host),(value)=>{query=value});bindUsageFilters(host);bindUsageActions(host);
     $$('[data-inventory-opening]',host).forEach((button)=>button.onclick=()=>openOpeningStock(button.dataset.inventoryOpening));
     $$('[data-inventory-receive]',host).forEach((button)=>button.onclick=()=>openInventoryReceipt(button.dataset.inventoryReceive));
+    $$('[data-receipt-payable]',host).forEach((button)=>button.onclick=()=>openInventoryReceipt('',button.dataset.receiptPayable));
     $$('[data-edit-material-master]',host).forEach((button)=>button.onclick=()=>openForm(button.dataset.editMaterialMaster));
     $$('[data-delete-material-master]',host).forEach((button)=>button.onclick=async()=>{if(!confirm('確定刪除此材料主檔？'))return;try{await store.deleteMaterial(button.dataset.deleteMaterialMaster);render();window.KushePhase1.toast('材料已刪除')}catch(error){window.KushePhase1.toast(error.message)}});
     window.KusheTableScroll?.refresh?.();
@@ -98,13 +107,25 @@
     const modal=overlay(markup);
     $('#materialOpeningForm',modal.node).onsubmit=async(event)=>{event.preventDefault();const button=event.submitter;button.disabled=true;try{await store.setMaterialOpeningStock(material.id,event.target.elements.quantity.value);modal.close();render();window.KushePhase1.toast('期初庫存已建立')}catch(error){button.disabled=false;window.KushePhase1.toast(error.message)}};
   }
-  function openInventoryReceipt(materialId){
-    const data=state(),material=data.materials.find((row)=>String(row.id)===String(materialId||''));if(!material)return;const summary=store.materialInventorySummary(material.id);
-    if(!summary.initialized)return window.KushePhase1.toast('請先設定期初庫存');
-    const todayValue=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Taipei'});
-    const markup='<section class="erp-detail-card project-master-modal materials-master-modal" role="dialog" aria-modal="true"><header><div><span>材料庫存</span><h2>新增入庫</h2><p>'+esc(material.name||'—')+'｜目前庫存 '+esc(summary.stock)+' '+esc(material.unit||'')+'</p></div><button type="button" data-close-detail aria-label="關閉">×</button></header><form id="materialReceiptForm"><div class="erp-detail-body"><div class="project-form-grid"><label><span>入庫日期</span><input name="date" type="date" value="'+esc(todayValue)+'" required></label><label><span>入庫數量（'+esc(material.unit||'單位')+'）</span><input name="quantity" type="number" min="0.01" step="0.01" required></label><label class="wide"><span>備註</span><textarea name="note" rows="3" placeholder="進貨單號、批次或其他說明"></textarea></label></div></div><footer><button type="button" class="commission-secondary" data-close-detail>取消</button><button type="submit" class="commission-primary">確認入庫</button></footer></form></section>';
-    const modal=overlay(markup);
-    $('#materialReceiptForm',modal.node).onsubmit=async(event)=>{event.preventDefault();const button=event.submitter;button.disabled=true;try{const values=Object.fromEntries(new FormData(event.target));values.material=material.id;await store.addInventoryReceipt(values);modal.close();render();window.KushePhase1.toast('材料入庫已完成，庫存已增加')}catch(error){button.disabled=false;window.KushePhase1.toast(error.message)}};
+  function openInventoryReceipt(materialId,receiptId=''){
+    const data=state(),receipt=receiptId?(data.inventoryReceipts||[]).find((row)=>String(row.id)===String(receiptId)):null,preview=receiptId?store.inventoryReceiptPayablePreview(receiptId):null;
+    if(receiptId&&(!receipt||!preview.allowed))return window.KushePhase1.toast(preview?.reason||'找不到入庫紀錄');
+    const material=data.materials.find((row)=>String(row.id)===String(receipt?.material||receipt?.materialId||materialId||''));if(!material)return;
+    const summary=store.materialInventorySummary(material.id);
+    if(!receipt&&!summary.initialized)return window.KushePhase1.toast('請先設定期初庫存');
+    const todayValue=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Taipei'}),suggestedPrice=store.num(material.unitPrice),requestKey=crypto.randomUUID();
+    const markup=`<section class="erp-detail-card project-master-modal materials-master-modal" role="dialog" aria-modal="true"><header><div><span>材料採購</span><h2>${receipt?'補登入庫應付':'新增入庫'}</h2><p>${esc(receipt?.materialName||material.name||'—')}｜${esc(preview?.vendorName||vendorName(material,data))}</p></div><button type="button" data-close-detail aria-label="關閉">×</button></header><form id="materialReceiptForm"><div class="erp-detail-body"><p class="material-receipt-note">${receipt?'依原入庫建立應付，庫存不變。舊入庫未保存成交單價，請核對下方參考價格。':'確認後同時增加庫存及建立廠商應付；入庫本身不扣銀行餘額。'}</p><div class="project-form-grid"><label><span>入庫日期</span><input name="date" type="date" value="${esc(receipt?.date||todayValue)}" ${receipt?'readonly':''} required></label><label><span>入庫數量（${esc(material.unit||'單位')}）</span><input name="quantity" type="number" min="0.01" step="0.01" value="${receipt?esc(receipt.quantity):''}" ${receipt?'readonly':''} required></label><label><span>進貨單價（未稅）</span><input name="unitPrice" type="number" min="0.01" step="0.01" value="${suggestedPrice>0?suggestedPrice:''}" required></label><label><span>應付金額（未稅）</span><input id="materialReceiptTotal" value="—" readonly></label><label class="wide"><span>備註</span><textarea name="note" rows="3" ${receipt?'readonly':''} placeholder="進貨單號、批次或其他說明">${esc(receipt?.note||'')}</textarea></label></div>${receipt?'<label class="material-receipt-confirm"><input name="confirmed" type="checkbox" required><span>已確認成交單價，且此筆採購尚未記入其他應付</span></label>':''}</div><footer><button type="button" class="commission-secondary" data-close-detail>取消</button><button type="submit" class="commission-primary">${receipt?'確認補登應付':'確認入庫並建立應付'}</button></footer></form></section>`;
+    const modal=overlay(markup),form=$('#materialReceiptForm',modal.node),syncTotal=()=>{$('#materialReceiptTotal',modal.node).value=money(store.num(form.elements.quantity.value)*store.num(form.elements.unitPrice.value))};
+    form.elements.quantity.oninput=syncTotal;form.elements.unitPrice.oninput=syncTotal;syncTotal();let submitting=false;
+    form.onsubmit=async(event)=>{
+      event.preventDefault();if(submitting)return;submitting=true;const button=event.submitter||$('button[type="submit"]',form);button.disabled=true;
+      try{
+        const values=Object.fromEntries(new FormData(form));
+        if(receipt)await store.recordInventoryReceiptPayable(receipt.id,{unitPrice:values.unitPrice,confirmed:form.elements.confirmed.checked});
+        else await store.addInventoryReceipt({...values,material:material.id,idempotencyKey:requestKey});
+        modal.close();render();window.KushePhase1.toast(receipt?'應付已補登，庫存未變動':'材料已入庫，廠商應付已建立');
+      }catch(error){submitting=false;button.disabled=false;window.KushePhase1.toast(error.message)}
+    };
   }
   function materialNameSuggestions(data,currentId=''){
     const seen=new Set(),current=String(currentId||'');
@@ -131,3 +152,4 @@
   }});
 
 })();
+

@@ -208,6 +208,7 @@
     return /material|inventory/i.test(payable.sourceType || '') || payable.category === '材料採購';
   }
   const payableSourceLabels = {
+    'inventory-receipt':'材料入庫應付',
     'material-project':'單筆材料應付',
     'material-merged':'合併材料應付',
     'manual-payable':'手動新增應付',
@@ -529,7 +530,7 @@
       return {
         id: receipt.id,
         projectId: receipt.project || '',
-        projectName: receipt.projectName || project.name || '未指定案場',
+        projectName: receipt.projectName || project.name || '庫存採購',
         materialName: receipt.materialName || material.name || '未命名材料',
         model: receipt.model || receipt.spec || material.model || '',
         unit: receipt.unit || material.unit || '—',
@@ -581,12 +582,13 @@
     return {kind:'material',lines,groups:[...groups.values()].map((group) => ({...group,subtotal:group.lines.reduce((sum, line) => sum + store.num(line.amount), 0)})),sourceTotal,matches,emptyNote:payable.note || payable.sourceNo || '僅保留應付彙總資料'};
   }
   function sourceDetailsMarkup(source, payable) {
+    const isInventory=payable.sourceType==='inventory-receipt',heading=isInventory?'材料入庫明細':'材料使用明細';
     if (source.kind === 'expense') {
       const line=source.lines[0];
       return `<section class="payable-source-section"><header><div><h3>費用明細</h3><p>直接顯示此筆應付既有來源</p></div></header><div class="payable-detail-scroll"><table class="payable-expense-table"><thead><tr><th>日期</th><th>案場</th><th>類別／來源</th><th>項目／說明</th><th class="num">金額</th><th>備註</th></tr></thead><tbody><tr><td>${esc(line.date)}</td><td>${esc(line.projectName)}</td><td>${esc(line.source)}</td><td>${esc(line.item)}</td><td class="num"><b>${money(line.amount)}</b></td><td>${esc(line.note)}</td></tr></tbody></table></div></section>`;
     }
-    if (!source.lines.length) return `<section class="payable-source-section"><header><div><h3>材料使用明細</h3><p>直接讀取既有材料來源</p></div></header><div class="payable-source-empty"><b>現有資料未保存可展開的逐筆材料明細</b><span>${esc(source.emptyNote)}</span></div></section>`;
-    return `<section class="payable-source-section"><header><div><h3>材料使用明細</h3><p>${source.groups.length} 個案場・${source.lines.length} 筆既有材料來源</p></div></header><div class="payable-material-groups">${source.groups.map((group) => `<article class="payable-material-group"><div class="payable-material-group-head"><b>${esc(group.name)}</b><span>案場小計 ${money(group.subtotal)}</span></div><div class="payable-detail-scroll"><table class="payable-source-table"><thead><tr><th>案場</th><th>材料名稱</th><th>規格／型號</th><th>單位</th><th class="num">數量</th><th class="num">單價</th><th class="num">小計</th><th>使用／紀錄日期</th></tr></thead><tbody>${group.lines.map((line) => `<tr><td>${esc(line.projectName)}</td><td><b>${esc(line.materialName)}</b></td><td>${esc(line.model || '—')}</td><td>${esc(line.unit)}</td><td class="num">${line.quantity}</td><td class="num">${money(line.unitPrice)}</td><td class="num"><b>${money(line.amount)}</b></td><td>${esc(line.date || '—')}</td></tr>`).join('')}</tbody></table></div></article>`).join('')}</div><div class="payable-source-total ${source.matches ? 'is-matched' : 'is-mismatch'}"><span>材料應付合計</span><strong>${money(source.sourceTotal)}</strong><small>${source.matches ? '與應付金額一致' : `應付帳款金額 ${money(payable.amount)}，現有來源資料有差異`}</small></div></section>`;
+    if (!source.lines.length) return `<section class="payable-source-section"><header><div><h3>${heading}</h3><p>直接讀取既有材料來源</p></div></header><div class="payable-source-empty"><b>現有資料未保存可展開的逐筆材料明細</b><span>${esc(source.emptyNote)}</span></div></section>`;
+    return `<section class="payable-source-section"><header><div><h3>${heading}</h3><p>${isInventory?'採購入庫':source.groups.length+' 個案場'}・${source.lines.length} 筆材料來源</p></div></header><div class="payable-material-groups">${source.groups.map((group) => `<article class="payable-material-group"><div class="payable-material-group-head"><b>${esc(group.name)}</b><span>${isInventory?'採購小計':'案場小計'} ${money(group.subtotal)}</span></div><div class="payable-detail-scroll"><table class="payable-source-table"><thead><tr><th>案場</th><th>材料名稱</th><th>規格／型號</th><th>單位</th><th class="num">數量</th><th class="num">單價</th><th class="num">小計</th><th>${isInventory?'入庫日期':'使用／紀錄日期'}</th></tr></thead><tbody>${group.lines.map((line) => `<tr><td>${esc(line.projectName)}</td><td><b>${esc(line.materialName)}</b></td><td>${esc(line.model || '—')}</td><td>${esc(line.unit)}</td><td class="num">${line.quantity}</td><td class="num">${money(line.unitPrice)}</td><td class="num"><b>${money(line.amount)}</b></td><td>${esc(line.date || '—')}</td></tr>`).join('')}</tbody></table></div></article>`).join('')}</div><div class="payable-source-total ${source.matches ? 'is-matched' : 'is-mismatch'}"><span>材料應付合計</span><strong>${money(source.sourceTotal)}</strong><small>${source.matches ? '與應付金額一致' : `應付帳款金額 ${money(payable.amount)}，現有來源資料有差異`}</small></div></section>`;
   }
   function verifiedHistoricalPaymentMarkup(payable, truth) {
     return `<section class="payable-payment-section"><header><div><h3>付款紀錄</h3><p>${truth.paymentCount} 次付款（歷史資料已核對）</p></div></header><div class="payable-history-scroll"><table class="payable-detail-table payable-tax-payment-table"><thead><tr><th>付款日期</th><th class="num">未稅沖帳</th><th class="num">進項稅額</th><th class="num">銀行實際付款</th><th>銀行帳戶</th><th>付款狀態</th><th>備註</th></tr></thead><tbody><tr><td>${esc(truth.bankDate || '—')}</td><td class="num">${money(truth.netAmount)}</td><td class="num">${money(truth.taxAmount)}</td><td class="num"><b>${money(truth.bankAmount)}</b></td><td>${esc(truth.bankName)}</td><td><span class="commission-status settled">已完成</span></td><td>歷史付款資料，材料、發票與銀行金額已完整核對</td></tr></tbody></table></div></section>`;
@@ -1056,3 +1058,4 @@
   }});
 
 }());
+

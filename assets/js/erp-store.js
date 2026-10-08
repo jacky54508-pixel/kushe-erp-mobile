@@ -1332,15 +1332,15 @@
       return {id:payment.id,payableId:payment.payableId||'',amount:num(payment.amount),legacy:Boolean(payment.legacy),payableMatchCount:payableMatches.length,bankTransactionIds:bankMatches.map((row)=>row.id),orphanPayment,ambiguousPayment,missingBank,duplicateBank,duplicatePayment,amountMismatch,netAmountMismatch,repairClassification:orphanPayment||ambiguousPayment||duplicateBank||duplicatePayment?repair.MANUAL:missingBank||amountMismatch||netAmountMismatch?repair.SEMANTIC:null};
     });
     const payableAudit=payables.map((payable)=>{
-      const payablePayments=payments.filter((payment)=>financialAuditText(payment.payableId)===financialAuditText(payable.id)),inputInvoices=invoices.filter((invoice)=>(invoice.invoiceType==='input'||/進項/u.test(financialAuditText(invoice.type)))&&(financialAuditText(invoice.payableId||invoice.sourceId)===financialAuditText(payable.id)||legacyInvoicePayable(invoice)===payable)),usageIds=new Set((payable.usageIds||[]).map(financialAuditText).filter(Boolean)),linkedMaterials=materialUsages.filter((usage)=>financialAuditText(usage.payableId)===financialAuditText(payable.id)||usageIds.has(financialAuditText(usage.id))||financialAuditText(payable.sourceId)&&financialAuditText(usage.id)===financialAuditText(payable.sourceId)),sourceType=financialAuditText(payable.sourceType),expectsMaterial=/material|inventory|usage/i.test(sourceType)||/材料/u.test(financialAuditText(payable.category)),materialLinkMismatch=expectsMaterial&&!linkedMaterials.length||usageIds.size>linkedMaterials.filter((usage)=>usageIds.has(financialAuditText(usage.id))).length;
+      const payablePayments=payments.filter((payment)=>financialAuditText(payment.payableId)===financialAuditText(payable.id)),inputInvoices=invoices.filter((invoice)=>(invoice.invoiceType==='input'||/進項/u.test(financialAuditText(invoice.type)))&&(financialAuditText(invoice.payableId||invoice.sourceId)===financialAuditText(payable.id)||legacyInvoicePayable(invoice)===payable)),usageIds=new Set((payable.usageIds||[]).map(financialAuditText).filter(Boolean)),linkedMaterials=materialUsages.filter((usage)=>financialAuditText(usage.payableId)===financialAuditText(payable.id)||usageIds.has(financialAuditText(usage.id))||financialAuditText(payable.sourceId)&&financialAuditText(usage.id)===financialAuditText(payable.sourceId)),sourceType=financialAuditText(payable.sourceType),expectsMaterial=/material|inventory|usage/i.test(sourceType)||/材料/u.test(financialAuditText(payable.category)),linkedInventory=inventoryReceipts.filter((receipt)=>financialAuditText(receipt.payableId)===financialAuditText(payable.id)),inventorySource=sourceType==='inventory-receipt',inventoryLinkMatch=linkedInventory.length===1&&financialAuditText(linkedInventory[0].id)===financialAuditText(payable.sourceId)&&financialAuditMoneyEqual(linkedInventory[0].amount,payable.amount)&&financialAuditMoneyEqual(linkedInventory[0].amount,Math.round(num(linkedInventory[0].quantity)*num(linkedInventory[0].unitPrice))),materialLinkMismatch=inventorySource?!inventoryLinkMatch:expectsMaterial&&!linkedMaterials.length||usageIds.size>linkedMaterials.filter((usage)=>usageIds.has(financialAuditText(usage.id))).length;
       const invoiceAmountChecks=inputInvoices.map((invoice)=>{
         const payableNet=num(financialAuditFirst(payable,['preTaxAmount','amount'],0)),invoiceNet=num(financialAuditFirst(invoice,['netAmount','amount'],0)),invoiceGross=num(financialAuditFirst(invoice,['grossAmount','total'],invoiceNet+num(financialAuditFirst(invoice,['taxAmount','tax'],0)))),explicitPayableGrossValues=['grossTotal','taxIncludedAmount'].filter((key)=>financialAuditHas(payable,key)).map((key)=>num(payable[key])),netMatch=financialAuditMoneyEqual(payableNet,invoiceNet),explicitGrossMatch=explicitPayableGrossValues.every((value)=>financialAuditMoneyEqual(value,invoiceGross));
         return {invoiceId:financialAuditText(invoice.id||invoice.invoiceId),payableNet,invoiceNet,invoiceGross,explicitPayableGrossValues,netMatch,explicitGrossMatch,mismatch:!netMatch||!explicitGrossMatch};
-      }),invoiceMismatch=invoiceAmountChecks.some((row)=>row.mismatch),orphanPayable=!payablePayments.length&&!inputInvoices.length&&!linkedMaterials.length&&Boolean(sourceType)&&!/^manual/u.test(sourceType);
+      }),invoiceMismatch=invoiceAmountChecks.some((row)=>row.mismatch),orphanPayable=!payablePayments.length&&!inputInvoices.length&&!linkedMaterials.length&&!linkedInventory.length&&Boolean(sourceType)&&!/^manual/u.test(sourceType);
       if(orphanPayable)addIssue('payable',payable.id,'ORPHAN_PAYABLE','WARNING',repair.MANUAL,'Payable 找不到付款、發票或來源資料。');
       if(invoiceMismatch)addIssue('payable',payable.id,'PAYABLE_INVOICE_MISMATCH','BLOCKING',repair.SEMANTIC,'Payable 與進項發票金額不一致。');
       if(materialLinkMismatch)addIssue('payable',payable.id,'MATERIAL_LINK_MISMATCH','BLOCKING',repair.MANUAL,'Material 與 Payable 關聯不完整。');
-      return {id:payable.id,payableNo:payable.payableNo||payable.number||payable.sourceNo||'',sourceType,amount:num(payable.amount),paid:num(payable.paid),paymentCount:payablePayments.length,inputInvoiceCount:inputInvoices.length,materialUsageCount:linkedMaterials.length,invoiceAmountChecks,orphanPayable,invoiceMismatch,materialLinkMismatch,repairClassification:orphanPayable||materialLinkMismatch?repair.MANUAL:invoiceMismatch?repair.SEMANTIC:null};
+      return {id:payable.id,payableNo:payable.payableNo||payable.number||payable.sourceNo||'',sourceType,amount:num(payable.amount),paid:num(payable.paid),paymentCount:payablePayments.length,inputInvoiceCount:inputInvoices.length,materialUsageCount:linkedMaterials.length,inventoryReceiptCount:linkedInventory.length,invoiceAmountChecks,orphanPayable,invoiceMismatch,materialLinkMismatch,repairClassification:orphanPayable||materialLinkMismatch?repair.MANUAL:invoiceMismatch?repair.SEMANTIC:null};
     });
     const materialPayableLinks=materialUsages.filter((usage)=>financialAuditText(usage.payableId)).map((usage)=>{
       const matches=payables.filter((payable)=>financialAuditText(payable.id)===financialAuditText(usage.payableId)),orphanMaterialPayable=matches.length===0,ambiguousMaterialPayable=matches.length>1;
@@ -1386,6 +1386,7 @@
       if(matches.length!==1)addIssue('inventory',receipt.id,'INVENTORY_RECEIPT_MATERIAL_MISSING','BLOCKING',repair.MANUAL,'材料入庫紀錄找不到唯一材料主檔。');
       if(quantity<=0)addIssue('inventory',receipt.id,'INVENTORY_RECEIPT_NONPOSITIVE','BLOCKING',repair.SEMANTIC,'材料入庫數量必須大於 0。');
       if(!amountChainMatch)addIssue('inventory',receipt.id,'INVENTORY_RECEIPT_CHAIN_MISMATCH','BLOCKING',repair.SEMANTIC,'材料入庫 beforeStock + quantity 不等於 afterStock。');
+      if(receipt.accountingMode==='purchase-receipt'&&!payables.some((payable)=>payable.id===receipt.payableId&&payable.sourceType==='inventory-receipt'&&payable.sourceId===receipt.id))addIssue('inventory',receipt.id,'INVENTORY_RECEIPT_PAYABLE_MISSING','BLOCKING',repair.MANUAL,'採購入庫找不到對應應付來源。');
       return {id:financialAuditText(receipt.id),materialId,materialMatchCount:matches.length,quantity,beforeStock:before,afterStock:after,amountChainMatch};
     });
     const inventoryUsageAudit=materialUsages.filter((usage)=>usage.inventoryDeductedAt).map((usage)=>{
@@ -5278,16 +5279,65 @@
     persist('設定材料期初庫存 '+(material.name||'')+'｜'+value+' '+(material.unit||''),{materialId:material.id,openingStock:value});
     return materialInventorySummary(material.id);
   }
+  // Purchase liabilities belong to receipts; project usage records only consume stock.
+  function inventoryPurchasePrice(quantity, value) {
+    const unitPrice=Number(value),amount=Math.round(quantity*unitPrice);
+    if(value===undefined||value===null||clean(value)===''||!Number.isFinite(unitPrice)||unitPrice<=0)throw new Error('請確認本次進貨單價，必須大於 0');
+    if(!Number.isSafeInteger(amount)||amount<=0)throw new Error('本次入庫金額必須大於 0 且在有效範圍內');
+    return {unitPrice,amount};
+  }
+  function inventoryReceiptPayablePreview(receiptId) {
+    const matches=(state.inventoryReceipts||[]).filter((row)=>String(row.id)===String(receiptId||''));
+    if(matches.length!==1)return {allowed:false,reason:'找不到唯一入庫紀錄，已停止補登'};
+    const receipt=matches[0],material=state.materials.find((row)=>String(row.id)===String(receipt.material||receipt.materialId||'')),vendor=state.vendors.find((row)=>String(row.id)===String(receipt.vendor||''));
+    const payables=state.payables.filter((row)=>String(row.id)===String(receipt.payableId||'')||row.sourceType==='inventory-receipt'&&String(row.sourceId)===String(receipt.id));
+    let reason='';
+    if(receipt.payableId||receipt.accountingMode==='purchase-receipt'||payables.length)reason='此入庫已有應付關聯，不能重複補登';
+    else if(!material||!vendor)reason='材料或原入庫廠商不存在，請先核對來源';
+    else if(!Number.isFinite(Number(receipt.quantity))||Number(receipt.quantity)<=0||!receipt.date)reason='入庫日期或數量不完整，請先核對來源';
+    else if(state.materialUsages.some((usage)=>String(usage.material)===String(material.id)&&String(usage.date||'')>=String(receipt.date)&&(usage.payableId||state.payables.some((payable)=>(payable.usageIds||[]).includes(usage.id)))))reason='此材料在入庫日期之後已有用料應付，需先核對以免重複計帳';
+    else if(state.payables.some((payable)=>String(payable.vendor)===String(vendor.id)&&String(payable.date||'')>=String(receipt.date)&&/^manual/.test(payable.sourceType||'')))reason='此廠商在入庫日期之後已有手動應付，需先核對以免重複計帳';
+    return {allowed:!reason,reason,receiptId:receipt.id,date:receipt.date,materialName:receipt.materialName||material?.name||'',vendorName:receipt.vendorName||vendor?.name||'',quantity:Number(receipt.quantity),unit:receipt.unit||material?.unit||'',suggestedUnitPrice:num(material?.unitPrice),payableNo:payables[0]?.payableNo||''};
+  }
+  function createInventoryReceiptPayable(receipt, price, vendor, now) {
+    if(receipt.payableId||state.payables.some((row)=>row.sourceType==='inventory-receipt'&&String(row.sourceId)===String(receipt.id)))throw new Error('此入庫已建立應付，不能重複計帳');
+    const payable={id:uid(),payableNo:nextPayableNumber(receipt.date),date:receipt.date,vendor:vendor.id,vendorName:receipt.vendorName||vendor.name||'',project:'',projectName:'',category:'材料採購',item:'材料入庫｜'+receipt.materialName,amount:price.amount,paid:0,dueDate:'',status:'未付款',note:receipt.note||'',sourceType:'inventory-receipt',sourceId:receipt.id,createdAt:now,updatedAt:now};
+    Object.assign(receipt,price,{payableId:payable.id,accountingMode:'purchase-receipt',updatedAt:now});
+    state.payables.unshift(payable);
+    return payable;
+  }
+  async function recordInventoryReceiptPayable(receiptId, values={}) {
+    requireStoreTransactionDraft();
+    const preview=inventoryReceiptPayablePreview(receiptId);
+    if(!preview.allowed)throw new Error(preview.reason);
+    if(values.confirmed!==true)throw new Error('請確認此筆為尚未記入應付的新購材料');
+    const receipt=state.inventoryReceipts.find((row)=>String(row.id)===String(receiptId)),price=inventoryPurchasePrice(Number(receipt.quantity),values.unitPrice),vendor=state.vendors.find((row)=>String(row.id)===String(receipt.vendor)),now=new Date().toISOString();
+    const payable=createInventoryReceiptPayable(receipt,price,vendor,now);
+    persist('補登材料入庫應付 '+receipt.materialName,{inventoryReceiptId:receipt.id,payableId:payable.id,amount:price.amount,stockChanged:false});
+    return payable;
+  }
   async function addInventoryReceipt(values) {
     requireStoreTransactionDraft();
-    const material=state.materials.find((row)=>String(row.id)===String(values.material||values.materialId||'')),quantity=Number(values.quantity);
+    const material=state.materials.find((row)=>String(row.id)===String(values.material||values.materialId||'')),quantity=Number(values.quantity),requestKey=clean(values.idempotencyKey);
     if(!material)throw new Error('請選擇有效材料');
     if(!material.inventoryInitializedAt)throw new Error('請先設定此材料的期初庫存，再新增入庫');
     if(!Number.isFinite(quantity)||quantity<=0)throw new Error('入庫數量必須大於 0');
-    const now=new Date().toISOString(),beforeStock=Math.max(0,num(material.stock)),afterStock=beforeStock+quantity;
-    const receipt={id:uid(),date:values.date||businessDate(new Date(now)),material:material.id,materialId:material.id,materialName:material.name||'',vendor:material.vendor||'',vendorName:material.vendorName||'',unit:material.unit||'',model:material.model||'',quantity,beforeStock,afterStock,note:clean(values.note),createdAt:now,updatedAt:now};
+    if(!requestKey)throw new Error('請重新開啟入庫視窗後再送出');
+    const vendor=state.vendors.find((row)=>String(row.id)===String(material.vendor||''));
+    if(!vendor)throw new Error('請先確認此材料的廠商');
+    const price=inventoryPurchasePrice(quantity,values.unitPrice),now=new Date().toISOString(),date=values.date||businessDate(new Date(now)),note=clean(values.note);
+    const requestFingerprint=JSON.stringify({material:material.id,quantity,unitPrice:price.unitPrice,date,note}),replays=state.inventoryReceipts.filter((row)=>row.idempotencyKey===requestKey);
+    if(replays.length){
+      const receipt=replays[0],payable=state.payables.find((row)=>row.id===receipt.payableId);
+      if(replays.length!==1||receipt.requestFingerprint!==requestFingerprint||!payable||payable.sourceType!=='inventory-receipt'||payable.sourceId!==receipt.id||num(payable.amount)!==num(receipt.amount))throw new Error('入庫重送內容或應付關聯不同，請重新核對');
+      return receipt;
+    }
+    const beforeStock=Math.max(0,num(material.stock)),afterStock=beforeStock+quantity;
+    if(!Number.isFinite(afterStock)||afterStock>Number.MAX_SAFE_INTEGER)throw new Error('入庫後庫存超出有效範圍');
+    const receipt={id:uid(),date,material:material.id,materialId:material.id,materialName:material.name||'',vendor:vendor.id,vendorName:vendor.name||'',unit:material.unit||'',model:material.model||'',quantity,beforeStock,afterStock,note,idempotencyKey:requestKey,requestFingerprint,createdAt:now,updatedAt:now};
+    const payable=createInventoryReceiptPayable(receipt,price,vendor,now);
     state.inventoryReceipts.unshift(receipt);material.stock=afterStock;material.inventoryUpdatedAt=now;material.updatedAt=now;
-    persist('材料入庫 '+(material.name||'')+'｜+'+quantity+' '+(material.unit||''),{inventoryReceiptId:receipt.id,materialId:material.id,quantity,beforeStock,afterStock});
+    persist('材料入庫及應付 '+(material.name||''),{inventoryReceiptId:receipt.id,payableId:payable.id,quantity,beforeStock,afterStock,amount:price.amount});
     return receipt;
   }
   async function saveMaterial(values, id = '') {
@@ -5308,7 +5358,7 @@
   }
   async function deleteMaterial(id) {
     requireStoreTransactionDraft(); const row=state.materials.find((item)=>item.id===id); if(!row)return false;
-    if(state.materialUsages.some((usage)=>String(usage.material)===String(id)))throw new Error('此材料已有使用紀錄，為保留案場成本與應付來源不能刪除');
+    if(state.materialUsages.some((usage)=>String(usage.material)===String(id))||(state.inventoryReceipts||[]).some((receipt)=>String(receipt.material||receipt.materialId)===String(id)))throw new Error('此材料已有使用或入庫紀錄，為保留庫存與帳務來源不能刪除');
     state.materials=state.materials.filter((item)=>item!==row); persist(`刪除材料 ${row.name||''}`); return true;
   }
   async function saveMaterialUsage(values, id = '') {
@@ -5320,17 +5370,20 @@
     const oldMaterial=existing?state.materials.find((row)=>String(row.id)===String(existing.material||'')):null,existingWasDeducted=Boolean(existing?.inventoryDeductedAt);
     const oldQuantity=existingWasDeducted?Math.max(0,num(existing.quantity)):0,oldAvailable=oldMaterial?Math.max(0,num(oldMaterial.stock))+oldQuantity:0,newAvailable=Math.max(0,num(material.stock))+(existingWasDeducted&&oldMaterial&&String(oldMaterial.id)===String(material.id)?oldQuantity:0);
     if(newAvailable<quantity)throw new Error(`庫存不足，禁止送出。目前可用 ${newAvailable} ${material.unit||''}，本次需要 ${quantity} ${material.unit||''}`);
-    const now=new Date().toISOString(),oldPayable=payableForUsage(existing);
+    const now=new Date().toISOString(),oldPayable=existing?payableForUsage(existing):null;
+    if(existing?.payableId&&!oldPayable)throw new Error('此歷史材料的應付關聯不完整，已停止修改');
+    if(existing?.accountingMode==='inventory-cost-only'&&oldPayable)throw new Error('此領料紀錄出現非預期應付關聯，請先核對');
     if(existing&&payableLocked(oldPayable))throw new Error('此材料來源的應付已付款，不能直接修改；請先以正式帳務方式處理');
     if(existingWasDeducted&&oldMaterial){
       oldMaterial.stock=oldAvailable;oldMaterial.inventoryUpdatedAt=now;oldMaterial.updatedAt=now;
     }
     material.stock=Math.max(0,num(material.stock))-quantity;material.inventoryUpdatedAt=now;material.updatedAt=now;
-    const row=existing||{id:uid(),createdAt:now,status:'未付'};
+    const row=existing||{id:uid(),createdAt:now,status:'已領料'};
     if(existing&&oldPayable){oldPayable.usageIds=(oldPayable.usageIds||[]).filter((usageId)=>String(usageId)!==String(existing.id));}
     Object.assign(row,{date:values.date||businessDate(new Date(now)),employee:employee?.id||row.employee||'',employeeName:employee?.name||row.employeeName||'',project:project.id,projectName:project.name,material:material.id,materialName:material.name||'',vendor:vendor.id,vendorName:vendor.name||'',quantity,unitPrice,amount:Math.round(quantity*unitPrice),unit:material.unit||'',model:material.model||'',note:clean(values.note),updatedAt:now,payableId:'',inventoryDeductedAt:now,inventoryQuantity:quantity,inventoryMaterialId:material.id});
     if(!existing)state.materialUsages.unshift(row);
-    if(oldPayable)syncMaterialPayable(oldPayable); assignMaterialUsage(row);
+    if(oldPayable){syncMaterialPayable(oldPayable);assignMaterialUsage(row)}
+    else row.accountingMode='inventory-cost-only';
     persist(`${id?'修改':'新增'}案場材料 ${project.name}`,{materialUsageId:row.id,materialId:material.id,inventoryBefore:newAvailable,inventoryAfter:material.stock,inventoryQuantity:quantity}); return row;
   }
   async function assignMaterialUsageEmployee(id, employeeId) {
@@ -6118,7 +6171,7 @@
     'addReceipt','updateReceipt','deleteReceipt','completeEmployeeCashHandover','cancelEmployeeCashHandover','addRetentionReceipt','updateRetentionReceipt','deleteRetentionReceipt','deleteReceivableAccounting',
     'savePayable','deletePayable','cleanupMaterialPayableTestData','repairMergedPayableHistory','addPayablePayment','updatePayablePayment','deletePayablePayment',
     'updatePayrollAdjustments','addSalaryPayment','updateSalaryPayment','deleteSalaryPayment','addProjectCommissionSettlement','deleteProjectCommissionSettlement','updateBillingInvoice',
-    'saveCustomer','deleteCustomer','saveProject','deleteProject','mergeProject','saveEmployee','deleteEmployee','saveVendor','saveMaterial','deleteMaterial','setMaterialOpeningStock','addInventoryReceipt',
+    'saveCustomer','deleteCustomer','saveProject','deleteProject','mergeProject','saveEmployee','deleteEmployee','saveVendor','saveMaterial','deleteMaterial','setMaterialOpeningStock','addInventoryReceipt','recordInventoryReceiptPayable',
     'saveMaterialUsage','assignMaterialUsageEmployee','deleteMaterialUsage','saveProjectCost','deleteProjectCost','saveQuotationPrice','saveQuotation','saveQuotationBundle','setQuotationStatus','deleteQuotation',
     'cancelQuotationConfirmation','createQuotationRevision','saveQuotationTemplate'
   ]);
@@ -6130,7 +6183,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
