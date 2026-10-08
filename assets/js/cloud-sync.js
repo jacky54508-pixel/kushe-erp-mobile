@@ -306,6 +306,18 @@
     return {code:'REMOTE_APPLIED',syncVersion:temporarySessionBaseline.syncVersion,remoteFingerprint:raceRemote.fingerprint,localFingerprint:appliedInfo.fingerprint};
   }
 
+  async function trustedRemoteApplyReadiness(store) {
+    let ready=await store?.remoteApplyReadiness?.();
+    if(!ready?.safe&&ready?.code==='STORE_LAYERS_DIVERGED'&&typeof store?.repairEmergencyMirrorForRemoteApply==='function'){
+      const editor=editorReadiness();
+      if(editor.safe){
+        const repaired=await store.repairEmergencyMirrorForRemoteApply();
+        if(repaired?.safe)ready=await store.remoteApplyReadiness();
+      }
+    }
+    return ready;
+  }
+
   function reconcileFromCloud(reason) {
     if (!['STARTUP','AUTH_READY','VISIBILITY','FOCUS','ONLINE','POLL'].includes(reason)) return Promise.resolve({code:'CANCELLED'});
     if (!deviceAllowsAutomaticSync()) return refreshTemporaryFromCloud(reason).catch((error)=>({code:writeFailureCode(error)||'ERROR'}));
@@ -327,8 +339,8 @@
         // Reuse the same operation kind and ownership guard as controlled apply.
         const result = await coordinate('remote-apply', async () => {
           if (!valid()) return {code:'CANCELLED'};
-          const ready = await window.KuSheERPStore?.remoteApplyReadiness?.();
-          if (!ready?.safe || !valid()) return {code:'STORE_BUSY'};
+          const store=window.KuSheERPStore,ready=await trustedRemoteApplyReadiness(store);
+          if (!ready?.safe || !valid()) return {code:ready?.code||'STORE_BUSY'};
           return safeApplyOperation(valid);
         });
         resolve(result);
@@ -631,7 +643,7 @@
       const auth=await authContext(),store=window.KuSheERPStore;
       if (!store?.remoteApplyReadiness || !store?.applyRemoteSnapshot) throw new CloudSyncError('STORE_BUSY');
       const baseline=readBaseline(auth.user.id),row=await readRemote(auth);
-      const ready=await store.remoteApplyReadiness(),editor=editorReadiness();
+      const ready=await trustedRemoteApplyReadiness(store),editor=editorReadiness();
       assertOperation(auth);
       const local=ready.safe?await snapshotInfo(ready.data):null;
       const remote=row?await validateRemoteSnapshot(row.data,row.updated_at):null;
@@ -2010,6 +2022,16 @@
       if(pendingRecovery?.state==='blocked'){
         autoArmed=false;
         return setAutoState('MANUAL_REQUIRED',{pending:false,armed:false,message:`需要手動同步（${pendingRecovery.failureCode||pendingRecovery.code}）`});
+      }
+      if(deviceAllowsAutomaticSync()){
+        const store=window.KuSheERPStore;
+        if(store?.remoteApplyReadiness){
+          const readiness=await store.remoteApplyReadiness();
+          if(!readiness?.safe&&readiness?.code==='STORE_LAYERS_DIVERGED'&&typeof store.repairEmergencyMirrorForRemoteApply==='function'){
+            const editor=editorReadiness();
+            if(editor.safe)await store.repairEmergencyMirrorForRemoteApply();
+          }
+        }
       }
       const checked = await inspectCore();
       if (!activeAutoRun(generation)) return autoStatus();
