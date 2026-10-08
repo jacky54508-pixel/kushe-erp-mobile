@@ -675,12 +675,16 @@
     state.receivables.forEach((receivable) => {
       if (receivable.legacyReceived === undefined) {
         const recordedReceipts=state.receipts.filter((row)=>row.receivableId===receivable.id).reduce((sum,row)=>sum+receiptSettlementAmount(row),0);
-        receivable.legacyReceived=Math.max(0,num(receivable.received)-recordedReceipts);
+        const legacyReceived=Math.max(0,num(receivable.received)-recordedReceipts);
+        if(legacyReceived>0)receivable.legacyReceived=legacyReceived;
       }
       const billing=state.billings.find((row)=>row.id===receivable.billingId||String(row.number||'')===String(receivable.sourceNo||''));
       const retentionAmount=num(receivable.retentionAmount ?? receivable.retention ?? billing?.retentionAmount ?? billing?.retention);
       const recorded=state.retentionReceipts.filter((row)=>row.receivableId===receivable.id||row.billingId&&row.billingId===receivable.billingId).reduce((sum,row)=>sum+num(row.amount),0);
-      if (receivable.legacyRetentionReceived === undefined) receivable.legacyRetentionReceived=Math.max(0,Math.max(num(receivable.retentionReceived),num(billing?.retentionReceived))-recorded);
+      if (receivable.legacyRetentionReceived === undefined) {
+        const legacyRetentionReceived=Math.max(0,Math.max(num(receivable.retentionReceived),num(billing?.retentionReceived))-recorded);
+        if(legacyRetentionReceived>0)receivable.legacyRetentionReceived=legacyRetentionReceived;
+      }
       const received=Math.min(retentionAmount,num(receivable.legacyRetentionReceived)+recorded);
       receivable.retentionAmount=retentionAmount;receivable.retentionReceived=received;receivable.remainingRetention=Math.max(0,retentionAmount-received);receivable.retentionStatus=retentionState(retentionAmount,received,receivable.retentionStatus);
       if(billing){billing.retentionAmount=num(billing.retentionAmount ?? billing.retention);billing.retentionReceived=received;billing.remainingRetention=Math.max(0,billing.retentionAmount-received);billing.retentionStatus=retentionState(billing.retentionAmount,received,billing.retentionStatus)}
