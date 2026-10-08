@@ -492,6 +492,7 @@
     if (document.activeElement?.matches?.('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) return false;
     const nodes = document.querySelectorAll('form:not([role="search"]),[role="dialog"],dialog,.erp-detail-overlay,.commission-drawer-layer,.commission-drawer,[contenteditable]:not([contenteditable="false"])');
     for (const node of nodes) {
+      if (node.id==='cloudSyncModal'||node.closest?.('#cloudSyncModal')) continue;
       if (typeof node.getClientRects !== 'function') return false;
       if (!node.hidden && node.getClientRects().length) return false;
     }
