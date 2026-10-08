@@ -2054,6 +2054,33 @@
         autoArmed=false;
         return setAutoState('TRUSTED_PRIORITY_AVAILABLE',{pending:false,armed:false});
       }
+      if (checked.code === 'REMOTE_NEWER') {
+        const baseline=readBaseline(checked.auth.user.id),decision=decideRemote({
+          userId:checked.auth.user.id,
+          baseline,
+          remoteExists:checked.remoteExists,
+          remoteVersion:checked.syncVersion,
+          metadataValid:Number.isFinite(Date.parse(checked.remoteUpdatedAt)),
+          remoteFingerprint:checked.remote?.fingerprint,
+          localFingerprint:checked.local?.fingerprint,
+          storeSafe:true,
+          editorSafe:editorReadiness().safe
+        });
+        if(decision.eligibleApply){
+          autoArmed=false;
+          setAutoState('CHECKING',{pending:true,armed:false,message:'雲端有新資料，正在安全同步到本機'});
+          window.setTimeout(()=>{
+            void reconcileFromCloud('AUTH_READY').then((result)=>{
+              if(result?.code==='REMOTE_APPLIED'||result?.code==='SYNCED')return;
+              if(result?.code==='EDITOR_DIRTY'||result?.code==='STORE_BUSY')return;
+              if(autoStarted&&!autoArmed)setAutoState('CONFLICT',{pending:false,armed:false});
+            });
+          },0);
+          return autoStatus();
+        }
+        autoArmed=false;
+        return setAutoState('CONFLICT',{pending:false,armed:false});
+      }
       if (checked.code === 'LOCAL_NEWER') {
         const baseline = readBaseline(checked.auth.user.id);
         const row = { data: checked.remote.data, updated_at: checked.remoteUpdatedAt, sync_version: checked.syncVersion, last_writer_mode:checked.remoteWriterMode, last_base_sync_version:checked.remoteBaseSyncVersion };
