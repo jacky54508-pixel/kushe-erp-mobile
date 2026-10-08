@@ -5592,6 +5592,41 @@
     if(revision.id&&!journal)throw storeError('缺少提交 journal','STORE_JOURNAL_MISSING');
     if(journal)assertStoreTerminalJournalBound(journal,fp,revision,token,local[RECEIPT_COMMIT_KEY]||'',persistent?.meta?.receiptCommitVersion);
   }
+  async function repairEmergencyMirrorForRemoteApply() {
+    if(isEphemeralMode())return freezeStoreState({safe:false,code:'EPHEMERAL_MODE'});
+    if(!storeTrustedForCurrentUser())return freezeStoreState({safe:false,code:'DEVICE_TRUST_REQUIRED'});
+    if(!db||!publishedState||storeRecoveryBlocked||receiptWritesBlocked)return freezeStoreState({safe:false,code:'STORE_NOT_READY'});
+    try{
+      return await coordinatedStorage('repairEmergencyMirrorForRemoteApply',async()=>{
+        const observation=await readStorageObservation({existingOnly:true}),{values,local,session}=observation,persistent=values[STATE_KEY],journal=values[STORE_JOURNAL_KEY];
+        for(const key of [STORE_RECOVERY_KEY,RECEIPT_RECOVERY_KEY])if(values[key]||local[key]||session[key])throw storeError('資料復原尚未完成，禁止自動修復本機鏡像','STORE_WRITES_BLOCKED');
+        if(local[RECEIPT_ACTIVE_KEY])throw storeError('尚有收款操作標記，禁止自動修復本機鏡像','STORE_WRITES_BLOCKED');
+        const fp=storeStateFingerprint(persistent),revision=storeRevisionOf(persistent),token=parseStoreJson(local[STORE_COMMIT_KEY],'本機提交版本');
+        assertStoreCommitTokensBound(fp,revision,token,local[RECEIPT_COMMIT_KEY]||'',persistent?.meta?.receiptCommitVersion);
+        if(revision.id&&!journal)throw storeError('缺少提交 journal，禁止自動修復本機鏡像','STORE_JOURNAL_MISSING');
+        if(journal)assertStoreTerminalJournalBound(journal,fp,revision,token,local[RECEIPT_COMMIT_KEY]||'',persistent?.meta?.receiptCommitVersion);
+        if(storeStateFingerprint(publishedState)!==fp||settledStateFingerprint!==fp||loadedPersistentFingerprint!==fp)throw storeError('本機主資料已變更，禁止自動修復鏡像','STALE_STORE_STATE');
+
+        let mirrorMatches=false;
+        if(local[EMERGENCY_KEY]!==null){
+          try{mirrorMatches=storeStateFingerprint(parseStoreJson(local[EMERGENCY_KEY],'Emergency backup'))===fp}catch(_){}
+        }
+        if(mirrorMatches)return freezeStoreState({safe:true,code:'EMERGENCY_MIRROR_ALREADY_BOUND',baseline:await observationHash(observation),repaired:false});
+
+        const encoded=JSON.stringify(persistent);
+        localStorage.setItem(EMERGENCY_KEY,encoded);
+        if(localStorage.getItem(EMERGENCY_KEY)!==encoded)throw storeError('Emergency backup 無法安全重建','STORE_EMERGENCY_WRITE_FAILED');
+        const verified=await readStorageObservation({existingOnly:true});
+        assertObservationCommitted(verified);
+        if(storeStateFingerprint(verified.values[STATE_KEY])!==fp)throw storeError('重建鏡像後主資料已變更','STALE_STORE_STATE');
+        loadedEmergencyRaw=encoded;
+        return freezeStoreState({safe:true,code:'EMERGENCY_MIRROR_REPAIRED',baseline:await observationHash(verified),repaired:true});
+      });
+    }catch(error){
+      return freezeStoreState({safe:false,code:error?.code||'STORE_UNVERIFIED'});
+    }
+  }
+
   function portableStoreSnapshot(value) {
     const result=storeStateClone(value||{});
     if(result.meta){delete result.meta.receiptCommitVersion;delete result.meta.localCommitToken}
@@ -6095,7 +6130,7 @@
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
-    readCommittedSnapshot,remoteApplyReadiness,legacyBootstrapEvidence,applyRemoteSnapshot,replaceSnapshot,recoveryPreview,recoverStore,
+    readCommittedSnapshot,remoteApplyReadiness,repairEmergencyMirrorForRemoteApply,legacyBootstrapEvidence,applyRemoteSnapshot,replaceSnapshot,recoveryPreview,recoverStore,
     loadEphemeralSnapshot,clearEphemeralSession,isEphemeralMode,
     getLastStoreTransactionResult:()=>lastStoreTransactionResult,
     persist:()=>Promise.reject(storeError('直接 persist 已停用；請使用正式 Store 寫入 API','DIRECT_PERSIST_FORBIDDEN'))
