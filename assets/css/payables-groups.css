@@ -1,0 +1,29 @@
+/* P26: payable display groups; individual accounts and payment actions stay intact. */
+#payablesApp [data-vendor-region][hidden] { display: none !important; }
+#payablesApp .payable-vendor-list-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 16px 18px; border-bottom: 1px solid #e2e8f0; }
+#payablesApp .payable-vendor-list-heading strong { color: #163557; font-size: 15px; }
+#payablesApp .payable-vendor-list-heading > span { color: #64748b; font-size: 13px; }
+#payablesApp .payable-vendor-summary > tr > td { background: #f0f5fa; border-top: 1px solid #dbe5ef; border-bottom: 1px solid #dbe5ef; }
+#payablesApp .payable-vendor-summary > tr > td:first-child { box-shadow: inset 3px 0 #315b83; }
+#payablesApp .payable-vendor-summary strong { color: #163557; }
+#payablesApp .payable-vendor-summary .receipt-count-badge { display: block; width: fit-content; margin-top: 6px; }
+#payablesApp .payable-vendor-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 38px; padding: 8px 12px; border: 1px solid #b7c9db; border-radius: 8px; background: #fff; color: #244d74; font: inherit; font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+#payablesApp .payable-vendor-toggle:hover { background: #e8f0f8; }
+#payablesApp .payable-vendor-toggle:focus-visible { outline: 3px solid #739fc5; outline-offset: 2px; }
+#payablesApp .payable-vendor-rows > .payable-main-row > td:first-child { padding-left: 22px; }
+#payablesApp .payable-vendor-card { padding: 16px; border: 1px solid #dbe5ef; border-radius: 14px; background: #f0f5fa; min-width: 0; }
+#payablesApp .payable-vendor-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+#payablesApp .payable-vendor-card h3 { margin: 0; color: #163557; font-size: 17px; overflow-wrap: anywhere; }
+#payablesApp .payable-vendor-card header p { margin: 6px 0 0; font-size: 12px; color: #64748b; }
+#payablesApp .payable-vendor-totals { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin: 18px 0; }
+#payablesApp .payable-vendor-totals dt { margin-bottom: 5px; font-size: 12px; color: #64748b; }
+#payablesApp .payable-vendor-totals dd { margin: 0; font-size: 16px; font-weight: 700; color: #163557; overflow-wrap: anywhere; }
+#payablesApp .payable-vendor-totals > div:last-child dd { color: #a55318; }
+#payablesApp .payable-vendor-card > .payable-vendor-toggle { width: 100%; min-height: 44px; }
+#payablesApp .payable-vendor-cards { display: grid; gap: 12px; padding-top: 14px; }
+#payablesApp .payable-vendor-cards .mobile-record-card { margin: 0; background: #fff; }
+@media (max-width: 480px) {
+  #payablesApp .payable-vendor-list-heading { padding: 14px; }
+  #payablesApp .payable-vendor-card { padding: 14px; }
+  #payablesApp .payable-vendor-totals dd { font-size: 15px; }
+}
