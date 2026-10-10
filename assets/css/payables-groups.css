@@ -1,4 +1,4 @@
-/* P26-3: compact vendor summaries; presentation-only sizing changes. */
+/* P26-4: compact vendor summaries and per-account detail rows. */
 #payablesApp [data-vendor-region][hidden],
 #payablesApp .payable-account-history[hidden] { display: none !important; }
 #payablesApp .payable-vendor-list-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 12px 16px; border-bottom: 1px solid #e2e8f0; }
@@ -56,11 +56,55 @@
 #payablesApp .payable-account-history .mobile-action-row { display: flex; flex-wrap: wrap; gap: 8px; }
 #payablesApp .payable-account-history .mobile-action-row button { min-height: 36px; padding: 6px 14px; border: 1px solid #ccdbe9; border-radius: 7px; background: #fff; color: #294c70; font: inherit; font-size: 12px; cursor: pointer; }
 #payablesApp .payable-account-history .mobile-action-row .mobile-danger-action { color: #993d38; border-color: #e8cac7; }
+#payablesApp .payable-account-table { width: 100%; table-layout: fixed; border-collapse: collapse; color: #173b60; }
+#payablesApp .payable-account-table .payable-col-quantity { width: 10%; }
+#payablesApp .payable-account-table .payable-col-unit { width: 11%; }
+#payablesApp .payable-account-table .payable-col-total { width: 14%; }
+#payablesApp .payable-account-table .payable-col-actions { width: 200px; }
+#payablesApp .payable-account-table th { padding: 11px 10px; border-bottom: 1px solid #dce5ee; color: #65798d; font-size: 12px; font-weight: 600; text-align: left; }
+#payablesApp .payable-account-table th.num { text-align: right; }
+#payablesApp .payable-account-table th:first-child { padding-left: 0; }
+#payablesApp .payable-account-table th:last-child { padding-right: 0; }
+#payablesApp .payable-account-table > .payable-account-card { padding: 0; border-bottom: 1px solid #dce5ee; }
+#payablesApp .payable-account-summary > td { padding: 12px 10px; vertical-align: middle; font-size: 13px; overflow-wrap: anywhere; }
+#payablesApp .payable-account-summary > td:first-child { padding-left: 0; }
+#payablesApp .payable-account-summary > td:last-child { padding-right: 0; }
+#payablesApp .payable-account-item > strong { display: block; font-size: 14px; font-weight: 700; }
+#payablesApp .payable-account-item > small { display: block; margin-top: 4px; color: #65798d; font-size: 11px; }
+#payablesApp .payable-account-quantity, #payablesApp .payable-account-unit-price, #payablesApp .payable-account-total { text-align: right; font-variant-numeric: tabular-nums; }
+#payablesApp .payable-account-state { display: block; margin-top: 3px; color: #65798d; font-size: 11px; }
+#payablesApp .payable-account-state.is-settled { color: #18816b; }
+#payablesApp .payable-account-state.is-partial, #payablesApp .payable-account-state.is-overdue, #payablesApp .payable-account-mismatch { color: #a45d0c; }
+#payablesApp .payable-account-mismatch { display: block; font-size: 11px; }
+#payablesApp .payable-account-table .payable-account-actions { justify-content: flex-end; gap: 6px; }
+#payablesApp .payable-account-table .payable-account-actions > button { padding: 6px 9px; white-space: nowrap; }
+#payablesApp .payable-account-table .payable-account-history { display: table-row; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+#payablesApp .payable-account-table .payable-account-history > td { padding: 0 0 12px; }
+#payablesApp .payable-account-detail-content { display: grid; gap: 14px; min-width: 0; padding: 14px; border: 1px solid #dce5ee; border-radius: 8px; background: #fff; }
+@media (min-width: 821px) and (max-width: 1100px) {
+  #payablesApp .payable-account-table .payable-col-actions { width: 180px; }
+}
 @media (min-width: 1100px) {
   #payablesApp .payable-vendor-info { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 18px; }
   #payablesApp .payable-vendor-title { flex-basis: 100%; }
 }
 @media (max-width: 820px) {
+  #payablesApp .payable-account-table, #payablesApp .payable-account-table > .payable-account-card { display: block; }
+  #payablesApp .payable-account-table colgroup, #payablesApp .payable-account-table thead { display: none; }
+  #payablesApp .payable-account-summary { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto; align-items: start; gap: 5px 8px; padding: 12px 0; }
+  #payablesApp .payable-account-summary > td { display: block; padding: 0; }
+  #payablesApp .payable-account-item { grid-column: 1 / 3; grid-row: 1; }
+  #payablesApp .payable-account-total { grid-column: 3; grid-row: 1 / 3; }
+  #payablesApp .payable-account-quantity, #payablesApp .payable-account-unit-price { grid-row: 2; text-align: left; font-size: 12px; }
+  #payablesApp .payable-account-quantity { grid-column: 1; }
+  #payablesApp .payable-account-unit-price { grid-column: 2; }
+  #payablesApp .payable-account-quantity::before { content: '數量 '; color: #65798d; font-size: 11px; }
+  #payablesApp .payable-account-unit-price::before { content: '單價 '; color: #65798d; font-size: 11px; }
+  #payablesApp .payable-account-total::before { content: '應付 '; color: #65798d; font-size: 11px; }
+  #payablesApp .payable-account-operation { grid-column: 1 / -1; padding-top: 4px !important; }
+  #payablesApp .payable-account-table .payable-account-history { display: block; }
+  #payablesApp .payable-account-table .payable-account-history > td { display: block; }
+  #payablesApp .payable-account-detail-content { padding: 10px; }
   #payablesApp .payable-vendor-list { padding: 10px; gap: 10px; }
   #payablesApp .payable-vendor-list-heading { padding: 12px; }
   #payablesApp .payable-vendor-toggle { grid-template-columns: minmax(0,1fr) auto; gap: 6px 12px; padding: 12px 14px; }
