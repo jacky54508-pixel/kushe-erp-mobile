@@ -623,7 +623,14 @@
   }
   function toggleDetail(id, model) {
     const main = $(`[data-expand-payable="${CSS.escape(id)}"]`);
-    if (!main) return;
+    if (!main) {
+      const card = $(`[data-mobile-payable="${CSS.escape(id)}"]`);
+      if (!card) return;
+      const region = card.closest('[data-vendor-region]');
+      if (region?.hidden) setVendorExpanded(region.dataset.vendorRegion, true);
+      setAccountHistoryExpanded(card, $('.mobile-payable-detail',card).hidden);
+      return;
+    }
     let detail = main.nextElementSibling?.matches('[data-payment-detail]') ? main.nextElementSibling : null;
     const expanded = !main.classList.contains('is-expanded');
     if (expanded && !detail) {
@@ -820,24 +827,36 @@
     };
   }
   function mobileSourceMarkup(model) {
-    const source=model.source;
-    if(source.kind==='expense'){
-      const line=source.lines[0];
-      return `<section class="mobile-detail-stack"><h4>費用明細</h4><article class="mobile-detail-item"><div class="mobile-detail-item__top"><span>${esc(line.projectName)}</span><span>${esc(line.date)}</span></div><strong class="mobile-detail-item__title">${esc(line.item)}</strong><div class="mobile-meta-row"><span>${esc(line.source)}</span><strong>${money(line.amount)}</strong></div>${line.note!=='—'?`<p class="mobile-detail-note">${esc(line.note)}</p>`:''}</article></section>`;
+    const source = model.source;
+    if (source.kind === 'expense') {
+      const line = source.lines[0];
+      return `<div class="payable-account-expense"><strong>${esc(line.item)}</strong><span>${esc(line.projectName)} · ${esc(line.source)}</span>${line.note && line.note !== '—' ? `<p>${esc(line.note)}</p>` : ''}</div>`;
     }
-    if(!source.lines.length)return `<section class="mobile-detail-stack"><h4>材料使用明細</h4><p class="mobile-detail-note">${esc(source.emptyNote)}</p></section>`;
-    return `<section class="mobile-detail-stack"><h4>材料使用明細</h4>${source.lines.map((line)=>`<article class="mobile-detail-item"><div class="mobile-detail-item__top">${[line.projectName,line.source].filter((value)=>value&&value!=='—').map((value)=>`<span>${esc(value)}</span>`).join('')}</div><strong class="mobile-detail-item__title">${esc(line.materialName)}</strong>${line.date?`<p class="mobile-detail-note">${esc(line.date)}</p>`:''}${line.model?`<p class="mobile-detail-note">${esc(line.model)}</p>`:''}<div class="mobile-detail-item__meta">${esc([line.quantity,line.unit].filter((value)=>value!==''&&value!==undefined&&value!==null&&value!=='—').join(' '))}</div><div class="mobile-detail-item__amount-row"><span>單價 ${unitMoney(line.unitPrice)}</span><strong>小計 ${money(line.amount)}</strong></div></article>`).join('')}<div class="mobile-source-total ${source.matches?'is-matched':'is-mismatch'}"><span>材料應付合計</span><strong>${money(source.sourceTotal)}</strong></div></section>`;
+    if (!source.lines.length) return `<div class="payable-source-empty"><b>現有資料未保存可展開的逐筆材料明細</b><span>${esc(source.emptyNote)}</span></div>`;
+    return `<div class="payable-account-lines">${source.lines.map((line) => `<div class="payable-material-line" data-account-source="${esc(line.id)}"><div class="payable-line-description"><strong>${esc(line.materialName)}</strong><span>${esc([line.date, line.projectName, line.model].filter((value) => value && value !== '—').join(' · '))}</span></div><div class="payable-line-value"><small>數量</small><span>${esc(line.quantity)} ${esc(line.unit)}</span></div><div class="payable-line-value"><small>單價</small><span>${unitMoney(line.unitPrice)}</span></div><div class="payable-line-value"><small>小計</small><strong>${money(line.amount)}</strong></div></div>`).join('')}</div>${!source.matches ? `<p class="payable-account-warning">材料來源合計 ${money(source.sourceTotal)}，應付帳款金額 ${money(model.amount)}，現有來源資料有差異。</p>` : ''}`;
   }
+
   function mobilePaymentMarkup(model) {
     const payments=model.payments;
     if(!payments.count)return `<section class="mobile-detail-stack"><h4>付款紀錄</h4><div class="mobile-detail-item"><span>尚無付款紀錄</span></div></section>`;
     return `<section class="mobile-detail-stack"><h4>付款紀錄</h4>${payments.rows.map((payment)=>`<article class="mobile-detail-item"><div class="mobile-detail-item__top"><span>${esc(payment.date)}</span><strong>${money(payment.amount)}</strong></div>${payment.bankName?`<div class="mobile-meta-row"><span>銀行帳戶</span><strong>${esc(payment.bankName)}</strong></div>`:''}${payment.method?`<div class="mobile-meta-row"><span>付款方式</span><strong>${esc(payment.method)}</strong></div>`:''}${payment.fee!==undefined?`<div class="mobile-meta-row"><span>手續費</span><strong>${money(payment.fee)}</strong></div>`:''}<div class="mobile-meta-row"><span>實際扣款</span><strong>${money(payment.actualDebit)}</strong></div>${payment.note&&payment.note!=='—'?`<p class="mobile-detail-note">${esc(payment.note)}</p>`:''}${payment.editable?`<div class="mobile-action-row"><button type="button" data-mobile-edit-payment="${esc(payment.id)}">編輯</button><button class="mobile-danger-action" type="button" data-mobile-delete-payment="${esc(payment.id)}" data-payable-id="${esc(model.id)}">刪除</button></div>`:''}</article>`).join('')}</section>`;
   }
-  function mobilePayableCardMarkup(model) {
-    const meta=[['應付金額',money(model.amount)],['已付',money(model.paid)],['應付日期',model.date||''],['到期日',model.dueDate||''],['應付月份',monthOf(model.date)],['付款月份',model.paymentMonths.join('、')],['來源類型',model.sourceTypeLabel]].filter(([,value])=>value&&value!=='—');
-    return `<article class="mobile-record-card" data-mobile-payable="${esc(model.id)}"><header class="mobile-record-card__header"><div class="mobile-record-card__title"><strong>${esc(model.vendorName)}</strong><span>${esc(model.project)}${model.sourceLabel&&model.sourceLabel!==model.project?`｜${esc(model.sourceLabel)}`:''}</span></div><div class="mobile-record-card__amount"><small>未付金額</small><strong>${money(model.outstanding)}</strong></div></header><span class="mobile-status-badge">${esc(model.status)}</span><div class="mobile-card-grid">${meta.map(([label,value])=>`<div class="mobile-meta-row"><span>${label}</span><strong>${esc(value)}</strong></div>`).join('')}</div><div class="mobile-action-layout"><div class="mobile-action-primary"><button class="mobile-primary-action" type="button" data-mobile-payable-expand aria-expanded="false">查看明細</button>${model.canPay?`<button class="mobile-primary-action" type="button" data-pay="${esc(model.id)}">付款</button>`:''}</div><details class="mobile-action-more"><summary>更多操作</summary><div class="mobile-action-more-panel"><button class="mobile-danger-action" type="button" data-mobile-payable-delete="${esc(model.id)}">刪除整筆帳務</button></div></details></div><div class="mobile-payable-detail" hidden>${mobileSourceMarkup(model)}${mobilePaymentMarkup(model)}</div></article>`;
+  function mobilePayableCardMarkup(model, regionSuffix) {
+    const regionId = `payable-account-payments-${regionSuffix}`;
+    const meta = [['應付日期',model.date],['應付單號',model.payableNo],['到期日',model.dueDate],['付款月份',model.paymentMonths.join('、')],['來源類型',model.sourceTypeLabel]].filter(([,value]) => value && value !== '—');
+    return `<article class="payable-account-card" data-mobile-payable="${esc(model.id)}"><div class="payable-account-caption"><span>${esc(model.sourceTypeLabel)}${model.date ? ` · ${esc(model.date)}` : ''}${model.payableNo !== '—' ? ` · ${esc(model.payableNo)}` : ''}</span><span class="commission-status ${model.baseStatus === '已付清' ? 'settled' : model.overdue ? 'overdue' : model.baseStatus === '部分付款' ? 'partial' : ''}">${esc(model.status)}</span></div>${mobileSourceMarkup(model)}<footer class="payable-account-footer"><div class="payable-account-amounts"><span>應付 <b>${money(model.amount)}</b></span><span>已付 <b>${money(model.paid)}</b></span><span>未付 <b>${money(model.outstanding)}</b></span>${model.taxPayment?.verified ? `<span>含稅實付 <b>${money(model.taxPayment.bankAmount)}</b></span>` : ''}</div><div class="payable-account-actions"><button class="commission-secondary compact" type="button" data-mobile-payable-expand aria-controls="${regionId}" aria-expanded="false">付款紀錄 (${model.payments.count})</button>${model.canPay ? `<button class="commission-primary compact" type="button" data-pay="${esc(model.id)}">付款</button>` : ''}<div class="payable-more"><button class="payable-more-toggle" type="button" data-payable-more="${esc(model.id)}" aria-label="${esc(model.payableNo !== '—' ? model.payableNo : model.item)}：更多帳款操作" aria-expanded="false">⋯</button></div></div></footer><div id="${regionId}" class="mobile-payable-detail payable-account-history" hidden><dl class="payable-account-meta">${meta.map(([label,value]) => `<div><dt>${label}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl>${taxPaymentDetailsMarkup(model,model.taxPayment)}${mobilePaymentMarkup(model)}</div></article>`;
+  }
+  function setAccountHistoryExpanded(card, expanded) {
+    const detail = $('.mobile-payable-detail', card), button = $('[data-mobile-payable-expand]', card);
+    if (!detail || !button) return;
+    detail.hidden = !expanded;
+    button.setAttribute('aria-expanded', String(expanded));
+    if (!button.dataset.collapsedLabel) button.dataset.collapsedLabel = button.textContent;
+    button.textContent = expanded ? '收合付款紀錄' : button.dataset.collapsedLabel;
+    requestAnimationFrame(scheduleStickyScrollbar);
   }
   // Display-only grouping: retain every payable and its original payment target.
+
   function buildVendorGroups(models, state) {
     const groups = new Map();
     const cleanName = (value) => String(value || '').trim();
@@ -879,8 +898,9 @@
   }
   function vendorToggleMarkup(group, regionId) {
     const expanded = expandedVendorGroups.has(group.key);
-    return `<button class="payable-vendor-toggle" type="button" data-vendor-toggle="${esc(group.key)}" aria-expanded="${expanded}" aria-controls="${regionId}" aria-label="${esc(group.vendorName)}：${expanded ? '收合明細' : '展開明細'}"><span data-vendor-toggle-label>${expanded ? '收合明細' : '展開明細'}</span><span data-vendor-toggle-icon aria-hidden="true">${expanded ? '⌃' : '⌄'}</span></button>`;
+    return `<button class="payable-vendor-toggle" type="button" data-vendor-toggle="${esc(group.key)}" aria-expanded="${expanded}" aria-controls="${regionId}" aria-label="${esc(group.vendorName)}：${expanded ? '收合明細' : '展開明細'}"><span class="payable-vendor-info"><span class="payable-vendor-title"><strong>${esc(group.vendorName)}</strong><span class="commission-status ${group.statusClass}">${esc(group.status)}</span></span><span class="payable-vendor-meta">${group.models.length} 筆帳款${group.project !== '—' ? ` · ${esc(group.project)}` : ''} · ${esc(group.category)}</span><span class="payable-vendor-totals"><span>應付 ${money(group.amount)}</span><span>已付 ${money(group.paid)}</span></span></span><span class="payable-vendor-due"><small>尚未支付</small><strong>${money(group.outstanding)}</strong></span><span class="payable-vendor-affordance"><span data-vendor-toggle-label>${expanded ? '收合明細' : '展開明細'}</span><span data-vendor-toggle-icon aria-hidden="true">${expanded ? '⌃' : '⌄'}</span></span></button>`;
   }
+
   function setVendorExpanded(key, expanded) {
     if (expanded) expandedVendorGroups.add(key); else expandedVendorGroups.delete(key);
     const root = $('#payablesApp');
@@ -893,17 +913,11 @@
     });
     requestAnimationFrame(scheduleStickyScrollbar);
   }
-  function desktopPayableRowMarkup(row) {
-    return `<tr class="payable-main-row" data-expand-payable="${esc(row.id)}" tabindex="0" aria-expanded="false"><td>${esc(row.date || '—')}</td><td><b>${esc(row.vendorName)}</b>${row.payments.count ? `<span class="receipt-count-badge">${row.payments.count} 次付款</span>` : ''}</td><td><b>${esc(row.project)}</b></td><td><span class="payable-category">${esc(row.category)}</span><small class="payable-source-label">${esc(row.sourceLabel)}</small></td><td class="num"><span class="payable-net-amount">${money(row.amount)}</span>${row.taxPayment?.verified ? `<small class="payable-tax-paid">含稅實付 ${money(row.taxPayment.bankAmount)}</small>` : ''}</td><td class="num">${money(row.paid)}</td><td class="num"><b>${money(row.outstanding)}</b></td><td><span class="commission-status ${row.baseStatus === '已付清' ? 'settled' : row.baseStatus === '部分付款' ? 'partial' : row.overdue ? 'overdue' : ''}">${esc(row.status)}</span></td><td><div class="receivable-actions payable-row-actions">${row.canPay ? `<button class="commission-primary compact" type="button" data-pay="${esc(row.id)}">付款</button>` : ''}<button class="receivable-expand" type="button" data-expand-button="${esc(row.id)}" aria-label="展開應付明細" aria-expanded="false"><span aria-hidden="true">⌄</span></button><div class="payable-more"><button class="payable-more-toggle" type="button" data-payable-more="${esc(row.id)}" aria-label="更多操作" aria-expanded="false">⋯</button></div></div></td></tr>`;
+  function vendorGroupMarkup(group, index) {
+    const regionId = `payable-vendor-group-${index}`;
+    return `<section class="payable-vendor-card ${group.statusClass === 'settled' ? 'is-settled' : ''}">${vendorToggleMarkup(group,regionId)}<div id="${regionId}" class="payable-vendor-accounts" data-vendor-region="${esc(group.key)}" ${expandedVendorGroups.has(group.key) ? '' : 'hidden'}>${group.models.map((model,accountIndex) => mobilePayableCardMarkup(model,`${index}-${accountIndex}`)).join('')}<div class="payable-vendor-footer"><span>${group.models.length} 筆帳款</span><span>應付合計 <b>${money(group.amount)}</b></span></div></div></section>`;
   }
-  function desktopVendorGroupMarkup(group, index) {
-    const regionId = `payable-vendor-desktop-${index}`;
-    return `<tbody class="payable-vendor-summary"><tr><td title="${esc(group.dateRange)}"><small class="payable-source-label">最近一筆</small>${esc(group.date)}</td><td><strong>${esc(group.vendorName)}</strong><span class="receipt-count-badge">${group.models.length} 筆帳款</span></td><td>${esc(group.project)}</td><td>${esc(group.category)}<small class="payable-source-label">廠商彙總</small></td><td class="num"><b>${money(group.amount)}</b></td><td class="num">${money(group.paid)}</td><td class="num"><b>${money(group.outstanding)}</b></td><td><span class="commission-status ${group.statusClass}">${esc(group.status)}</span></td><td>${vendorToggleMarkup(group, regionId)}</td></tr></tbody><tbody id="${regionId}" class="payable-vendor-rows" data-vendor-region="${esc(group.key)}" ${expandedVendorGroups.has(group.key) ? '' : 'hidden'}>${group.models.map(desktopPayableRowMarkup).join('')}</tbody>`;
-  }
-  function mobileVendorGroupMarkup(group, index) {
-    const regionId = `payable-vendor-mobile-${index}`;
-    return `<section class="payable-vendor-card"><header><div><h3>${esc(group.vendorName)}</h3><p>${group.models.length} 筆帳款 · ${esc(group.project)}</p></div><span class="commission-status ${group.statusClass}">${esc(group.status)}</span></header><dl class="payable-vendor-totals"><div><dt>應付合計</dt><dd>${money(group.amount)}</dd></div><div><dt>已付</dt><dd>${money(group.paid)}</dd></div><div><dt>未付</dt><dd>${money(group.outstanding)}</dd></div></dl>${vendorToggleMarkup(group, regionId)}<div id="${regionId}" class="payable-vendor-cards" data-vendor-region="${esc(group.key)}" ${expandedVendorGroups.has(group.key) ? '' : 'hidden'}>${group.models.map(mobilePayableCardMarkup).join('')}</div></section>`;
-  }
+
   function bindListEvents(models) {
     const modelById=new Map(models.map((model)=>[String(model.id),model]));
     $$('[data-vendor-toggle]', $('#payablesApp')).forEach((button) => {
@@ -934,7 +948,7 @@
         }
       };
     });
-    $$('[data-mobile-payable-expand]').forEach((button)=>button.onclick=()=>{const card=button.closest('[data-mobile-payable]'),detail=$('.mobile-payable-detail',card),expanded=detail.hidden;detail.hidden=!expanded;button.setAttribute('aria-expanded',String(expanded));button.textContent=expanded?'收合明細':'查看明細'});
+    $$('[data-mobile-payable-expand]').forEach((button) => button.onclick = () => { const card = button.closest('[data-mobile-payable]'); setAccountHistoryExpanded(card, $('.mobile-payable-detail',card).hidden); });
     $$('[data-mobile-payable-delete]').forEach((button)=>button.onclick=()=>openPayableDelete(button.dataset.mobilePayableDelete));
     $$('[data-mobile-edit-payment]').forEach((button)=>button.onclick=()=>openEditPayment(button.dataset.mobileEditPayment));
     $$('[data-mobile-delete-payment]').forEach((button)=>button.onclick=()=>deletePaymentAction(button.dataset.mobileDeletePayment,button.dataset.payableId,false));
@@ -944,7 +958,7 @@
     const state = store.getState();
     const rows = filteredRows();
     const models = rows.map((row)=>buildPayablePresentation(row,state));
-    const groups = buildVendorGroups(models, state);
+    const groups = buildVendorGroups(models, state).sort((a,b) => Number(a.outstanding <= 0) - Number(b.outstanding <= 0));
     const all = allRows();
     const month = monthOf(today());
     const total = all.reduce((sum, row) => sum + row.amount, 0);
@@ -956,7 +970,7 @@
     $('#payablesApp').innerHTML = `<section class="commissions-heading"><div><h1>應付帳款</h1><p>管理廠商款項、分次付款與銀行實際扣款</p></div><button class="commission-primary" id="newPayable" type="button">＋ 新增應付</button></section>
       <section class="commission-kpis payable-kpis"><article data-kpi="ap.total" role="button" tabindex="0" aria-label="查看應付總額對應明細" aria-expanded="false"><span>應付總額</span><strong>${money(total)}</strong><small>${all.length} 筆應付</small></article><article class="is-success" data-kpi="ap.paid" role="button" tabindex="0" aria-label="查看本月已付對應明細" aria-expanded="false"><span>本月已付</span><strong>${money(monthPaid)}</strong><small>${esc(month)} 付款</small></article><article class="is-warning" data-kpi="ap.open" role="button" tabindex="0" aria-label="查看未付帳款對應明細" aria-expanded="false"><span>未付帳款</span><strong>${money(open)}</strong><small>含部分付款餘額</small></article><article class="is-warning" data-kpi="ap.overdue" role="button" tabindex="0" aria-label="查看逾期應付對應明細" aria-expanded="false"><span>逾期應付</span><strong>${money(overdue)}</strong><small>已超過到期日</small></article><article data-kpi="ap.month" role="button" tabindex="0" aria-label="查看本月新增應付對應明細" aria-expanded="false"><span>本月新增應付</span><strong>${money(monthAdded)}</strong><small>${esc(month)} 新增</small></article></section>
       <section class="commission-panel commission-filters"><div class="payable-filter-grid"><label><span>應付月份</span><input id="payableMonth" type="month" value="${esc(filters.month)}"></label><label><span>付款月份</span><input id="payablePaymentMonth" type="month" value="${esc(filters.paymentMonth)}"></label><label><span>廠商／收款人</span><select id="payableVendor">${selectOptions(state.vendors,filters.vendor,'全部廠商／收款人')}</select></label><label><span>案場</span><select id="payableProject">${selectOptions(state.projects,filters.project,'全部案場')}</select></label><label><span>類別</span><select id="payableCategory"><option value="">全部類別</option>${categories.map((value) => `<option ${filters.category === value ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select></label><label><span>付款狀態</span><select id="payableStatus"><option value="">全部狀態</option>${['未付款','部分付款','已付清'].map((value) => `<option ${filters.status === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label class="payable-search" style="grid-column:1/-1"><span>關鍵字</span><input id="payableQuery" type="search" value="${esc(filters.query)}" placeholder="廠商、案場、材料或費用"></label></div><p class="payable-filter-note" style="margin:10px 0 0;color:#718096;font-size:12px">應付月份＝帳款建立月份｜付款月份＝實際付款月份</p></section>
-      <section class="commission-panel billing-list-panel"><div class="payable-vendor-list-heading"><strong>${groups.length} 家廠商／收款人 · ${models.length} 筆帳款</strong><span>金額依目前篩選彙總，展開查看各筆明細</span></div><div class="commission-table-wrap"><table class="commission-table payable-table"><thead><tr><th>日期</th><th>廠商／收款人</th><th>案場</th><th>類別／來源</th><th class="num">應付金額</th><th class="num">已付</th><th class="num">未付</th><th>狀態</th><th>操作</th></tr></thead>${groups.map(desktopVendorGroupMarkup).join('') || '<tbody><tr><td colspan="9" class="billing-empty">此篩選條件下沒有應付帳款。</td></tr></tbody>'}</table></div><div class="mobile-payables">${groups.map(mobileVendorGroupMarkup).join('')||'<p class="mobile-detail-item">此篩選條件下沒有應付帳款。</p>'}</div></section>`;
+      <section class="commission-panel billing-list-panel"><div class="payable-vendor-list-heading"><strong>${groups.length} 家廠商／收款人 · ${models.length} 筆帳款</strong><span>金額依目前篩選彙總，點廠商展開細項</span></div><div class="payable-vendor-list">${groups.map(vendorGroupMarkup).join('') || '<p class="billing-empty">此篩選條件下沒有應付帳款。</p>'}</div></section>`;
     bindListEvents(models);
     requestAnimationFrame(scheduleStickyScrollbar);
   }
