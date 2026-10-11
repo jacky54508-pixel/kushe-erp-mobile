@@ -5344,20 +5344,62 @@
     requireStoreTransactionDraft();
     const name=clean(values.name),code=clean(values.code),unit=clean(values.unit),vendor=state.vendors.find((row)=>row.id===values.vendor),unitPrice=Math.max(0,num(values.unitPrice));
     if(!name)throw new Error('請輸入材料名稱'); if(!unit)throw new Error('請輸入材料單位'); if(!vendor)throw new Error('請選擇材料廠商');
-    const duplicate=state.materials.find((row)=>row.id!==id&&sameName(row.name,name)&&String(row.vendor||'')===String(vendor.id));
-    if(duplicate)throw new Error('此廠商已有相同名稱的材料');
-    if(code&&state.materials.some((row)=>row.id!==id&&sameName(row.code,code)))throw new Error('材料代碼已存在');
-    const now=new Date().toISOString(),row=state.materials.find((item)=>item.id===id)||{id:uid(),stock:0,openingStock:0,safeStock:0,createdAt:now};
-    Object.assign(row,{name,code,vendor:vendor.id,vendorName:vendor.name||'',unit,unitPrice,model:clean(values.model),note:clean(values.note),updatedAt:now});
+    const existing=id?state.materials.find((item)=>item.id===id):null;
+    if(id&&!existing)throw new Error('找不到材料，請重新整理後再試');
+    const now=new Date().toISOString(),fields={name,code,vendor:vendor.id,vendorName:vendor.name||'',unit,unitPrice,model:clean(values.model),note:clean(values.note)};
+    let mode='',quantity=0,date='',opening=0,requestKey='',requestFingerprint='';
     if(!id){
-      const openingRaw=values.openingStock,opening=openingRaw===undefined||openingRaw===null||String(openingRaw).trim()===''?0:Number(openingRaw);
-      if(!Number.isFinite(opening)||opening<0)throw new Error('期初庫存必須是 0 以上的有效數量');
-      row.openingStock=opening;row.stock=opening;row.inventoryInitializedAt=now;row.inventoryUpdatedAt=now;state.materials.unshift(row);
+      mode=clean(values.inventoryMode);
+      const openingRaw=values.openingStock;
+      opening=openingRaw===undefined||openingRaw===null||String(openingRaw).trim()===''?0:Number(openingRaw);
+      if(!Number.isFinite(opening)||opening<0||opening>Number.MAX_SAFE_INTEGER)throw new Error('期初庫存必須是有效的非負數量');
+      // Old cached forms must not silently treat a new purchase as opening stock.
+      if(!mode&&opening>0)throw new Error('請重新整理材料頁，選擇「新購進貨」或「原有期初庫存」後再儲存');
+      if(!mode)mode='opening';
+      if(!['purchase','opening'].includes(mode))throw new Error('請選擇材料建立方式');
+      requestKey=clean(values.idempotencyKey);
+      if(mode==='purchase'){
+        quantity=Number(values.purchaseQuantity);date=clean(values.purchaseDate);
+        if(opening!==0)throw new Error('新購進貨不可同時填入期初庫存');
+        if(!Number.isFinite(quantity)||quantity<=0||quantity>Number.MAX_SAFE_INTEGER)throw new Error('進貨數量必須大於 0 且在有效範圍內');
+        inventoryPurchasePrice(quantity,values.unitPrice);
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date+'T00:00:00Z'))||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date)throw new Error('請填寫有效的進貨日期');
+        if(!requestKey)throw new Error('請重新開啟新增材料視窗後再送出');
+      }else if(num(values.purchaseQuantity)>0)throw new Error('期初庫存不可同時填入新購進貨數量');
+      requestFingerprint=JSON.stringify({name,code,vendor:vendor.id,unit,unitPrice,model:fields.model,note:fields.note,mode,quantity,date,opening});
+      const replays=requestKey?state.materials.filter((row)=>row.creationRequestKey===requestKey):[];
+      if(replays.length){
+        const row=replays[0];
+        if(replays.length!==1||row.creationRequestFingerprint!==requestFingerprint||['name','code','vendor','unit','unitPrice','model','note'].some((key)=>row[key]!==fields[key]))throw new Error('新增材料重送內容不同，請先核對已儲存資料');
+        if(mode==='purchase'){
+          // Verify the existing purchase through the same receipt replay guard.
+          const receipts=state.inventoryReceipts.filter((receipt)=>receipt.idempotencyKey===requestKey);
+          if(receipts.length!==1||receipts[0].material!==row.id)throw new Error('新增材料的入庫關聯不完整，已停止重送');
+          await addInventoryReceipt({material:row.id,quantity,unitPrice,date,note:fields.note,idempotencyKey:requestKey});
+        }
+        return row;
+      }
+    }
+    const duplicate=state.materials.find((row)=>row.id!==id&&sameName(row.name,name)&&String(row.vendor||'')===String(vendor.id));
+    if(duplicate)throw new Error('此廠商已有相同名稱的材料，後續採購請使用該材料的「入庫」');
+    if(code&&state.materials.some((row)=>row.id!==id&&sameName(row.code,code)))throw new Error('材料代碼已存在');
+    const row=existing||{id:uid(),stock:0,openingStock:0,safeStock:0,createdAt:now};
+    Object.assign(row,fields,{updatedAt:now});
+    if(!id){
+      row.openingStock=opening;row.stock=opening;row.inventoryInitializedAt=now;row.inventoryUpdatedAt=now;
+      if(requestKey){row.creationRequestKey=requestKey;row.creationRequestFingerprint=requestFingerprint;}
+      state.materials.unshift(row);
+      if(mode==='purchase'){
+        // Both records stay in the outer saveMaterial draft; receipt requests its only commit.
+        await addInventoryReceipt({material:row.id,quantity,unitPrice,date,note:fields.note,idempotencyKey:requestKey});
+        return row;
+      }
     }
     persist(`${id?'修改':'新增'}材料 ${row.name}`); return row;
   }
   async function deleteMaterial(id) {
     requireStoreTransactionDraft(); const row=state.materials.find((item)=>item.id===id); if(!row)return false;
+    if(num(row.stock)!==0||num(row.openingStock)!==0)throw new Error('此材料仍有庫存或期初庫存紀錄，不能刪除；請先核對庫存來源');
     if(state.materialUsages.some((usage)=>String(usage.material)===String(id))||(state.inventoryReceipts||[]).some((receipt)=>String(receipt.material||receipt.materialId)===String(id)))throw new Error('此材料已有使用或入庫紀錄，為保留庫存與帳務來源不能刪除');
     state.materials=state.materials.filter((item)=>item!==row); persist(`刪除材料 ${row.name||''}`); return true;
   }
@@ -6199,3 +6241,4 @@
   });
   window.KuSheERPStore=Object.freeze(publicStore);
 }());
+

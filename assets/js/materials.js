@@ -87,7 +87,7 @@
     const rows=vendors.map((row)=>'<tr><td><b>'+esc(row.name||'—')+'</b></td><td>'+esc(row.contact||'—')+'</td><td>'+esc(row.phone||'—')+'</td><td>'+esc(row.taxId||'—')+'</td><td>'+esc(row.address||'—')+'</td><td><button type="button" class="commission-secondary compact" data-edit-material-vendor="'+esc(row.id)+'">編輯</button></td></tr>').join('')||'<tr><td colspan="6" class="billing-empty">尚無材料廠商。</td></tr>';
     const modal=overlay('<section class="erp-detail-card project-master-modal material-vendor-manager-modal" role="dialog" aria-modal="true"><header><div><span>材料管理</span><h2>材料廠商</h2><p>這裡管理共用廠商主檔；已被材料或應付使用的廠商資料不會被刪除。</p></div><button type="button" data-close-detail aria-label="關閉">×</button></header><div class="erp-detail-body"><div class="material-vendor-manager-actions"><button type="button" class="commission-primary" id="newMaterialVendor">＋ 新增廠商</button></div><div class="commission-table-wrap"><table class="commission-table material-vendor-table"><thead><tr><th>廠商</th><th>聯絡人</th><th>電話</th><th>統編</th><th>地址</th><th>操作</th></tr></thead><tbody>'+rows+'</tbody></table></div></div><footer><button type="button" class="commission-secondary" data-close-detail>關閉</button></footer></section>');
     $('#newMaterialVendor',modal.node).onclick=()=>openVendorForm('',()=>{modal.close();openVendorManager()});
-    $('[data-edit-material-vendor]',modal.node).forEach((button)=>button.onclick=()=>openVendorForm(button.dataset.editMaterialVendor,()=>{modal.close();openVendorManager()}));
+    $$('[data-edit-material-vendor]',modal.node).forEach((button)=>button.onclick=()=>openVendorForm(button.dataset.editMaterialVendor,()=>{modal.close();openVendorManager()}));
   }
   async function render(){
     if(!active)return; await store.load(); const data=state(),host=$('#materialsApp');if(!host)return;
@@ -134,13 +134,45 @@
   }
   function openForm(id=''){
     const data=state(),row=data.materials.find((item)=>item.id===id)||{},vendors=store.materialVendorOptions(),nameSuggestions=materialNameSuggestions(data,id);
-    const modal=overlay(`<section class="erp-detail-card project-master-modal materials-master-modal" role="dialog" aria-modal="true"><header><div><span>材料主檔</span><h2>${id?'編輯材料':'新增材料'}</h2><p>材料價格供案場材料使用自動帶入；單次使用改價不回寫主檔。</p></div><button type="button" data-close-detail aria-label="關閉">×</button></header><form id="materialMasterForm" autocomplete="off"><div class="erp-detail-body"><div class="project-form-grid"><label><span>材料名稱</span><input name="materialName" id="materialNameInput" list="materialNameSuggestions" value="${esc(row.name||'')}" autocomplete="off" autocapitalize="off" spellcheck="false" required><datalist id="materialNameSuggestions">${nameSuggestions.map((name)=>`<option value="${esc(name)}"></option>`).join('')}</datalist></label><label><span>材料代碼</span><input name="code" value="${esc(row.code||'')}"></label><label class="material-vendor-field"><span>廠商</span><div class="material-vendor-select-row"><select name="vendor" required>${optionRows(vendors,row.vendor,'請選擇既有廠商')}</select><button type="button" class="commission-secondary compact" id="quickAddMaterialVendor">＋ 新增廠商</button></div></label><label><span>單位</span><input name="unit" value="${esc(row.unit||'')}" required></label><label><span>單價</span><input name="unitPrice" type="number" min="0" step="0.01" value="${store.num(row.unitPrice)}" required></label><label><span>規格／型號</span><input name="model" value="${esc(row.model||'')}"></label>${id?'':`<label><span>期初庫存</span><input name="openingStock" type="number" min="0" step="0.01" value="0" required></label>`}<label class="wide"><span>備註</span><textarea name="note" rows="3">${esc(row.note||'')}</textarea></label></div></div><footer><button type="button" class="commission-secondary" data-close-detail>取消</button><button type="submit" class="commission-primary">儲存材料</button></footer></form></section>`);
+    const requestKey=id?'':crypto.randomUUID(),todayValue=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Taipei'});
+    const inventoryFields=id?'':`
+      <label class="wide"><span>建立方式</span><select name="inventoryMode" required><option value="purchase">新購進貨（建立應付）</option><option value="opening">原有期初庫存／僅建檔（不建立應付）</option></select></label>
+      <label data-new-material-purchase><span>進貨日期</span><input name="purchaseDate" type="date" value="${esc(todayValue)}" required></label>
+      <label data-new-material-purchase><span>本次進貨數量</span><input name="purchaseQuantity" type="number" min="0.01" step="0.01" required></label>
+      <label class="wide" data-new-material-purchase><span>本次應付金額（未稅）</span><input id="newMaterialPurchaseTotal" value="—" readonly></label>
+      <label class="wide" data-new-material-opening hidden style="display:none"><span>原有期初庫存數量</span><input name="openingStock" type="number" min="0" step="0.01" value="0" disabled></label>`;
+    const modal=overlay(`<section class="erp-detail-card project-master-modal materials-master-modal" role="dialog" aria-modal="true"><header><div><span>材料主檔</span><h2>${id?'編輯材料':'新增材料'}</h2><p>${id?'材料價格供案場材料使用自動帶入；單次使用改價不回寫主檔。':'新購材料會同時建立庫存及廠商應付。'}</p></div><button type="button" data-close-detail aria-label="關閉">×</button></header><form id="materialMasterForm" autocomplete="off"><div class="erp-detail-body"><div class="project-form-grid"><label><span>材料名稱</span><input name="materialName" id="materialNameInput" list="materialNameSuggestions" value="${esc(row.name||'')}" autocomplete="off" autocapitalize="off" spellcheck="false" required><datalist id="materialNameSuggestions">${nameSuggestions.map((name)=>`<option value="${esc(name)}"></option>`).join('')}</datalist></label><label><span>材料代碼</span><input name="code" value="${esc(row.code||'')}"></label><label class="material-vendor-field"><span>廠商</span><div class="material-vendor-select-row"><select name="vendor" required>${optionRows(vendors,row.vendor,'請選擇既有廠商')}</select><button type="button" class="commission-secondary compact" id="quickAddMaterialVendor">＋ 新增廠商</button></div></label><label><span>單位</span><input name="unit" value="${esc(row.unit||'')}" required></label><label><span id="materialUnitPriceLabel">${id?'單價':'進貨單價（未稅）'}</span><input name="unitPrice" type="number" min="${id?'0':'0.01'}" step="0.01" value="${store.num(row.unitPrice)}" required></label><label><span>規格／型號</span><input name="model" value="${esc(row.model||'')}"></label>${inventoryFields}<label class="wide"><span>備註</span><textarea name="note" rows="3">${esc(row.note||'')}</textarea></label></div>${id?'':'<p id="newMaterialInventoryHint" class="material-receipt-note" role="status"></p>'}</div><footer><button type="button" class="commission-secondary" data-close-detail>取消</button><button type="submit" class="commission-primary">${id?'儲存材料':'儲存並建立應付'}</button></footer></form></section>`);
+    const form=$('#materialMasterForm',modal.node),submitButton=$('button[type="submit"]',form);
+    if(!id){
+      const updateInventoryMode=()=>{
+        const purchase=form.elements.inventoryMode.value==='purchase';
+        $$('[data-new-material-purchase]',form).forEach((group)=>{group.hidden=!purchase;group.style.display=purchase?'':'none';$$('input',group).forEach((input)=>{input.disabled=!purchase;if(!input.readOnly)input.required=purchase})});
+        const openingGroup=$('[data-new-material-opening]',form);openingGroup.hidden=purchase;openingGroup.style.display=purchase?'none':'';
+        form.elements.openingStock.disabled=purchase;form.elements.openingStock.required=!purchase;
+        form.elements.unitPrice.min=purchase?'0.01':'0';
+        $('#materialUnitPriceLabel',form).textContent=purchase?'進貨單價（未稅）':'材料參考單價';
+        const quantity=Number(form.elements.purchaseQuantity.value),price=Number(form.elements.unitPrice.value),amount=Math.round(quantity*price);
+        $('#newMaterialPurchaseTotal',form).value=quantity>0&&price>0&&Number.isSafeInteger(amount)&&amount>0?money(amount):'—';
+        $('#newMaterialInventoryHint',form).textContent=purchase?'儲存後同時增加本次進貨庫存並建立廠商應付；不會直接扣銀行餘額。':'只建立原有庫存，不建立應付。若是新買進的材料，請改選「新購進貨」；僅建檔可填 0。';
+        submitButton.textContent=purchase?'儲存並建立應付':'儲存期初／材料主檔';
+      };
+      form.elements.inventoryMode.onchange=updateInventoryMode;form.elements.purchaseQuantity.oninput=updateInventoryMode;form.elements.unitPrice.oninput=updateInventoryMode;updateInventoryMode();
+    }
     $('#quickAddMaterialVendor',modal.node).onclick=()=>openVendorForm('',(saved)=>{
       const select=$('[name="vendor"]',modal.node),vendors=store.materialVendorOptions();
       select.innerHTML=optionRows(vendors,saved.id,'請選擇既有廠商');select.value=saved.id;
       window.KushePhase1.toast('新廠商已建立並自動選取');
     });
-    $('#materialMasterForm',modal.node).onsubmit=async(event)=>{event.preventDefault();const button=event.submitter;button.disabled=true;try{{const values=Object.fromEntries(new FormData(event.target));values.name=values.materialName;delete values.materialName;await store.saveMaterial(values,id);}modal.close();render();window.KushePhase1.toast('材料主檔已儲存')}catch(error){button.disabled=false;window.KushePhase1.toast(error.message)}};
+    let submitting=false;
+    form.onsubmit=async(event)=>{
+      event.preventDefault();if(submitting)return;submitting=true;submitButton.disabled=true;
+      try{
+        const values=Object.fromEntries(new FormData(form));values.name=values.materialName;delete values.materialName;
+        if(!id)values.idempotencyKey=requestKey;
+        await store.saveMaterial(values,id);modal.close();render();
+        window.KushePhase1.toast(!id&&values.inventoryMode==='purchase'?'材料已新增、庫存及廠商應付已建立':id?'材料主檔已更新':'期初／材料主檔已儲存，未建立應付');
+      }catch(error){submitting=false;submitButton.disabled=false;window.KushePhase1.toast(error.message)}
+    };
   }
   window.addEventListener('kushe:data-updated',()=>{if(active)render()});
   window.KusheMaterials={activate(){active=true;render()},deactivate(){active=false;clearTimeout(searchTimer)},render};
@@ -153,4 +185,5 @@
   }});
 
 })();
+
 
