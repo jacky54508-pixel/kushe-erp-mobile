@@ -961,3 +961,30 @@
     white-space:normal;
   }
 }
+
+/* P28: compact, scoped editor for existing unbilled construction items. */
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-drawer { width:min(820px,100vw); display:flex; flex-direction:column; overflow:hidden; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-drawer #dailyWorkForm { display:flex; flex:1; flex-direction:column; min-height:0; padding:0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-drawer .daily-drawer-body { padding:16px; overflow:auto; flex:1; min-height:0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-drawer #dailyWorkForm>footer { display:flex; justify-content:flex-end; gap:10px; padding:12px 16px; border-top:1px solid #dfe7f0; background:#fff; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-group { margin:16px 0; padding:14px; border:1px solid #dfe7f0; border-radius:12px; background:#fff; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-group h3 { font-size:16px; margin:0 0 6px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-group header p { font-size:12px; color:#64748b; margin:0 0 10px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-item { display:grid; grid-template-columns:minmax(0,1fr) 130px; align-items:center; gap:12px; padding:10px 0; border-top:1px solid #edf1f6; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-item b { font-size:14px; overflow-wrap:anywhere; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-drawer small { display:block; color:#64748b; font-size:12px; margin-top:5px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-drawer label { display:grid; gap:5px; font-size:12px; min-width:0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-drawer :is(input,select) { width:100%; min-width:0; box-sizing:border-box; min-height:40px; padding:8px; border:1px solid #ced9e6; border-radius:7px; font:inherit; font-size:14px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-drawer :is(input[readonly],select:disabled) { background:#f1f5f9; color:#475569; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-addition { padding:12px; margin:12px 0; border:1px solid #b8d6ef; border-radius:8px; background:#f7fbff; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-addition-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:10px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-fields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-wide { grid-column:span 2; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp :is(.unbilled-notice,.unbilled-review) { padding:12px; background:#eef5fc; border-radius:8px; font-size:13px; line-height:1.65; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-review h3 { font-size:16px; margin:0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp #unbilledError { color:#a51b28; font-size:14px; }
+@media(max-width:580px) {
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-item { grid-template-columns:minmax(0,1fr) 110px; gap:8px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-fields { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-wide { grid-column:1/-1; }
+}

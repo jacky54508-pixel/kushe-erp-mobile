@@ -216,7 +216,7 @@
     return `<small class="daily-billing-counts">${esc(dailyBillingAmountLabel(summary))} ${money(summary.remainingAmount)}</small>`;
   }
   function dailyBillingLockLabel(summary) {
-    return {'部分已請款':'部分已請款・已鎖定','已請款':'已請款鎖定','請款資料待查核':'請款資料待查核・已鎖定'}[summary.status] || '已進入請款流程・已鎖定';
+    return {'部分已請款':'已請款項目鎖定','已請款':'已請款鎖定','請款資料待查核':'請款資料待查核・已鎖定'}[summary.status] || '已進入請款流程・已鎖定';
   }
   function buildDailyBatch(state,batchId,logs) {
       const projectGroups=new Map();logs.forEach((log)=>{const key=log.groupId||log.id;if(!projectGroups.has(key))projectGroups.set(key,[]);projectGroups.get(key).push(log)});
@@ -244,8 +244,9 @@
     }).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
   }
   function dailyActions(batch) {
-    const monthPaidLocked=batch.logs.some((log)=>store.payrollHistoryLock(log.employee,log.date).locked),paidDeleteLocked=batch.logs.some((log)=>store.dailyLogPayrollDeleteLock(log).locked),billingLocked=batch.logs.some((log)=>log.billingId||(log.billingStatus&&log.billingStatus!=='未請款')),actions=paidDeleteLocked?'<span class="commission-status is-settled" title="此紀錄已納入已付款薪資，為保留歷史帳務不可修改或刪除。">已付款鎖定</span>':billingLocked?`<span class="commission-status billing-done daily-billing-lock" title="此紀錄已進入請款流程，不可修改或刪除。">${esc(dailyBillingLockLabel(batch.billingSummary))}</span>`:monthPaidLocked?`<div class="commission-row-actions"><span class="commission-status is-settled" title="同月份已有薪資付款，為避免新增薪資來源不可編輯。">編輯鎖定</span><button type="button" data-daily-delete="${esc(batch.batchId)}">刪除</button></div>`:`<div class="commission-row-actions"><button type="button" data-daily-edit="${esc(batch.batchId)}">編輯</button><button type="button" data-daily-delete="${esc(batch.batchId)}">刪除</button></div>`;
-    return `<button type="button" data-daily-view="${esc(batch.batchId)}">查看內容</button>${actions}`;
+    const monthPaidLocked=batch.logs.some((log)=>store.payrollHistoryLock(log.employee,log.date).locked),paidDeleteLocked=batch.logs.some((log)=>store.dailyLogPayrollDeleteLock(log).locked),billingLocked=batch.logs.some((log)=>log.billingId||(log.billingStatus&&log.billingStatus!=='未請款')),actions=paidDeleteLocked?'<span class="commission-status is-settled" title="此紀錄已納入已付款薪資，為保留歷史帳務不可修改或刪除。">已付款鎖定</span>':billingLocked?`<span class="commission-status billing-done daily-billing-lock" title="已請款項目保持鎖定；未請款項目請使用專用編輯入口。">${esc(dailyBillingLockLabel(batch.billingSummary))}</span>`:monthPaidLocked?`<div class="commission-row-actions"><span class="commission-status is-settled" title="同月份已有薪資付款，為避免新增薪資來源不可編輯。">編輯鎖定</span><button type="button" data-daily-delete="${esc(batch.batchId)}">刪除</button></div>`:`<div class="commission-row-actions"><button type="button" data-daily-edit="${esc(batch.batchId)}">編輯</button><button type="button" data-daily-delete="${esc(batch.batchId)}">刪除</button></div>`;
+    const canAmend=billingLocked&&batch.billingSummary.unbilledItemCount>0&&!batch.billingSummary.inconsistentItemCount&&!paidDeleteLocked&&!monthPaidLocked;
+    return `<button type="button" data-daily-view="${esc(batch.batchId)}">查看內容</button>${canAmend?`<button type="button" data-daily-unbilled="${esc(batch.batchId)}">編輯未請款明細</button>`:''}${actions}`;
   }
   function dailySection(state,batches) {
     return `<section class="commission-panel daily-work-panel"><header><div><h2>每日作業</h2><p>沿用既有每日施工流程；抽成、點工與待請款仍由同一筆來源串聯。</p></div></header><div class="commission-table-wrap daily-desktop-table"><table class="commission-table daily-work-table"><thead><tr><th>日期</th><th>員工</th><th>客戶／案場</th><th>施工項目</th><th class="num">未稅施工額</th><th class="num">抽成</th><th class="num">點工薪資</th><th>請款狀態</th><th>操作</th></tr></thead><tbody>${batches.map((batch)=>{const actions=dailyActions(batch);return `<tr data-daily-batch="${esc(batch.batchId)}"><td>${esc(batch.date)}</td><td><b>${esc(batch.employees.join('、'))}</b></td><td><span class="daily-project-list">${batch.projects.map(esc).join('<br>')}</span></td><td><span class="commission-source">${esc(batch.items.filter(Boolean).slice(0,3).join('、')||'純點工')}${batch.itemCount>3?` 等 ${batch.itemCount} 項`:''}</span></td><td class="num"><b>${money(batch.untaxed)}</b><small>${batch.itemCount} 筆</small></td><td class="num">${money(batch.commission)}</td><td class="num">${money(batch.work)}</td><td>${dailyBillingBadge(batch.billingSummary)}${dailyBillingCounts(batch.billingSummary)}${dailyBillingAmountText(batch.billingSummary)}</td><td>${actions}</td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="9">此篩選條件下沒有每日作業紀錄。</td></tr>'}</tbody></table></div><div class="daily-mobile-list" aria-label="每日作業清單">${dailyMobileCards(batches)}</div></section>`;
@@ -632,6 +633,7 @@
     $$('[data-delete]', panel).forEach((button) => button.addEventListener('click', () => remove(button.dataset.delete)));
     $$('[data-daily-view]', panel).forEach((button)=>button.addEventListener('click',()=>openDailyDetail(button.dataset.dailyView,button)));
     $$('[data-daily-edit]', panel).forEach((button) => button.addEventListener('click', () => openDailyDrawer(button.dataset.dailyEdit)));
+    $$('[data-daily-unbilled]', panel).forEach((button)=>button.addEventListener('click',()=>openDailyUnbilledEditor(button.dataset.dailyUnbilled)));
     $$('[data-daily-delete]', panel).forEach((button) => button.addEventListener('click', () => removeDaily(button.dataset.dailyDelete)));
     $$('[data-view-daily-source]', panel).forEach((button)=>button.addEventListener('click',()=>showDailySource(button.dataset.viewDailySource,button)));
     $$('[data-view-payroll]', panel).forEach((button)=>button.addEventListener('click',()=>{window.KushePayroll?.prepareNavigationTarget({employeeId:button.dataset.viewPayroll,month:filters.month});window.location.hash='#payroll'}));
@@ -649,6 +651,77 @@
     const log=(store.getState().dailyLogs||[]).find((row)=>row.id===sourceId);
     if(!log)return window.KushePhase1?.toast('找不到對應的每日作業來源');
     openDailyDetail(log.batchId||log.id,trigger);
+  }
+  function openDailyUnbilledEditor(batchId) {
+    if(dailySubmitInFlight||quickProjectSaveActive)return;
+    const preview=store.dailyUnbilledEditPreview(batchId);
+    if(!preview.safe)return window.KushePhase1?.toast(preview.reason||'此紀錄沒有可編輯的未請款明細');
+    const state=store.getState(),layer=$('#commissionDrawerLayer'),batch=dailyBatchById(state,batchId);
+    if(!layer||!batch)return;
+    stopDailyDrawerViewport();dailyEditorActive=true;
+    const decimal=value=>new Intl.NumberFormat('zh-TW',{maximumFractionDigits:6}).format(number(value));
+    const groupHtml=(group,gi)=>{
+      const rows=group.rows.filter(row=>row.editable),display=window.KusheDisplaySort?.sortWorkRows?window.KusheDisplaySort.sortWorkRows(rows.map(row=>({...row.item,sourceIndex:row.index}))):rows.map(row=>({...row.item,sourceIndex:row.index}));
+      return `<section class="unbilled-group" data-unbilled-group="${gi}"><header><h3>${esc(group.projectName||'施工案場')}</h3><p>${esc(group.employeeNames.join('、'))} · 已請款及不列入請款 ${group.rows.length-rows.length} 項保留</p></header>${!group.safe?`<p class="unbilled-notice">${esc(group.reason)}</p>`:`<div>${display.map(item=>`<div class="unbilled-item"><div><b>${esc(item.house||'未指定戶別')} · ${esc(item.item||item.itemName)}</b><small>原數量 ${decimal(item.qty)} ${esc(item.unit)} · 單價 $${decimal(item.inputPrice??item.unitPrice??item.price)}（${esc(item.taxMode||'未稅')}）</small></div><label><span>修改後總數量</span><input data-unbilled-qty="${gi}:${item.sourceIndex}" type="number" min="0.000001" step="any" inputmode="decimal" required value="${esc(item.qty)}" aria-label="${esc(item.house+' '+(item.item||item.itemName)+' 修改後總數量')}"></label></div>`).join('')}</div><div data-unbilled-additions="${gi}"></div><button class="commission-secondary" type="button" data-unbilled-add="${gi}">＋ 追加施工項目</button>`}</section>`;
+    };
+    layer.innerHTML=`<div class="commission-drawer-backdrop" data-unbilled-close></div><aside class="commission-drawer daily-drawer unbilled-drawer" role="dialog" aria-modal="true" aria-labelledby="unbilledTitle"><header><div><h2 id="unbilledTitle">編輯未請款明細</h2><p>${esc(batch.date)} · ${esc(batch.employees.join('、'))}</p></div><button type="button" class="commission-drawer-close" data-unbilled-close aria-label="關閉">×</button></header><form id="dailyWorkForm"><div class="daily-drawer-body"><p class="unbilled-notice">數量請填修改後的總數。例如原有 10、追加 3，請填 13。新項目會加入這筆每日作業；日期、員工與原單價維持不變。</p>${preview.groups.map(groupHtml).join('')}<section class="unbilled-review" id="unbilledReview" aria-live="polite" hidden></section><p id="unbilledError" role="alert" hidden></p></div><footer><button type="button" class="commission-secondary" data-unbilled-close>取消</button><button class="commission-primary" type="submit">檢查變更</button></footer></form></aside>`;
+    layer.hidden=false;layer.classList.add('is-open');
+    const form=$('#dailyWorkForm',layer),submit=$('button[type="submit"]',form),review=$('#unbilledReview',form),errorBox=$('#unbilledError',form);
+    let reviewed='',committed=false;
+    const clearReview=()=>{reviewed='';review.hidden=true;errorBox.hidden=true;submit.textContent='檢查變更'};
+    form.addEventListener('input',clearReview);form.addEventListener('change',clearReview);
+    const isCurrent=()=>dailyEditorActive&&form.isConnected&&$('#dailyWorkForm',layer)===form;
+    const close=()=>{if(dailySubmitInFlight||!isCurrent())return;layer.onkeydown=null;closeDrawer()};
+    $$('[data-unbilled-close]',layer).forEach(button=>button.onclick=close);
+    layer.onkeydown=event=>{
+      if(event.key==='Escape'){event.preventDefault();close()}
+      if(event.key==='Tab'){const targets=$$('button,input,select',layer).filter(node=>!node.disabled&&node.getClientRects().length),first=targets[0],last=targets.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus()}}
+    };
+    $$('[data-unbilled-add]',form).forEach(button=>button.onclick=()=>{
+      if(dailySubmitInFlight)return;
+      const gi=Number(button.dataset.unbilledAdd),group=preview.groups[gi],quotes=store.confirmedQuotationItems(group.project,group.customer).filter(row=>row.pricingType==='actual'),row=document.createElement('div');
+      row.className='unbilled-addition';row.dataset.groupIndex=gi;
+      row.innerHTML=`<div class="unbilled-addition-heading"><b>追加施工</b><button class="commission-secondary" type="button" data-add-remove>移除此追加</button></div><div class="unbilled-fields"><label><span>戶別</span><input data-add-house required placeholder="例如 2A"></label><label class="unbilled-wide"><span>施工來源</span><select data-add-source><option value="manual">手動施工／無報價來源</option>${quotes.map((quote,index)=>`<option value="${index}">${esc(quote.item)} · $${decimal(quote.price)}／${esc(quote.unit)}</option>`).join('')}</select></label><label class="unbilled-wide"><span>施工項目</span><input data-add-item required></label><label><span>單位</span><input data-add-unit required value="式"></label><label><span>施工數量</span><input data-add-qty type="number" min="0.000001" step="any" inputmode="decimal" required></label><label><span>單價</span><input data-add-price type="number" min="0" step="any" inputmode="decimal" required></label><label><span>稅別</span><select data-add-tax><option>未稅</option><option>含稅</option></select></label></div><small>此項目將列入待請款，並沿用本案場原員工與抽成比例。</small>`;
+      row.unbilledQuotes=quotes;
+      $('[data-add-source]',row).onchange=()=>{
+        const value=$('[data-add-source]',row).value,quote=value==='manual'?null:quotes[Number(value)];
+        for(const [selector,key] of [['[data-add-item]','item'],['[data-add-unit]','unit'],['[data-add-price]','price']]){const input=$(selector,row);input.readOnly=Boolean(quote);if(quote)input.value=quote[key]??''}
+        $('[data-add-tax]',row).disabled=Boolean(quote);if(quote)$('[data-add-tax]',row).value=quote.taxMode||'未稅';clearReview();
+      };
+      $('[data-add-remove]',row).onclick=()=>{if(!dailySubmitInFlight){row.remove();clearReview()}};
+      $(`[data-unbilled-additions="${gi}"]`,form).appendChild(row);clearReview();$('[data-add-house]',row).focus();
+    });
+    const collect=()=>{
+      const changes=$$('[data-unbilled-qty]',form).map(input=>{const [gi,index]=input.dataset.unbilledQty.split(':').map(Number),group=preview.groups[gi],old=group.rows[index].item;return {groupId:group.groupId,workItemId:old.workItemId,qty:input.value,old,group}}).filter(row=>Number(row.qty)!==Number(row.old.qty));
+      const additions=$$('.unbilled-addition',form).map(row=>{
+        const group=preview.groups[Number(row.dataset.groupIndex)],value=$('[data-add-source]',row).value,quote=value==='manual'?null:row.unbilledQuotes[Number(value)];
+        return {groupId:group.groupId,house:$('[data-add-house]',row).value.trim(),item:$('[data-add-item]',row).value.trim(),unit:$('[data-add-unit]',row).value.trim(),qty:$('[data-add-qty]',row).value,inputPrice:$('[data-add-price]',row).value,taxMode:$('[data-add-tax]',row).value,sourceType:quote?'quotation':'manual',quotationId:quote?.quotationId||'',quotationLineId:quote?.quotationLineId||''};
+      });
+      return {changes,additions};
+    };
+    form.onsubmit=async event=>{
+      event.preventDefault();if(dailySubmitInFlight||committed||!isCurrent())return;
+      if(!form.reportValidity())return;
+      const {changes,additions}=collect(),payload={expectedFingerprint:preview.fingerprint,changes:changes.map(({groupId,workItemId,qty})=>({groupId,workItemId,qty})),additions},signature=JSON.stringify(payload);
+      if(!changes.length&&!additions.length){errorBox.textContent='尚未變更施工明細';errorBox.hidden=false;return}
+      if(reviewed!==signature){
+        const taxRate=number(state.settings.defaultTax)||5,amount=(qty,price,tax)=>tax==='含稅'?Math.round(number(qty)*number(price)/(1+taxRate/100)):number(qty)*number(price),delta=changes.reduce((sum,row)=>sum+amount(row.qty,row.old.inputPrice??row.old.unitPrice??row.old.price,row.old.taxMode)-number(row.old.untaxedSubtotal),0)+additions.reduce((sum,row)=>sum+amount(row.qty,row.inputPrice,row.taxMode),0);
+        review.innerHTML=`<h3>確認本次變更</h3><ul>${changes.map(row=>`<li>${esc(row.group.projectName)}／${esc(row.old.house||'未指定戶別')}／${esc(row.old.item||row.old.itemName)}：${decimal(row.old.qty)} → <b>${decimal(row.qty)}</b> ${esc(row.old.unit)}</li>`).join('')}${additions.map(row=>`<li>追加 ${esc(row.house)}／${esc(row.item)}：${decimal(row.qty)} ${esc(row.unit)} × $${decimal(row.inputPrice)}（${esc(row.taxMode)}）</li>`).join('')}</ul><p>待請款未稅金額：${money(batch.billingSummary.remainingAmount)} → <b>${money(batch.billingSummary.remainingAmount+delta)}</b></p><p>儲存後，同步更新這筆施工的業績與未付款抽成。</p>`;
+        review.hidden=false;reviewed=signature;submit.textContent='確認儲存';review.scrollIntoView({block:'nearest',behavior:'smooth'});return;
+      }
+      dailySubmitInFlight=true;
+      const enabled=$$('input,select,button',layer).filter(node=>!node.disabled);enabled.forEach(node=>node.disabled=true);submit.textContent='儲存中…';errorBox.hidden=true;
+      try{
+        await store.saveDailyUnbilledItems(batchId,payload);committed=true;
+        const result=store.getLastStoreTransactionResult?.();if(result?.status==='COMMITTED_WITH_NOTIFICATION_WARNING')showManualCommittedWarning(result);
+      }catch(error){
+        const result=store.getLastStoreTransactionResult?.();
+        if(error.transactionStatus==='COMMITTED_WITH_NOTIFICATION_WARNING'&&result?.operationType==='saveDailyUnbilledItems'){committed=true;showManualCommittedWarning(result)}
+        else{errorBox.textContent=error.message||'儲存失敗，請重新開啟明細確認';errorBox.hidden=false;reviewed='';review.hidden=true}
+      }finally{dailySubmitInFlight=false;enabled.forEach(node=>node.disabled=false);submit.textContent='檢查變更'}
+      if(committed){close();window.KushePhase1?.toast('未請款明細已更新，已請款內容保留')}
+    };
+    startDailyDrawerViewport(layer);$('[data-unbilled-qty]',form)?.focus({preventScroll:true});
   }
   function openDailyDrawerLegacy(batchId='') {
     const state=store.getState(),logs=batchId?(state.dailyLogs||[]).filter((log)=>(log.batchId||log.id)===batchId):[];
@@ -1256,3 +1329,4 @@
   }});
 
 }());
+
