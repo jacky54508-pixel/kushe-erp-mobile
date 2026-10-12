@@ -203,7 +203,7 @@
     white-space: normal;
   }
 
-  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-desktop-table [data-daily-view] {
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-desktop-table :is([data-daily-view],[data-daily-unbilled]) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -222,7 +222,7 @@
     vertical-align: middle;
   }
 
-  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-desktop-table [data-daily-view]:hover {
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-desktop-table :is([data-daily-view],[data-daily-unbilled]):hover {
     border-color: #91add0;
     background: #edf5ff;
   }
@@ -278,6 +278,13 @@
     margin: 0;
   }
 
+  /* Keep the P28 lock label below the two actions instead of widening the row. */
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-desktop-table [data-daily-unbilled] + .daily-billing-lock {
+    display: table;
+    width: fit-content;
+    margin: 2px 0 0;
+  }
+
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-readonly-detail>header>[data-detail-close] {
     min-width: 72px;
     min-height: 38px;
@@ -319,7 +326,7 @@
     background: #064eba;
   }
 
-  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-desktop-table :is([data-daily-view],.commission-row-actions button):focus-visible,
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-desktop-table :is([data-daily-view],[data-daily-unbilled],.commission-row-actions button):focus-visible,
   :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-readonly-detail [data-detail-close]:focus-visible {
     outline: 3px solid rgba(7,91,216,.22);
     outline-offset: 2px;
