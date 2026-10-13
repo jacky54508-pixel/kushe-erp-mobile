@@ -1,0 +1,77 @@
+name: P29-2 isolated source build
+on:
+  push:
+    branches: [p29-2-build-20261014]
+permissions:
+  contents: write
+jobs:
+  build:
+    if: github.repository == 'jacky54508-pixel/kushe-erp-mobile' && github.ref == 'refs/heads/p29-2-build-20261014'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: bootstrap
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: d94839c6d3417ad23c3b553ef120cb78ff68c472
+          path: work
+          fetch-depth: 1
+      - name: Apply exact tested source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib,base64,zlib,json,hashlib
+          root=pathlib.Path('work')
+          packed=pathlib.Path('bootstrap/tools/p29-2-payload.b64').read_text()
+          # Correct a known one-character transport transcription; reject every other difference.
+          packed=packed.replace('GrcEcc23AvrW23','GrcEcc23Avr23')
+          assert hashlib.sha256(packed.encode()).hexdigest()=='ee55fd27ac696ca8def4535492f64a15ba14cb106464b078d962534863782b2c','Payload transport checksum mismatch'
+          payload=json.loads(zlib.decompress(base64.b64decode(packed)))
+          allowed={'assets/js/erp-store.js','assets/js/projects.js','assets/js/commissions.js','assets/js/billing.js','assets/js/project-billing-defaults.js','assets/css/project-billing-defaults.css','index.html'}
+          assert set(payload['manifest'])==allowed
+          blob=lambda b:hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
+          for path,m in payload['manifest'].items():
+            p=root/path
+            assert (blob(p.read_bytes()) if p.exists() else None)==m['before'],path+' baseline mismatch'
+            text=p.read_text() if p.exists() else payload['adds'][path]
+            for op in payload['operations']:
+              if op['path']==path:
+                assert text.count(op['old'])==1,path+' replacement mismatch'
+                text=text.replace(op['old'],op['new'])
+            assert blob(text.encode())==m['after'],path+' tested hash mismatch'
+            p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text)
+          pathlib.Path('qa').mkdir()
+          pathlib.Path('qa/store-test.cjs').write_text(payload['test'])
+          pathlib.Path('qa/source-manifest.json').write_text(json.dumps(payload['manifest'],indent=2))
+          print('All seven source files exactly match the locally tested hashes')
+          PY
+          cd work
+          git diff --check
+          for f in assets/js/erp-store.js assets/js/projects.js assets/js/commissions.js assets/js/billing.js assets/js/project-billing-defaults.js; do node --check "$f"; done
+          QA_ROOT="$PWD" QA_EVIDENCE_DIR="$GITHUB_WORKSPACE/qa" node ../qa/store-test.cjs
+      - name: Publish clean review branch only
+        working-directory: work
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/beta | cut -f1)" = d94839c6d3417ad23c3b553ef120cb78ff68c472
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = cc8f0b3c8742d20117defb1c8eaace41bf392a78
+          test -z "$(git ls-remote origin refs/heads/p29-2-ready-20261014)"
+          git add -- assets/js/erp-store.js assets/js/projects.js assets/js/commissions.js assets/js/billing.js assets/js/project-billing-defaults.js assets/css/project-billing-defaults.css index.html
+          test "$(git diff --cached --name-only | wc -l)" -eq 7
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'P29-2: preserve explicit project billing defaults and complete quick creation' -m 'Resolve explicit none/no-invoice before company defaults. Inherit omitted conditions coherently on new projects and preserve existing project preferences on edits. Add quick-project retention and invoice fields, draft-only origin summary, conditional-field visibility and per-invoice override preservation across detail-mode changes.' -m 'Validated 24 isolated real-Store transaction scenarios and 37 Chromium UI/integration checks using synthetic data only. No live ERP database access, migration or backfill. Existing billing writers, money calculations, daily-submit path, payroll, security and cloud-sync code unchanged. Beta review only.'
+          git push origin HEAD:refs/heads/p29-2-ready-20261014
+          echo "READY_COMMIT=$(git rev-parse HEAD)" | tee ../qa/ready-commit.txt
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = cc8f0b3c8742d20117defb1c8eaace41bf392a78
+          test "$(git ls-remote origin refs/heads/beta | cut -f1)" = d94839c6d3417ad23c3b553ef120cb78ff68c472
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p29-2-source-build-evidence
+          path: qa/
+          retention-days: 7
