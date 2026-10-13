@@ -995,3 +995,140 @@
   :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-fields { grid-template-columns:repeat(2,minmax(0,1fr)); }
   :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .unbilled-wide { grid-column:1/-1; }
 }
+
+/* P29: compact daily draft editor. Existing unbilled editor and accounting screens are excluded. */
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact { width:min(1240px,100vw); display:flex; flex-direction:column; overflow:hidden; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact>header { padding:12px 18px; min-height:64px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact>header h2 { font-size:20px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm { padding:0; display:flex; flex-direction:column; flex:1; min-height:0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm>.daily-drawer-body { display:flex; flex-direction:column; gap:12px; padding:16px; overflow:auto; min-height:0; flex:1; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-form-section { padding:12px; border-radius:10px; box-shadow:none; margin:0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-section-title { margin-bottom:8px; gap:10px; padding:0; min-height:0; background:none; border:0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-section-title h3 { font-size:14px; margin:0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-section-title p { font-size:12px; margin:3px 0 0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-form-grid { gap:10px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-employee-grid { display:flex; gap:8px; flex-wrap:wrap; padding:0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-employee-choice { min-height:40px; padding:7px 12px; border-radius:8px; box-shadow:none; gap:8px; width:auto; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-employee-name b { font-size:14px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-employee-name small { display:none; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-entry-mode-section { padding:8px 12px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-entry-mode-section .daily-section-title { margin:0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-entry-mode-section .daily-section-title p { display:none; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-entry-mode-grid { display:flex; gap:6px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-entry-mode-card { min-height:40px; padding:8px 36px 8px 12px; border-radius:7px; box-shadow:none; transform:none; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-entry-mode-card b { font-size:14px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-entry-mode-card small { display:none; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-entry-mode-card::after { width:20px; height:20px; right:8px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-entry-mode-card:has(input:focus-visible) { outline:2px solid #186fbe; outline-offset:2px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-project-block { padding:0; overflow:visible; border-color:#dce5ee; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-header { padding:10px 12px; gap:10px; background:#f7f9fc; border-radius:9px 9px 0 0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-project-block>.daily-house-header { grid-template-columns:minmax(0,1fr) auto; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-project-control { gap:8px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-project-control>label>span { font-size:12px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact [data-project-houses] { padding:10px; gap:10px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-group { border-radius:8px; box-shadow:none; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-group>.daily-house-header { grid-template-columns:minmax(110px,180px) minmax(100px,1fr) auto; align-items:center; padding:8px 10px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-group>.daily-house-header>label { display:flex; gap:8px; align-items:center; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-name { min-width:0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-group>.daily-house-header>label>span { flex-shrink:0; white-space:nowrap; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm>.daily-drawer-body>* { flex-shrink:0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-amount { display:flex; gap:8px; justify-content:flex-end; align-items:center; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-amount span { font-size:12px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-subtotal { font-size:16px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-group>footer, :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-project-block>footer { padding:8px 10px; margin:0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-next-source { font-size:11px; margin:4px 0 0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-items { table-layout:fixed; min-width:850px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-col-item { width:29%; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-col-unit { width:6%; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-col-qty { width:9%; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-col-tax { width:8%; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-col-price { width:10%; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-col-total { width:13%; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-col-purpose { width:16%; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-col-actions { width:9%; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-items :is(td,th) { padding:7px 6px; vertical-align:top; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-items th { font-size:12px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-items :is(input,select) { font-size:14px; min-height:36px; padding:6px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-line-item[readonly] { display:none; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-quote-hint { font-size:11px; line-height:1.4; margin-top:4px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-line[data-source-type=""] .daily-line-item { display:none; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact :is(.daily-row-menu,.daily-house-menu) summary { list-style:none; cursor:pointer; font-size:12px; color:#44617c; border:1px solid #cfdbe7; border-radius:6px; padding:8px 10px; text-align:center; background:#fff; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact :is(.daily-row-menu,.daily-house-menu) summary::-webkit-details-marker { display:none; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact :is(.daily-row-menu,.daily-house-menu)[open]>summary { background:#e9f2fb; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-menu>div { display:flex; flex-wrap:wrap; gap:5px; padding-top:6px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-line-actions { display:grid; gap:4px; padding-top:4px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-line-actions button { padding:6px; min-height:32px; font-size:12px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-pay-details { border:1px solid #dce5ee; border-radius:9px; background:#fff; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-pay-details>summary { cursor:pointer; padding:12px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:13px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyPaySummary { color:#5c6e82; flex:1; font-size:12px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-pay-details>summary em { color:#226bb2; font-size:12px; font-style:normal; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-pay-details-body { padding:0 12px 12px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-pay-details-body>.daily-form-section { border:0; padding:10px 0 0; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm>.daily-compact-footer { display:grid; grid-template-columns:1fr auto; gap:8px 16px; flex-shrink:0; padding:10px 16px max(10px,env(safe-area-inset-bottom)); border-top:1px solid #dce5ee; background:#fff; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-draft-count { grid-column:1; font-size:12px; color:#62758a; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-total-bar { grid-column:1; display:flex; gap:6px 16px; flex-wrap:wrap; margin:0; padding:0; border:0; border-radius:0; background:none; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-total-bar span { font-size:11px; display:flex; gap:5px; align-items:center; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-total-bar b { font-size:14px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-total-bar[hidden] { display:none; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-footer-actions { grid-column:2; grid-row:1 / 3; display:flex; align-items:center; gap:8px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-save-feedback { grid-column:1 / -1; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-layer { position:absolute; inset:0; z-index:8; display:grid; place-items:center; padding:24px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-layer[hidden] { display:none; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-backdrop { position:absolute; inset:0; border:0; background:rgba(15,30,50,.5); width:100%; height:100%; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-card { position:relative; display:flex; flex-direction:column; width:min(1100px,100%); max-height:100%; min-height:0; background:#fff; border-radius:14px; box-shadow:0 20px 60px #152c4838; overflow:hidden; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-card>header { flex-shrink:0; display:flex; justify-content:space-between; align-items:center; padding:16px 20px 10px; gap:16px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-card h3 { margin:4px 0 0; font-size:21px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-card small { display:block; font-weight:400; font-size:12px; color:#68798a; margin-top:4px; line-height:1.5; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-card button { min-height:40px; cursor:pointer; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-card>header>button { width:40px; border:0; background:#f1f5f9; border-radius:8px; font-size:24px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp #dailyQuantityHelp { flex-shrink:0; margin:0; padding:0 20px 16px; color:#5d7186; font-size:13px; line-height:1.6; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-scroll { overflow:auto; min-height:0; margin:0 20px; border:1px solid #dce5ee; border-radius:8px; overscroll-behavior:contain; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-table { border-collapse:separate; border-spacing:0; width:100%; table-layout:auto; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-table :is(th,td) { padding:10px; border-bottom:1px solid #e7edf3; border-right:1px solid #e7edf3; text-align:left; background:#fff; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-table thead th { position:sticky; top:0; z-index:2; background:#f2f6fb; min-width:160px; font-size:14px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-table thead th:first-child { z-index:3; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-table tr>:first-child { position:sticky; left:0; min-width:110px; width:130px; z-index:1; box-shadow:1px 0 #dce5ee; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-table tr>:last-child { min-width:75px; width:75px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-table input { box-sizing:border-box; width:100%; min-width:90px; padding:9px; border:1px solid #cbd8e5; border-radius:6px; font-size:16px; min-height:42px; color:#142f4d; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-table input:focus { outline:2px solid #2b7cc3; outline-offset:1px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-table input[aria-invalid="true"] { border-color:#c23b45; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-table button { border:0; background:none; color:#63758a; padding:5px; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-tools { flex-shrink:0; padding:10px 20px; display:flex; gap:16px; align-items:center; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-tools span { font-size:12px; color:#64758a; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-error { flex-shrink:0; margin:0; padding:0 20px 10px; font-size:13px; color:#b12a38; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-card>footer { flex-shrink:0; display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 20px; border-top:1px solid #dce5ee; background:#f7faff; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-card>footer>span { font-size:13px; color:#5e7186; }
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-card>footer>div { display:flex; gap:8px; }
+@media(max-width:820px) {
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] .daily-compact>header { min-height:64px; padding:10px 12px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] .daily-compact #dailyWorkForm>.daily-drawer-body { padding:10px; gap:10px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-form-section { padding:10px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-entry-mode-card { min-height:44px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-entry-mode-card b { font-size:13px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] .daily-compact #dailyWorkForm .daily-house-group>.daily-house-header { grid-template-columns:minmax(0,1fr) auto; gap:8px; padding:8px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] .daily-compact #dailyWorkForm .daily-house-group>.daily-house-header>label { grid-column:1; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] .daily-compact #dailyWorkForm .daily-house-amount { grid-column:2; display:block; text-align:right; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-house-amount span { display:block; font-size:11px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] .daily-compact #dailyWorkForm .daily-house-items tbody { padding:6px; gap:8px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] .daily-compact #dailyWorkForm .daily-house-items tr.daily-line { gap:8px; padding:8px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] .daily-compact #dailyWorkForm .daily-house-items :is(.daily-cell-total,.daily-cell-actions) { grid-column:auto; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-quote-hint { font-size:11px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact :is(.daily-row-menu,.daily-house-menu)>summary { min-height:44px; display:flex; align-items:center; justify-content:center; box-sizing:border-box; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-pay-details>summary { gap:6px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyPaySummary { flex-basis:100%; order:2; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm>.daily-compact-footer { padding:8px 10px max(8px,env(safe-area-inset-bottom)); grid-template-columns:1fr; gap:6px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-footer-actions { grid-column:1; grid-row:auto; width:100%; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-footer-actions button { flex:1; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-total-bar { gap:4px 12px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-total-bar span { font-size:10px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact .daily-total-bar b { font-size:12px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-layer { padding:10px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-card>header { padding:12px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp #dailyQuantityHelp { padding:0 12px 10px; font-size:12px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-scroll { margin:0 12px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-card>footer { padding:10px 12px max(10px,env(safe-area-inset-bottom)); flex-wrap:wrap; gap:8px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-card>footer>div { width:100%; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-card>footer button { flex:1; min-height:44px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-tools { flex-shrink:0; padding:8px 12px; gap:8px; }
+  :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-error { padding:0 12px 8px; }
+}
