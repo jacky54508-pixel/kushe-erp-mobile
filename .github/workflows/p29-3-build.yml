@@ -1,0 +1,45 @@
+name: P29-3 isolated source build
+on:
+  push:
+    branches: [p29-3-build-20261014]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ccc786ac71c4d5cc1bc2df875b1da6aa2d74d0a5
+          path: source
+      - name: Apply and verify exact locally tested source
+        run: |
+          python harness/qa/p29-3-apply.py
+          cd source
+          node --check assets/js/erp-store.js
+          node --check assets/js/payroll.js
+          git diff --check
+      - name: Publish clean review branch only
+        run: |
+          set -euo pipefail
+          cd source
+          test -z "$(git ls-remote --heads origin p29-3-ready-20261014)"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add assets/js/erp-store.js assets/js/payroll.js assets/css/payroll-adjustments.css index.html
+          test "$(git diff --cached --name-only | wc -l)" = 4
+          git commit -m 'P29-3: separate monthly fuel edits from unchanged commission bases' -m 'Preserve unpaid-month editing and existing paid/source locks. Add scoped stale-form protection, compact adjustment fields, mixed-basis preservation, visible errors and duplicate-submit protection. Local validation: 25 isolated real-Store scenarios and 45 Chromium UI checks with synthetic data only. Build verifies exact tested file hashes. No live ERP data access, migrations or backfills. Beta review only.'
+          git push origin HEAD:refs/heads/p29-3-ready-20261014
+          git rev-parse HEAD > ../ready-commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p29-3-source-build-evidence
+          path: |
+            source-manifest.json
+            ready-commit.txt
+          retention-days: 7
