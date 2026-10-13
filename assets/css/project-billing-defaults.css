@@ -1,0 +1,28 @@
+/* P29-2: only project-default controls and the new-billing summary. */
+#commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] .daily-quick-project-card { width:min(680px,100%); max-height:100%; }
+#commissionsApp #commissionDrawerLayer[data-drawer-mode="daily"] .daily-quick-project-body { min-height:0; overflow:auto; overscroll-behavior:contain; }
+#commissionsApp #commissionDrawerLayer .quick-project-conditions { margin:2px 0 0; padding:14px 16px 12px; border-top:1px solid #dce5ef; min-width:0; }
+#commissionsApp #commissionDrawerLayer .quick-project-conditions h4 { margin:0 0 5px; color:#16395e; font-size:15px; font-weight:700; }
+#commissionsApp #commissionDrawerLayer .quick-condition-intro,
+#commissionsApp #commissionDrawerLayer .quick-company-default-hint { margin:0 0 12px; color:#63758a; font-size:12px; line-height:1.6; }
+#commissionsApp #commissionDrawerLayer .quick-company-default-hint { margin:10px 0 0; }
+#commissionsApp #commissionDrawerLayer .quick-condition-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px 14px; }
+#commissionsApp #commissionDrawerLayer .quick-condition-grid label { display:flex; flex-direction:column; gap:6px; min-width:0; }
+#commissionsApp #commissionDrawerLayer .quick-condition-grid label>span { color:#4c6179; font-size:12px; font-weight:600; }
+#commissionsApp #commissionDrawerLayer .quick-condition-grid :is(input,select) { min-width:0; width:100%; min-height:40px; padding:8px 10px; border:1px solid #c9d7e5; border-radius:7px; background:#fff; color:#16395e; font-size:14px; box-sizing:border-box; }
+#commissionsApp #commissionDrawerLayer .quick-condition-grid :is(input,select):focus-visible { outline:2px solid #2873c2; outline-offset:2px; }
+#commissionsApp #commissionDrawerLayer .quick-condition-error { margin:10px 0 0; color:#ac302b; font-size:13px; line-height:1.5; }
+#commissionsApp #commissionDrawerLayer .quick-project-conditions [hidden],
+#projectMasterForm #projectRetentionRateWrap[hidden], #projectMasterForm #projectRetentionBaseWrap[hidden], #projectMasterForm #projectTaxModeWrap[hidden],
+#billingDraftApp :is(#billingRetentionFields,#billingRetentionBaseFields,#billingRetentionRateWrap,#billingRetentionCustomWrap,#billingInvoiceFields)[hidden] { display:none !important; }
+#billingDraftApp .billing-project-defaults { margin:10px 0 4px; padding:10px 12px; border-left:3px solid #326faa; border-radius:4px; background:#f0f5fb; color:#224c76; font-size:14px; line-height:1.6; overflow-wrap:anywhere; }
+#billingDraftApp .billing-project-defaults[data-source="review"] { border-left-color:#9b7427; background:#fff9eb; color:#78591e; }
+#billingDraftApp .billing-defaults-scope { display:block; margin:0 0 18px; color:#65758a; font-size:12px; line-height:1.5; }
+@media(max-width:560px) {
+  #commissionsApp #commissionDrawerLayer .quick-condition-grid { gap:12px 10px; }
+  #commissionsApp #commissionDrawerLayer .quick-condition-grid :is(input,select) { font-size:16px; min-height:44px; padding:8px; }
+  #commissionsApp #commissionDrawerLayer .quick-condition-grid label>span { font-size:12px; }
+}
+@media(max-width:360px) {
+  #commissionsApp #commissionDrawerLayer .quick-condition-grid { grid-template-columns:1fr; }
+}

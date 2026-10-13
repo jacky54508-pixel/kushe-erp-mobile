@@ -5314,7 +5314,7 @@
     const source=customer?.projectDefaultsConfigured===true?customer:latest;
     return {
       defaultRetentionMode:['5','10','custom'].includes(source.defaultRetentionMode)?source.defaultRetentionMode:'none',
-      defaultRetentionRate:Math.max(0,num(source.defaultRetentionRate)),
+      defaultRetentionRate:source.defaultRetentionMode==='5'?5:source.defaultRetentionMode==='10'?10:Math.max(0,num(source.defaultRetentionRate)),
       defaultRetentionBase:source.defaultRetentionBase==='preTax'?'preTax':'taxIncluded',
       defaultInvoiceChoice:source.defaultInvoiceChoice==='invoice_required'?'invoice_required':'no_invoice',
       defaultTaxMode:source.defaultTaxMode==='含稅'?'含稅':'未稅',
@@ -5329,9 +5329,25 @@
     const duplicate=state.projects.find((row)=>row.id!==id&&sameName(row.name,name)&&row.customer===customer.id);
     if(duplicate)throw new Error('此客戶已有同名案場，請直接編輯既有案場');
     const now=new Date().toISOString(),row=state.projects.find((item)=>item.id===id)||{id:uid(),createdAt:now},companyDefaults=companyProjectDefaults(customer);
-    const retentionMode=['5','10','custom'].includes(values.defaultRetentionMode)?values.defaultRetentionMode:(!id?companyDefaults.defaultRetentionMode:'none');
+    // P29-2: resolve only on an explicit save. Never backfill other projects or invoices.
+    const defaults=id?row:companyDefaults;
+    const supplied=key=>hasOwn(values,key)&&values[key]!==undefined;
+    const preference=(key,allowed,fallback)=>{
+      if(supplied(key)){if(!allowed.includes(values[key]))throw new Error('案場請款設定無效：'+key);return values[key]}
+      return allowed.includes(defaults[key])?defaults[key]:fallback;
+    };
+    const retentionMode=preference('defaultRetentionMode',['none','5','10','custom'],'none');
+    const rateInput=supplied('defaultRetentionRate')?values.defaultRetentionRate:defaults.defaultRetentionRate;
+    let retentionRate=retentionMode==='5'?5:retentionMode==='10'?10:0;
+    if(retentionMode==='custom'){
+      if((typeof rateInput!=='string'&&typeof rateInput!=='number')||String(rateInput).trim()===''||!Number.isFinite(Number(rateInput))||Number(rateInput)<0||Number(rateInput)>100)throw new Error('保留比例必須填寫 0～100% 的有效數值');
+      retentionRate=Number(rateInput);
+    }
+    const retentionBase=preference('defaultRetentionBase',['preTax','taxIncluded'],'taxIncluded');
+    const invoiceChoice=preference('defaultInvoiceChoice',['no_invoice','invoice_required'],'no_invoice');
+    const taxMode=preference('defaultTaxMode',['未稅','含稅'],'未稅');
     const defaultCommissionBasis=normalizeCommissionBasis(values.defaultCommissionBasis??(!id?companyDefaults.defaultCommissionBasis:row.defaultCommissionBasis));
-    Object.assign(row,{name,customer:customer.id,customerName:customer.name,address:clean(values.address),startDate:values.startDate||'',expectedEndDate:values.expectedEndDate||'',actualEndDate:values.actualEndDate||'',status:['進行中','已完工','暫停'].includes(values.status)?values.status:'進行中',contractAmount:Math.max(0,num(values.contractAmount)),note:clean(values.note),defaultRetentionMode:retentionMode,defaultRetentionRate:retentionMode==='5'?5:retentionMode==='10'?10:retentionMode==='custom'?Math.max(0,num(values.defaultRetentionRate)):0,defaultRetentionAmount:0,defaultRetentionBase:values.defaultRetentionBase==='preTax'?'preTax':'taxIncluded',defaultInvoiceChoice:values.defaultInvoiceChoice==='invoice_required'?'invoice_required':'no_invoice',defaultTaxMode:values.defaultTaxMode==='含稅'?'含稅':'未稅',defaultPricingMode:pricingMode(values.defaultPricingMode)||row.defaultPricingMode||companyDefaults.defaultPricingMode||'',defaultCommissionBasis,updatedAt:now});
+    Object.assign(row,{name,customer:customer.id,customerName:customer.name,address:clean(values.address),startDate:values.startDate||'',expectedEndDate:values.expectedEndDate||'',actualEndDate:values.actualEndDate||'',status:['進行中','已完工','暫停'].includes(values.status)?values.status:'進行中',contractAmount:Math.max(0,num(values.contractAmount)),note:clean(values.note),defaultRetentionMode:retentionMode,defaultRetentionRate:retentionRate,defaultRetentionAmount:id&&!supplied('defaultRetentionMode')&&!supplied('defaultRetentionRate')?num(row.defaultRetentionAmount):0,defaultRetentionBase:retentionBase,defaultInvoiceChoice:invoiceChoice,defaultTaxMode:taxMode,defaultPricingMode:pricingMode(values.defaultPricingMode)||row.defaultPricingMode||companyDefaults.defaultPricingMode||'',defaultCommissionBasis,updatedAt:now});
     Object.assign(customer,{projectDefaultsConfigured:true,defaultRetentionMode:row.defaultRetentionMode,defaultRetentionRate:row.defaultRetentionRate,defaultRetentionBase:row.defaultRetentionBase,defaultInvoiceChoice:row.defaultInvoiceChoice,defaultTaxMode:row.defaultTaxMode,defaultPricingMode:row.defaultPricingMode,defaultCommissionBasis:row.defaultCommissionBasis,projectDefaultsUpdatedAt:now,updatedAt:now});
     if(!id)state.projects.unshift(row); persist(`${id?'修改':'新增'}案場 ${row.name}｜同步公司預設`); return row;
   }
