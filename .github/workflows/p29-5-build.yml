@@ -1,0 +1,38 @@
+name: P29-5 isolated source build
+on:
+  push:
+    branches: [p29-5-build-20261014]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ddf737cfad6895adddf48072e9a6d9ccc3e7f435
+          path: source
+      - name: Apply exact locally tested source and verify
+        working-directory: source
+        run: python ../harness/apply-p29-5.py
+      - name: Publish clean review branch only
+        working-directory: source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = ddf737cfad6895adddf48072e9a6d9ccc3e7f435
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add assets/css/payroll-commission-picker.css assets/js/payroll-commission-picker.js assets/js/payroll.js index.html
+          git commit -m 'P29-5: group eligible salary commissions by project for explicit bulk selection' -m 'Keep individual allocation identities, original salaryPaymentPlan and payment writers. Add eligible-only project selection across invoices, read-only locked sources, partial-selection state and fixed payment summary. Stop stale plans before submit, preserve drafts and block in-flight changes. Validated 216 offline checks with synthetic data and 33 JavaScript syntax checks. No live ERP data access, migration, backfill or payment execution. Beta review only.'
+          git push origin HEAD:refs/heads/p29-5-ready-20261014
+          git rev-parse HEAD > /tmp/p29-5-evidence/ready-commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p29-5-source-build-evidence
+          path: /tmp/p29-5-evidence
+          retention-days: 7
