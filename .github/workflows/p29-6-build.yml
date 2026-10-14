@@ -1,0 +1,43 @@
+name: P29-6 isolated source build
+on:
+  push:
+    branches: [p29-6-build-20261014]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 8ecc61c322b1a9cdade43c3f60d7f028875ebe75
+          path: source
+          fetch-depth: 1
+      - name: Apply exact locally tested source and verify
+        run: python3 harness/.p29-6-build/apply.py source
+      - name: Publish clean review branch only
+        working-directory: source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "8ecc61c322b1a9cdade43c3f60d7f028875ebe75"
+          test ! -e .p29-6-build
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add assets/js/erp-store.js assets/js/billing.js assets/js/dashboard.js assets/js/receivable-cheques.js assets/css/receivable-cheques.css index.html
+          test "$(git diff --cached --name-only | wc -l)" -eq 6
+          git diff --cached --check
+          git commit -m 'P29-6: register receivable cheques separately from actual bank clearing' -m 'Add cheque number, face date and in-app reminders. Pending tickets reserve receivable capacity without settlement, bank income or commission release. Explicit clearing uses the existing atomic receipt/bank writer with idempotency and scoped stale-form checks. Preserve legacy posted cheque receipts; no automatic migration or backfill. Local validation: 352 isolated synthetic-data checks and 34 JavaScript syntax checks. Native localhost persistence test blocked by container policy and not counted. Build verifies exact tested source hashes. No live ERP data access. Review candidate only; main unchanged.'
+          git push origin HEAD:refs/heads/p29-6-ready-20261014
+          git rev-parse HEAD > ../harness/.p29-6-build/ready-commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p29-6-source-build-evidence
+          path: |
+            harness/.p29-6-build/source-manifest.json
+            harness/.p29-6-build/ready-commit.txt
+          retention-days: 7
