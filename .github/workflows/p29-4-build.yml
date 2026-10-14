@@ -1,0 +1,64 @@
+name: P29-4 isolated source build
+on:
+  push:
+    branches: [p29-4-build-20261014]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: e913bb5bca3e2c6117c03e9c2351d20ecbd92821
+          path: source
+          fetch-depth: 1
+      - name: Apply exact locally tested presentation changes
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = e913bb5bca3e2c6117c03e9c2351d20ecbd92821
+          python ../harness/tools/p29-4-build.py .
+          cp ../harness/tools/p29-4-payroll-actions-notes.css assets/css/payroll-actions-notes.css
+          node --check assets/js/payroll.js
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json,subprocess
+          expected={
+            'assets/css/payroll-actions-notes.css':'876e2c7e649fa8d0f08546b9494bebd71a92f76604e117849afb9c632a4c4609',
+            'assets/js/payroll.js':'73fcbcb57e5d7cda4b98450ef65eac608a92da2a75eb5e438c9fe5709d4d7fbe',
+            'index.html':'934943b1cf7bfea703fa8778accd2b1e73775ef6f7bbea356be8611ede9d66b6'
+          }
+          for f,h in expected.items():
+            got=hashlib.sha256(Path(f).read_bytes()).hexdigest()
+            assert got==h,(f,got,h)
+          changed=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())|set(subprocess.check_output(['git','ls-files','--others','--exclude-standard'],text=True).splitlines())
+          assert changed==set(expected),changed
+          Path('../build-evidence').mkdir(exist_ok=True)
+          Path('../build-evidence/verified-hashes.json').write_text(json.dumps(expected,indent=2))
+          PY
+          git diff --check
+      - name: Publish clean review branch only
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c p29-4-ready-20261014
+          git add assets/js/payroll.js assets/css/payroll-actions-notes.css index.html
+          git commit -m 'P29-4: place salary notes beside amounts and simplify payroll actions' -m 'Reuse existing otherNote, deductionNote and adjustmentNote fields with multiline controls. Keep original notes, source/payment writers, stale-form checks and locks. Clarify employee cash collection separately from wage deductions. Group payable amount/status, retain explicit detail toggle, and prioritize payment before adjustment and salary slip.' -m 'Validated 25 Store regression scenarios, 45 UI regressions and 62 notes/action checks offline with synthetic data only. All other files and 12 protected payroll functions unchanged. No live ERP data access or backfill. Beta review only.'
+          git show --stat > ../build-evidence/commit.txt
+          git diff HEAD^ HEAD > ../build-evidence/changes.patch
+          git push origin HEAD:refs/heads/p29-4-ready-20261014
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p29-4-source-build-evidence
+          path: build-evidence/
+          retention-days: 7
