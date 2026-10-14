@@ -1,0 +1,81 @@
+/* P29-6: scoped, additive cheque entry, registry and due-date presentation. */
+.cheque-overlay{z-index:1600;padding:20px;background:rgba(12,32,57,.48)}
+.cheque-overlay .cheque-card{width:min(1040px,100%);max-height:calc(100dvh - 40px);display:flex;flex-direction:column;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 20px 70px #10294440}
+.cheque-overlay .cheque-card>header{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 22px;background:#fff;border-bottom:1px solid #dce5ee;color:#183552}
+.cheque-card>header small{font-size:12px;color:#6b8197;font-weight:700}
+.cheque-card>header h2{margin:4px 0 6px;font-size:22px;line-height:1.3;color:#15344f}
+.cheque-card>header p{margin:0;color:#637c91;font-size:13px;line-height:1.5}
+.cheque-overlay .cheque-close{display:grid;place-items:center;flex:none;width:44px;height:44px;min-height:44px;padding:0;border:1px solid #d5e0ea;border-radius:9px;color:#466780;background:#fff;font-size:26px}
+.cheque-overlay .cheque-body{padding:20px 22px;overflow:auto;overscroll-behavior:contain;min-height:0;flex:1}
+.cheque-overlay .cheque-card>footer{flex:none;display:flex;justify-content:flex-end;flex-wrap:wrap;gap:10px;padding:12px 22px max(12px,env(safe-area-inset-bottom));border-top:1px solid #dce5ee;background:#fff;margin:0}
+.cheque-card :is(button,input,select,textarea){font:inherit;box-sizing:border-box}
+.cheque-card button{cursor:pointer;min-height:40px;line-height:1.35}
+.cheque-card button:disabled{cursor:default;opacity:.55}
+.cheque-card :is(.commission-primary,.commission-secondary){padding:10px 16px;border-radius:8px;font-size:14px;box-shadow:none}
+.cheque-card .commission-primary{border:1px solid #1268b6;background:#1268b6;color:#fff}
+.cheque-card .commission-secondary{border:1px solid #cfdeeb;background:#fff;color:#234f70}
+.cheque-card .cheque-danger{color:#a44034}
+.cheque-card :is(input,select,textarea){min-width:0;width:100%;min-height:40px;padding:9px 11px;border:1px solid #cbd9e6;border-radius:7px;background:#fff;color:#17344e}
+.cheque-card input[type="number"]{text-align:right;font-variant-numeric:tabular-nums}
+.cheque-card input[type="checkbox"]{width:20px;height:20px;min-height:20px;flex:none;padding:0;accent-color:#1268b6}
+.cheque-card :is(input,select,textarea,button,summary):focus-visible,.cheque-entry-fields :is(input,select):focus-visible{outline:2px solid #438dcc;outline-offset:2px}
+.cheque-card textarea{resize:vertical;min-height:66px}
+.cheque-card label{display:grid;align-content:start;gap:7px;min-width:0;color:#587189;font-size:13px;font-weight:600}
+.cheque-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:0 0 16px}
+.cheque-wide{grid-column:1/-1}
+.cheque-status{display:inline-flex;width:fit-content;align-items:center;padding:4px 8px;border-radius:5px;background:#eff3f7;color:#5f7488;font-size:12px;white-space:nowrap;font-weight:600}
+.cheque-status.is-upcoming{background:#eaf3fe;color:#225e9c}
+.cheque-status.is-today{background:#fff4db;color:#956323}
+.cheque-status.is-overdue,.cheque-status.is-invalid{background:#fff0ea;color:#a4412b}
+.cheque-status.is-cleared{background:#e7f5f0;color:#216f61}
+.cheque-list-summary{display:flex;gap:12px 24px;align-items:center;flex-wrap:wrap;color:#62768c;font-size:14px}
+.cheque-list-summary b{font-size:19px;color:#193d5f;font-variant-numeric:tabular-nums;margin-left:6px}
+.cheque-help{font-size:13px;line-height:1.65;color:#667c90;margin:12px 0 16px}
+.cheque-filter{display:grid;grid-template-columns:200px minmax(0,1fr);gap:14px;margin:20px 0 14px}
+.cheque-list{border:1px solid #dce5ee;border-radius:9px;overflow:hidden}
+.cheque-list-row{display:grid;grid-template-columns:minmax(120px,1fr) minmax(180px,1.6fr) minmax(135px,1fr) minmax(90px,.65fr) auto;align-items:center;gap:16px;padding:14px;border-bottom:1px solid #e6edf4}
+.cheque-list-row:last-child{border-bottom:0}
+.cheque-list-row>div{display:grid;gap:5px;min-width:0}
+.cheque-list-row :is(strong,b){color:#183c5d;overflow-wrap:anywhere;font-size:14px}
+.cheque-list-row small{color:#74869a;font-size:12px;overflow-wrap:anywhere}
+.cheque-list-row .cheque-amount{font-size:17px;text-align:right;font-variant-numeric:tabular-nums}
+.cheque-empty{padding:22px;color:#71869a;font-size:14px}
+.cheque-legacy,.cheque-deductions{margin-top:18px;border-top:1px solid #dce5ee;padding-top:12px;color:#637a90;font-size:13px;line-height:1.7}
+.cheque-legacy summary,.cheque-deductions summary{cursor:pointer;min-height:36px}
+.cheque-ticket-head{display:flex;align-items:center;gap:16px;padding:0 0 18px;border-bottom:1px solid #e3eaf1}
+.cheque-ticket-head>div{display:grid;gap:6px;min-width:0}
+.cheque-ticket-head small{color:#6e8498;font-size:13px}
+.cheque-ticket-head strong{font-size:22px;color:#214562;overflow-wrap:anywhere}
+.cheque-ticket-head .cheque-ticket-amount{margin-left:auto;font-size:25px;font-variant-numeric:tabular-nums}
+.cheque-meta{display:grid;grid-template-columns:1fr 1fr;gap:18px 24px;margin:20px 0}
+.cheque-meta>div{min-width:0}.cheque-meta dt{font-size:12px;color:#6c8297;margin-bottom:5px}
+.cheque-meta dd{margin:0;font-size:14px;color:#20415d;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}
+.cheque-success{padding:12px;background:#ebf6f1;color:#2b6e60;font-size:13px;line-height:1.65;border-radius:7px}
+.cheque-clear-amount{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:#f1f6fc;border-radius:8px;margin-bottom:20px;color:#647a90}
+.cheque-clear-amount strong{font-size:26px;color:#174b75}
+.cheque-clear-preview{display:flex;flex-wrap:wrap;justify-content:space-between;gap:16px;background:#f5f8fc;border-radius:8px;padding:14px;font-size:13px;color:#627a91}
+.cheque-clear-preview b{display:block;margin-top:6px;color:#185d73;font-size:21px;font-variant-numeric:tabular-nums}
+.cheque-card .cheque-confirm{display:flex;align-items:flex-start;gap:10px;margin-top:18px;line-height:1.65;font-size:14px;color:#23445f}
+.cheque-confirm input{margin:2px 0 0}
+.cheque-card .cheque-feedback{flex:0 0 100%;margin:0 0 4px;padding:9px 12px;background:#fff1e9;border:1px solid #ebc5b2;border-radius:7px;color:#923d25;font-size:13px;line-height:1.5}
+.cheque-card .cheque-feedback[data-tone="status"]{background:#eff5fc;border-color:#d5e3f2;color:#285577}
+.cheque-card .cheque-feedback[hidden]{display:none}
+#receiptEditorForm .cheque-entry-fields{grid-column:1/-1;border:1px solid #d5e2ef;border-radius:9px;padding:14px 16px;margin:0;background:#f8fbff;min-width:0}
+#receiptEditorForm .cheque-entry-fields[hidden]{display:none!important}
+#receiptEditorForm .cheque-entry-fields legend{font-size:14px;font-weight:700;padding:0 7px;color:#254c6b}
+#receiptEditorForm .cheque-entry-fields .cheque-fields{gap:12px;margin:0}
+#receiptEditorForm .cheque-entry-fields label{min-width:0;display:grid;gap:6px;align-content:start}
+#receiptEditorForm .cheque-entry-fields :is(input,select){min-width:0;width:100%;font-size:14px}
+#receiptEditorForm .cheque-entry-fields .cheque-help{margin-bottom:0}
+.cheque-entry-note{grid-column:1/-1;padding:10px 13px;border:1px solid #dbe7f2;border-radius:8px;background:#f4f8fd;color:#5f758a;font-size:13px;line-height:1.65}
+#receivablesApp .cheque-toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:12px 16px;margin:0 0 16px;background:#fff;border:1px solid #d8e4ee;border-radius:9px}
+#receivablesApp .cheque-toolbar>div{display:flex;align-items:center;gap:16px;flex-wrap:wrap;min-width:0}
+#receivablesApp .cheque-toolbar strong{font-size:15px;color:#204766}
+#receivablesApp .cheque-toolbar span{font-size:13px;color:#697f92}
+#receivablesApp .cheque-toolbar button{white-space:nowrap;min-height:40px;font-size:13px;padding:8px 14px;box-shadow:none}
+#receivablesApp .cheque-row-link{min-height:34px;padding:5px 8px;background:#eef5fc;color:#28628e;border:0;border-radius:5px;font-size:12px;cursor:pointer;white-space:nowrap}
+@media(max-width:820px){.cheque-list-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:12px}.cheque-list-row>div:nth-child(2){grid-column:1/3;grid-row:2}.cheque-list-row>div:nth-child(3){grid-column:2;grid-row:1}.cheque-list-row>.cheque-amount{grid-column:3;grid-row:1}.cheque-list-row>button{grid-column:3;grid-row:2}.cheque-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){
+ .cheque-overlay{padding:8px}.cheque-overlay .cheque-card{max-height:calc(100dvh - 16px);border-radius:12px}.cheque-overlay .cheque-card>header{padding:14px}.cheque-card>header h2{font-size:20px}.cheque-overlay .cheque-body{padding:16px 14px}.cheque-overlay .cheque-card>footer{padding:10px 14px max(10px,env(safe-area-inset-bottom));gap:8px}.cheque-card>footer button{flex:1 1 auto;min-height:44px;font-size:14px}.cheque-card :is(input,select,textarea){font-size:16px;min-height:44px}.cheque-filter{grid-template-columns:1fr;gap:12px;margin-top:16px}.cheque-fields{gap:12px}.cheque-fields label:nth-child(1),.cheque-fields label:nth-child(2){min-width:0}.cheque-list-row{grid-template-columns:minmax(0,1fr) minmax(90px,auto);gap:12px;padding:12px}.cheque-list-row>div:nth-child(2){grid-column:1/3;grid-row:2}.cheque-list-row>div:nth-child(3){grid-column:1;grid-row:3}.cheque-list-row>.cheque-amount{grid-column:2;grid-row:1}.cheque-list-row>button{grid-column:2;grid-row:3;min-height:44px}.cheque-list-summary{gap:12px}.cheque-ticket-head{gap:10px;flex-wrap:wrap}.cheque-ticket-head .cheque-ticket-amount{font-size:23px}.cheque-ticket-head strong{font-size:19px}.cheque-meta{gap:16px}.cheque-meta>div:first-child{grid-column:1/-1}.cheque-card .cheque-confirm{font-size:13px}.cheque-card .cheque-confirm input{min-height:20px}.cheque-clear-preview{gap:12px}.cheque-clear-preview b{font-size:19px}#receiptEditorForm .cheque-entry-fields{padding:12px}#receiptEditorForm .cheque-entry-fields :is(input,select){font-size:16px;min-height:44px}#receivablesApp .cheque-toolbar{padding:12px;gap:10px}#receivablesApp .cheque-toolbar>div{gap:6px}#receivablesApp .cheque-toolbar span{line-height:1.5}
+}
+@media(max-width:360px){.cheque-fields{grid-template-columns:1fr}.cheque-meta{grid-template-columns:1fr}.cheque-ticket-head .cheque-ticket-amount{width:100%;margin-left:0}.cheque-close{align-self:flex-start}}
