@@ -4705,8 +4705,19 @@
     if(!Number.isFinite(amount)||amount<0)throw new Error(`${label}必須是 0 以上的有限數字`);
     return Math.round(amount);
   }
+  // P29-3: an in-memory form guard only; never stored or backfilled into business records.
+  function payrollAdjustmentSnapshot(reference) {
+    const key=String(reference||''),record=(state.payroll||[]).find(row=>String(row.id)===key),divider=key.lastIndexOf('__');
+    const employee=record?payrollEmployeeId(record):divider>0?key.slice(0,divider):'',month=record?String(record.month||''):divider>0?key.slice(divider+2):'';
+    if(!employee||!/^\d{4}-\d{2}$/.test(month))return '';
+    const belongs=row=>String(row.employee||row.employeeId||'')===employee&&monthOf(row.date||row.month)===month;
+    const logs=(state.dailyLogs||[]).filter(belongs),logIds=new Set(logs.map(row=>String(row.id))),billingIds=new Set(logs.flatMap(row=>[row.billingId,...(row.items||[]).map(item=>item.billingId)]).filter(Boolean).map(String));
+    const ordered=rows=>[...rows].sort((a,b)=>String(a.id||'').localeCompare(String(b.id||'')));
+    return JSON.stringify({payroll:ordered(state.payroll.filter(row=>payrollEmployeeId(row)===employee&&String(row.month||'')===month)),attendance:ordered((state.attendance||[]).filter(belongs)),commissions:ordered((state.commissions||[]).filter(row=>belongs(row)||(row.sourceType==='daily-log'&&logIds.has(String(row.sourceId||''))))),dailyLogs:ordered(logs),billings:ordered((state.billings||[]).filter(row=>billingIds.has(String(row.id))))});
+  }
   async function updatePayrollAdjustments(groupKey, values={}) {
     requireStoreTransactionDraft();
+    if(values.expectedAdjustmentSnapshot!==undefined&&values.expectedAdjustmentSnapshot!==payrollAdjustmentSnapshot(groupKey))throw new Error('此員工該月份的薪資或施工來源已更新；本次未儲存，請保留輸入並重新開啟核對。');
     const reference=String(groupKey||''),group=monthlyPayrollGroups().find((row)=>row.key===reference||row.recordIds.some((id)=>String(id)===reference));
     let employeeId=group?.employeeId||'',month=group?.month||'';
     if(!group){const divider=reference.lastIndexOf('__');if(divider>0){employeeId=reference.slice(0,divider);month=reference.slice(divider+2)}}
@@ -4716,8 +4727,11 @@
     const normalized=Object.fromEntries(salaryAdjustmentFields.map(([field,label])=>[field,payrollAdjustmentAmount(values[field],label)])),payrollAdjustmentNote=String(values.adjustmentNote??values.payrollAdjustmentNote??'').trim(),otherNote=String(values.otherNote??records.find((row)=>String(row.otherNote||'').trim())?.otherNote??'').trim(),deductionNote=String(values.deductionNote??records.find((row)=>String(row.deductionNote||'').trim())?.deductionNote??'').trim();
     const requestedBases=values.projectCommissionBases&&typeof values.projectCommissionBases==='object'&&!Array.isArray(values.projectCommissionBases)?values.projectCommissionBases:{};
     for(const [projectId,rawBasis] of Object.entries(requestedBases)){
+      if(!['preTax','taxIncluded'].includes(rawBasis))throw new Error('抽成計算基準無效，請重新選擇。');
       const basis=normalizeCommissionBasis(rawBasis),targets=(state.dailyLogs||[]).filter((log)=>String(log.employee||'')===employeeId&&monthOf(log.date)===month&&String(log.project||'')===String(projectId));
       if(!targets.length)continue;
+      // Cached clients may still send all selects. An unchanged basis is NOT a request to recalculate commission.
+      if(targets.every(log=>normalizeCommissionBasis(log.commissionBasis)===basis))continue;
       if(targets.some((log)=>dailyLogCommissionSettlementLock(log).locked))throw new Error('此案場抽成已有實際發放紀錄，不能直接改含稅／未稅基準。');
       const formalBasis=projectCommissionBasisAmounts(employeeId,month,projectId);
       if(!formalBasis.resolved)throw new Error(`此案場無法唯一核對正式請款金額：${formalBasis.reason||'請確認請款關聯'}`);
@@ -5314,7 +5328,7 @@
     const source=customer?.projectDefaultsConfigured===true?customer:latest;
     return {
       defaultRetentionMode:['5','10','custom'].includes(source.defaultRetentionMode)?source.defaultRetentionMode:'none',
-      defaultRetentionRate:Math.max(0,num(source.defaultRetentionRate)),
+      defaultRetentionRate:source.defaultRetentionMode==='5'?5:source.defaultRetentionMode==='10'?10:Math.max(0,num(source.defaultRetentionRate)),
       defaultRetentionBase:source.defaultRetentionBase==='preTax'?'preTax':'taxIncluded',
       defaultInvoiceChoice:source.defaultInvoiceChoice==='invoice_required'?'invoice_required':'no_invoice',
       defaultTaxMode:source.defaultTaxMode==='含稅'?'含稅':'未稅',
@@ -5329,9 +5343,25 @@
     const duplicate=state.projects.find((row)=>row.id!==id&&sameName(row.name,name)&&row.customer===customer.id);
     if(duplicate)throw new Error('此客戶已有同名案場，請直接編輯既有案場');
     const now=new Date().toISOString(),row=state.projects.find((item)=>item.id===id)||{id:uid(),createdAt:now},companyDefaults=companyProjectDefaults(customer);
-    const retentionMode=['5','10','custom'].includes(values.defaultRetentionMode)?values.defaultRetentionMode:(!id?companyDefaults.defaultRetentionMode:'none');
+    // P29-2: resolve only on an explicit save. Never backfill other projects or invoices.
+    const defaults=id?row:companyDefaults;
+    const supplied=key=>hasOwn(values,key)&&values[key]!==undefined;
+    const preference=(key,allowed,fallback)=>{
+      if(supplied(key)){if(!allowed.includes(values[key]))throw new Error('案場請款設定無效：'+key);return values[key]}
+      return allowed.includes(defaults[key])?defaults[key]:fallback;
+    };
+    const retentionMode=preference('defaultRetentionMode',['none','5','10','custom'],'none');
+    const rateInput=supplied('defaultRetentionRate')?values.defaultRetentionRate:defaults.defaultRetentionRate;
+    let retentionRate=retentionMode==='5'?5:retentionMode==='10'?10:0;
+    if(retentionMode==='custom'){
+      if((typeof rateInput!=='string'&&typeof rateInput!=='number')||String(rateInput).trim()===''||!Number.isFinite(Number(rateInput))||Number(rateInput)<0||Number(rateInput)>100)throw new Error('保留比例必須填寫 0～100% 的有效數值');
+      retentionRate=Number(rateInput);
+    }
+    const retentionBase=preference('defaultRetentionBase',['preTax','taxIncluded'],'taxIncluded');
+    const invoiceChoice=preference('defaultInvoiceChoice',['no_invoice','invoice_required'],'no_invoice');
+    const taxMode=preference('defaultTaxMode',['未稅','含稅'],'未稅');
     const defaultCommissionBasis=normalizeCommissionBasis(values.defaultCommissionBasis??(!id?companyDefaults.defaultCommissionBasis:row.defaultCommissionBasis));
-    Object.assign(row,{name,customer:customer.id,customerName:customer.name,address:clean(values.address),startDate:values.startDate||'',expectedEndDate:values.expectedEndDate||'',actualEndDate:values.actualEndDate||'',status:['進行中','已完工','暫停'].includes(values.status)?values.status:'進行中',contractAmount:Math.max(0,num(values.contractAmount)),note:clean(values.note),defaultRetentionMode:retentionMode,defaultRetentionRate:retentionMode==='5'?5:retentionMode==='10'?10:retentionMode==='custom'?Math.max(0,num(values.defaultRetentionRate)):0,defaultRetentionAmount:0,defaultRetentionBase:values.defaultRetentionBase==='preTax'?'preTax':'taxIncluded',defaultInvoiceChoice:values.defaultInvoiceChoice==='invoice_required'?'invoice_required':'no_invoice',defaultTaxMode:values.defaultTaxMode==='含稅'?'含稅':'未稅',defaultPricingMode:pricingMode(values.defaultPricingMode)||row.defaultPricingMode||companyDefaults.defaultPricingMode||'',defaultCommissionBasis,updatedAt:now});
+    Object.assign(row,{name,customer:customer.id,customerName:customer.name,address:clean(values.address),startDate:values.startDate||'',expectedEndDate:values.expectedEndDate||'',actualEndDate:values.actualEndDate||'',status:['進行中','已完工','暫停'].includes(values.status)?values.status:'進行中',contractAmount:Math.max(0,num(values.contractAmount)),note:clean(values.note),defaultRetentionMode:retentionMode,defaultRetentionRate:retentionRate,defaultRetentionAmount:id&&!supplied('defaultRetentionMode')&&!supplied('defaultRetentionRate')?num(row.defaultRetentionAmount):0,defaultRetentionBase:retentionBase,defaultInvoiceChoice:invoiceChoice,defaultTaxMode:taxMode,defaultPricingMode:pricingMode(values.defaultPricingMode)||row.defaultPricingMode||companyDefaults.defaultPricingMode||'',defaultCommissionBasis,updatedAt:now});
     Object.assign(customer,{projectDefaultsConfigured:true,defaultRetentionMode:row.defaultRetentionMode,defaultRetentionRate:row.defaultRetentionRate,defaultRetentionBase:row.defaultRetentionBase,defaultInvoiceChoice:row.defaultInvoiceChoice,defaultTaxMode:row.defaultTaxMode,defaultPricingMode:row.defaultPricingMode,defaultCommissionBasis:row.defaultCommissionBasis,projectDefaultsUpdatedAt:now,updatedAt:now});
     if(!id)state.projects.unshift(row); persist(`${id?'修改':'新增'}案場 ${row.name}｜同步公司預設`); return row;
   }
@@ -6338,7 +6368,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,

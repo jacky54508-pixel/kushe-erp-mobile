@@ -1,0 +1,95 @@
+/* P29-3: only the salary adjustment dialog; payment, payroll PDF and other modals are excluded. */
+.erp-detail-overlay.payroll-adjustment-overlay{padding:16px;overflow:hidden}
+.erp-detail-overlay .payroll-adjustment-v2{width:min(960px,100%);max-height:calc(100dvh - 32px);display:flex;flex-direction:column;border-radius:14px;overflow:hidden;background:#fff}
+.payroll-adjustment-v2,.payroll-adjustment-v2 *{box-sizing:border-box;min-width:0}
+.erp-detail-overlay .payroll-adjustment-v2>header{padding:16px 22px;display:flex;align-items:center;justify-content:space-between;gap:16px;background:#fff;border-bottom:1px solid #dce5ef;color:#153756;flex-shrink:0}
+.erp-detail-overlay .payroll-adjustment-v2>header span{color:#60758a;font-size:12px;font-weight:600;letter-spacing:0}
+.erp-detail-overlay .payroll-adjustment-v2>header h2{margin:3px 0 0;font-size:21px;color:#153756;line-height:1.35}
+.payroll-adjustment-v2>header h2 small{font-size:14px;font-weight:500;margin-left:10px;color:#61758b;white-space:nowrap}
+.erp-detail-overlay .payroll-adjustment-v2>header p{font-size:12px;color:#728297;margin:4px 0 0;line-height:1.4}
+.erp-detail-overlay .payroll-adjustment-v2>header button{width:38px;height:38px;min-height:38px;border:1px solid #d9e2ed;border-radius:8px;background:#f8fafc;color:#4b637c;font-size:24px;flex-shrink:0}
+.payroll-adjustment-v2 #payrollAdjustmentForm{padding:0;display:flex;flex-direction:column;min-height:0;overflow:hidden;flex:1}
+.erp-detail-overlay .payroll-adjustment-v2 .erp-detail-body{padding:18px 22px;display:flex;flex-direction:column;gap:14px;overflow:auto;overscroll-behavior:contain;min-height:0;flex:1}
+.payroll-adjustment-v2 .erp-detail-body>*{flex-shrink:0}
+.payroll-adjustment-v2 .payroll-auto-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;padding:12px 14px;border:1px solid #e5ebf2;border-radius:8px;background:#f8fafc}
+.payroll-adjustment-v2 .payroll-auto-summary>span{display:grid;gap:4px;font-size:12px;color:#62778d}
+.payroll-adjustment-v2 .payroll-auto-summary b{font-size:17px;font-variant-numeric:tabular-nums;color:#153756}
+.payroll-adjustment-v2 .payroll-adjustment-main{padding:0;margin:0;border:0}
+.payroll-adjustment-v2 .payroll-adjustment-heading{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin:0 0 10px}
+.payroll-adjustment-v2 .payroll-adjustment-heading h3{font-size:15px;margin:0;color:#183b60}
+.payroll-adjustment-v2 .payroll-adjustment-heading small{font-size:12px;color:#6f8195}
+.payroll-adjustment-v2 .payroll-adjustment-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 16px}
+.payroll-adjustment-v2 label{display:grid;gap:6px;font-size:12px;color:#516a84;margin:0;min-width:0}
+.payroll-adjustment-v2 label>span{font-weight:600}
+.payroll-adjustment-v2 .payroll-adjustment-money{display:flex;align-items:center;gap:5px;border:1px solid #cfdbe8;border-radius:7px;background:#fff;padding:0 10px;height:40px;font-weight:normal}
+.payroll-adjustment-v2 .payroll-adjustment-money:focus-within{border-color:#3578bd;box-shadow:0 0 0 3px rgba(53,120,189,.10)}
+.payroll-adjustment-v2 .payroll-adjustment-money i{font-size:13px;color:#8495a7;font-style:normal}
+.payroll-adjustment-v2 .payroll-adjustment-money input{flex:1;width:100%;border:0!important;background:transparent!important;box-shadow:none!important;outline:none!important;border-radius:0;height:38px;min-height:0;padding:0 0 0 2px;font-size:16px;font-weight:600;color:#183b60;text-align:right;font-variant-numeric:tabular-nums}
+.payroll-adjustment-v2 .payroll-adjustment-fold{border:1px solid #e0e8f0;border-radius:8px;background:#fff;overflow:hidden}
+.payroll-adjustment-v2 .payroll-adjustment-fold>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;cursor:pointer;font-size:14px;font-weight:600;color:#26496b;min-height:44px;list-style:none}
+.payroll-adjustment-v2 .payroll-adjustment-fold>summary::-webkit-details-marker{display:none}
+.payroll-adjustment-v2 .payroll-adjustment-fold>summary>span{flex:1}
+.payroll-adjustment-v2 .payroll-adjustment-fold>summary small{font-weight:400;color:#687f95;font-size:12px;margin-left:8px}
+.payroll-adjustment-v2 .payroll-adjustment-fold>summary em{font-size:12px;font-weight:400;font-style:normal;color:#376fa6;white-space:nowrap}
+.payroll-adjustment-v2 .payroll-adjustment-fold>summary::after{content:'';width:7px;height:7px;border-right:1.5px solid #627d97;border-bottom:1.5px solid #627d97;transform:rotate(45deg);margin:0 3px 4px 0}
+.payroll-adjustment-v2 .payroll-adjustment-fold[open]>summary{background:#f7f9fc;border-bottom:1px solid #e8eef5}
+.payroll-adjustment-v2 .payroll-adjustment-fold[open]>summary::after{transform:rotate(225deg);margin-top:5px}
+.payroll-adjustment-v2 .payroll-adjustment-fold:not([open])>.payroll-fold-body{display:none}
+.payroll-adjustment-v2 .payroll-fold-body{padding:12px}
+.payroll-adjustment-v2 .payroll-adjustment-hint{font-size:12px;color:#6a7e92;margin:0 0 8px;line-height:1.5}
+.payroll-adjustment-v2 .payroll-basis-rows{display:grid}
+.payroll-adjustment-v2 .payroll-basis-row{display:grid;grid-template-columns:minmax(150px,1.25fr) minmax(130px,1fr) minmax(70px,.6fr) 140px;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #e9edf3}
+.payroll-adjustment-v2 .payroll-basis-row:last-child{border-bottom:0}
+.payroll-adjustment-v2 .payroll-basis-project{display:grid;gap:4px}
+.payroll-adjustment-v2 .payroll-basis-project strong{font-size:14px;color:#214768;overflow-wrap:anywhere}
+.payroll-adjustment-v2 .payroll-basis-project small{font-size:11px;color:#7a8ea2;overflow-wrap:anywhere;line-height:1.4}
+.payroll-adjustment-v2 .payroll-basis-amount{display:grid;gap:4px;font-size:11px;color:#798b9c}
+.payroll-adjustment-v2 .payroll-basis-amount b{font-size:13px;color:#284c6d;font-weight:500;font-variant-numeric:tabular-nums}
+.payroll-adjustment-v2 .payroll-basis-label{font-size:11px}
+.payroll-adjustment-v2 :is(select,input:not([type=number]),textarea){width:100%;border:1px solid #cfdbe8;border-radius:7px;color:#28496b;padding:8px 10px;font-size:14px;min-height:38px;background:#fff;line-height:1.4}
+.payroll-adjustment-v2 textarea{resize:vertical;min-height:62px;max-height:160px}
+.payroll-adjustment-v2 .payroll-adjustment-notes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.payroll-adjustment-v2 .payroll-note-wide{grid-column:1/-1}
+.erp-detail-overlay .payroll-adjustment-v2 .payroll-adjustment-footer{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 20px;padding:12px 22px;border-top:1px solid #dce5ef;background:#fff;flex-shrink:0;margin:0;max-height:50dvh;overflow:auto}
+.payroll-adjustment-v2 .payroll-adjustment-feedback,.payroll-adjustment-v2 .payroll-basis-pending{grid-column:1/-1;border-radius:6px;padding:8px 10px;margin:0;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.payroll-adjustment-v2 .payroll-adjustment-feedback{color:#993e31;background:#fff3ef;border:1px solid #f2d6cc}
+.payroll-adjustment-v2 .payroll-adjustment-feedback[data-tone=status]{color:#285a89;background:#f1f7fc;border-color:#d7e5f1}
+.payroll-adjustment-v2 .payroll-basis-pending{color:#865d1e;background:#fff9e9}
+.payroll-adjustment-v2 [hidden]{display:none!important}
+.payroll-adjustment-v2 .payroll-adjustment-totals{grid-column:1/-1;display:flex;gap:5px 14px;flex-wrap:wrap;font-size:11px;color:#718397;align-items:center}
+.payroll-adjustment-v2 .payroll-adjustment-totals b{color:#425d75;font-weight:600}
+.payroll-adjustment-v2 .payroll-adjustment-result{grid-column:1;display:flex;align-items:center;gap:14px;justify-content:space-between}
+.payroll-adjustment-v2 .payroll-adjustment-result>span{display:grid;gap:2px;font-size:13px;color:#285271;font-weight:600}
+.payroll-adjustment-v2 .payroll-adjustment-result small{font-size:10px;color:#7b8ca0;font-weight:400}
+.payroll-adjustment-v2 .payroll-adjustment-result strong{font-size:24px;line-height:1.2;color:#12675e;font-variant-numeric:tabular-nums;white-space:nowrap}
+.payroll-adjustment-v2 .payroll-adjustment-buttons{grid-column:2;grid-row:auto;display:flex;align-items:center;gap:8px}
+.payroll-adjustment-v2 .payroll-adjustment-buttons button{font-size:14px;padding:10px 14px;min-height:42px;border-radius:8px;white-space:nowrap}
+.payroll-adjustment-v2 .payroll-adjustment-buttons .commission-primary{background:#1261ae;box-shadow:none;border:1px solid #1261ae;color:#fff}
+.payroll-adjustment-v2 :is(button,summary,select,input,textarea):focus-visible{outline:2px solid #2c79c4;outline-offset:2px}
+.payroll-adjustment-v2 button:disabled{opacity:.6;cursor:wait}
+@media(max-width:680px){
+ .erp-detail-overlay.payroll-adjustment-overlay{padding:8px}
+ .erp-detail-overlay .payroll-adjustment-v2{max-height:calc(100dvh - 16px);width:100%;border-radius:10px}
+ .erp-detail-overlay .payroll-adjustment-v2>header{padding:12px 14px}
+ .erp-detail-overlay .payroll-adjustment-v2>header h2{font-size:18px}
+ .erp-detail-overlay .payroll-adjustment-v2>header p{font-size:11px}
+ .erp-detail-overlay .payroll-adjustment-v2>header button{width:42px;height:42px}
+ .erp-detail-overlay .payroll-adjustment-v2 .erp-detail-body{padding:14px;gap:12px}
+ .payroll-adjustment-v2 .payroll-auto-summary{gap:8px;padding:10px;font-size:11px}
+ .payroll-adjustment-v2 .payroll-auto-summary>span{font-size:11px}
+ .payroll-adjustment-v2 .payroll-auto-summary b{font-size:15px}
+ .payroll-adjustment-v2 .payroll-adjustment-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+ .payroll-adjustment-v2 .payroll-adjustment-money{height:44px;padding:0 8px}
+ .payroll-adjustment-v2 .payroll-adjustment-money input{height:42px}
+ .payroll-adjustment-v2 :is(select,input:not([type=number]),textarea){font-size:16px;min-height:44px}
+ .payroll-adjustment-v2 .payroll-adjustment-notes{grid-template-columns:1fr}
+ .payroll-adjustment-v2 .payroll-basis-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+ .payroll-adjustment-v2 .payroll-basis-project{grid-column:1/-1}
+ .payroll-adjustment-v2 .payroll-basis-row>label{grid-column:1/-1}
+ .erp-detail-overlay .payroll-adjustment-v2 .payroll-adjustment-footer{padding:10px 14px max(10px,env(safe-area-inset-bottom));grid-template-columns:1fr;gap:6px}
+ .payroll-adjustment-v2 .payroll-adjustment-result{gap:8px}
+ .payroll-adjustment-v2 .payroll-adjustment-buttons{grid-column:1;grid-row:auto;justify-content:flex-end}
+ .payroll-adjustment-v2 .payroll-adjustment-buttons button{min-height:44px;padding:10px 12px}
+ .payroll-adjustment-v2 .payroll-adjustment-buttons .commission-primary{flex:1}
+ .payroll-adjustment-v2 .payroll-adjustment-result strong{font-size:22px}
+}
