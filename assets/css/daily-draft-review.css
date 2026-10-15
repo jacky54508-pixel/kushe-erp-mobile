@@ -1,0 +1,21 @@
+/* P29-7: scoped in-place draft review; no business view/card changes. */
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm .daily-draft-review {grid-column:1/-1;grid-row:auto;padding:10px 12px;border:1px solid #e4cc93;border-radius:8px;background:#fffaf0;color:#62481e;display:grid;gap:8px;font-size:13px;line-height:1.5;min-width:0;}
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm .daily-draft-review[hidden] {display:none;}
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm .daily-draft-review-heading {display:grid;gap:3px;}
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm .daily-draft-review ul {margin:0;padding-left:20px;max-height:140px;overflow:auto;overflow-wrap:anywhere;}
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm .daily-draft-review li {margin:3px 0;}
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm .daily-draft-review .is-blocking {color:#a32c2c;}
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm .daily-draft-review-actions {display:flex;gap:8px;flex-wrap:wrap;}
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm .daily-draft-review button {font-size:13px;min-height:40px;padding:8px 12px;}
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm .daily-draft-review-note {margin:0;color:#6c6b68;font-size:12px;}
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm .daily-draft-review[data-tone="success"] {background:#eff9f4;border-color:#bcdacb;color:#215f49;}
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm .daily-draft-review[data-tone="error"] {background:#fff5f5;border-color:#e7b5b5;color:#913b3b;}
+/* Explicit footer rows avoid the older grid-row:1/3 action group overlapping a review. */
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm:has(.daily-draft-review:not([hidden]))>.daily-compact-footer {max-height:58%;overflow:auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;}
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm:has(.daily-draft-review:not([hidden])) .daily-draft-review {flex:1 0 100%;box-sizing:border-box;}
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm:has(.daily-draft-review:not([hidden])) .daily-draft-count {flex:1 0 100%;}
+:is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm:has(.daily-draft-review:not([hidden])) .daily-footer-actions {margin-left:auto;}
+@media(max-width:600px){
+ :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm .daily-draft-review-actions button {flex:1 1 auto;min-height:44px;}
+ :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-compact #dailyWorkForm .daily-draft-review ul {max-height:100px;}
+}

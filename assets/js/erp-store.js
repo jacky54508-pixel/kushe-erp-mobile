@@ -2766,8 +2766,96 @@
     });
     return lines;
   }
+  // P29-7: scoped draft evidence; this reader never persists or normalizes data.
+  function dailyDraftScope(values={},editingBatchId='',source=state) {
+    const rows=key=>Array.isArray(source?.[key])?source[key]:[],same=(a,b)=>String(a??'')===String(b??''),date=String(values.date||''),month=monthOf(date);
+    const previous=rows('dailyLogs').filter(log=>editingBatchId&&same(log.batchId||log.id,editingBatchId));
+    const employees=new Set([...(values.employeeIds||[]),...previous.map(log=>log.employee)].map(String));
+    const projects=new Set([...(values.lines||[]).map(line=>line.project),...previous.map(log=>log.project)].filter(Boolean).map(String));
+    const selectedProjects=rows('projects').filter(row=>projects.has(String(row.id))),customers=new Set(selectedProjects.map(row=>String(row.customer||'')));
+    const quotations=new Set((values.lines||[]).map(line=>String(line.quotationId||line.quoteId||'')).filter(Boolean));
+    const logs=rows('dailyLogs').filter(log=>employees.has(String(log.employee))&&same(log.date,date));
+    const logIds=new Set([...logs,...previous].map(log=>String(log.id)));
+    const payroll=rows('payroll').filter(row=>employees.has(String(row.employee||row.employeeId))&&same(row.month,month)),payrollIds=new Set(payroll.map(row=>String(row.id)));
+    const ordered=list=>[...list].sort((a,b)=>String(a.id||'').localeCompare(String(b.id||'')));
+    return {date,month,batchId:editingBatchId,employees:ordered(rows('employees').filter(row=>employees.has(String(row.id)))),projects:ordered(selectedProjects),customers:ordered(rows('customers').filter(row=>customers.has(String(row.id)))),quotations:ordered(rows('quotations').filter(row=>quotations.has(String(row.id)))),taxRate:source?.settings?.defaultTax,logs:ordered(logs),previous:ordered(previous),commissions:ordered(rows('commissions').filter(row=>row.sourceType==='daily-log'&&logIds.has(String(row.sourceId)))),payroll:ordered(payroll),payments:ordered(rows('salaryPayments').filter(row=>payrollIds.has(String(row.payrollId))||employees.has(String(row.employee||row.employeeId))&&same(row.month||monthOf(row.date),month))),settlements:ordered(rows('commissionSettlements').filter(row=>employees.has(String(row.employee||row.employeeId))))};
+  }
+  function dailyDraftSnapshot(values={},editingBatchId='',source=state) {
+    return storeStateFingerprint(dailyDraftScope(values,editingBatchId,source));
+  }
+  function dailyDraftReview(values={},editingBatchId='',original=state) {
+    const before=dailyDraftScope(values,editingBatchId,original),current=dailyDraftScope(values,editingBatchId,state),issues=[],changes=[];
+    const add=(message,extra={})=>issues.push({message,...extra}),changed=(key,label)=>{if(storeStateFingerprint(before[key])!==storeStateFingerprint(current[key]))changes.push(label)};
+    changed('employees','所選員工主檔已更新；本次手動輸入的日薪／時薪與抽成比例仍保留。');
+    changed('projects','所選案場設定已更新，請核對客戶、案場及抽成基準。');
+    changed('customers','所屬客戶／公司設定已更新，請核對案場預設。');
+    changed('quotations','所選報價已更新，請核對施工品項、單價及稅別。');
+    changed('taxRate','稅率設定已更新，請核對新的試算金額。');
+    changed('payroll','所選員工月份的薪資資料已更新。');
+    if(editingBatchId&&(!current.previous.length||storeStateFingerprint(before.previous)!==storeStateFingerprint(current.previous)))add('原施工紀錄已被修改或刪除；不能用舊草稿覆蓋。請先匯出草稿，再開啟最新紀錄核對。',{code:'BATCH_CHANGED'});
+    (values.employeeIds||[]).forEach(id=>{
+      const matches=(state.employees||[]).filter(row=>String(row.id)===String(id));
+      if(matches.length!==1)add('所選員工已不存在或識別不唯一，請重新選擇。',{code:'EMPLOYEE_CHANGED'});
+      if(payrollHistoryLock(id,values.date).locked)add('所選員工此月份已有薪資付款，不能新增或更動施工薪資來源。',{code:'PAYROLL_LOCKED'});
+    });
+    if(current.previous.some(log=>log.billingId||log.billingStatus&&log.billingStatus!=='未請款'||dailyLogCommissionSettlementLock(log).locked))add('原施工已進入請款或抽成發放流程，不能直接修改。',{code:'SOURCE_LOCKED'});
+    (values.lines||[]).forEach((line,index)=>{
+      const project=(state.projects||[]).filter(row=>String(row.id)===String(line.project));
+      if(project.length!==1||!(state.customers||[]).some(row=>String(row.id)===String(project[0]?.customer))){add(`第 ${index+1} 項：案場或客戶已不存在，請重新選擇。`,{code:'PROJECT_CHANGED',rowIndex:index});return}
+      const quoteId=line.quotationId||line.quoteId||'',lineId=line.quotationLineId||line.quoteLineId||'';
+      if(line.sourceType==='quotation'||quoteId||lineId){
+        const quote=confirmedQuotationItems(line.project,project[0].customer).find(item=>String(item.quotationId)===String(quoteId)&&String(item.quotationLineId)===String(lineId));
+        if(!quote){add(`第 ${index+1} 項：原報價已失效，請重新選擇已確認報價。`,{code:'QUOTE_MISSING',rowIndex:index});return}
+        const price=quote.pricingType==='lump_sum'?num(quote.lumpSumAmount):num(quote.price);
+        if(num(line.inputPrice)!==price||line.item!==quote.item||(line.unit||'式')!==(quote.unit||'式')||line.taxMode!==quote.taxMode||(line.pricingType||'actual')!==quote.pricingType)
+          add(`第 ${index+1} 項：報價內容與草稿不同（原單價 ${num(line.inputPrice)}，最新 ${price}；${quote.taxMode}）。套用時保留戶別與數量。`,{code:'QUOTE_CHANGED',rowIndex:index,canApply:true});
+      }
+    });
+    // Only flag newly observed equivalents. Existing deliberate repeat work is not silently removed.
+    if(!editingBatchId){
+      const oldIds=new Set(before.logs.map(row=>String(row.id))),added=current.logs.filter(row=>!oldIds.has(String(row.id)));
+      const sameLine=(a,b)=>String(a.house||'').trim()===String(b.house||'').trim()&&String(a.itemName||a.item||'')===String(b.itemName||b.item||'')&&num(a.qty)===num(b.qty)&&num(a.unitPrice??a.inputPrice??a.price)===num(b.unitPrice??b.inputPrice??b.price);
+      const overlaps=added.filter(log=>values.workOnly?log.workOnly&&String(log.note||'').trim()===String(values.note||'').trim():(values.lines||[]).some(line=>String(line.project)===String(log.project)&&(log.items||[]).some(item=>sameLine(item,line))));
+      if(overlaps.length)add('最新資料已有相同員工、日期及施工內容的紀錄，可能已在其他頁面新增。請先匯出草稿並核對清單，避免重複新增。',{code:'POSSIBLE_DUPLICATE',batchIds:[...new Set(overlaps.map(log=>log.batchId||log.id))]});
+    }
+    return freezeStoreState({issues,changes,snapshot:dailyDraftSnapshot(values,editingBatchId)});
+  }
+  // Adopt only an already-committed, fully verified LOCAL snapshot into memory.
+  // No load/bootstrap, mirror repair, marker clearing, cloud requests, or business writes.
+  async function refreshDailyDraftBase() {
+    const principal=storeCurrentUserId(),initial=publishedState,epoch=storeWriterEpoch;
+    const ready=()=>{
+      if(!principal||storeCurrentUserId()!==principal||!storeTrustedForCurrentUser()||isEphemeralMode())throw storeError('請在原登入帳號的信任裝置核對草稿；臨時裝置請先匯出草稿後重新登入。','DAILY_DRAFT_SESSION_CHANGED');
+      if(!db||!initial||publishedState!==initial||storeRecoveryBlocked||receiptWritesBlocked)throw storeError('目前資料狀態無法安全更新，請保留草稿並檢查同步／恢復狀態。','STORE_WRITES_BLOCKED');
+      if(activeStoreTransaction||activeStoreWriters||queuedStoreWriters||persistenceInFlight||storeLoadPromise||storeWriterEpoch!==epoch)throw storeError('另有資料操作進行中，草稿已保留；請稍後再次核對。','STORE_BUSY');
+      if(storeStateFingerprint(initial)!==settledStateFingerprint)throw storeError('記憶體狀態異常，不能重新綁定版本。','DIRTY_PUBLISHED_STATE');
+    };
+    ready();
+    return coordinatedStorage('refreshDailyDraftBase',async()=>{
+      ready();const observed=await readStorageObservation({existingOnly:true});assertObservationCommitted(observed);
+      const primary=observed.values[STATE_KEY],revision=storeRevisionOf(primary),oldRevision=storeRevisionOf(initial);
+      if(!revision.id||revision.sequence<oldRevision.sequence||revision.sequence===oldRevision.sequence&&revision.id!==oldRevision.id)throw storeError('最新資料版本無法唯一核對，草稿仍保留；請檢查恢復狀態。','DAILY_DRAFT_VERSION_UNVERIFIED');
+      validateReplacementSnapshot(primary);
+      for(const key of ['customers','projects','vendors','materials','employees','banks','quotations','quotationPrices','quotationTemplates','dailyLogs','dailyItemPresets','attendance','commissions','billings','receivables','receipts','retentionReceipts','payables','payments','salaryPayments','commissionSettlements','bankTransactions','payroll','materialUsages','inventoryReceipts','projectCosts','invoices','audit'])if(!Array.isArray(primary[key]))throw storeError('最新資料格式需要重新載入核對；不會在草稿更新時補值。','DAILY_DRAFT_FORMAT_UNVERIFIED');
+      const fingerprint=storeStateFingerprint(primary),candidate=freezeStoreState(storeStateClone(primary));
+      if(revision.sequence===oldRevision.sequence&&fingerprint!==loadedPersistentFingerprint)throw storeError('同一版本出現不同資料，草稿仍保留；請核對儲存證據。','DAILY_DRAFT_VERSION_UNVERIFIED');
+      const verified=await readStorageObservation({existingOnly:true});assertObservationCommitted(verified);ready();
+      if(storeStateFingerprint(observed)!==storeStateFingerprint(verified))throw storeError('核對期間資料再次變更；沒有更新草稿，請稍後再試。','STALE_STORE_STATE');
+      // One synchronous publication after every fallible verification has completed.
+      publishedState=candidate;state=candidate;loadedPersistentHadValue=true;loadedPersistentFingerprint=fingerprint;
+      loadedEmergencyRaw=verified.local[EMERGENCY_KEY];storeCommitTokenSeen=verified.local[STORE_COMMIT_KEY];receiptCommitVersionSeen=verified.local[RECEIPT_COMMIT_KEY]||'';
+      settledStateFingerprint=fingerprint;lastSettledMemoryFingerprint=receiptStateFingerprint(candidate);
+      return {data:candidate,revision,changed:fingerprint!==storeStateFingerprint(initial)};
+    },{readOnly:true});
+  }
   async function saveDailyBatch(values, editingBatchId = '', options = {}) {
     requireStoreTransactionDraft();
+    if(options.expectedDailyDraftSnapshot!==undefined){
+      if(!options.expectedDraftPrincipal||storeCurrentUserId()!==options.expectedDraftPrincipal)throw storeError('登入帳號已變更，草稿不可送到另一個帳號。','DAILY_DRAFT_SESSION_CHANGED');
+      if(options.expectedDailyDraftSnapshot!==dailyDraftSnapshot(values,editingBatchId))throw storeError('草稿使用的案場、報價或薪資來源已更新；請保留草稿並核對最新資料。','DAILY_DRAFT_CONTEXT_CHANGED');
+      const problems=dailyDraftReview(values,editingBatchId,state).issues;
+      if(problems.length)throw storeError(problems[0].message,'DAILY_DRAFT_SOURCE_CHANGED');
+    }
     const previous = editingBatchId ? batchRows(editingBatchId) : [];
     const strictLines=options?.strictRows===true?validateStrictDailyBatch(values,previous,options):null;
     if (previous.some((log) => log.billingId || (log.billingStatus && log.billingStatus !== '未請款'))) throw new Error('已進入請款流程的施工紀錄不可直接修改');
@@ -6525,11 +6613,11 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ dailyDraftSnapshot, dailyDraftReview, receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
-    readCommittedSnapshot,remoteApplyReadiness,repairEmergencyMirrorForRemoteApply,legacyBootstrapEvidence,applyRemoteSnapshot,replaceSnapshot,recoveryPreview,recoverStore,
+    refreshDailyDraftBase,readCommittedSnapshot,remoteApplyReadiness,repairEmergencyMirrorForRemoteApply,legacyBootstrapEvidence,applyRemoteSnapshot,replaceSnapshot,recoveryPreview,recoverStore,
     loadEphemeralSnapshot,clearEphemeralSession,isEphemeralMode,
     getLastStoreTransactionResult:()=>lastStoreTransactionResult,
     persist:()=>Promise.reject(storeError('直接 persist 已停用；請使用正式 Store 寫入 API','DIRECT_PERSIST_FORBIDDEN'))

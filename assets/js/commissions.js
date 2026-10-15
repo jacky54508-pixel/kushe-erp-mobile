@@ -757,7 +757,7 @@
     if(!lines.length&&!workOnly)lines=[emptyLine()];
     const workLog=logs.find(log=>log.workMode&&log.workMode!=='none')||{},initialWorkMode=workLog.workMode||'none',commissionEnabled=!workOnly&&(!logs.length||logs.some(log=>number(log.performance)>0)),layer=$('#commissionDrawerLayer');
     const projectOptions=(selected='')=>`<option value="">請選擇案場</option>${store.masterOptions('projects').map(project=>`<option value="${esc(project.id)}" ${String(project.id)===String(selected)?'selected':''}>${esc(label(store.getState(),'customers',project.customer,project.customerName||'未指定客戶'))}｜${esc(project.name)}</option>`).join('')}`;
-    const employeeOptions=store.masterOptions('employees');
+    let employeeOptions=store.masterOptions('employees');
     const defaultCommissionRate=employee=>employee.commissionRate===undefined||employee.commissionRate===null||employee.commissionRate===''?25:number(employee.commissionRate);
     const commissionRateDraft=Object.fromEntries(employeeOptions.map(employee=>{const saved=logs.find(log=>String(log.employee)===String(employee.id)&&Number.isFinite(Number(log.rate)))?.rate;return [String(employee.id),saved!==undefined?number(saved):defaultCommissionRate(employee)]}));
     const defaultCommissionBasis=employee=>employee.commissionBasis==='taxIncluded'?'taxIncluded':'preTax';
@@ -1063,6 +1063,17 @@
     $$('[data-daily-house-batch-cancel]',batchLayer).forEach(button=>button.onclick=closeBatch);
     $('#confirmDailyHouseBatch',batchLayer).onclick=()=>{if(!batchTemplate||!body.contains(batchTemplate))return closeBatch();const houses=parseHouseBatch(batchInput.value);if(!houses.length){window.KushePhase1?.toast('請至少輸入一個戶別');return}const project=groupProject(batchTemplate),drafts=groupRows(batchTemplate).map(row=>rowDraft(row)),block=blockOf(batchTemplate),skipped=[],created=[];houses.forEach(house=>{if(findGroup(project,house)){skipped.push(house);return}createGroup(project,house,drafts.map(draft=>cloneDailyLineDraft(draft,house)),block);created.push(house)});closeBatch();calc();window.KushePhase1?.toast([created.length?'已建立 '+created.join('、'):'',skipped.length?skipped.join('、')+' 已存在，已略過':''].filter(Boolean).join('；'))};
     batchLayer.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();closeBatch()}};calc();
+    form._dailySubmitContext.canReview=()=>!dailySubmitInFlight&&!quickProjectSaveActive&&quantityLayer.hidden&&batchLayer.hidden&&quickProjectLayer.hidden;
+    form._dailySubmitContext.readDraft=()=>readDailyDraft(form,form._dailySubmitContext);
+    form._dailySubmitContext.refreshDraftView=()=>{
+      state=store.getState();employeeOptions=store.masterOptions('employees');
+      $$('.daily-line',form).forEach(refreshChoices);calc();
+    };
+    form._dailySubmitContext.applyLatestQuote=index=>{
+      const row=$$('.daily-line',form).sort((a,b)=>number(a.dataset.draftOrder)-number(b.dataset.draftOrder))[index];
+      if(row){refreshChoices(row);applyChoice(row);calc()}
+    };
+    if(window.KusheDailyDraftReview)form._dailySubmitContext.review=window.KusheDailyDraftReview.attach(form,form._dailySubmitContext,state);
     startDailyDrawerViewport(layer);
   }
   // P20 Daily Save-1: feedback stays inside the drawer, even when the body is scrolled.
@@ -1080,8 +1091,14 @@
     // Error presentation must not throw a second error or discard the original draft.
     try{context?.showRowError?.(error,rows)}catch(_){}
   }
+  function readDailyDraft(form,context,rows=$$('.daily-line',form).sort((a,b)=>number(a.dataset.draftOrder)-number(b.dataset.draftOrder))) {
+      const workOnly=Boolean(context?.workOnly?.());
+      const lines=workOnly?[]:rows.map(row=>({project:$('.daily-line-project',row).value,house:$('.daily-line-house',row).value.trim(),item:row.dataset.itemName||$('.daily-line-item',row).value.trim(),itemName:row.dataset.itemName||$('.daily-line-item',row).value.trim(),unit:$('.daily-line-unit',row).value.trim()||'式',qty:context?.strictRows?$('.daily-line-qty',row).value:number($('.daily-line-qty',row).value),inputPrice:number($('.daily-line-price',row).value),unitPrice:number($('.daily-line-price',row).value),taxMode:$('.daily-line-tax',row).value,billable:row.dataset.pricingType!=='lump_sum'&&$('.daily-billable input',row).checked,sourceType:row.dataset.sourceType||'manual',pricingType:row.dataset.pricingType||'actual',quotationId:row.dataset.quotationId||'',quotationLineId:row.dataset.quotationLineId||'',quotationNo:row.dataset.quotationNo||'',quoteId:row.dataset.quotationId||'',quoteLineId:row.dataset.quotationLineId||'',lumpSumAmount:number(row.dataset.lumpSumAmount),workItemId:row.dataset.workItemId||''}));
+      return {date:form.elements.date.value,employeeIds:$$('input[name="dailyEmployees"]:checked',form).map(input=>input.value),commissionRates:Object.fromEntries($$('input[name="dailyCommissionRate"]',form).map(input=>[input.dataset.employeeId,input.value])),commissionBases:Object.fromEntries($$('select[name="dailyCommissionBasis"]',form).map(select=>[select.dataset.employeeId,select.value])),workRates:Object.fromEntries($$('input[name="dailyWorkRate"]',form).map(input=>[input.dataset.employeeId,input.value])),lines,workOnly,commissionEnabled:workOnly?false:form.elements.commissionEnabled.checked,workMode:form.elements.workMode.value,workQty:number(form.elements.workQty.value),note:(workOnly?form.elements.workDescription.value:form.elements.note.value).trim()};
+  }
   async function submitDaily(event) {
     event.preventDefault();const form=event.currentTarget,context=form._dailySubmitContext;
+    if(context?.review?.busy)return;
     if(dailySubmitInFlight||form.dataset.committed==='true'||form.dataset.submitLocked==='true')return;
     const rows=$$('.daily-line',form).sort((a,b)=>number(a.dataset.draftOrder)-number(b.dataset.draftOrder)),button=$('button[type="submit"]',form);
     $$('[aria-invalid]',form).forEach(input=>input.removeAttribute('aria-invalid'));
@@ -1089,8 +1106,8 @@
     try{
       const workOnly=Boolean(context?.workOnly?.());
       context?.validateRows(rows);
-      const lines=workOnly?[]:rows.map(row=>({project:$('.daily-line-project',row).value,house:$('.daily-line-house',row).value.trim(),item:row.dataset.itemName||$('.daily-line-item',row).value.trim(),itemName:row.dataset.itemName||$('.daily-line-item',row).value.trim(),unit:$('.daily-line-unit',row).value.trim()||'式',qty:context?.strictRows?$('.daily-line-qty',row).value:number($('.daily-line-qty',row).value),inputPrice:number($('.daily-line-price',row).value),unitPrice:number($('.daily-line-price',row).value),taxMode:$('.daily-line-tax',row).value,billable:row.dataset.pricingType!=='lump_sum'&&$('.daily-billable input',row).checked,sourceType:row.dataset.sourceType||'manual',pricingType:row.dataset.pricingType||'actual',quotationId:row.dataset.quotationId||'',quotationLineId:row.dataset.quotationLineId||'',quotationNo:row.dataset.quotationNo||'',quoteId:row.dataset.quotationId||'',quoteLineId:row.dataset.quotationLineId||'',lumpSumAmount:number(row.dataset.lumpSumAmount),workItemId:row.dataset.workItemId||''}));
-      values={date:form.elements.date.value,employeeIds:$$('input[name="dailyEmployees"]:checked',form).map(input=>input.value),commissionRates:Object.fromEntries($$('input[name="dailyCommissionRate"]',form).map(input=>[input.dataset.employeeId,input.value])),commissionBases:Object.fromEntries($$('select[name="dailyCommissionBasis"]',form).map(select=>[select.dataset.employeeId,select.value])),workRates:Object.fromEntries($$('input[name="dailyWorkRate"]',form).map(input=>[input.dataset.employeeId,input.value])),lines,workOnly,commissionEnabled:workOnly?false:form.elements.commissionEnabled.checked,workMode:form.elements.workMode.value,workQty:number(form.elements.workQty.value),note:(workOnly?form.elements.workDescription.value:form.elements.note.value).trim()};
+      values=readDailyDraft(form,context,rows);
+      context?.review?.beforeSubmit();
     }catch(error){dailySaveError(form,context,error,rows);return}
     dailySubmitInFlight=true;button.disabled=true;button.textContent='儲存中…';
     dailySaveFeedback(form,'儲存中，請勿重複送出或關閉視窗。','pending');
@@ -1099,12 +1116,13 @@
     enabledControls.forEach(input=>{input.disabled=true});
     let batchId;
     try{
-      batchId=await store.saveDailyBatch(values,context?.batchId??editingDailyBatch,context?.strictRows?{strictRows:true,draftRowKeys:rows.map(row=>row.dataset.draftRowKey)}:{});
+      batchId=await store.saveDailyBatch(values,context?.batchId??editingDailyBatch,context?.strictRows?{strictRows:true,draftRowKeys:rows.map(row=>row.dataset.draftRowKey),...context?.review?.saveOptions(values)}:{});
     }catch(error){
       dailySubmitInFlight=false;
       if(error.transactionStatus==='RECOVERY_REQUIRED'){form.dataset.submitLocked='true';window.KusheRecovery?.showResult(error);button.textContent='狀態待核對，請勿重送'}
       else{enabledControls.forEach(input=>{input.disabled=false});button.disabled=false;button.textContent='儲存每日施工'}
       dailySaveError(form,context,error,rows,error.transactionStatus==='RECOVERY_REQUIRED'?'儲存狀態待核對，請保留此畫面，勿重送。':undefined);
+      context?.review?.onError(error);
       return;
     }
     // From this point forward the batch is durable. A refresh failure is never a save failure.
@@ -1113,7 +1131,7 @@
     try{
       result=store.getLastStoreTransactionResult?.();
       enabledControls.forEach(input=>{input.disabled=false});
-      if(context)await context.afterCommit();else{dailySubmitInFlight=false;closeDrawer();render()}
+      if(context){await context.afterCommit();context.review?.afterCommit()}else{dailySubmitInFlight=false;closeDrawer();render()}
       if(result?.status==='COMMITTED_WITH_NOTIFICATION_WARNING'){
         dailySaveFeedback(form,'資料已儲存，但畫面更新異常；請核對紀錄，勿重送。','warning');
         window.KusheRecovery?.showResult(result);
@@ -1302,7 +1320,9 @@
   }
   function closeDrawer() {
     if(quickProjectSaveActive&&$('#dailyQuickProjectLayer')&&!$('#dailyQuickProjectLayer').hidden)return;
-    if(dailySubmitInFlight)return;
+    if(dailySubmitInFlight||$('#dailyWorkForm')?._dailySubmitContext?.review?.busy)return;
+    if($('#dailyWorkForm')?._dailySubmitContext?.review?.allowClose()===false)return;
+    $('#dailyWorkForm')?._dailySubmitContext?.review?.dispose();
     const wasManual=$('#commissionDrawerLayer')?.dataset.drawerMode==='manual';
     if(manualSubmitInFlight&&wasManual)return;
     stopDailyDrawerViewport();
@@ -1406,6 +1426,7 @@
     searchLifecycleGeneration += 1;
     searchComposing = false;
     searchRenderPending = false;
+    $('#dailyWorkForm')?._dailySubmitContext?.review?.dispose();
     active = false; stopDailyDrawerViewport(); stopManualDrawerViewport(); closeDailyDetail(); closeProjectCommissionSettlementDrawer(); dailyDetailNeedsRefresh=false; dailyDetailContext=null; dailyEditorActive = false;
   }
   window.addEventListener('kushe:data-updated', () => { if (active && !quickProjectSaveActive && !dailySubmitInFlight && !dailyEditorActive && !manualDrawerActive && !settlementDrawerActive) refreshWorkforceResults(); });
