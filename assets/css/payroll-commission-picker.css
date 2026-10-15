@@ -1,0 +1,117 @@
+/* P29-5: scoped to new-payment dialogs; never affects legacy payment or salary adjustments. */
+.erp-detail-overlay .payroll-source-payment-card.payroll-picker-v5{width:min(980px,calc(100vw - 32px));height:min(870px,calc(100dvh - 32px));max-height:calc(100dvh - 32px);display:flex;flex-direction:column;overflow:hidden;border-radius:16px;background:#fff}
+.erp-detail-overlay .payroll-picker-v5>header{flex:none;padding:16px 22px;background:#fff;color:#132f50;border-bottom:1px solid #e0e7ef;min-height:0}
+.erp-detail-overlay .payroll-picker-v5>header span{font-size:12px;color:#62768c}
+.erp-detail-overlay .payroll-picker-v5>header h2{font-size:22px;margin:4px 0;color:#153351}
+.erp-detail-overlay .payroll-picker-v5>header p{font-size:12px;margin:3px 0 0;color:#62768c;line-height:1.5}
+.erp-detail-overlay .payroll-picker-v5>header button{width:44px;height:44px;min-width:44px;min-height:44px;background:#f7f9fc;border:1px solid #dbe5ef;color:#345776}
+.erp-detail-overlay .payroll-picker-v5 #salaryPaymentForm{display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden}
+.erp-detail-overlay .payroll-picker-v5 #salaryPaymentForm>.erp-detail-body{padding:18px 22px;min-height:0;flex:1;overflow:auto;overscroll-behavior:contain}
+.erp-detail-overlay .payroll-picker-v5 .payroll-payment-summary{margin:0 0 16px;gap:8px}
+.erp-detail-overlay .payroll-picker-v5 .payroll-payment-summary article{padding:10px 12px;border-radius:8px;box-shadow:none}
+.erp-detail-overlay .payroll-picker-v5 .payroll-payment-summary article b{font-size:17px;font-variant-numeric:tabular-nums}
+.erp-detail-overlay .payroll-picker-v5 .payroll-payment-source-section{margin:12px 0 18px;border:0;border-radius:0;overflow:visible}
+.erp-detail-overlay .payroll-picker-v5 .payroll-payment-source-section>header{padding:0 0 10px;border:0;background:none}
+.erp-detail-overlay .payroll-picker-v5 .payroll-payment-source-section>header h3{font-size:16px}
+.erp-detail-overlay .payroll-picker-v5 .payroll-payment-source-section>header p{font-size:12px;line-height:1.6}
+.erp-detail-overlay .payroll-picker-v5 .receipt-form-grid{gap:12px 16px;margin:0}
+.erp-detail-overlay .payroll-picker-v5 .receipt-form-grid label>span{font-size:12px}
+.erp-detail-overlay .payroll-picker-v5 .receipt-form-grid input,.erp-detail-overlay .payroll-picker-v5 .receipt-form-grid select{min-height:42px;padding:8px 10px;font-size:14px;border-radius:8px}
+.erp-detail-overlay .payroll-picker-v5 .cp-picker{font-size:14px;color:#173650}
+.erp-detail-overlay .payroll-picker-v5 .cp-picker *{box-sizing:border-box}
+.erp-detail-overlay .payroll-picker-v5 .cp-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;flex-wrap:wrap;font-size:12px;color:#61768d}
+.erp-detail-overlay .payroll-picker-v5 .cp-toolbar>div{display:flex;gap:6px}
+.erp-detail-overlay .payroll-picker-v5 .cp-toolbar button{height:36px;padding:6px 12px;border:1px solid #d1deeb;border-radius:7px;background:#fff;color:#155da2;font-size:12px;font-weight:600;cursor:pointer;box-shadow:none}
+.erp-detail-overlay .payroll-picker-v5 .cp-toolbar button:disabled{color:#8391a0;background:#f8fafc;cursor:default}
+.erp-detail-overlay .payroll-picker-v5 .cp-project{border:1px solid #d7e3ed;border-radius:10px;margin-bottom:10px;overflow:hidden;background:#fff}
+.erp-detail-overlay .payroll-picker-v5 .cp-project.is-selected{border-color:#82b5df}
+.erp-detail-overlay .payroll-picker-v5 .cp-project.is-selected>.cp-project-header{background:#f2f8ff}
+.erp-detail-overlay .payroll-picker-v5 .cp-project-header{display:grid;grid-template-columns:minmax(0,1fr) auto auto;grid-template-rows:auto auto;gap:3px 20px;padding:12px 14px;align-items:center;background:#fbfcfe;border:0;min-height:96px}
+.erp-detail-overlay .payroll-picker-v5 .cp-group-toggle{display:flex;align-items:center;gap:8px;min-width:0;margin:0;grid-column:1;grid-row:1;cursor:pointer}
+.erp-detail-overlay .payroll-picker-v5 .cp-check-target{width:44px;min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;margin:0}
+.erp-detail-overlay .payroll-picker-v5 .cp-picker input[type=checkbox]{appearance:auto;width:19px;height:19px;min-height:0;min-width:0;padding:0;margin:0;accent-color:#1265b4;border-radius:4px;flex:none;cursor:pointer;box-shadow:none}
+.erp-detail-overlay .payroll-picker-v5 .cp-picker input[type=checkbox]:disabled{cursor:default}
+.erp-detail-overlay .payroll-picker-v5 .cp-project-title{display:block;min-width:0}
+.erp-detail-overlay .payroll-picker-v5 .cp-project-title>b{display:block;font-size:15px;color:#173650;overflow-wrap:anywhere;line-height:1.5}
+.erp-detail-overlay .payroll-picker-v5 .cp-project-title>small{display:block;font-size:11px;color:#667e94;line-height:1.5;font-weight:400;margin-top:2px}
+.erp-detail-overlay .payroll-picker-v5 .cp-project-amount{grid-column:2;grid-row:1;text-align:right;white-space:nowrap;display:grid;gap:3px}
+.erp-detail-overlay .payroll-picker-v5 .cp-project-amount>span{font-size:11px;color:#6a7e92}
+.erp-detail-overlay .payroll-picker-v5 .cp-project-amount>b{font-size:20px;color:#173650;font-variant-numeric:tabular-nums}
+.erp-detail-overlay .payroll-picker-v5 .cp-project-status{grid-column:1/3;grid-row:2;display:flex;gap:5px 12px;align-items:center;flex-wrap:wrap;padding-left:52px;line-height:1.7;font-size:11px;color:#698095}
+.erp-detail-overlay .payroll-picker-v5 .cp-ready-count{color:#28658a}
+.erp-detail-overlay .payroll-picker-v5 .cp-wait-count{color:#926328}
+.erp-detail-overlay .payroll-picker-v5 .cp-picked{color:#1564ae;font-weight:600}
+.erp-detail-overlay .payroll-picker-v5 .cp-project-waiting .cp-picked{display:none}
+.erp-detail-overlay .payroll-picker-v5 .cp-expand{grid-column:3;grid-row:1/3;display:flex;align-items:center;justify-content:center;gap:5px;min-height:44px;min-width:94px;padding:8px;border:1px solid #d5e2ef;border-radius:7px;background:#fff;color:#375e84;font-size:12px;cursor:pointer;box-shadow:none}
+.erp-detail-overlay .payroll-picker-v5 .cp-expand>span{color:inherit;font-size:12px;font-weight:500}
+.erp-detail-overlay .payroll-picker-v5 .cp-expand svg{transition:transform .15s;flex:none}
+.erp-detail-overlay .payroll-picker-v5 .cp-expand[aria-expanded=true] svg{transform:rotate(180deg)}
+.erp-detail-overlay .payroll-picker-v5 .cp-project-detail{border-top:1px solid #e2eaf2;padding:4px 14px 12px}
+.erp-detail-overlay .payroll-picker-v5 .cp-project-detail[hidden]{display:none!important}
+.erp-detail-overlay .payroll-picker-v5 .cp-bill{margin:8px 0 0}
+.erp-detail-overlay .payroll-picker-v5 .cp-bill h4{font-size:12px;font-weight:600;background:#f4f7fa;margin:0;padding:8px 10px;border-radius:5px;line-height:1.5;overflow-wrap:anywhere;color:#65788e}
+.erp-detail-overlay .payroll-picker-v5 .cp-source-row{display:flex;align-items:center;gap:8px;margin:0;padding:4px 8px;border-bottom:1px solid #edf1f5;min-height:52px;cursor:pointer}
+.erp-detail-overlay .payroll-picker-v5 .cp-source-row:has(input:checked){background:#f2f8ff}
+.erp-detail-overlay .payroll-picker-v5 .cp-source-house{flex:1;min-width:0;display:block}
+.erp-detail-overlay .payroll-picker-v5 .cp-source-house b{display:block;font-size:14px;overflow-wrap:anywhere;color:#264660}
+.erp-detail-overlay .payroll-picker-v5 .cp-source-house small{display:block;font-size:11px;color:#71849a;font-weight:400;line-height:1.5;overflow-wrap:anywhere}
+.erp-detail-overlay .payroll-picker-v5 .cp-source-row>strong{font-size:15px;font-variant-numeric:tabular-nums;white-space:nowrap;color:#244966}
+.erp-detail-overlay .payroll-picker-v5 .cp-source-locked{cursor:default;color:#6d7f8d;padding:10px 8px}
+.erp-detail-overlay .payroll-picker-v5 .cp-lock-reason{font-size:11px;color:#906026;max-width:40%;overflow-wrap:anywhere}
+.erp-detail-overlay .payroll-picker-v5 .cp-locked-details{margin-top:10px;border:1px solid #e2e7ed;border-radius:6px;padding:0 8px;background:#fafbfc}
+.erp-detail-overlay .payroll-picker-v5 .cp-locked-details>summary{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px;font-size:12px;cursor:pointer;list-style:none;color:#6b7a8b}
+.erp-detail-overlay .payroll-picker-v5 .cp-locked-details>summary::-webkit-details-marker{display:none}
+.erp-detail-overlay .payroll-picker-v5 .cp-locked-details>summary>span{display:flex;align-items:center;gap:4px;white-space:nowrap;font-size:11px}
+.erp-detail-overlay .payroll-picker-v5 .cp-locked-details[open]>summary svg{transform:rotate(180deg)}
+.erp-detail-overlay .payroll-picker-v5 .cp-locked-details>p{padding:4px 2px 8px;font-size:11px}
+.erp-detail-overlay .payroll-picker-v5 .cp-empty{padding:14px;font-size:12px;background:#f5f8fb;border-radius:8px}
+.erp-detail-overlay .payroll-picker-v5 input:focus-visible,.erp-detail-overlay .payroll-picker-v5 button:focus-visible,.erp-detail-overlay .payroll-picker-v5 summary:focus-visible{outline:2px solid #1875bf;outline-offset:3px}
+.erp-detail-overlay .payroll-picker-v5 #salaryPaymentForm>.cp-payment-footer{flex:none;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;padding:12px 22px max(12px,env(safe-area-inset-bottom));border-top:1px solid #dbe4ed;background:#fff;margin:0}
+.erp-detail-overlay .payroll-picker-v5 .cp-payment-meta{grid-column:1;display:flex;gap:5px 16px;flex-wrap:wrap;align-items:center;color:#62788f;font-size:12px;min-width:0}
+.erp-detail-overlay .payroll-picker-v5 .cp-selection-total{color:#1b659e;font-weight:600;grid-column:1/3;font-size:12px;line-height:1.5}
+.erp-detail-overlay .payroll-picker-v5 .cp-payment-result{grid-column:1;display:flex;gap:12px;align-items:center;justify-content:space-between;min-width:0;color:#173f62;font-size:14px;font-weight:600}
+.erp-detail-overlay .payroll-picker-v5 .cp-payment-result b{font-size:26px;color:#105f99;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.erp-detail-overlay .payroll-picker-v5 .cp-payment-buttons{display:flex;align-items:center;gap:8px;grid-column:2;grid-row:2/4}
+.erp-detail-overlay .payroll-picker-v5 .cp-payment-buttons button{min-height:44px;padding:10px 18px;white-space:nowrap;box-shadow:none;font-size:14px;border-radius:8px}
+.erp-detail-overlay .payroll-picker-v5 [data-cp-feedback]{grid-column:1/3;background:#fff6ea;color:#8a4c15;border:1px solid #eed9bd;border-radius:7px;padding:8px 10px;margin:0;font-size:12px;line-height:1.5}
+.erp-detail-overlay .payroll-picker-v5 [data-cp-feedback][hidden]{display:none}
+@media(max-width:820px){
+ .erp-detail-overlay .payroll-source-payment-card.payroll-picker-v5{width:100%;height:100dvh;max-height:100dvh;border-radius:0}
+ .erp-detail-overlay .payroll-picker-v5>header{padding:12px 14px}
+ .erp-detail-overlay .payroll-picker-v5 #salaryPaymentForm>.erp-detail-body{padding:14px}
+ .erp-detail-overlay .payroll-picker-v5 .cp-project-header{padding:10px;gap:5px 10px;grid-template-columns:minmax(0,1fr) auto;min-height:0}
+ .erp-detail-overlay .payroll-picker-v5 .cp-project-amount{grid-column:2;grid-row:1}
+ .erp-detail-overlay .payroll-picker-v5 .cp-project-amount>b{font-size:18px}
+ .erp-detail-overlay .payroll-picker-v5 .cp-project-title>b{font-size:14px}
+ .erp-detail-overlay .payroll-picker-v5 .cp-project-title>small{display:none}
+ .erp-detail-overlay .payroll-picker-v5 .cp-project-status{grid-column:1;grid-row:2;padding-left:0;gap:2px 8px;font-size:11px}
+ .erp-detail-overlay .payroll-picker-v5 .cp-expand{grid-column:2;grid-row:2;min-width:88px;min-height:44px;padding:6px}
+ .erp-detail-overlay .payroll-picker-v5 .cp-project-detail{padding:4px 8px 10px}
+ .erp-detail-overlay .payroll-picker-v5 .cp-toolbar button{min-height:44px}
+ .erp-detail-overlay .payroll-picker-v5 .receipt-form-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+ .erp-detail-overlay .payroll-picker-v5 .receipt-form-grid input,.erp-detail-overlay .payroll-picker-v5 .receipt-form-grid select{font-size:16px;min-height:44px;max-width:100%;min-width:0;width:100%}
+ .erp-detail-overlay .payroll-picker-v5 #salaryPaymentForm>.cp-payment-footer{grid-template-columns:1fr;gap:6px;padding:10px 14px max(10px,env(safe-area-inset-bottom))}
+ .erp-detail-overlay .payroll-picker-v5 .cp-selection-total,.erp-detail-overlay .payroll-picker-v5 [data-cp-feedback],.erp-detail-overlay .payroll-picker-v5 .cp-payment-meta,.erp-detail-overlay .payroll-picker-v5 .cp-payment-result{grid-column:1}
+ .erp-detail-overlay .payroll-picker-v5 .cp-payment-meta{font-size:11px;gap:3px 12px}
+ .erp-detail-overlay .payroll-picker-v5 .cp-payment-buttons{grid-column:1;grid-row:auto;justify-content:flex-end}
+ .erp-detail-overlay .payroll-picker-v5 .cp-payment-buttons button:last-child{min-width:150px}
+ .erp-detail-overlay .payroll-picker-v5 .cp-payment-result b{font-size:24px}
+}
+@media(max-width:420px){
+ .erp-detail-overlay .payroll-picker-v5 .payroll-payment-summary article{padding:8px}
+ .erp-detail-overlay .payroll-picker-v5 .payroll-payment-summary article b{font-size:16px}
+ .erp-detail-overlay .payroll-picker-v5 .cp-project-header{gap:6px}
+ .erp-detail-overlay .payroll-picker-v5 .cp-group-toggle{gap:2px}
+ .erp-detail-overlay .payroll-picker-v5 .cp-project-amount>b{font-size:16px}
+ .erp-detail-overlay .payroll-picker-v5 .cp-project-title>b{font-size:13px}
+ .erp-detail-overlay .payroll-picker-v5 .cp-project-amount>span{font-size:10px}
+ .erp-detail-overlay .payroll-picker-v5 .cp-project-status{font-size:10px}
+}
+@media(max-height:560px){
+ .erp-detail-overlay .payroll-picker-v5>header{padding:8px 14px}
+ .erp-detail-overlay .payroll-picker-v5>header p{display:none}
+ .erp-detail-overlay .payroll-picker-v5>header h2{font-size:18px}
+ .erp-detail-overlay .payroll-picker-v5 #salaryPaymentForm>.cp-payment-footer{padding-top:6px;padding-bottom:6px;gap:4px}
+ .erp-detail-overlay .payroll-picker-v5 .cp-payment-result b{font-size:20px}
+}
+@media(prefers-reduced-motion:reduce){.erp-detail-overlay .payroll-picker-v5 .cp-picker svg{transition:none}}

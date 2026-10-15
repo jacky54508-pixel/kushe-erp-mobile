@@ -2766,8 +2766,96 @@
     });
     return lines;
   }
+  // P29-7: scoped draft evidence; this reader never persists or normalizes data.
+  function dailyDraftScope(values={},editingBatchId='',source=state) {
+    const rows=key=>Array.isArray(source?.[key])?source[key]:[],same=(a,b)=>String(a??'')===String(b??''),date=String(values.date||''),month=monthOf(date);
+    const previous=rows('dailyLogs').filter(log=>editingBatchId&&same(log.batchId||log.id,editingBatchId));
+    const employees=new Set([...(values.employeeIds||[]),...previous.map(log=>log.employee)].map(String));
+    const projects=new Set([...(values.lines||[]).map(line=>line.project),...previous.map(log=>log.project)].filter(Boolean).map(String));
+    const selectedProjects=rows('projects').filter(row=>projects.has(String(row.id))),customers=new Set(selectedProjects.map(row=>String(row.customer||'')));
+    const quotations=new Set((values.lines||[]).map(line=>String(line.quotationId||line.quoteId||'')).filter(Boolean));
+    const logs=rows('dailyLogs').filter(log=>employees.has(String(log.employee))&&same(log.date,date));
+    const logIds=new Set([...logs,...previous].map(log=>String(log.id)));
+    const payroll=rows('payroll').filter(row=>employees.has(String(row.employee||row.employeeId))&&same(row.month,month)),payrollIds=new Set(payroll.map(row=>String(row.id)));
+    const ordered=list=>[...list].sort((a,b)=>String(a.id||'').localeCompare(String(b.id||'')));
+    return {date,month,batchId:editingBatchId,employees:ordered(rows('employees').filter(row=>employees.has(String(row.id)))),projects:ordered(selectedProjects),customers:ordered(rows('customers').filter(row=>customers.has(String(row.id)))),quotations:ordered(rows('quotations').filter(row=>quotations.has(String(row.id)))),taxRate:source?.settings?.defaultTax,logs:ordered(logs),previous:ordered(previous),commissions:ordered(rows('commissions').filter(row=>row.sourceType==='daily-log'&&logIds.has(String(row.sourceId)))),payroll:ordered(payroll),payments:ordered(rows('salaryPayments').filter(row=>payrollIds.has(String(row.payrollId))||employees.has(String(row.employee||row.employeeId))&&same(row.month||monthOf(row.date),month))),settlements:ordered(rows('commissionSettlements').filter(row=>employees.has(String(row.employee||row.employeeId))))};
+  }
+  function dailyDraftSnapshot(values={},editingBatchId='',source=state) {
+    return storeStateFingerprint(dailyDraftScope(values,editingBatchId,source));
+  }
+  function dailyDraftReview(values={},editingBatchId='',original=state) {
+    const before=dailyDraftScope(values,editingBatchId,original),current=dailyDraftScope(values,editingBatchId,state),issues=[],changes=[];
+    const add=(message,extra={})=>issues.push({message,...extra}),changed=(key,label)=>{if(storeStateFingerprint(before[key])!==storeStateFingerprint(current[key]))changes.push(label)};
+    changed('employees','所選員工主檔已更新；本次手動輸入的日薪／時薪與抽成比例仍保留。');
+    changed('projects','所選案場設定已更新，請核對客戶、案場及抽成基準。');
+    changed('customers','所屬客戶／公司設定已更新，請核對案場預設。');
+    changed('quotations','所選報價已更新，請核對施工品項、單價及稅別。');
+    changed('taxRate','稅率設定已更新，請核對新的試算金額。');
+    changed('payroll','所選員工月份的薪資資料已更新。');
+    if(editingBatchId&&(!current.previous.length||storeStateFingerprint(before.previous)!==storeStateFingerprint(current.previous)))add('原施工紀錄已被修改或刪除；不能用舊草稿覆蓋。請先匯出草稿，再開啟最新紀錄核對。',{code:'BATCH_CHANGED'});
+    (values.employeeIds||[]).forEach(id=>{
+      const matches=(state.employees||[]).filter(row=>String(row.id)===String(id));
+      if(matches.length!==1)add('所選員工已不存在或識別不唯一，請重新選擇。',{code:'EMPLOYEE_CHANGED'});
+      if(payrollHistoryLock(id,values.date).locked)add('所選員工此月份已有薪資付款，不能新增或更動施工薪資來源。',{code:'PAYROLL_LOCKED'});
+    });
+    if(current.previous.some(log=>log.billingId||log.billingStatus&&log.billingStatus!=='未請款'||dailyLogCommissionSettlementLock(log).locked))add('原施工已進入請款或抽成發放流程，不能直接修改。',{code:'SOURCE_LOCKED'});
+    (values.lines||[]).forEach((line,index)=>{
+      const project=(state.projects||[]).filter(row=>String(row.id)===String(line.project));
+      if(project.length!==1||!(state.customers||[]).some(row=>String(row.id)===String(project[0]?.customer))){add(`第 ${index+1} 項：案場或客戶已不存在，請重新選擇。`,{code:'PROJECT_CHANGED',rowIndex:index});return}
+      const quoteId=line.quotationId||line.quoteId||'',lineId=line.quotationLineId||line.quoteLineId||'';
+      if(line.sourceType==='quotation'||quoteId||lineId){
+        const quote=confirmedQuotationItems(line.project,project[0].customer).find(item=>String(item.quotationId)===String(quoteId)&&String(item.quotationLineId)===String(lineId));
+        if(!quote){add(`第 ${index+1} 項：原報價已失效，請重新選擇已確認報價。`,{code:'QUOTE_MISSING',rowIndex:index});return}
+        const price=quote.pricingType==='lump_sum'?num(quote.lumpSumAmount):num(quote.price);
+        if(num(line.inputPrice)!==price||line.item!==quote.item||(line.unit||'式')!==(quote.unit||'式')||line.taxMode!==quote.taxMode||(line.pricingType||'actual')!==quote.pricingType)
+          add(`第 ${index+1} 項：報價內容與草稿不同（原單價 ${num(line.inputPrice)}，最新 ${price}；${quote.taxMode}）。套用時保留戶別與數量。`,{code:'QUOTE_CHANGED',rowIndex:index,canApply:true});
+      }
+    });
+    // Only flag newly observed equivalents. Existing deliberate repeat work is not silently removed.
+    if(!editingBatchId){
+      const oldIds=new Set(before.logs.map(row=>String(row.id))),added=current.logs.filter(row=>!oldIds.has(String(row.id)));
+      const sameLine=(a,b)=>String(a.house||'').trim()===String(b.house||'').trim()&&String(a.itemName||a.item||'')===String(b.itemName||b.item||'')&&num(a.qty)===num(b.qty)&&num(a.unitPrice??a.inputPrice??a.price)===num(b.unitPrice??b.inputPrice??b.price);
+      const overlaps=added.filter(log=>values.workOnly?log.workOnly&&String(log.note||'').trim()===String(values.note||'').trim():(values.lines||[]).some(line=>String(line.project)===String(log.project)&&(log.items||[]).some(item=>sameLine(item,line))));
+      if(overlaps.length)add('最新資料已有相同員工、日期及施工內容的紀錄，可能已在其他頁面新增。請先匯出草稿並核對清單，避免重複新增。',{code:'POSSIBLE_DUPLICATE',batchIds:[...new Set(overlaps.map(log=>log.batchId||log.id))]});
+    }
+    return freezeStoreState({issues,changes,snapshot:dailyDraftSnapshot(values,editingBatchId)});
+  }
+  // Adopt only an already-committed, fully verified LOCAL snapshot into memory.
+  // No load/bootstrap, mirror repair, marker clearing, cloud requests, or business writes.
+  async function refreshDailyDraftBase() {
+    const principal=storeCurrentUserId(),initial=publishedState,epoch=storeWriterEpoch;
+    const ready=()=>{
+      if(!principal||storeCurrentUserId()!==principal||!storeTrustedForCurrentUser()||isEphemeralMode())throw storeError('請在原登入帳號的信任裝置核對草稿；臨時裝置請先匯出草稿後重新登入。','DAILY_DRAFT_SESSION_CHANGED');
+      if(!db||!initial||publishedState!==initial||storeRecoveryBlocked||receiptWritesBlocked)throw storeError('目前資料狀態無法安全更新，請保留草稿並檢查同步／恢復狀態。','STORE_WRITES_BLOCKED');
+      if(activeStoreTransaction||activeStoreWriters||queuedStoreWriters||persistenceInFlight||storeLoadPromise||storeWriterEpoch!==epoch)throw storeError('另有資料操作進行中，草稿已保留；請稍後再次核對。','STORE_BUSY');
+      if(storeStateFingerprint(initial)!==settledStateFingerprint)throw storeError('記憶體狀態異常，不能重新綁定版本。','DIRTY_PUBLISHED_STATE');
+    };
+    ready();
+    return coordinatedStorage('refreshDailyDraftBase',async()=>{
+      ready();const observed=await readStorageObservation({existingOnly:true});assertObservationCommitted(observed);
+      const primary=observed.values[STATE_KEY],revision=storeRevisionOf(primary),oldRevision=storeRevisionOf(initial);
+      if(!revision.id||revision.sequence<oldRevision.sequence||revision.sequence===oldRevision.sequence&&revision.id!==oldRevision.id)throw storeError('最新資料版本無法唯一核對，草稿仍保留；請檢查恢復狀態。','DAILY_DRAFT_VERSION_UNVERIFIED');
+      validateReplacementSnapshot(primary);
+      for(const key of ['customers','projects','vendors','materials','employees','banks','quotations','quotationPrices','quotationTemplates','dailyLogs','dailyItemPresets','attendance','commissions','billings','receivables','receipts','retentionReceipts','payables','payments','salaryPayments','commissionSettlements','bankTransactions','payroll','materialUsages','inventoryReceipts','projectCosts','invoices','audit'])if(!Array.isArray(primary[key]))throw storeError('最新資料格式需要重新載入核對；不會在草稿更新時補值。','DAILY_DRAFT_FORMAT_UNVERIFIED');
+      const fingerprint=storeStateFingerprint(primary),candidate=freezeStoreState(storeStateClone(primary));
+      if(revision.sequence===oldRevision.sequence&&fingerprint!==loadedPersistentFingerprint)throw storeError('同一版本出現不同資料，草稿仍保留；請核對儲存證據。','DAILY_DRAFT_VERSION_UNVERIFIED');
+      const verified=await readStorageObservation({existingOnly:true});assertObservationCommitted(verified);ready();
+      if(storeStateFingerprint(observed)!==storeStateFingerprint(verified))throw storeError('核對期間資料再次變更；沒有更新草稿，請稍後再試。','STALE_STORE_STATE');
+      // One synchronous publication after every fallible verification has completed.
+      publishedState=candidate;state=candidate;loadedPersistentHadValue=true;loadedPersistentFingerprint=fingerprint;
+      loadedEmergencyRaw=verified.local[EMERGENCY_KEY];storeCommitTokenSeen=verified.local[STORE_COMMIT_KEY];receiptCommitVersionSeen=verified.local[RECEIPT_COMMIT_KEY]||'';
+      settledStateFingerprint=fingerprint;lastSettledMemoryFingerprint=receiptStateFingerprint(candidate);
+      return {data:candidate,revision,changed:fingerprint!==storeStateFingerprint(initial)};
+    },{readOnly:true});
+  }
   async function saveDailyBatch(values, editingBatchId = '', options = {}) {
     requireStoreTransactionDraft();
+    if(options.expectedDailyDraftSnapshot!==undefined){
+      if(!options.expectedDraftPrincipal||storeCurrentUserId()!==options.expectedDraftPrincipal)throw storeError('登入帳號已變更，草稿不可送到另一個帳號。','DAILY_DRAFT_SESSION_CHANGED');
+      if(options.expectedDailyDraftSnapshot!==dailyDraftSnapshot(values,editingBatchId))throw storeError('草稿使用的案場、報價或薪資來源已更新；請保留草稿並核對最新資料。','DAILY_DRAFT_CONTEXT_CHANGED');
+      const problems=dailyDraftReview(values,editingBatchId,state).issues;
+      if(problems.length)throw storeError(problems[0].message,'DAILY_DRAFT_SOURCE_CHANGED');
+    }
     const previous = editingBatchId ? batchRows(editingBatchId) : [];
     const strictLines=options?.strictRows===true?validateStrictDailyBatch(values,previous,options):null;
     if (previous.some((log) => log.billingId || (log.billingStatus && log.billingStatus !== '未請款'))) throw new Error('已進入請款流程的施工紀錄不可直接修改');
@@ -3244,7 +3332,8 @@
     const bankLinked=state.bankTransactions.some((row)=>String(row.billingId||'')===String(billing.id)||String(row.receivableId||'')===String(receivable.id)||[String(billing.id),String(receivable.id)].includes(String(row.sourceId||''))||receiptIds.has(String(row.sourceId||''))||receiptIds.has(String(row.receiptId||''))||receiptIds.has(String(row.retentionReceiptId||''))||(String(row.sourceNo||'')===String(billing.number||'')&&/receipt|receivable|retention|收款|應收|保留/i.test(`${row.sourceType||''} ${row.category||''}`)));
     const issuedInvoice=billingInvoiceStatus(billing)==='invoiced'||Boolean(String(billing.invoiceNo||'').trim())||billingInvoiceRecords(billing).some((row)=>invoiceStatus(row.status,row.invoiceNumber||row.number)==='issued'||Boolean(String(row.invoiceNumber||row.number||'').trim()));
     let reason='';
-    if(receipts.length)reason='已有一般收款紀錄';
+    if(receivable.receivableCheques!==undefined&&(!Array.isArray(receivable.receivableCheques)||receivable.receivableCheques.length))reason='已有支票登記／歷程，為保留票據關聯不可改刪請款';
+    else if(receipts.length)reason='已有一般收款紀錄';
     else if(retentionReceipts.length)reason='已有保留款收回紀錄';
     else if(num(receivable.received)>0||num(receivable.legacyReceived)>0)reason='對應應收已有收款';
     else if(bankLinked)reason='已有關聯銀行入帳交易';
@@ -3273,6 +3362,7 @@
   function accountingDeletionPreflight(receivableId) {
     const receivable=state.receivables.find((row)=>String(row.id)===String(receivableId));
     if(!receivable)throw new Error('找不到應收帳款');
+    if(receivable.receivableCheques!==undefined&&(!Array.isArray(receivable.receivableCheques)||receivable.receivableCheques.length))throw new Error('已有支票登記／歷程，禁止整筆刪除帳務');
     const billings=receivableBillingCandidates(receivable);
     if(billings.length!==1)throw new Error('找不到唯一 Billing／Receivable 關係，為避免誤刪已停止');
     const billing=billings[0];
@@ -3800,9 +3890,156 @@
     adjustBankIncome(bank,num(receipt.netAmount),now);
     return transaction;
   }
+  // P29-6: received cheques live on their existing receivable; readers never backfill.
+  // A pending cheque is NOT a receipt, bank income, or commission-unlocking event.
+  const CHEQUE_SCHEMA='kushe-receivable-cheque-v1';
+  let activeChequeClear=null;
+  const chequeText=(value)=>String(value??'').trim();
+  function chequeDate(value,label) {
+    const text=chequeText(value),time=Date.parse(text+'T00:00:00Z');
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(text)||!Number.isFinite(time)||new Date(time).toISOString().slice(0,10)!==text)throw new Error(label+'請填有效日期');
+    return text;
+  }
+  function chequeList(ar) {
+    if(ar.receivableCheques===undefined)return [];
+    if(!Array.isArray(ar.receivableCheques))throw new Error('支票登記格式待核對，已停止修改');
+    return ar.receivableCheques;
+  }
+  function chequeAR(id) {
+    const rows=(state.receivables||[]).filter(ar=>String(ar.id)===String(id||''));
+    if(rows.length!==1)throw new Error('找不到唯一的應收帳款，已停止支票操作');
+    return rows[0];
+  }
+  function strictCheque(row) {
+    if(!row||row.schema!==CHEQUE_SCHEMA||!chequeText(row.id)||!['pending','cleared','cancelled'].includes(row.status)||!Number.isSafeInteger(row.revision)||row.revision<1)throw new Error('支票紀錄或狀態待核對，已停止修改');
+    const spec=chequeSpec(row);
+    if(spec.reservedAmount!==row.reservedAmount)throw new Error('支票票面與預留沖銷金額不一致');
+    return row;
+  }
+  function chequeSpec(values) {
+    const number=chequeText(values.number),amount=strictReceiptMoney(values.amount,'支票票面金額',{minimum:1});
+    if(!Number.isSafeInteger(Number(values.amount)))throw new Error('支票票面金額請填有效整數');
+    if(!number||number.length>80)throw new Error('請填寫支票號碼（最多 80 字）');
+    if(/[\u0000-\u001f\u007f]/.test(number))throw new Error('支票號碼不可包含控制字元');
+    const receivedDate=chequeDate(values.receivedDate,'收票日期'),dueDate=chequeDate(values.dueDate,'到期日／票面日期');
+    if(receivedDate>businessDate())throw new Error('收票日期不可晚於今天');
+    if(![0,1,3,7].includes(Number(values.reminderDays))||values.reminderDays===''||values.reminderDays===null||values.reminderDays===undefined)throw new Error('請選擇支票提醒時間');
+    const deductions=normalizeCustomerDeductions(values.deductions),deductionAmount=safeReceiptMoneySum(deductions.map(r=>r.amount),'支票待確認扣款');
+    return {number,amount,receivedDate,dueDate,reminderDays:Number(values.reminderDays),issuerBank:chequeText(values.issuerBank),drawer:chequeText(values.drawer),note:chequeText(values.note),deductions,reservedAmount:safeReceiptMoneySum([amount,deductionAmount],'支票預留沖銷金額')};
+  }
+  function chequeIntent(spec) {
+    return JSON.stringify({...spec,deductions:spec.deductions.map(({category,amount,note})=>({category,amount,note}))});
+  }
+  function pendingChequeAmount(ar,excludeId='') {
+    const rows=chequeList(ar),ids=new Set();
+    return safeReceiptMoneySum(rows.map(row=>{
+      strictCheque(row);if(ids.has(row.id))throw new Error('支票識別重複，已停止修改');ids.add(row.id);
+      return row.status==='pending'&&row.id!==excludeId?row.reservedAmount:0;
+    }),'待兌現預留金額');
+  }
+  function receivableChequeCapacity(receivableId) {
+    const ar=chequeAR(receivableId),baseline=assertReceivableSettlementBaseline(ar),reserved=pendingChequeAmount(ar);
+    return {outstanding:baseline.outstanding,reserved,available:Math.max(0,baseline.outstanding-reserved),inconsistent:reserved>baseline.outstanding};
+  }
+  function receivableChequeSnapshot(receivableId) {
+    const ar=chequeAR(receivableId);
+    // Scope to this receivable and its real settlement evidence, not unrelated employees/projects.
+    return storeStateFingerprint({ar,receipts:(state.receipts||[]).filter(r=>String(r.receivableId)===String(ar.id)),billings:receivableBillingCandidates(ar)});
+  }
+  function requireChequeSnapshot(ar,expected) {
+    if(typeof expected!=='string'||expected!==receivableChequeSnapshot(ar.id))throw new Error('此筆應收或支票資料已變動；請保留輸入、取消後重新開啟核對');
+  }
+  function uniqueCheque(ar,id) {
+    const rows=chequeList(ar).filter(row=>String(row.id)===String(id||''));
+    if(rows.length!==1)throw new Error('找不到唯一支票紀錄');
+    return strictCheque(rows[0]);
+  }
+  function checkChequeDuplicate(spec,exceptId='') {
+    const normalize=value=>chequeText(value).replace(/\s+/g,'').toLocaleUpperCase('en-US');
+    for(const ar of state.receivables||[])for(const row of chequeList(ar)){
+      if(row.id===exceptId)continue;
+      if(normalize(row.number)===normalize(spec.number)&&(!normalize(row.issuerBank)||!normalize(spec.issuerBank)||normalize(row.issuerBank)===normalize(spec.issuerBank)))throw new Error('已有相同票號的支票紀錄（含已兌現／取消）。請核對付款銀行與原紀錄，勿重複登記');
+    }
+  }
+  function saveReceivableCheque(receivableId,values={},chequeId='') {
+    requireStoreTransactionDraft();
+    const ar=chequeAR(receivableId),rows=chequeList(ar),spec=chequeSpec(values),intent=chequeIntent(spec),request=chequeText(values.idempotencyKey);
+    if(!chequeId){
+      if(!request||request.length>160)throw new Error('支票操作識別不存在，請重新開啟');
+      const replay=rows.filter(row=>row.idempotencyKey===request);
+      if(replay.length>1)throw new Error('支票操作識別重複');
+      if(replay.length===1){strictCheque(replay[0]);if(replay[0].registrationFingerprint!==intent)throw new Error('相同操作識別的支票內容不同，已停止重送');return replay[0]}
+    }
+    requireChequeSnapshot(ar,values.expectedSnapshot);
+    const row=chequeId?uniqueCheque(ar,chequeId):null;
+    if(row&&row.status!=='pending')throw new Error('只有待兌現支票可編輯；已入帳及取消紀錄保留原狀');
+    strictReceivableBillingRelation(ar);
+    checkChequeDuplicate(spec,row?.id||'');
+    const available=assertReceivableSettlementBaseline(ar).outstanding-pendingChequeAmount(ar,row?.id||'');
+    if(spec.reservedAmount>available)throw new Error('票面金額加本次扣款不可超過未被其他支票預留的應收餘額');
+    const now=new Date().toISOString(),target=row||{id:uid(),schema:CHEQUE_SCHEMA,status:'pending',revision:0,idempotencyKey:request,registrationFingerprint:intent,createdAt:now};
+    if(row){if(!Array.isArray(row.changes))row.changes=[];row.changes.push({at:now,previous:{...chequeSpec(row)}})}
+    Object.assign(target,spec,{revision:target.revision+1,updatedAt:now});
+    if(!row){if(ar.receivableCheques===undefined)ar.receivableCheques=[];ar.receivableCheques.push(target)}
+    persist((row?'修改':'登記')+'待兌現支票 '+target.number,{receivableId:ar.id,chequeId:target.id,bankEntry:false});
+    return target;
+  }
+  function cancelReceivableCheque(receivableId,chequeId,values={}) {
+    requireStoreTransactionDraft();
+    const ar=chequeAR(receivableId),row=uniqueCheque(ar,chequeId),reason=chequeText(values.reason);
+    requireChequeSnapshot(ar,values.expectedSnapshot);
+    if(row.status!=='pending')throw new Error('只有待兌現支票可取消；已兌現紀錄不可直接取消');
+    if(!reason)throw new Error('請填寫取消／退回原因');
+    Object.assign(row,{status:'cancelled',cancelReason:reason,cancelledAt:new Date().toISOString(),updatedAt:new Date().toISOString(),revision:row.revision+1});
+    persist('取消待兌現支票 '+row.number,{receivableId:ar.id,chequeId:row.id,reason,bankEntry:false});return row;
+  }
+  function clearReceivableCheque(receivableId,chequeId,values={}) {
+    requireStoreTransactionDraft();
+    const ar=chequeAR(receivableId),row=uniqueCheque(ar,chequeId),date=chequeDate(values.date,'實際入帳日期'),bankId=chequeText(values.bankId),fee=strictReceiptMoney(values.fee??0,'兌現手續費'),feePayer=chequeText(values.feePayer||'company'),note=chequeText(values.note),request=chequeText(values.idempotencyKey);
+    if(!request||values.confirmed!==true)throw new Error('請先確認已核對銀行實際入帳');
+    if(!['company','counterparty'].includes(feePayer))throw new Error('手續費負擔方式不正確');
+    const clearIntent=JSON.stringify({date,bankId,fee,feePayer,note});
+    if(row.status==='cleared'){
+      if(row.clearRequestKey!==request||row.clearFingerprint!==clearIntent)throw new Error('這張支票已兌現入帳，禁止重複確認');
+      const receipt=state.receipts.find(r=>r.id===row.receiptId);if(!receipt||receipt.chequeId!==row.id)throw new Error('已兌現支票關聯待核對');
+      assertReceiptPostCondition(receipt,ar);return row;
+    }
+    if(row.status!=='pending')throw new Error('這張支票已取消，不能兌現');
+    requireChequeSnapshot(ar,values.expectedSnapshot);strictReceivableBillingRelation(ar);
+    if(date<row.receivedDate||date<row.dueDate)throw new Error('實際入帳日期不可早於收票日期或票面日期');
+    if(date>businessDate())throw new Error('實際入帳日期不可晚於今天；到期不代表已兌現');
+    strictBankIncomeBaseline(bankId);
+    const input={receivableId:ar.id,date,cashAmount:row.amount,amount:row.amount,collectionType:'bank',bankId,paymentMethod:'支票',fee,feePayer,note:note||row.note,deductions:row.deductions,idempotencyKey:'cheque-clear-'+row.id};
+    let receipt;
+    try{activeChequeClear={receivableId:ar.id,chequeId:row.id};receipt=addReceiptUnlocked(input)}finally{activeChequeClear=null}
+    if(!receipt||receipt.receivableId!==ar.id)throw new Error('支票兌現收款關聯核對失敗');
+    Object.assign(receipt,{chequeId:row.id,chequeNumber:row.number,chequeDueDate:row.dueDate,chequeReceivedDate:row.receivedDate});
+    const transaction=state.bankTransactions.find(r=>r.id===receipt.bankTransactionId);
+    if(!transaction)throw new Error('支票兌現銀行入帳核對失敗');
+    Object.assign(transaction,{chequeId:row.id,chequeNumber:row.number,chequeDueDate:row.dueDate});
+    Object.assign(row,{status:'cleared',clearedDate:date,bankId,fee,feePayer,clearNote:note,receiptId:receipt.id,bankTransactionId:transaction.id,clearRequestKey:request,clearFingerprint:clearIntent,updatedAt:new Date().toISOString(),revision:row.revision+1});
+    assertReceiptPostCondition(receipt,ar);
+    if(pendingChequeAmount(ar)>assertReceivableSettlementBaseline(ar).outstanding)throw new Error('兌現後應收預留金額不一致');
+    // addReceiptUnlocked requested the ONE outer atomic persistence; no second persist.
+    return row;
+  }
+  function receivableChequeRows(receivableId='',asOf=businessDate(),sourceState=state) {
+    const today=chequeDate(asOf,'查詢日期'),data=sourceState||{};
+    return (data.receivables||[]).filter(ar=>!receivableId||String(ar.id)===String(receivableId)).flatMap(ar=>{
+      const context={receivableId:ar.id,billingId:ar.billingId||'',sourceNo:ar.sourceNo||'',customerName:ar.customerName||(data.customers||[]).find(c=>c.id===ar.customer)?.name||'—',projectName:ar.projectName||(data.projects||[]).find(p=>p.id===ar.project)?.name||'—'};
+      if(ar.receivableCheques!==undefined&&!Array.isArray(ar.receivableCheques))return [{...context,id:'invalid-'+ar.id,status:'invalid',reminderState:'invalid',amount:0,number:'資料待核對'}];
+      return (ar.receivableCheques||[]).map(row=>{
+        let reminderState=row?.status||'invalid',days=null;
+        try{strictCheque(row);days=Math.round((Date.parse(row.dueDate+'T00:00:00Z')-Date.parse(today+'T00:00:00Z'))/86400000);if(row.status==='pending')reminderState=days<0?'overdue':days===0?'today':days<=row.reminderDays?'upcoming':'pending'}catch(_){reminderState='invalid'}
+        return {...storeStateClone(row||{}),...context,reminderState,days};
+      });
+    });
+  }
+
   function addReceipt(values = {}) { return queueReceiptMutation(()=>addReceiptUnlocked(values)); }
   function addReceiptUnlocked(values) {
     requireStoreTransactionDraft();
+    if(values.paymentMethod==='支票'&&!activeChequeClear)throw new Error('新支票請先登記待兌現，再從支票管理確認實際入帳');
     const idempotencyKey=String(values.idempotencyKey||'').trim(),existingMatches=idempotencyKey?state.receipts.filter((row)=>String(row.idempotencyKey||'')===idempotencyKey):[];
     if(existingMatches.length>1)throw new Error('收款 idempotencyKey 不唯一，已停止重送');
     if(existingMatches.length===1){
@@ -3827,6 +4064,8 @@
     const ar=arMatches[0],baseline=assertReceivableSettlementBaseline(ar),input=receiptInputPlan(values),outstanding=baseline.outstanding;
     if(input.deductionAmount>0)strictReceivableBillingRelation(ar);
     if(input.settlementAmount>outstanding)throw new Error('本次沖銷應收不可超過未收餘額');
+    const reserved=pendingChequeAmount(ar,activeChequeClear?.receivableId===ar.id?activeChequeClear.chequeId:'');
+    if(input.settlementAmount>outstanding-reserved)throw new Error('此筆應收已有待兌現支票預留；請核對支票，不可重複收款');
     if(input.cashAmount>0&&input.collectionType!=='employee_cash')strictBankReference({bankId:input.bankId},'新的收款銀行帳戶');
     const now=new Date().toISOString(),receipt={id:uid(),idempotencyKey:idempotencyKey||uid(),receivableId:ar.id,billingId:ar.billingId||'',date:input.date,amount:input.cashAmount,cashAmount:input.cashAmount,deductionAmount:input.deductionAmount,settlementAmount:input.settlementAmount,deductions:input.deductions,fee:input.fee,feePayer:input.feePayer,netAmount:input.netAmount,bankId:input.bankId,bankAccountId:input.bankId,paymentMethod:input.paymentMethod,note:input.note,collectionType:input.collectionType,collectorEmployeeId:input.collectorEmployeeId,collectorEmployeeName:input.collectorEmployeeName,collectedAt:input.collectedAt,handoverStatus:input.handoverStatus,requestFingerprint:receiptIntentFingerprint(ar.id,input),createdAt:now,updatedAt:now};
     return executeReceiptMutationDraft(`新增分次收款 ${ar.sourceNo}`,()=>{const currentAr=state.receivables.find((row)=>String(row.id||'')===String(ar.id||''));state.receipts.unshift(receipt);syncReceiptBankTransaction(receipt,currentAr,now);syncReceivableSummary(currentAr,now);return receipt},(row)=>assertReceiptPostCondition(row,state.receivables.find((item)=>String(item.id||'')===String(ar.id||''))));
@@ -3837,7 +4076,10 @@
     const receiptMatches=state.receipts.filter((row)=>String(row.id||'')===String(id||''));if(receiptMatches.length!==1)throw new Error(receiptMatches.length?'收款紀錄編號不唯一，已停止修改':'找不到收款紀錄');const receipt=receiptMatches[0];
     const arMatches=state.receivables.filter((row)=>String(row.id||'')===String(receipt.receivableId||''));if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止修改':'找不到對應應收帳款');const ar=arMatches[0],storedPlan=strictStoredReceiptPlan(receipt);if(storedPlan.collectionType==='employee_cash'&&storedPlan.handoverStatus==='completed')throw new Error('已繳回員工代收款不可由一般收款編輯修改');const baseline=assertReceivableSettlementBaseline(ar),input=receiptInputPlan(values,receipt);
     if(storedPlan.deductionAmount>0||input.deductionAmount>0)strictReceivableBillingRelation(ar,receipt);
+    if(receipt.chequeId)throw new Error('這筆是已確認的支票兌現收款，請保留票據與銀行關聯，勿直接修改');
+    if(input.paymentMethod==='支票'&&storedPlan.paymentMethod!=='支票')throw new Error('已入帳收款不可直接改為待兌現支票');
     const otherReceived=receivableSettlementTruth(ar,receipt);
+    if(input.settlementAmount>baseline.amount-otherReceived-pendingChequeAmount(ar))throw new Error('修改後金額會占用待兌現支票預留，已停止修改');
     if(otherReceived+input.settlementAmount>baseline.amount)throw new Error('本次沖銷應收不可超過本期剩餘應收');
     if(input.cashAmount>0&&input.collectionType!=='employee_cash')strictBankReference({bankId:input.bankId},'新的收款銀行帳戶');receiptMutationPlan(receipt);const now=new Date().toISOString();
     return executeReceiptMutationDraft(`修改應收收款 ${ar.sourceNo||''}`,()=>{const currentReceipt=state.receipts.find((row)=>String(row.id||'')===String(receipt.id||'')),currentAr=state.receivables.find((row)=>String(row.id||'')===String(ar.id||'')),currentPlan=receiptMutationPlan(currentReceipt);Object.assign(currentReceipt,{date:input.date,amount:input.cashAmount,cashAmount:input.cashAmount,deductionAmount:input.deductionAmount,settlementAmount:input.settlementAmount,deductions:input.deductions,fee:input.fee,feePayer:input.feePayer,netAmount:input.netAmount,bankId:input.bankId,bankAccountId:input.bankId,paymentMethod:input.paymentMethod,note:input.note,collectionType:input.collectionType,collectorEmployeeId:input.collectorEmployeeId,collectorEmployeeName:input.collectorEmployeeName,collectedAt:input.collectedAt,handoverStatus:input.handoverStatus,requestFingerprint:receiptIntentFingerprint(ar.id,input),updatedAt:now});syncReceiptBankTransaction(currentReceipt,currentAr,now,currentPlan.transaction);syncReceivableSummary(currentAr,now);return currentReceipt},(row)=>assertReceiptPostCondition(row,state.receivables.find((item)=>String(item.id||'')===String(ar.id||''))));
@@ -3845,6 +4087,7 @@
   function deleteReceipt(id, token) { return queueReceiptMutation(()=>deleteReceiptUnlocked(id,token)); }
   function deleteReceiptUnlocked(id, token) {
     requireStoreTransactionDraft();
+    if(state.receipts.some(row=>String(row.id)===String(id)&&row.chequeId))throw new Error('已兌現支票有完整票據與銀行關聯，禁止從一般收款直接刪除');
     const receiptMatches=state.receipts.filter((row)=>String(row.id||'')===String(id||''));if(receiptMatches.length!==1)throw new Error(receiptMatches.length?'收款紀錄編號不唯一，已停止刪除':'找不到收款紀錄');const receipt=receiptMatches[0];
     const arMatches=state.receivables.filter((row)=>String(row.id||'')===String(receipt.receivableId||''));if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止刪除':'找不到對應應收帳款');const ar=arMatches[0],storedPlan=strictStoredReceiptPlan(receipt);if(storedPlan.deductionAmount>0)strictReceivableBillingRelation(ar,receipt);assertReceivableSettlementBaseline(ar);receiptMutationPlan(receipt);const now=new Date().toISOString();let mutationReceipt=null,mutationAr=null,mutationPlan=null;
     const mutate=()=>{mutationReceipt=state.receipts.find((row)=>String(row.id||'')===String(receipt.id||''));mutationAr=state.receivables.find((row)=>String(row.id||'')===String(ar.id||''));mutationPlan=receiptMutationPlan(mutationReceipt);if(mutationPlan.transaction){adjustBankIncome(mutationPlan.bank,-mutationPlan.amount,now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==mutationPlan.transaction)}state.receipts=state.receipts.filter((row)=>row!==mutationReceipt);syncReceivableSummary(mutationAr,now);assertReceiptDeletePostCondition(mutationReceipt,mutationAr,mutationPlan);return true};
@@ -4874,6 +5117,7 @@
     const totals=calculateBilling({lines:billing.lines||[],taxMode:billing.taxMode,invoiceStatus:nextInvoiceStatus,retentionMode:billing.retentionMode,retentionRate:billing.retentionRate,retentionBase:billing.retentionBase||'taxIncluded',retentionCustom:!billing.retentionBase&&billing.retentionMode==='custom'?billing.retention:undefined});
     const ar=state.receivables.find((row)=>row.id===billing.receivableId||row.billingId===billing.id||String(row.sourceNo||'')===String(billing.number||''));
     if(ar&&num(ar.received)>totals.receivable)throw new Error('切換後應收金額低於既有收款，請先確認收款紀錄');
+    if(ar&&num(ar.received)+pendingChequeAmount(ar)>totals.receivable)throw new Error('切換後應收金額不足以保留待兌現支票，請先核對支票與請款條件');
     Object.assign(billing,{invoiceStatus:nextInvoiceStatus,hasInvoice:nextInvoiceStatus!=='no_invoice',invoiceNo:number,invoiceDate:date,amount:totals.untaxed,tax:totals.tax,grossTotal:totals.grossTotal,preTaxAmount:totals.untaxed,taxAmount:totals.tax,taxIncludedAmount:totals.grossTotal,retention:totals.retention,retentionAmount:totals.retention,retentionBase:totals.retentionBase,retentionStatus:retentionState(totals.retention,billing.retentionReceived,billing.retentionStatus),remainingRetention:Math.max(0,totals.retention-num(billing.retentionReceived)),total:totals.receivable,updatedAt:now});
     if(ar){Object.assign(ar,{invoiceNo:number,invoiceStatus:nextInvoiceStatus,taxMode:billing.taxMode,untaxedAmount:totals.untaxed,tax:totals.tax,grossTotal:totals.grossTotal,preTaxAmount:totals.untaxed,taxAmount:totals.tax,taxIncludedAmount:totals.grossTotal,retention:totals.retention,retentionAmount:totals.retention,retentionBase:totals.retentionBase,retentionStatus:retentionState(totals.retention,ar.retentionReceived,ar.retentionStatus),remainingRetention:Math.max(0,totals.retention-num(ar.retentionReceived)),amount:totals.receivable,status:num(ar.received)>=totals.receivable&&totals.receivable>0?'已收':num(ar.received)>0?'部分收款':'未收',updatedAt:now})}
     syncBillingInvoiceRecord(billing,now);
@@ -6350,6 +6594,7 @@
     return { changed:true, settings:{...next}, defaultTaxChanged };
   }
   const STORE_WRITER_NAMES=new Set([
+    'saveReceivableCheque','cancelReceivableCheque','clearReceivableCheque',
     'repairDailyBillingLinks','saveSystemSettings',
     'saveQuotationUnitPreset','saveQuotationPublicNotePreset','deleteQuotationPublicNotePreset',
     'saveCommission','deleteCommission','saveDailyBatch','saveDailyUnbilledItems','deleteDailyBatch','saveInvoice','createBilling','updateBilling','deleteBilling',
@@ -6368,11 +6613,11 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ dailyDraftSnapshot, dailyDraftReview, receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
-    readCommittedSnapshot,remoteApplyReadiness,repairEmergencyMirrorForRemoteApply,legacyBootstrapEvidence,applyRemoteSnapshot,replaceSnapshot,recoveryPreview,recoverStore,
+    refreshDailyDraftBase,readCommittedSnapshot,remoteApplyReadiness,repairEmergencyMirrorForRemoteApply,legacyBootstrapEvidence,applyRemoteSnapshot,replaceSnapshot,recoveryPreview,recoverStore,
     loadEphemeralSnapshot,clearEphemeralSession,isEphemeralMode,
     getLastStoreTransactionResult:()=>lastStoreTransactionResult,
     persist:()=>Promise.reject(storeError('直接 persist 已停用；請使用正式 Store 寫入 API','DIRECT_PERSIST_FORBIDDEN'))

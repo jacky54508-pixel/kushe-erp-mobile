@@ -246,6 +246,7 @@
     const retentionBillings=data.billings.filter((row)=>number(row.retention)>number(row.retentionReceived));
     const retentionOpen=sum(retentionBillings,(row)=>Math.max(0,number(row.retention)-number(row.retentionReceived)));
     const attentions = [
+      ...(window.KusheCheques?.attentionItems(data)||[]),
       { type: '待請款施工', count: unbilledWork.count, countLabel: `${unbilledWork.count} 個案場`, amount: unbilledWork.amount, module: 'unbilled-work', tone: 'blue', icon: 'clipboard-list' },
       { type: '逾期應收', count: overdue.length, amount: sum(overdue, (row) => Math.max(0, arAmount(row) - paidAR(row))), module: 'receivables', tone: 'red', icon: 'circle-alert' },
       { type: '待收款', count: openAR.length, amount: outstandingAR, module: 'receivables', tone: 'orange', icon: 'arrow-down-to-line' },
@@ -337,7 +338,7 @@
     $('#projectRows').innerHTML = vm.projects.length ? vm.projects.map((row) => `<tr data-module="projects"><td title="${escapeHtml(row.name)}">${escapeHtml(row.name)}</td><td>${money(row.billed)}</td><td>${money(row.received)}</td><td>${money(row.outstanding)}</td><td>${money(row.material)}</td><td>${money(row.labor)}</td><td>${money(row.other)}</td><td>${money(row.customerDeduction)}</td><td>${money(row.totalCost)}</td><td>${money(row.profit)}</td><td>${row.margin.toFixed(1)}%</td><td><span class="status-pill ${/已完工/.test(row.status) ? 'done' : /暫停|未完工/.test(row.status) ? 'hold' : ''}">${escapeHtml(row.status)}</span></td></tr>`).join('') : '<tr><td colspan="12" class="empty-cell">目前沒有可彙整的案場資料</td></tr>';
   }
   function attentionMarkup(rows) {
-    return rows.length ? rows.map((row) => `<button class="attention-item" type="button" data-module="${row.module}"><span class="attention-icon ${row.tone}"><i data-icon="${row.icon}"></i></span><span class="attention-copy"><strong>${row.type}</strong><small class="count-pill">${row.countLabel||`${row.count} 筆`}</small></span><b class="attention-amount">${money(row.amount)}</b><i class="attention-arrow" data-icon="chevron-right"></i></button>`).join('') : '<div class="all-clear">目前沒有待處理項目</div>';
+    return rows.length ? rows.map((row) => `<button class="attention-item" type="button" ${row.chequeFilter?`data-cheque-filter="${row.chequeFilter}"`:`data-module="${row.module}"`}><span class="attention-icon ${row.tone}"><i data-icon="${row.icon}"></i></span><span class="attention-copy"><strong>${row.type}</strong><small class="count-pill">${row.countLabel||`${row.count} 筆`}</small></span><b class="attention-amount">${money(row.amount)}</b><i class="attention-arrow" data-icon="chevron-right"></i></button>`).join('') : '<div class="all-clear">目前沒有待處理項目</div>';
   }
   function renderAttention(vm) {
     $('#attentionList').innerHTML = attentionMarkup(vm.attentions);
