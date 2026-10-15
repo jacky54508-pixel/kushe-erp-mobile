@@ -1,0 +1,61 @@
+name: P29-7 isolated draft recovery verification
+
+on:
+  push:
+    branches: [p29-7-build-20261015]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 4ea7ac6df139dd2b2856833a468d44fb6242e5e2
+          path: base
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 4ea7ac6df139dd2b2856833a468d44fb6242e5e2
+          path: work
+      - name: Apply exact tested source and verify syntax
+        run: python harness/tools/p29-7/build.py work evidence qa-tests
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated browser test dependencies
+        run: |
+          python -m pip install playwright==1.57.0 beautifulsoup4==4.14.3
+          python -m playwright install --with-deps chromium
+      - name: Native synthetic persistence and two-tab test
+        env:
+          QA_ROOT: ${{ github.workspace }}/work
+          QA_BASE_ROOT: ${{ github.workspace }}/base
+          QA_EVIDENCE: ${{ github.workspace }}/evidence
+        run: python qa-tests/native-ci.py
+      - name: Publish clean review branch only after native tests pass
+        working-directory: work
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -b p29-7-ready-20261015
+          git add assets/css/daily-draft-review.css assets/js/daily-draft-review.js assets/js/commissions.js assets/js/erp-store.js index.html
+          test "$(git diff --cached --name-only | wc -l)" -eq 5
+          git diff --cached --check
+          git commit -m 'P29-7: preserve daily drafts while reviewing a newer committed local state' -m 'Add an explicit read-only rebase and review flow without resubmission. Keep native commit/journal/CAS and recovery fences. Preserve input nodes, quoted source identities and pay drafts; block changed historical batches and possible duplicates; apply changed quote values only on explicit user action. Local synthetic suites: 198 checks. Native Chromium IndexedDB, cross-tab Web Locks and browser close/reopen verified in isolated CI before publishing this candidate. No ERP account, live data, cloud migration or business writes. Beta review candidate only; main unchanged.'
+          git push origin HEAD:refs/heads/p29-7-ready-20261015
+          git rev-parse HEAD > ../evidence/candidate-sha.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p29-7-native-build-evidence
+          path: evidence
+          retention-days: 7
