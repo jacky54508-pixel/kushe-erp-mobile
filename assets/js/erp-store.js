@@ -5189,6 +5189,50 @@
     const date=String(value??'').trim();if(!date&&optional)return '';
     if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date+'T00:00:00Z'))||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date)throw new Error(label+'請填有效日期');return date;
   }
+  // P30-1: quotation references are documentary snapshots, never construction allocations.
+  function historicalQuotationSource(value) {
+    if(!value||typeof value!=='object'||Array.isArray(value)||value.schema!=='kushe-historical-quotation-v1')throw new Error('報價引用格式無效');
+    const text=(key,max,required=true)=>{const v=value[key];if(typeof v!=='string'||v!==v.trim()||(required&&!v)||v.length>max||/[\u0000-\u001f]/.test(v))throw new Error('報價引用欄位無效：'+key);return v};
+    const price=value.price;if(typeof price!=='number'||!Number.isFinite(price)||price<0||price>1e10||Math.abs(price*10000-Math.round(price*10000))>0.001)throw new Error('報價引用單價無效');
+    if(!['未稅','含稅'].includes(value.taxMode)||value.pricingType!=='actual'||!Number.isSafeInteger(value.lineNumber)||value.lineNumber<1)throw new Error('報價引用計價資訊無效');
+    return {schema:value.schema,quotationId:text('quotationId',200),quotationNumber:text('quotationNumber',200),quotationDate:billingDocumentDate(value.quotationDate,'報價日期',true),lineId:text('lineId',200),lineNumber:value.lineNumber,item:text('item',200),unit:text('unit',20),house:text('house',100,false),price,taxMode:value.taxMode,pricingType:'actual'};
+  }
+  function historicalQuotationChoices(id) {
+    const {billing,issues}=billingDocumentContext(id);
+    if(issues.length||billing.sourceType!=='legacy-ar-invoice-rebuild'||!Array.isArray(billing.lines)||billing.lines.length)return [];
+    const customer=String(billing.customer||''),project=String(billing.project||'');
+    if(!customer||!project)return []; // Never match by display name or choose another project's price.
+    const all=Array.isArray(state.quotations)?state.quotations:[];
+    return all.filter(q=>q.status==='已確認'&&String(q.customer||'')===customer&&String(q.project||'')===project&&q.id&&all.filter(x=>String(x.id)===String(q.id)).length===1).map(q=>{
+      const lines=Array.isArray(q.lines)?q.lines:[],rows=lines.map((line,index)=>{
+        let source=null,reason='';
+        try{
+          if(!line||!line.id||lines.filter(x=>String(x?.id)===String(line.id)).length!==1)throw new Error('品項識別不唯一，請依原單手動補登');
+          if(pricingTypeFor(q,line)!=='actual')throw new Error('總價項目不拆算單價，請依原請款明細手動補登');
+          if(line.price===null||line.price===undefined||String(line.price).trim()==='')throw new Error('沒有明確單價，請核對原單');
+          source=historicalQuotationSource({schema:'kushe-historical-quotation-v1',quotationId:String(q.id),quotationNumber:String(q.number||'').trim(),quotationDate:String(q.date||''),lineId:String(line.id),lineNumber:index+1,item:String(line.item||'').trim(),unit:String(line.unit||'').trim(),house:String(line.house||'').trim(),price:Number(line.price),taxMode:q.taxMode,pricingType:'actual'});
+        }catch(error){reason=error.message}
+        return {lineNumber:index+1,item:String(line?.item||''),unit:String(line?.unit||''),source,reason};
+      });
+      return {id:String(q.id),number:String(q.number||''),date:String(q.date||''),taxMode:String(q.taxMode||''),laterThanBill:Boolean(q.date&&billing.date&&String(q.date)>String(billing.date)),rows};
+    }).sort((a,b)=>b.date.localeCompare(a.date)||a.number.localeCompare(b.number,'zh-Hant',{numeric:true}));
+  }
+  function verifyHistoricalQuotationReferences(id,lines,previous,taxMode) {
+    let current=null;
+    const oldLines=Array.isArray(previous?.lines)?previous.lines:[];
+    for(const line of lines){
+      if(!line.quotationSource)continue;
+      const source=line.quotationSource,fingerprint=storeStateFingerprint(source);
+      // Saved snapshots remain usable even if the quotation is revised or removed later.
+      const saved=oldLines.some(old=>old.quotationSource&&storeStateFingerprint(old.quotationSource)===fingerprint);
+      if(!saved){
+        if(current===null)current=historicalQuotationChoices(id).flatMap(q=>q.rows).filter(row=>row.source).map(row=>storeStateFingerprint(row.source));
+        if(!current.includes(fingerprint))throw new Error('引用報價已變更或失效，請保留輸入，重新選擇並核對報價；未修改原帳款');
+      }
+      if(source.taxMode!==taxMode)throw new Error('引用報價稅別與補登單價方式不同；不自動換算，請核對原單');
+      if((line.price!==source.price||line.item!==source.item||line.unit!==source.unit)&&!line.quotationAdjustmentReason)throw new Error('引用後更正品項、單位或單價，請填寫「與報價不同的原因」');
+    }
+  }
   function historicalBillingLines(input,taxMode,amounts) {
     if(!['未稅','含稅'].includes(taxMode))throw new Error('請明確選擇補登單價為未稅或含稅');
     if(!Array.isArray(input)||!input.length||input.length>200)throw new Error('請填寫 1～200 筆歷史施工明細');
@@ -5198,7 +5242,14 @@
       if(!line||typeof line!=='object'||Array.isArray(line))throw new Error('明細格式無效');
       const item=textValue(line.item,'第 '+(index+1)+' 筆施工項目',200,true),unit=textValue(line.unit,'單位',20,true),qty=numeric(line.qty,'數量',true),price=numeric(line.price,'單價');
       if(!Number.isSafeInteger(Math.round(qty*price))||qty*price>Number.MAX_SAFE_INTEGER/200)throw new Error('明細金額超過安全範圍');
-      return {date:billingDocumentDate(line.date,'施工日期',true),house:textValue(line.house,'戶別／位置',100),item,unit,qty,price,subtotal:Math.round(qty*price)};
+      const normalized={date:billingDocumentDate(line.date,'施工日期',true),house:textValue(line.house,'戶別／位置',100),item,unit,qty,price,subtotal:Math.round(qty*price)};
+      if(line.quotationSource!==undefined&&line.quotationSource!==null){
+        normalized.quotationSource=historicalQuotationSource(line.quotationSource);
+        normalized.quotationAdjustmentReason=textValue(line.quotationAdjustmentReason??'','與報價不同的原因',300);
+        if(normalized.quotationSource.taxMode!==taxMode)throw new Error('引用報價稅別與補登單價方式不同；不自動換算');
+        if((price!==normalized.quotationSource.price||item!==normalized.quotationSource.item||unit!==normalized.quotationSource.unit)&&!normalized.quotationAdjustmentReason)throw new Error('引用後更正品項、單位或單價，請填寫「與報價不同的原因」');
+      }
+      return normalized;
     });
     const total=lines.reduce((sum,line)=>sum+line.subtotal,0),expected=taxMode==='含稅'?amounts.grossTotal:amounts.untaxed;
     if(!Number.isSafeInteger(expected)||total!==expected)throw new Error('補登明細合計 '+total+' 與原'+taxMode+'金額 '+expected+' 不符；不會修改原帳款');
@@ -5212,6 +5263,7 @@
     if(values.confirmed!==true)throw new Error('請先確認已核對原始請款資料');
     const reference=String(values.reference||'').trim();if(!reference||reference.length>1000)throw new Error('請填原始資料依據（最多 1000 字）');
     const lines=historicalBillingLines(values.lines,values.taxMode,amounts),previous=billing.historicalDetailSupplement;
+    verifyHistoricalQuotationReferences(id,lines,previous,values.taxMode);
     if(previous&&(previous.schema!=='kushe-historical-details-v1'||!Array.isArray(previous.history)))throw new Error('原補登歷程格式待核對，未覆寫');
     if(previous&&previous.reference===reference&&previous.taxMode===values.taxMode&&storeStateFingerprint(previous.lines)===storeStateFingerprint(lines))return billing;
     const history=previous?[{schema:previous.schema,revision:previous.revision,lines:storeStateClone(previous.lines),taxMode:previous.taxMode,reference:previous.reference,anchors:storeStateClone(previous.anchors),updatedAt:previous.updatedAt},...storeStateClone(previous.history)]:[];
@@ -6748,7 +6800,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ billingDocumentState, billingDocumentLines, saveHistoricalBillingDetails, dailyDraftSnapshot, dailyDraftReview, receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ historicalQuotationChoices, billingDocumentState, billingDocumentLines, saveHistoricalBillingDetails, dailyDraftSnapshot, dailyDraftReview, receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
