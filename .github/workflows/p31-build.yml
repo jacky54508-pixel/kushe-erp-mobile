@@ -1,0 +1,54 @@
+name: P31 isolated external billing groups verification
+on:
+  push:
+    branches: [p31-build-20261029]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      QA_ROOT_DIR: ${{ github.workspace }}/qa
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: df246e0ef126c9323a2beed0ce3da12c3ee81476
+          path: qa/src
+          fetch-depth: 1
+      - name: Reconstruct exact locally verified source
+        run: python3 harness/.p31-build/build.py
+      - name: Verify JavaScript syntax
+        run: find qa/src/assets/js -name '*.js' -print0 | xargs -0 -n1 node --check
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated browser dependencies
+        run: |
+          pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Verify native document persistence and stale-tab safety
+        run: python qa/tests/native-groups.py
+      - name: Publish clean candidate only after verification
+        working-directory: qa/src
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add assets/css/billing-groups.css assets/js/billing-groups.js assets/js/billing.js assets/js/erp-store.js assets/js/external-billing-print.js external-billing-print.html index.html
+          test "$(git diff --cached --name-only | wc -l)" -eq 7
+          git diff --cached --check
+          git commit -m 'P31: documentary billing groups with unchanged original accounting' -m 'Group original billings and receivables visually, preserve individual invoices and receipt paths, validate external details per original, save documentary versions in a separate metadata namespace. No auto grouping or migration. Exact local source hashes and JavaScript syntax verified. Isolated synthetic native browser persistence and stale-tab checks passed before candidate creation. No real ERP login or business database access. Candidate only; beta and main unchanged.'
+          git push origin HEAD:refs/heads/p31-ready-20261029
+          git rev-parse HEAD > ../evidence/candidate-sha.txt
+          git rev-parse HEAD^{tree} > ../evidence/candidate-tree.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p31-native-build-evidence
+          path: qa/evidence
+          retention-days: 7
