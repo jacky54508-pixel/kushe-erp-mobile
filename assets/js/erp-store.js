@@ -5110,8 +5110,142 @@
     persist(`刪除案場抽成結算 ${settlement.projectName||settlement.projectId||''}｜${settlement.employeeName||settlement.employeeId||''}`,{commissionSettlementId:settlementId});
     return true;
   }
+  // P30: historical detail is documentary only. Never rebuild financial sources from it.
+  function billingNeedsRecordedTotals(billing) {
+    return billing?.sourceType==='legacy-ar-invoice-rebuild'||!Array.isArray(billing?.lines)||billing.lines.length===0||!billingSafety(billing).editable;
+  }
+  function billingRecordedAmounts(billing) {
+    const issues=[];
+    const read=(row,names,label,required=true)=>{
+      const values=names.filter(key=>hasOwn(row||{},key)&&row[key]!==null&&row[key]!==undefined&&row[key]!=='').map(key=>row[key]);
+      if(!values.length){if(required)issues.push(label+'缺少已保存金額');return null}
+      if(values.some(value=>!['number','string'].includes(typeof value)||String(value).trim()===''||!Number.isSafeInteger(Number(value))||Number(value)<0)){issues.push(label+'不是有效金額');return null}
+      const numbers=values.map(Number);if(numbers.some(value=>value!==numbers[0])){issues.push(label+'的歷史金額欄位不一致');return null}return numbers[0];
+    };
+    const untaxed=read(billing,['preTaxAmount','amount'],'請款未稅'),tax=read(billing,['taxAmount','tax'],'請款稅額'),grossTotal=read(billing,['taxIncludedAmount','grossTotal'],'請款總額'),retention=read(billing,['retentionAmount','retention'],'保留款'),receivable=read(billing,['total'],'請款應收');
+    if([untaxed,tax,grossTotal,retention,receivable].every(value=>value!==null)&&(untaxed+tax!==grossTotal||grossTotal-retention!==receivable))issues.push('已保存的未稅、稅額、保留款與應收合計不一致');
+    return {untaxed,tax,grossTotal,retention,receivable,issues,read};
+  }
+  function billingDocumentContext(id) {
+    const key=String(id||''),matches=(state.billings||[]).filter(row=>String(row.id)===key);
+    if(!key||matches.length!==1)throw new Error('找不到唯一請款單，請先核對資料');
+    const billing=matches[0],issues=[],amounts=billingRecordedAmounts(billing);issues.push(...amounts.issues);
+    const ars=state.receivables.filter(row=>(billing.receivableId&&String(row.id)===String(billing.receivableId))||(row.billingId&&String(row.billingId)===key)||(billing.number&&row.sourceNo&&String(row.sourceNo)===String(billing.number)));
+    const ar=ars.length===1?ars[0]:null;
+    if(!ar)issues.push('找不到唯一對應應收帳款');
+    else{
+      if((billing.receivableId&&String(billing.receivableId)!==String(ar.id))||(ar.billingId&&String(ar.billingId)!==key))issues.push('請款與應收的來源識別不一致');
+      for(const field of ['customer','project'])if(billing[field]&&ar[field]&&String(billing[field])!==String(ar[field]))issues.push('請款與應收的'+(field==='customer'?'客戶':'案場')+'不一致');
+      for(const [names,expected,label,required] of [[['amount'],amounts.receivable,'應收總額',true],[['untaxedAmount','preTaxAmount'],amounts.untaxed,'應收未稅',false],[['tax','taxAmount'],amounts.tax,'應收稅額',false],[['grossTotal','taxIncludedAmount'],amounts.grossTotal,'應收含稅',false],[['retention','retentionAmount'],amounts.retention,'應收保留款',false]]){
+        const value=amounts.read(ar,names,label,required);if(value!==null&&value!==expected)issues.push(label+'與請款金額不符');
+      }
+    }
+    const invoices=billingInvoiceRecords(billing);
+    if(invoices.length>1)issues.push('對應發票不唯一，請先核對發票關聯');
+    const invoice=invoices.length===1?invoices[0]:null;
+    if(billingInvoiceStatus(billing)==='invoiced'&&!invoice)issues.push('已開發票但找不到唯一發票紀錄');
+    if(invoice){
+      if((invoice.billingId&&String(invoice.billingId)!==key)||(invoice.sourceType==='billing'&&invoice.sourceId&&String(invoice.sourceId)!==key))issues.push('發票來源關聯不一致');
+      if((invoice.invoiceType&&invoice.invoiceType!=='output')||/進項/.test(String(invoice.type||'')))issues.push('來源發票不是銷項發票');
+      if(invoiceStatus(invoice.status,invoice.invoiceNumber||invoice.number)==='void')issues.push('來源發票已作廢，請先核對帳務');
+      const numbers=[billing.invoiceNo,ar?.invoiceNo,invoice.invoiceNumber,invoice.number].filter(value=>String(value||'').trim()).map(value=>String(value).trim());
+      if(new Set(numbers).size>1)issues.push('請款、應收與發票號碼不一致');
+      for(const [names,expected,label] of [[['netAmount','amount'],amounts.untaxed,'發票未稅'],[['taxAmount','tax'],amounts.tax,'發票稅額'],[['grossAmount','total'],amounts.grossTotal,'發票含稅']]){
+        const value=amounts.read(invoice,names,label);if(value!==null&&value!==expected)issues.push(label+'與請款金額不符');
+      }
+    }
+    // read() may have added strict-field errors after the first collection.
+    const allIssues=[...new Set([...issues,...amounts.issues])],arIds=new Set(ars.map(row=>String(row.id)));
+    const related=row=>(row.billingId&&String(row.billingId)===key)||(row.receivableId&&arIds.has(String(row.receivableId)));
+    const snapshot=storeStateFingerprint({billing,ars,invoices,receipts:state.receipts.filter(related),retentionReceipts:state.retentionReceipts.filter(related),bankTransactions:state.bankTransactions.filter(related)});
+    return {billing,ar,invoice,amounts,issues:allIssues,snapshot};
+  }
+  function billingDocumentState(id) {
+    const ctx=billingDocumentContext(id),{billing,amounts,ar}=ctx;
+    const eligible=billing.sourceType==='legacy-ar-invoice-rebuild'&&Array.isArray(billing.lines)&&billing.lines.length===0;
+    const supplement=billing.historicalDetailSupplement;
+    let supplementValid=false;
+    if(supplement){
+      try{
+        if(supplement.schema!=='kushe-historical-details-v1')throw new Error('補登資料版本無法辨識');
+        const checked=historicalBillingLines(supplement.lines,supplement.taxMode,amounts);
+        if(storeStateFingerprint(supplement.anchors)!==storeStateFingerprint(historicalBillingAnchors(amounts)))throw new Error('補登時的帳款金額與目前不同');
+        supplementValid=checked.length>0;
+      }catch(error){ctx.issues.push(error.message)}
+    }
+    const received=ar&&Number.isFinite(Number(ar.received??0))?Number(ar.received??0):null;
+    return {isHistorical:billing.sourceType==='legacy-ar-invoice-rebuild',protected:billingNeedsRecordedTotals(billing),eligible:eligible&&ctx.issues.length===0,issues:ctx.issues,snapshot:ctx.snapshot,amounts:{untaxed:amounts.untaxed,tax:amounts.tax,grossTotal:amounts.grossTotal,retention:amounts.retention,receivable:amounts.receivable,unreceived:received===null||amounts.receivable===null?null:Math.max(0,amounts.receivable-received)},supplementValid,supplement:supplementValid?storeStateClone(supplement):null};
+  }
+  function billingDocumentLines(billing) {
+    if(Array.isArray(billing?.lines)&&billing.lines.length)return billing.lines;
+    if(billing?.sourceType!=='legacy-ar-invoice-rebuild'||!billing.historicalDetailSupplement)return [];
+    // Match both the immutable financial anchors and the current original bill.
+    try{const info=billingDocumentState(billing.id);return info.supplementValid?info.supplement.lines.map(line=>({...line,sourceType:'historical-supplement'})):[]}catch(_){return []}
+  }
+  function historicalBillingAnchors(amounts) {
+    return {untaxed:amounts.untaxed,tax:amounts.tax,grossTotal:amounts.grossTotal,retention:amounts.retention,receivable:amounts.receivable};
+  }
+  function billingDocumentDate(value,label,optional=false) {
+    const date=String(value??'').trim();if(!date&&optional)return '';
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date+'T00:00:00Z'))||new Date(date+'T00:00:00Z').toISOString().slice(0,10)!==date)throw new Error(label+'請填有效日期');return date;
+  }
+  function historicalBillingLines(input,taxMode,amounts) {
+    if(!['未稅','含稅'].includes(taxMode))throw new Error('請明確選擇補登單價為未稅或含稅');
+    if(!Array.isArray(input)||!input.length||input.length>200)throw new Error('請填寫 1～200 筆歷史施工明細');
+    const textValue=(value,label,max,required=false)=>{const result=String(value??'').trim();if((required&&!result)||result.length>max||/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(result))throw new Error(label+'請填有效內容');return result};
+    const numeric=(value,label,positive=false)=>{if(!['number','string'].includes(typeof value)||String(value).trim()===''||!Number.isFinite(Number(value))||Number(value)<0||(positive&&Number(value)<=0)||Number(value)>1e10||Math.abs(Number(value)*10000-Math.round(Number(value)*10000))>0.001)throw new Error(label+'請填有效非負數值（最多四位小數）');return Number(value)};
+    const lines=input.map((line,index)=>{
+      if(!line||typeof line!=='object'||Array.isArray(line))throw new Error('明細格式無效');
+      const item=textValue(line.item,'第 '+(index+1)+' 筆施工項目',200,true),unit=textValue(line.unit,'單位',20,true),qty=numeric(line.qty,'數量',true),price=numeric(line.price,'單價');
+      if(!Number.isSafeInteger(Math.round(qty*price))||qty*price>Number.MAX_SAFE_INTEGER/200)throw new Error('明細金額超過安全範圍');
+      return {date:billingDocumentDate(line.date,'施工日期',true),house:textValue(line.house,'戶別／位置',100),item,unit,qty,price,subtotal:Math.round(qty*price)};
+    });
+    const total=lines.reduce((sum,line)=>sum+line.subtotal,0),expected=taxMode==='含稅'?amounts.grossTotal:amounts.untaxed;
+    if(!Number.isSafeInteger(expected)||total!==expected)throw new Error('補登明細合計 '+total+' 與原'+taxMode+'金額 '+expected+' 不符；不會修改原帳款');
+    return lines;
+  }
+  async function saveHistoricalBillingDetails(id,values={}) {
+    requireStoreTransactionDraft();const ctx=billingDocumentContext(id),{billing,amounts}=ctx;
+    if(billing.sourceType!=='legacy-ar-invoice-rebuild'||!Array.isArray(billing.lines)||billing.lines.length)throw new Error('只可補登明確標記且沒有原始施工明細的歷史請款單');
+    if(!values.expectedSnapshot||values.expectedSnapshot!==ctx.snapshot)throw new Error('請款或關聯帳務已更新，請保留輸入並重新開啟核對');
+    if(ctx.issues.length)throw new Error(ctx.issues.join('；'));
+    if(values.confirmed!==true)throw new Error('請先確認已核對原始請款資料');
+    const reference=String(values.reference||'').trim();if(!reference||reference.length>1000)throw new Error('請填原始資料依據（最多 1000 字）');
+    const lines=historicalBillingLines(values.lines,values.taxMode,amounts),previous=billing.historicalDetailSupplement;
+    if(previous&&(previous.schema!=='kushe-historical-details-v1'||!Array.isArray(previous.history)))throw new Error('原補登歷程格式待核對，未覆寫');
+    if(previous&&previous.reference===reference&&previous.taxMode===values.taxMode&&storeStateFingerprint(previous.lines)===storeStateFingerprint(lines))return billing;
+    const history=previous?[{schema:previous.schema,revision:previous.revision,lines:storeStateClone(previous.lines),taxMode:previous.taxMode,reference:previous.reference,anchors:storeStateClone(previous.anchors),updatedAt:previous.updatedAt},...storeStateClone(previous.history)]:[];
+    if(history.length>100)throw new Error('補登歷程已達安全上限，請先核對');
+    const now=new Date().toISOString();
+    billing.historicalDetailSupplement={schema:'kushe-historical-details-v1',revision:(previous?.revision||0)+1,taxMode:values.taxMode,lines,reference,anchors:historicalBillingAnchors(amounts),updatedAt:now,history};
+    // No line/source rewrites, AR/payment changes, or recalculation; only this documentary field.
+    persist('補登歷史請款明細 '+billing.number,{billingId:billing.id,kind:'DOCUMENT_ONLY',revision:billing.historicalDetailSupplement.revision});return billing;
+  }
+  function updateProtectedBillingInvoice(id,values) {
+    const ctx=billingDocumentContext(id),{billing,ar,invoice}=ctx;
+    const current=billingInvoiceStatus(billing),choice=values.invoiceChoice;
+    if(!['no_invoice','invoice_required'].includes(choice)||(choice==='no_invoice')!==(current==='no_invoice'))throw new Error((ar&&pendingChequeAmount(ar)>0?'已有待兌現支票；':'')+'此請款金額已鎖定，不可透過發票設定切換稅務；只可更正票號與日期');
+    if(!values.expectedSnapshot||values.expectedSnapshot!==ctx.snapshot)throw new Error('請款或關聯帳務已更新，請重新開啟核對後儲存發票資料');
+    if(ctx.issues.length)throw new Error(ctx.issues.join('；'));
+    if(current==='no_invoice')return billing;
+    if(!invoice)throw new Error('找不到唯一發票紀錄，請先核對來源');
+    const number=String(values.invoiceNo??'').trim();if(number.length>50||/[\s\u0000-\u001f]/.test(number))throw new Error('請填有效發票號碼');
+    if(current==='invoiced'&&!number)throw new Error('已開發票不可清空票號；請另行核對發票更正流程');
+    const date=billingDocumentDate(values.invoiceDate,'發票日期');
+    if(number&&state.invoices.some(row=>row!==invoice&&[row.invoiceNumber,row.number].some(value=>String(value||'').trim().toUpperCase()===number.toUpperCase())))throw new Error('發票號碼已存在其他紀錄，請先核對');
+    const next=number?'invoiced':'invoice_pending';
+    if(number===String(billing.invoiceNo||'')&&date===String(billing.invoiceDate||billing.date||'')&&next===current&&number===String(invoice.invoiceNumber||invoice.number||'')&&date===String(invoice.invoiceDate||invoice.date||''))return billing;
+    const now=new Date().toISOString();
+    Object.assign(billing,{invoiceNo:number,invoiceDate:date,invoiceStatus:next,hasInvoice:true,updatedAt:now});
+    Object.assign(ar,{invoiceNo:number,invoiceDate:date,invoiceStatus:next,updatedAt:now});
+    Object.assign(invoice,{invoiceNumber:number,number,invoiceDate:date,date,status:number?'issued':'pending',updatedAt:now});
+    persist('更正請款發票資料（保留原帳款） '+billing.number,{billingId:billing.id,kind:'INVOICE_METADATA_ONLY'});return billing;
+  }
+
   async function updateBillingInvoice(id, values = {}) {
     requireStoreTransactionDraft(); const billing=state.billings.find((row)=>row.id===id);if(!billing)throw new Error('找不到請款單');
+    if(billingNeedsRecordedTotals(billing))return updateProtectedBillingInvoice(id,values);
+    if(values.expectedSnapshot!==undefined&&values.expectedSnapshot!==billingDocumentContext(id).snapshot)throw new Error('請款資料已變更，請重新開啟核對');
     const now=new Date().toISOString(),choice=values.invoiceChoice==='invoice_required'?'invoice_required':'no_invoice',number=choice==='no_invoice'?'':String(values.invoiceNo||'').trim(),date=choice==='no_invoice'?'':values.invoiceDate||billing.date||businessDate(new Date(now));
     const nextInvoiceStatus=choice==='no_invoice'?'no_invoice':number?'invoiced':'invoice_pending';
     const totals=calculateBilling({lines:billing.lines||[],taxMode:billing.taxMode,invoiceStatus:nextInvoiceStatus,retentionMode:billing.retentionMode,retentionRate:billing.retentionRate,retentionBase:billing.retentionBase||'taxIncluded',retentionCustom:!billing.retentionBase&&billing.retentionMode==='custom'?billing.retention:undefined});
@@ -5119,7 +5253,7 @@
     if(ar&&num(ar.received)>totals.receivable)throw new Error('切換後應收金額低於既有收款，請先確認收款紀錄');
     if(ar&&num(ar.received)+pendingChequeAmount(ar)>totals.receivable)throw new Error('切換後應收金額不足以保留待兌現支票，請先核對支票與請款條件');
     Object.assign(billing,{invoiceStatus:nextInvoiceStatus,hasInvoice:nextInvoiceStatus!=='no_invoice',invoiceNo:number,invoiceDate:date,amount:totals.untaxed,tax:totals.tax,grossTotal:totals.grossTotal,preTaxAmount:totals.untaxed,taxAmount:totals.tax,taxIncludedAmount:totals.grossTotal,retention:totals.retention,retentionAmount:totals.retention,retentionBase:totals.retentionBase,retentionStatus:retentionState(totals.retention,billing.retentionReceived,billing.retentionStatus),remainingRetention:Math.max(0,totals.retention-num(billing.retentionReceived)),total:totals.receivable,updatedAt:now});
-    if(ar){Object.assign(ar,{invoiceNo:number,invoiceStatus:nextInvoiceStatus,taxMode:billing.taxMode,untaxedAmount:totals.untaxed,tax:totals.tax,grossTotal:totals.grossTotal,preTaxAmount:totals.untaxed,taxAmount:totals.tax,taxIncludedAmount:totals.grossTotal,retention:totals.retention,retentionAmount:totals.retention,retentionBase:totals.retentionBase,retentionStatus:retentionState(totals.retention,ar.retentionReceived,ar.retentionStatus),remainingRetention:Math.max(0,totals.retention-num(ar.retentionReceived)),amount:totals.receivable,status:num(ar.received)>=totals.receivable&&totals.receivable>0?'已收':num(ar.received)>0?'部分收款':'未收',updatedAt:now})}
+    if(ar){Object.assign(ar,{invoiceNo:number,invoiceStatus:nextInvoiceStatus,taxMode:billing.taxMode==='含稅'?'含稅':'未稅',untaxedAmount:totals.untaxed,tax:totals.tax,grossTotal:totals.grossTotal,preTaxAmount:totals.untaxed,taxAmount:totals.tax,taxIncludedAmount:totals.grossTotal,retention:totals.retention,retentionAmount:totals.retention,retentionBase:totals.retentionBase,retentionStatus:retentionState(totals.retention,ar.retentionReceived,ar.retentionStatus),remainingRetention:Math.max(0,totals.retention-num(ar.retentionReceived)),amount:totals.receivable,status:num(ar.received)>=totals.receivable&&totals.receivable>0?'已收':num(ar.received)>0?'部分收款':'未收',updatedAt:now})}
     syncBillingInvoiceRecord(billing,now);
     persist(`更新請款單發票 ${billing.number}`);return billing;
   }
@@ -6594,6 +6728,7 @@
     return { changed:true, settings:{...next}, defaultTaxChanged };
   }
   const STORE_WRITER_NAMES=new Set([
+    'saveHistoricalBillingDetails',
     'saveReceivableCheque','cancelReceivableCheque','clearReceivableCheque',
     'repairDailyBillingLinks','saveSystemSettings',
     'saveQuotationUnitPreset','saveQuotationPublicNotePreset','deleteQuotationPublicNotePreset',
@@ -6613,7 +6748,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ dailyDraftSnapshot, dailyDraftReview, receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ billingDocumentState, billingDocumentLines, saveHistoricalBillingDetails, dailyDraftSnapshot, dailyDraftReview, receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
