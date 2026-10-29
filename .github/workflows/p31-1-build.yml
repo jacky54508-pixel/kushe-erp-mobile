@@ -1,0 +1,57 @@
+name: P31-1 isolated unified external billing verification
+on:
+  push:
+    branches: [p31-1-build-20261030]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      QA_ROOT_DIR: ${{ github.workspace }}/qa
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 074d815e19fc00c3d1372d2b6f95b401f257fafd
+          path: qa/src
+          fetch-depth: 1
+      - name: Verify and apply exact locally tested source
+        run: python3 harness/.p31-1-build/build.py
+      - name: Check JavaScript syntax
+        run: |
+          set -euo pipefail
+          find qa/src/assets/js -name '*.js' -print0 | xargs -0 -n1 node --check
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated browser dependencies
+        run: |
+          pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Native synthetic persistence and stale-tab verification
+        run: python qa/tests/native-unified.py
+      - name: Publish clean candidate only after native verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd qa/src
+          test "$(git write-tree)" = 'c3783c3d16595a20ff498bcf0ee75127211a5610'
+          test "$(git diff --cached --name-only | wc -l)" -eq 6
+          test -z "$(git diff --name-only)"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'P31-1: unified external detail table with immutable original accounting' -m 'Replace per-source editing with one documentary table, validate combined original untaxed or gross total without re-taxing. Explicit A-item seeding, visible validation, old document read/print compatibility and revision history retained. Exact tested source and native synthetic persistence verified. No live ERP login, original accounting edits, migration or main changes.'
+          git push origin HEAD:refs/heads/p31-1-ready-20261030
+          git rev-parse HEAD > ../evidence/candidate-sha.txt
+          git rev-parse HEAD^{tree} > ../evidence/candidate-tree.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p31-1-native-build-evidence
+          path: qa/evidence
+          retention-days: 7
