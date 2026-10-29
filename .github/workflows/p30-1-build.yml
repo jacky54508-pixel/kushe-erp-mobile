@@ -1,0 +1,56 @@
+name: P30-1 isolated quotation import verification
+on:
+  push:
+    branches: [p30-1-build-20261029]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      QA_ROOT_DIR: ${{ github.workspace }}/qa
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 1fa0a07a145a4e16dfed92c55662b9caa12d3ef4
+          path: qa/src
+          fetch-depth: 1
+      - name: Verify and apply exact locally tested source
+        run: python3 harness/.p30-1-build/build.py
+      - name: Check JavaScript syntax
+        run: |
+          set -euo pipefail
+          find qa/src/assets/js -name '*.js' -print0 | xargs -0 -n1 node --check
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated browser dependencies
+        run: |
+          pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Native synthetic persistence and stale-tab verification
+        run: python qa/tests/native-tests.py
+      - name: Publish clean candidate only after native verification
+        run: |
+          set -euo pipefail
+          cd qa/src
+          git diff --check
+          git add assets/css/historical-billing.css assets/js/erp-store.js assets/js/historical-billing.js assets/js/historical-quotation.js index.html
+          test "$(git write-tree)" = "c41bb6b816d3545f811a9a6dcd058608f0ad7dfb"
+          test "$(git diff --cached --name-only | wc -l)" = 5
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'P30-1: import quotation references into documentary historical details' -m 'Keep original account totals and document-only history. Import confirmed same-customer/project quotes without estimated quantities, retain source price snapshots, require reasons for overrides, support explicit household copying and duplicate-import checks. Revalidate new references before save; preserve already saved snapshots after quote changes. Local validation: 312 synthetic checks and 37 JavaScript syntax checks. Native isolated persistence and stale-tab verification passed before this candidate was created. No live ERP account or data access. No main changes.'
+          git push origin HEAD:refs/heads/p30-1-ready-20261029
+          git rev-parse HEAD > ../evidence/candidate-sha.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p30-1-native-build-evidence
+          path: qa/evidence
+          retention-days: 7
