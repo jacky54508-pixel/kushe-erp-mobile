@@ -1,0 +1,61 @@
+name: P30 isolated historical billing verification
+on:
+  push:
+    branches: [p30-build-20261029]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      QA_ROOT_DIR: ${{ github.workspace }}/qa
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 481b5dff39dab768e14cdf3ae14b78648cdb6e70
+          path: qa/src
+          fetch-depth: 1
+      - name: Reconstruct and verify exact tested application files
+        run: python3 harness/.p30-build/build.py
+      - name: Check JavaScript syntax
+        run: |
+          set -euo pipefail
+          find qa/src/assets/js -name '*.js' -print0 | xargs -0 -n1 node --check
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated browser dependencies
+        run: |
+          pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Verify native synthetic persistence and stale-tab protection
+        run: |
+          set -euo pipefail
+          python qa/tests/native-tests.py | tee qa/evidence/native-tests.log
+      - name: Publish clean review branch only after verification
+        working-directory: qa/src
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 481b5dff39dab768e14cdf3ae14b78648cdb6e70
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          while IFS= read -r path; do git add -- "$path"; done < ../evidence/changed-files.txt
+          test "$(git diff --cached --name-only | wc -l)" -eq 9
+          git diff --cached --check
+          git commit -m 'P30: protect recorded historical billing totals and add documentary details' -m 'Preserve original financial amounts, source identities and history. Guard invoice metadata edits; add explicit original-document detail supplementation, matching-total validation, stale snapshots and accurate decimal printing. 229 isolated local checks and 36 JavaScript syntax checks passed. Native Chromium persistence and stale-tab checks passed before this clean candidate was created. No live ERP account, database writes, migration, backfill or payment execution. Beta review only; main unchanged.'
+          git rev-parse HEAD | tee ../evidence/candidate-sha.txt
+          git push origin HEAD:refs/heads/p30-ready-20261029
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p30-build-evidence
+          retention-days: 7
+          include-hidden-files: true
+          path: |
+            harness/.p30-build
+            qa/evidence
