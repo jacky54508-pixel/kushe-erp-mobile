@@ -5113,13 +5113,14 @@
   }
   // P31: document-only grouping. Existing business collections are never written here.
   const EXTERNAL_BILLING_SCHEMA='kushe-external-billing-group-v1';
+  const EXTERNAL_BILLING_UNIFIED_SCHEMA='kushe-external-billing-group-v2';
   function externalBillingRecords() {
     const rows=state?.meta?.externalBillingDocuments;
     if(rows===undefined)return [];
     if(!Array.isArray(rows))throw new Error('對外合併文件資料格式待核對；原單保持原樣');
     const ids=new Set();
     rows.forEach(row=>{
-      if(!row||row.schema!==EXTERNAL_BILLING_SCHEMA||typeof row.id!=='string'||!row.id||ids.has(row.id)||!['draft','active','archived'].includes(row.status)||!Number.isSafeInteger(row.revision)||row.revision<1||!Array.isArray(row.sourceIds)||row.sourceIds.length<2||row.sourceIds.length>30||new Set(row.sourceIds).size!==row.sourceIds.length||row.sourceIds.some(id=>typeof id!=='string'||!id)||!row.sourceIds.includes(row.targetBillingId)||typeof row.displayProjectName!=='string'||typeof row.customerName!=='string'||typeof row.customerId!=='string'||typeof row.documentDate!=='string'||!Array.isArray(row.history))throw new Error('對外合併文件識別或版本待核對；不隱藏原單');
+      if(!row||![EXTERNAL_BILLING_SCHEMA,EXTERNAL_BILLING_UNIFIED_SCHEMA].includes(row.schema)||typeof row.id!=='string'||!row.id||ids.has(row.id)||!['draft','active','archived'].includes(row.status)||!Number.isSafeInteger(row.revision)||row.revision<1||!Array.isArray(row.sourceIds)||row.sourceIds.length<2||row.sourceIds.length>30||new Set(row.sourceIds).size!==row.sourceIds.length||row.sourceIds.some(id=>typeof id!=='string'||!id)||!row.sourceIds.includes(row.targetBillingId)||typeof row.displayProjectName!=='string'||typeof row.customerName!=='string'||typeof row.customerId!=='string'||typeof row.documentDate!=='string'||!Array.isArray(row.history))throw new Error('對外合併文件識別或版本待核對；不隱藏原單');
       ids.add(row.id);
     });
     return rows;
@@ -5212,6 +5213,34 @@
       return {billingId:section.billingId,taxMode:section.taxMode,lines,reason,total,target};
     });
   }
+  // P31-1: one external table; originals remain immutable accounting anchors.
+  function externalBillingUnified(value,sources,confirmed) {
+    if(!value||typeof value!=='object'||Array.isArray(value)||!['未稅','含稅'].includes(value.taxMode))throw new Error('請選擇整份對外明細的單價方式；不自動換算稅別');
+    if(!Array.isArray(value.lines)||value.lines.length>300||(confirmed&&!value.lines.length))throw new Error('整份對外明細請填 1～300 筆，不會自動裁切');
+    const lines=value.lines.map(line=>{
+      if(!line||typeof line!=='object'||Array.isArray(line))throw new Error('對外明細格式錯誤');
+      const parsed={house:externalBillingText(line.house,'戶別',100,false),item:externalBillingText(line.item,'施工項目',200,confirmed),unit:externalBillingText(line.unit,'單位',20,confirmed)};
+      for(const key of ['qty','price']){
+        const v=line[key],blank=v===null||v===undefined||typeof v==='string'&&!v.trim();
+        if(blank&&!confirmed){parsed[key]=null;continue}
+        const n=Number(v);
+        if(blank||!['number','string'].includes(typeof v)||!Number.isFinite(n)||n<0||(key==='qty'&&n<=0)||n>1e10||Math.abs(n*10000-Math.round(n*10000))>0.001)throw new Error('數量須大於零、單價不小於零，最多四位小數');
+        parsed[key]=n;
+      }
+      parsed.amount=parsed.qty===null||parsed.price===null?null:Math.round(parsed.qty*parsed.price);
+      if(parsed.amount!==null&&!Number.isSafeInteger(parsed.amount))throw new Error('明細金額超過安全範圍');
+      return parsed;
+    });
+    const totals=externalBillingTotals(sources),target=value.taxMode==='未稅'?totals.untaxed:totals.grossTotal;
+    const total=lines.reduce((sum,line)=>sum+(line.amount??0),0);
+    if(!Number.isSafeInteger(total))throw new Error('對外明細合計超過安全範圍');
+    if(confirmed&&total!==target)throw new Error('整份對外明細合計 '+total+' 與原單'+value.taxMode+'合計 '+target+' 不一致；不會修改原帳款');
+    const reason=externalBillingText(value.reason,'合併編排說明',1000,false);
+    const originals=sources.flatMap(s=>s.document.originalLines.map(l=>({house:l.house,item:l.item,unit:l.unit,qty:l.qty,price:l.price})));
+    const same=sources.every(s=>s.document.taxMode===value.taxMode)&&storeStateFingerprint(originals)===storeStateFingerprint(lines.map(({amount,...l})=>l));
+    if(confirmed&&!same&&!reason)throw new Error('合併後更改品項、數量或單價，請填寫「合併編排說明」；不為湊差額任意改價');
+    return {taxMode:value.taxMode,lines,reason,total,target};
+  }
   async function saveExternalBillingDocument(values={}) {
     requireStoreTransactionDraft();
     const key=externalBillingText(values.idempotencyKey,'操作識別',200),records=externalBillingRecords();
@@ -5228,10 +5257,19 @@
     if(previous?.status==='active'&&!active)throw new Error('有效版本不能降為草稿；請繼續修訂或解除分組');
     const primary=ctx.sources.find(s=>s.document.billingId===values.targetBillingId);
     if(!primary)throw new Error('對外案場必須選本組其中一張原單');
-    const documentDate=billingDocumentDate(values.documentDate,'文件日期'),note=externalBillingText(values.note,'對外備註',2000,false),sections=externalBillingSections(values.sections,ctx.sources,active);
-    if(sections.reduce((n,s)=>n+s.lines.length,0)>300)throw new Error('合併文件最多 300 筆對外明細；不會自動裁切');
+    const documentDate=billingDocumentDate(values.documentDate,'文件日期'),note=externalBillingText(values.note,'對外備註',2000,false);
+    let detail,schema=EXTERNAL_BILLING_SCHEMA;
+    if(values.detailMode==='unified'){
+      if(values.sections!==undefined)throw new Error('統一明細不可同時帶入分區明細，以免重複計算');
+      detail={detailMode:'unified',unified:externalBillingUnified(values.unified,ctx.sources,active)};schema=EXTERNAL_BILLING_UNIFIED_SCHEMA;
+    }else{
+      if(values.detailMode!==undefined||values.unified!==undefined||previous?.schema===EXTERNAL_BILLING_UNIFIED_SCHEMA)throw new Error('對外文件版本已更新，請保留輸入並使用新版統一明細');
+      const sections=externalBillingSections(values.sections,ctx.sources,active);
+      if(sections.reduce((n,s)=>n+s.lines.length,0)>300)throw new Error('合併文件最多 300 筆對外明細；不會自動裁切');
+      detail={sections};
+    }
     if(previous?.history.length>=50)throw new Error('此文件版本已達 50 版，請先整理文件；不覆寫舊版');
-    const now=new Date().toISOString(),doc={schema:EXTERNAL_BILLING_SCHEMA,id:id||'external-'+uid(),revision:(previous?.revision||0)+1,status:values.status,sourceIds:values.sourceIds.slice(),targetBillingId:values.targetBillingId,displayProjectName:primary.document.projectName,customerId:primary.document.customerId,customerName:primary.document.customerName,documentDate,note,sections,sourceSnapshots:ctx.sources.map(s=>storeStateClone(s.document)),settlementSnapshots:ctx.sources.map(s=>storeStateClone(s.settlement)),totals:ctx.totals,createdAt:previous?.createdAt||now,updatedAt:now,confirmedAt:active?now:'',history:previous?[...previous.history,((({history,...record})=>record)(previous))]:[],lastRequestKey:key,lastRequestFingerprint:requestFingerprint};
+    const now=new Date().toISOString(),doc={schema,id:id||'external-'+uid(),revision:(previous?.revision||0)+1,status:values.status,sourceIds:values.sourceIds.slice(),targetBillingId:values.targetBillingId,displayProjectName:primary.document.projectName,customerId:primary.document.customerId,customerName:primary.document.customerName,documentDate,note,...detail,sourceSnapshots:ctx.sources.map(s=>storeStateClone(s.document)),settlementSnapshots:ctx.sources.map(s=>storeStateClone(s.settlement)),totals:ctx.totals,createdAt:previous?.createdAt||now,updatedAt:now,confirmedAt:active?now:'',history:previous?[...previous.history,((({history,...record})=>record)(previous))]:[],lastRequestKey:key,lastRequestFingerprint:requestFingerprint};
     const next=records.map(r=>r.id===id?doc:r);if(!id)next.unshift(doc);
     // This is the sole business-snapshot assignment: a NEW documentary metadata namespace.
     state.meta.externalBillingDocuments=next;
@@ -5253,8 +5291,20 @@
       try{
         sources=externalBillingSources(doc.sourceIds);totals=externalBillingTotals(sources);
         if(records.some(d=>d!==doc&&d.status==='active'&&doc.status==='active'&&d.sourceIds.some(id=>doc.sourceIds.includes(id))))throw new Error('原單重複出現在多組有效文件，不隱藏原單');
-        if(!Array.isArray(doc.sourceSnapshots)||!Array.isArray(doc.settlementSnapshots)||!Array.isArray(doc.sections))throw new Error('保存文件的來源快照格式待核對');
-        if(doc.status==='active')externalBillingSections(doc.sections,doc.sourceSnapshots.map((document,i)=>({document,settlement:doc.settlementSnapshots[i]})),true);
+        if(!Array.isArray(doc.sourceSnapshots)||!Array.isArray(doc.settlementSnapshots)||doc.sourceSnapshots.length!==doc.sourceIds.length||doc.settlementSnapshots.length!==doc.sourceIds.length)throw new Error('保存文件的來源快照格式待核對');
+        const savedSources=doc.sourceSnapshots.map((document,i)=>{
+          if(document.billingId!==doc.sourceIds[i]||doc.settlementSnapshots[i]?.billingId!==document.billingId)throw new Error('保存文件的原單對照不一致');
+          return {document,settlement:doc.settlementSnapshots[i]};
+        });
+        if(storeStateFingerprint(externalBillingTotals(savedSources))!==storeStateFingerprint(doc.totals))throw new Error('保存文件合計與原單快照不同');
+        if(doc.schema===EXTERNAL_BILLING_UNIFIED_SCHEMA){
+          if(doc.detailMode!=='unified'||doc.sections!==undefined)throw new Error('統一對外明細格式待核對');
+          const parsed=externalBillingUnified(doc.unified,savedSources,doc.status==='active');
+          if(storeStateFingerprint(parsed)!==storeStateFingerprint(doc.unified))throw new Error('保存的統一明細金額或格式待核對');
+        }else{
+          if(!Array.isArray(doc.sections)||doc.unified!==undefined)throw new Error('保存的分區明細格式待核對');
+          if(doc.status==='active')externalBillingSections(doc.sections,savedSources,true);
+        }
       }catch(error){issues.push(error.message)}
       const termsChanged=issues.length>0||storeStateFingerprint(sources.map(s=>s.document))!==storeStateFingerprint(doc.sourceSnapshots);
       const settlementChanged=issues.length>0||storeStateFingerprint(sources.map(s=>s.settlement))!==storeStateFingerprint(doc.settlementSnapshots);
