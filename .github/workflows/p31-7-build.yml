@@ -1,0 +1,39 @@
+name: P31-7 isolated balanced list source verification
+on:
+  push:
+    branches: [p31-7-build-20261030]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 76cd91bccd13d4013f369facf4dc1701ab8f74a3
+          path: source
+          fetch-depth: 1
+      - name: Verify exact tested three-file source and protected tree
+        run: python3 harness/.p31-7-build/verify.py
+      - name: Create clean review candidate only
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git write-tree)" = dff6e0dd5b7b388e65c7c13a084cb5217a07c78e
+          test -z "$(git ls-remote --heads origin refs/heads/p31-7-ready-20261030)"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          candidate=$(git commit-tree dff6e0dd5b7b388e65c7c13a084cb5217a07c78e -p 76cd91bccd13d4013f369facf4dc1701ab8f74a3 -m 'P31-7: balanced side summaries with unchanged primary amount' -m 'Three UI/loading files only. Preserve primary amount coordinates and calculation, original source controls, mobile summaries, editor and all PDF files. Local isolated verification: 585 checks and 39 JavaScript syntax checks passed. Complete tree verified equal to locally tested source. No real ERP login, business-data access, migration, Store or sync changes. Review branch only; this workflow does not advance main or beta.')
+          git push origin "$candidate:refs/heads/p31-7-ready-20261030"
+          printf '%s\n' "$candidate" > ../evidence/candidate.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p31-7-source-verification
+          path: evidence
+          retention-days: 7
