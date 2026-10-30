@@ -1,0 +1,42 @@
+name: P31-6 isolated inline list source verification
+on:
+  push:
+    branches: [p31-6-build-20261030]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: f3d927818395a3accf38c4598c504646deb6942d
+          path: candidate
+          fetch-depth: 1
+      - name: Verify exact tested three-file patch and complete source tree
+        run: python harness/.p31-6-build/verify.py candidate
+      - name: Create clean candidate only after source and syntax checks
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git write-tree)" = "ad908bfd44aa59509fe46b21a76caddd6cacbe42"
+          if git ls-remote --exit-code --heads origin refs/heads/p31-6-ready-20261030; then
+            echo 'Candidate branch already exists; stopping without overwrite.'
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'P31-6: align consolidated billing summaries with native table columns' -m 'Three UI/loading files only. Native summary cells replace desktop spanning cards; preserve compact original-source controls, mobile summaries, editor, source identity and accepted PDF. Local verification: 465 isolated synthetic checks and 39 JavaScript syntax checks passed. Complete candidate tree verified equal to tested source. No live ERP login, business-data access, Store, sync or accounting changes. This workflow publishes only a review branch; main and beta are unchanged.'
+          git push origin HEAD:refs/heads/p31-6-ready-20261030
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p31-6-source-verification
+          path: harness/.p31-6-build/verification.json
+          retention-days: 7
