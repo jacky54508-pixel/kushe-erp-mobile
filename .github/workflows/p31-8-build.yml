@@ -1,0 +1,38 @@
+name: P31-8 isolated date and history UI source verification
+on:
+  push:
+    branches: [p31-8-build-20261030]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+      - uses: actions/checkout@v4
+        with:
+          ref: 29c37345dc3677eeaf8b29dc79e6fa3c8d8d3182
+          path: app
+          fetch-depth: 1
+      - name: Verify exact locally tested source and protected files
+        run: python harness/.p31-8-build/verify.py app
+      - name: Create clean UI-only review candidate
+        working-directory: app
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add assets/css/billing-groups.css assets/js/billing-groups.js index.html
+          git commit -m 'P31-8: aligned summary columns and read-only saved date history' -m 'Three UI/loading files only. Display original document date separately from saved creation/modification timestamp in Asia/Taipei; read-only history exposes date transitions and preserved versions. Missing time is never fabricated or backfilled. No Store, accounting, sync, editor or PDF changes. 593 local synthetic checks and 39 JS syntax checks passed; complete source manifest verified here. No real ERP login or data access. Review candidate only; this workflow does not update main or beta.'
+          git rev-parse HEAD > ../evidence/candidate.txt
+          git rev-parse HEAD^{tree} > ../evidence/tree.txt
+          git push origin HEAD:refs/heads/p31-8-ready-20261030
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p31-8-source-verification
+          path: evidence
+          retention-days: 7
