@@ -38,13 +38,72 @@
   function activeFor(billingId){return index().documents.find(g=>g.canGroup&&g.document.sourceIds.includes(String(billingId)));}
   function statusText(g){return g.totals.outstanding>0?(g.totals.received>0?'部分收款':'待收款'):g.totals.retentionOutstanding>0?'本期收清・保留款待收':'全部收清';}
   function groupSummary(g,kind){
-    const d=g.document,t=g.totals;
-    // P31-3: presentation only. Use the existing group totals and action hooks.
-    return '<div class="bg-summary"><div class="bg-identity"><div class="bg-titleline"><span class="bg-kind">對外合併</span><h3>'+esc(d.displayProjectName)+'</h3></div><p class="bg-caption"><span>'+esc(d.customerName)+'</span><span>'+d.sourceIds.length+' 張原單 · 發票各自保留</span></p></div>'+
-      '<div class="bg-money-grid"><div class="bg-metric"><small>原請款合計</small><b>'+money(t.grossTotal)+'</b></div><div class="bg-metric"><small>本期應收</small><b>'+money(t.receivable)+'</b></div><div class="bg-metric bg-amount"><small>本期未沖銷</small><strong>'+money(t.outstanding)+'</strong><span class="bg-state">'+statusText(g)+'</span></div></div>'+
-      '<div class="bg-actions"><button type="button" class="commission-primary" data-bg-edit>對外明細</button><button type="button" class="commission-secondary" data-bg-expand aria-expanded="false">原單 '+d.sourceIds.length+' 張</button><button type="button" class="commission-secondary" data-bg-pdf>PDF</button><span class="bg-version">第 '+d.revision+' 版 · 不另計應收</span></div></div>'+
+    const d=g.document,t=g.totals,isReceivable=kind==='receivable';
+    // P31-5: one primary amount per view, using the existing validated read model.
+    return '<div class="bg-summary bg-summary-single"><div class="bg-identity"><div class="bg-titleline"><h3>'+esc(d.displayProjectName)+'</h3><span class="bg-kind">合併請款</span></div><p class="bg-caption">'+esc(d.customerName)+'</p></div>'+
+      '<div class="bg-money-grid"><div class="bg-metric bg-amount"><small>'+(isReceivable?'本期未沖銷':'請款合計')+'</small><strong>'+money(isReceivable?t.outstanding:t.grossTotal)+'</strong><span class="bg-state">'+statusText(g)+'</span></div></div>'+
+      '<div class="bg-actions"><button type="button" class="commission-primary" data-bg-edit>對外明細</button><button type="button" class="commission-secondary" data-bg-pdf>PDF</button><button type="button" class="bg-original-toggle" data-bg-expand aria-expanded="false">原單 '+d.sourceIds.length+' 張</button></div></div>'+
       (t.retentionOutstanding||t.pendingCheque?'<div class="bg-extra-facts">'+(t.retentionOutstanding?'<span>保留款待收 <b>'+money(t.retentionOutstanding)+'</b></span>':'')+(t.pendingCheque?'<span>待兌現預留 <b>'+money(t.pendingCheque)+'</b></span>':'')+'</div>':'')+
       (g.termsChanged?'<p class="bg-warning">原單內容已變動；請核對修訂後再出本次文件。</p>':g.settlementChanged?'<p class="bg-info">收款狀態已更新；列表為即時餘額，重新出單前請修訂確認。</p>':'');
+  }
+  function groupReadOnlyFacts(g){
+    const n=document.createElement('details'),t=g.totals;n.className='bg-finance-details';
+    n.innerHTML='<summary>金額與文件資訊</summary><div class="bg-finance-values">'+[['原請款合計',t.grossTotal],['本期應收',t.receivable],['本期已沖銷',t.received],['本期未沖銷',t.outstanding],['保留款待收',t.retentionOutstanding],['待兌現預留',t.pendingCheque]].map(([label,value])=>'<span>'+label+'<b>'+money(value)+'</b></span>').join('')+'</div><p>第 '+g.document.revision+' 版 · '+g.document.sourceIds.length+' 張原單／發票各自保留，不另計一筆應收。待兌現預留包含在本期未沖銷中，不另加計。</p>';
+    return n;
+  }
+  function sourceLabels(source,kind){
+    const d=source.document,p=source.settlement;
+    const invoice=['invoiced','no_invoice'].includes(d.invoiceStatus)?d.invoiceStatus:'invoice_pending';
+    const label=invoice==='invoiced'?'已開發票':invoice==='no_invoice'?'免開發票':'待開發票';
+    return {
+      info:'<b class="bg-source-title">'+esc(d.projectName)+'</b><small class="bg-source-reference">'+esc(d.number||'未填單號')+'<span>'+esc(d.date||'日期未填')+'</span></small>',
+      amount:'<small class="bg-source-amount-label">'+(kind==='receivable'?'本期未沖銷':'原請款金額')+'</small><strong>'+money(kind==='receivable'?p.outstanding:d.anchors.grossTotal)+'</strong>'+(kind==='receivable'?'<small class="bg-source-state">'+(p.outstanding>0?(p.received>0?'部分收款':'待收款'):'本期已收清')+'</small>':'')+(p.retentionOutstanding>0?'<small class="bg-source-attention">保留款待收 '+money(p.retentionOutstanding)+'</small>':'')+(p.pendingCheque>0?'<small class="bg-source-attention">待兌現預留 '+money(p.pendingCheque)+'</small>':''),
+      invoice:'<span class="invoice-status-badge '+invoice+'">'+label+'</span>'+(d.invoiceNo?'<small class="bg-source-invoice-no">'+esc(d.invoiceNo)+'</small>':'')
+    };
+  }
+  function sourceActions(view,originalActions,extra){
+    const holder=document.createElement('div');holder.className='bg-source-actions';
+    if(view){view.textContent='查看原單';view.setAttribute('aria-label','查看對應原請款單');holder.append(view)}
+    if(originalActions){
+      const menu=document.createElement('details');menu.className='bg-source-account-menu';
+      const summary=document.createElement('summary');summary.textContent='收款／紀錄';menu.append(summary);
+      if(extra)menu.append(extra);
+      menu.append(originalActions);holder.append(menu);
+      // Preserve the actual bound buttons, not clones or new payment handlers.
+      if($('[aria-expanded="true"][data-expand-button],[aria-expanded="true"][data-mobile-expand]',originalActions))menu.open=true;
+    }
+    return holder;
+  }
+  function compactOriginalTable(table,g,kind){
+    table.classList.add('bg-source-table');
+    const header=$(':scope>thead',table);if(header)header.innerHTML='<tr><th>原始請款</th><th>'+(kind==='receivable'?'本期未沖銷':'原請款金額')+'</th><th>發票</th><th>操作</th></tr>';
+    const body=$(':scope>tbody',table);
+    Array.from(body.children).forEach(row=>{
+      if(row.matches('.receipt-history-row'))return;
+      const id=kind==='billing'?$('[data-billing-detail]',row)?.dataset.billingDetail:row.dataset.expandReceivable;
+      const source=g.sources.find(s=>(kind==='billing'?s.document.billingId:s.document.receivableId)===id);if(!source)return;
+      const view=kind==='billing'?$('[data-billing-detail]',row):$('[data-view-receivable-billing]',row),actions=kind==='receivable'?$('.receivable-actions',row):null;
+      if(!view)return; // Keep the original controls intact if a future renderer changes its hooks.
+      const labels=sourceLabels(source,kind),cells=[];
+      for(const [name,html] of [['identity',labels.info],['amount',labels.amount],['invoice',labels.invoice]]){const cell=document.createElement('td');cell.className='bg-source-'+name;cell.innerHTML=html;cells.push(cell)}
+      // Preserve due/employee-cash warnings instead of hiding them during simplification.
+      $$('.receivable-due,.employee-cash-inline-summary',row).forEach(n=>cells[0].append(n));
+      const actionCell=document.createElement('td');actionCell.className='bg-source-controls';actionCell.append(sourceActions(view,actions));cells.push(actionCell);
+      row.replaceChildren(...cells);row.classList.add('bg-source-row');
+    });
+    const spans=()=>$$(':scope>tbody>.receipt-history-row>td',table).forEach(td=>td.colSpan=4);
+    spans();table.addEventListener('click',()=>queueMicrotask(spans));
+  }
+  function compactOriginalCard(card,g,kind){
+    const id=kind==='billing'?$('[data-billing-detail]',card)?.dataset.billingDetail:card.dataset.mobileReceivable;
+    const source=g.sources.find(s=>(kind==='billing'?s.document.billingId:s.document.receivableId)===id);if(!source)return;
+    const view=kind==='billing'?$('[data-billing-detail]',card):$('.receivable-detail-link',card),actions=kind==='receivable'?$('.receivable-actions',card):null;
+    if(!view)return;
+    const labels=sourceLabels(source,kind),detail=$('.mobile-receivable-detail',card),extra=kind==='receivable'?$('.mobile-card-grid',card):null,cash=$('.employee-cash-mobile-summary',card);
+    const top=document.createElement('div');top.className='bg-source-card-top';top.innerHTML='<div class="bg-source-identity">'+labels.info+'</div><div class="bg-source-amount">'+labels.amount+'</div>';
+    const invoice=document.createElement('div');invoice.className='bg-source-invoice';invoice.innerHTML=labels.invoice;
+    const control=sourceActions(view,actions,extra);card.replaceChildren(top,invoice,control);card.classList.add('bg-source-record');
+    if(cash)card.append(cash);if(detail)card.append(detail);
   }
   function wireGroup(box,g,kind,content){
     const key=kind+':'+g.document.id,button=$('[data-bg-expand]',box);
@@ -84,10 +143,11 @@
       const td=document.createElement('td');td.colSpan=Math.max(1,rows[0].children.length);wrapper.append(td);
       const box=document.createElement('section');box.className='bg-group';box.innerHTML=groupSummary(g,kind);td.append(box);
       const content=document.createElement('div');content.className='bg-originals';content.hidden=true;
-      const note=document.createElement('p');note.className='bg-info';note.textContent='以下是原帳款，不是新增帳款。收款／支票／保留款仍逐原單處理。';content.append(note);
+      // Compact source rows below retain each original action and source identity.
       const scroll=document.createElement('div');scroll.className='bg-original-table-scroll';const table=document.createElement('table');table.className=body.parentElement.className;
       const head=body.parentElement.querySelector(':scope>thead');if(head)table.append(head.cloneNode(true));const inner=document.createElement('tbody');table.append(inner);scroll.append(table);content.append(scroll);box.append(content);
       rows[0].before(wrapper);rows.forEach(row=>{const detail=row.nextElementSibling;inner.append(row);if(extra.includes(detail))inner.append(detail)});
+      compactOriginalTable(table,g,kind);content.append(groupReadOnlyFacts(g));
       wireGroup(box,g,kind,content);
     });
     groups.forEach(g=>{
@@ -95,7 +155,7 @@
       const cards=kind==='billing'?$$('.mobile-billing-card',root).filter(card=>ids.has($('[data-billing-detail]',card)?.dataset.billingDetail)):$$('[data-mobile-receivable]',root).filter(card=>ids.has(card.dataset.mobileReceivable));
       if(!cards.length)return;
       const box=document.createElement('article');box.className='bg-group bg-group-mobile';box.dataset.bgGroup=g.document.id;box.innerHTML=groupSummary(g,kind);
-      const content=document.createElement('div');content.className='bg-originals';content.hidden=true;box.append(content);cards[0].before(box);cards.forEach(card=>content.append(card));wireGroup(box,g,kind,content);
+      const content=document.createElement('div');content.className='bg-originals';content.hidden=true;box.append(content);cards[0].before(box);cards.forEach(card=>{compactOriginalCard(card,g,kind);content.append(card)});content.append(groupReadOnlyFacts(g));wireGroup(box,g,kind,content);
     });
   }
   function modal(title,subtitle){
