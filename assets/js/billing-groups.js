@@ -37,39 +37,92 @@
   }
   function activeFor(billingId){return index().documents.find(g=>g.canGroup&&g.document.sourceIds.includes(String(billingId)));}
   function statusText(g){return g.totals.outstanding>0?(g.totals.received>0?'部分收款':'待收款'):g.totals.retentionOutstanding>0?'本期收清・保留款待收':'全部收清';}
+  // P31-8: project saved document metadata only. Never invent or persist dates on read.
+  function documentDateText(value){
+    if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return '未記錄';
+    const stamp=Date.parse(value+'T00:00:00.000Z');
+    return Number.isFinite(stamp)&&new Date(stamp).toISOString().slice(0,10)===value?value.replace(/-/g,'/'):'未記錄';
+  }
+  function documentTimeText(value){
+    if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)||documentDateText(value.slice(0,10))==='未記錄')return '未記錄';
+    const stamp=Date.parse(value);if(!Number.isFinite(stamp))return '未記錄';
+    const parts=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(stamp)).map(p=>[p.type,p.value]));
+    return parts.year+'/'+parts.month+'/'+parts.day+' '+parts.hour+':'+parts.minute;
+  }
+  function documentStamp(d){
+    const revised=d.revision>1||(Array.isArray(d.history)&&d.history.length>0);
+    return {label:revised?'最後修改':'建立時間',time:documentTimeText(revised?d.updatedAt:(d.createdAt||d.updatedAt))};
+  }
+  function documentAuditMarkup(d){
+    const stamp=documentStamp(d),revision=Number.isSafeInteger(d.revision)&&d.revision>0?'第 '+d.revision+' 版':'版本待核對';
+    return '<div class="bg-document-date"><span class="bg-document-date-value">'+esc(documentDateText(d.documentDate))+' <small>文件</small></span><small class="bg-document-stamp">'+stamp.label+'：<span>'+esc(stamp.time)+'</span></small><button type="button" class="bg-history-link" data-bg-history>'+revision+' · 修改紀錄</button></div>';
+  }
+  function invoiceOverview(g){
+    const sources=g.sources||[],counts={invoiced:0,invoice_pending:0,no_invoice:0};let unknown=0;
+    sources.forEach(s=>{const status=s.document?.invoiceStatus;if(Object.prototype.hasOwnProperty.call(counts,status))counts[status]++;else unknown++});
+    const issued=counts.invoiced,required=issued+counts.invoice_pending,exempt=counts.no_invoice;
+    const label=unknown||!sources.length?'發票待核對':!required?'免開發票':issued===required?'已開發票':issued?'部分開票':'待開發票';
+    const cls=unknown||!sources.length?'invoice_pending':!required?'no_invoice':issued===required?'invoiced':'invoice_pending';
+    const detail=unknown?'有 '+unknown+' 張狀態未記錄':!required?'原單 '+exempt+' 張免開':'已開 '+issued+'／'+required+' 張'+(exempt?' · 免開 '+exempt+' 張':'');
+    return '<span class="invoice-status-badge '+cls+'">'+label+'</span><small class="bg-invoice-progress">'+detail+'</small>';
+  }
+  function openDocumentHistory(id){
+    let g;try{g=index().documents.find(g=>g.document.id===id)}catch(error){notifyError(error.message);return}
+    if(!g){notifyError('找不到這份合併文件；未修改任何資料。');return}
+    const d=g.document,records=[...(Array.isArray(d.history)?d.history:[]),d].slice().sort((a,b)=>a.revision-b.revision);
+    const m=modal('合併請款修改紀錄','僅查看已保存的版本；不修改文件日期或帳款。'),items=records.map((record,i)=>{
+      const previous=records[i-1],date=documentDateText(record.documentDate),changed=previous&&previous.documentDate!==record.documentDate;
+      const label=record.status==='archived'?'解除分組':record.status==='draft'?'草稿保存':previous?'確認／修訂':'首次建立';
+      const time=documentTimeText(record.updatedAt||(!previous?record.createdAt:''));
+      return '<article class="bg-history-entry"><header><strong>第 '+esc(record.revision)+' 版'+(record.revision===d.revision?' · 目前版本':'')+'</strong><span>'+label+'</span></header><p class="bg-history-time">保存時間：'+esc(time)+'（台灣時間）</p><p>文件日期：'+esc(date)+'</p>'+(changed?'<p class="bg-history-date-change">日期更改：'+esc(documentDateText(previous.documentDate))+' → '+esc(date)+'</p>':'')+(record.status==='active'?'<button type="button" class="commission-secondary" data-bg-history-preview="'+esc(record.revision)+'">查看保存版本</button>':'')+'</article>';
+    }).reverse();
+    m.body.innerHTML='<p class="bg-history-project"><b>'+esc(d.displayProjectName)+'</b> · '+esc(d.customerName)+'</p><p class="bg-help">時間使用既有保存紀錄，以台灣時間顯示；未記錄的時間不推測或回填。查看、匯出及程式更新不算文件修改。</p><div class="bg-history-list">'+items.join('')+'</div>';
+    m.footer.innerHTML='<div class="bg-footer-actions"><span>唯讀紀錄，不儲存資料</span><button type="button" class="commission-secondary" data-bg-history-close>關閉</button></div>';
+    $('[data-bg-history-close]',m.footer).onclick=()=>m.close();
+    $$('[data-bg-history-preview]',m.body).forEach(button=>button.onclick=()=>printSaved(id,Number(button.dataset.bgHistoryPreview),true));
+    requestAnimationFrame(()=>{if(!m.isClosed())$('[data-bg-history-close]',m.footer).focus({preventScroll:true})});
+  }
   function groupSummary(g,kind){
     const d=g.document,t=g.totals,isReceivable=kind==='receivable';
     // P31-5: one primary amount per view, using the existing validated read model.
     return '<div class="bg-summary bg-summary-single"><div class="bg-identity"><div class="bg-titleline"><h3>'+esc(d.displayProjectName)+'</h3><span class="bg-kind">合併請款</span></div><p class="bg-caption">'+esc(d.customerName)+'</p></div>'+
       '<div class="bg-money-grid"><div class="bg-metric bg-amount"><small>'+(isReceivable?'本期未沖銷':'請款合計')+'</small><strong>'+money(isReceivable?t.outstanding:t.grossTotal)+'</strong><span class="bg-state">'+statusText(g)+'</span></div></div>'+
-      '<div class="bg-actions"><button type="button" class="commission-primary" data-bg-edit>對外明細</button><button type="button" class="commission-secondary" data-bg-pdf>PDF</button><button type="button" class="bg-original-toggle" data-bg-expand aria-expanded="false">原單 '+d.sourceIds.length+' 張</button></div></div>'+
+      '<div class="bg-actions"><button type="button" class="commission-primary" data-bg-edit>編輯明細</button><button type="button" class="commission-secondary" data-bg-pdf>PDF</button><button type="button" class="bg-original-toggle" data-bg-expand aria-expanded="false">原單 '+d.sourceIds.length+' 張</button></div></div>'+
+      '<div class="bg-mobile-audit">'+documentAuditMarkup(d)+'</div>'+
       (t.retentionOutstanding||t.pendingCheque?'<div class="bg-extra-facts">'+(t.retentionOutstanding?'<span>保留款待收 <b>'+money(t.retentionOutstanding)+'</b></span>':'')+(t.pendingCheque?'<span>待兌現預留 <b>'+money(t.pendingCheque)+'</b></span>':'')+'</div>':'')+
       (g.termsChanged?'<p class="bg-warning">原單內容已變動；請核對修訂後再出本次文件。</p>':g.settlementChanged?'<p class="bg-info">收款狀態已更新；列表為即時餘額，重新出單前請修訂確認。</p>':'');
   }
   // P31-6: native summary cells share the existing table columns. Read-only presentation.
   function inlineGroupRow(g,kind,header){
-    const titles=Array.from(header?.cells||[],cell=>cell.textContent.trim());
-    const billing=kind==='billing',d=g.document,t=g.totals;
-    if(billing? !['請款單號','客戶','案場','請款金額','操作'].every(v=>titles.includes(v))
-      : !['請款資訊','客戶／案場','本期應收','操作'].every(v=>titles.includes(v))||!titles.some(v=>['應收沖銷','收款進度'].includes(v)))return null;
-    const amountIndex=titles.findIndex(title=>billing?title==='請款金額':['應收沖銷','收款進度'].includes(title));
-    // P31-7: only the two sides span existing columns; the primary amount stays in its native column.
-    if(amountIndex<1||amountIndex>=titles.length-1)return null;
-    const row=document.createElement('tr');row.className='bg-group-row bg-inline-row bg-balanced-row';row.dataset.bgGroup=d.id;
-    const toggle='<button type="button" class="bg-inline-toggle" data-bg-expand aria-expanded="false">合併 '+d.sourceIds.length+' 張</button>';
-    const actions='<div class="bg-inline-actions"><button type="button" class="commission-link" data-bg-edit>對外明細</button><button type="button" class="commission-link" data-bg-pdf>PDF</button></div>';
+    const titles=Array.from(header?.cells||[],cell=>cell.textContent.trim()),billing=kind==='billing',d=g.document,t=g.totals;
+    const known=billing?['選取','請款單號','日期','客戶','案場','請款金額','保留款','應收金額','已沖銷','未沖銷','發票','狀態','操作']:['請款資訊','客戶／案場','本期應收','應收沖銷','收款進度','保留款','狀態','操作'];
+    const required=billing?['選取','請款單號','日期','客戶','案場','請款金額','操作']:['請款資訊','客戶／案場','本期應收','操作'];
+    if(!required.every(v=>titles.includes(v))||titles.some(v=>!known.includes(v))||!billing&&!titles.some(v=>['應收沖銷','收款進度'].includes(v)))return null;
+    const row=document.createElement('tr');row.className='bg-group-row bg-inline-row bg-audit-row';row.dataset.bgGroup=d.id;
+    const toggle='<button type="button" class="bg-inline-toggle bg-arrow-toggle" data-bg-expand aria-expanded="false" aria-label="展開原單（'+d.sourceIds.length+' 張）"></button>';
+    const identity='<b class="bg-document-title">合併請款</b><small class="bg-document-count">'+d.sourceIds.length+' 張原單</small>';
+    const actions='<div class="bg-inline-actions"><button type="button" class="commission-link" data-bg-edit>編輯明細</button><button type="button" class="commission-link" data-bg-pdf>PDF</button></div>';
     const extras=(t.retentionOutstanding?'<small class="bg-inline-attention">保留款待收 '+money(t.retentionOutstanding)+'</small>':'')+(t.pendingCheque?'<small class="bg-inline-attention">待兌現預留 '+money(t.pendingCheque)+'</small>':'');
     const warning=g.termsChanged?'<small class="bg-inline-warning" role="status">原單已變動，出單前請核對修訂。</small>':g.settlementChanged?'<small class="bg-inline-notice" role="status">收款已更新，出單前請核對修訂。</small>':'';
-    const identity=document.createElement('td');identity.colSpan=amountIndex;identity.className='bg-inline-identity bg-balanced-identity';
-    identity.setAttribute('aria-label','合併請款來源與對外案場');
-    identity.innerHTML='<div class="bg-inline-start">'+toggle+'<div class="bg-inline-title"><b class="bg-inline-project">'+esc(d.displayProjectName)+'</b><small class="bg-inline-customer">'+esc(d.customerName)+'</small>'+extras+warning+'</div></div>';
-    const amount=document.createElement('td');amount.colSpan=1;amount.dataset.bgColumn=titles[amountIndex];amount.className='num bg-inline-amount';
-    amount.innerHTML=(!billing?'<small class="bg-inline-amount-label">本期未沖銷</small>':'')+'<b class="bg-inline-primary">'+money(billing?t.grossTotal:t.outstanding)+'</b>';
-    amount.setAttribute('aria-label',(billing?'請款合計':'本期未沖銷')+' '+money(billing?t.grossTotal:t.outstanding));
-    const controls=document.createElement('td');controls.colSpan=titles.length-amountIndex-1;controls.className='bg-inline-controls bg-balanced-controls';
-    controls.setAttribute('aria-label','原發票與應收說明及對外文件操作');
-    controls.innerHTML='<div class="bg-inline-end"><div class="bg-inline-context"><span class="bg-inline-state">'+statusText(g)+'</span><span class="bg-inline-policy">發票各自保留<span aria-hidden="true"> · </span>應收依原單</span></div>'+actions+'</div>';
-    row.append(identity,amount,controls);
+    const values=billing?{
+      '選取':toggle,'請款單號':identity,'日期':documentAuditMarkup(d),'客戶':esc(d.customerName),'案場':'<b class="bg-inline-project">'+esc(d.displayProjectName)+'</b>'+extras+warning,
+      '請款金額':'<b class="bg-inline-primary">'+money(t.grossTotal)+'</b>','保留款':money(t.retention),'應收金額':money(t.receivable),'已沖銷':money(t.received),'未沖銷':money(t.outstanding),'發票':invoiceOverview(g),'狀態':'<span class="bg-inline-state">'+statusText(g)+'</span>','操作':actions
+    }:{
+      '請款資訊':'<div class="bg-document-reference">'+toggle+'<div>'+identity+'</div></div>'+documentAuditMarkup(d),
+      '客戶／案場':esc(d.customerName)+'<b class="bg-inline-project">'+esc(d.displayProjectName)+'</b>'+extras+warning,
+      '本期應收':money(t.receivable),'應收沖銷':'<small class="bg-inline-amount-label">本期未沖銷</small><b class="bg-inline-primary">'+money(t.outstanding)+'</b>',
+      '收款進度':'<small class="bg-inline-amount-label">本期未沖銷</small><b class="bg-inline-primary">'+money(t.outstanding)+'</b>',
+      '保留款':money(t.retention),'狀態':'<span class="bg-inline-state">'+statusText(g)+'</span>','操作':actions
+    };
+    titles.forEach(title=>{
+      const cell=document.createElement('td');cell.dataset.bgColumn=title;cell.innerHTML=values[title];
+      if(['請款金額','保留款','應收金額','已沖銷','未沖銷','本期應收','應收沖銷','收款進度'].includes(title))cell.className='num bg-audit-money';
+      if(billing?title==='請款金額':['應收沖銷','收款進度'].includes(title))cell.classList.add('bg-inline-amount');
+      if(title==='選取')cell.classList.add('bg-toggle-cell');
+      if(title==='日期'||title==='請款資訊')cell.classList.add('bg-audit-date');
+      if(title==='操作')cell.classList.add('bg-inline-controls');
+      row.append(cell);
+    });
     return row;
   }
   function groupReadOnlyFacts(g){
@@ -133,10 +186,11 @@
   }
   function wireGroup(box,g,kind,content){
     const key=kind+':'+g.document.id,button=$('[data-bg-expand]',box);
-    const update=()=>{const opened=expand.has(key);content.hidden=!opened;button.setAttribute('aria-expanded',String(opened));button.textContent=(box.classList.contains('bg-inline-row')?'合併 ':'原單 ')+g.document.sourceIds.length+' 張';button.setAttribute('aria-label',(opened?'收合':'展開')+'原單（'+g.document.sourceIds.length+' 張）');};
+    const update=()=>{const opened=expand.has(key);content.hidden=!opened;button.setAttribute('aria-expanded',String(opened));button.textContent=box.classList.contains('bg-audit-row')?'':(box.classList.contains('bg-inline-row')?'合併 ':'原單 ')+g.document.sourceIds.length+' 張';button.setAttribute('aria-label',(opened?'收合':'展開')+'原單（'+g.document.sourceIds.length+' 張）');};
     button.onclick=()=>{if(expand.has(key))expand.delete(key);else expand.add(key);update()};update();
     $('[data-bg-edit]',box).onclick=()=>openEditor(g.document.sourceIds,g.document.id);
     $('[data-bg-pdf]',box).onclick=()=>printSaved(g.document.id);
+    $$('[data-bg-history]',box).forEach(button=>button.onclick=()=>openDocumentHistory(g.document.id));
   }
   function mountList(root,kind,context){
     if(!root)return;

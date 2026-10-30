@@ -264,3 +264,46 @@
 @media(min-width:621px) and (pointer:coarse){
   :is(#billingsApp,#receivablesApp) .bg-balanced-row :is(.bg-inline-toggle,.bg-inline-actions button){min-height:44px}
 }
+
+/* P31-8: native column alignment and read-only saved-document timestamps. */
+:is(#billingsApp,#receivablesApp) .bg-document-title{display:block;font-weight:650;font-size:13px;line-height:1.5}
+:is(#billingsApp,#receivablesApp) .bg-document-count{display:block;font-size:11px;line-height:1.6;color:#6b8097}
+:is(#billingsApp,#receivablesApp) .bg-document-date{display:grid;gap:2px;min-width:0;line-height:1.5}
+:is(#billingsApp,#receivablesApp) .bg-document-date-value{font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+:is(#billingsApp,#receivablesApp) .bg-document-date-value>small{font-size:10px;font-weight:400;color:#6b8097;margin-left:2px}
+:is(#billingsApp,#receivablesApp) .bg-document-stamp{display:block;font-size:10.5px;color:#667d94;white-space:normal;font-weight:400}
+:is(#billingsApp,#receivablesApp) .bg-document-stamp>span{white-space:nowrap;font-variant-numeric:tabular-nums}
+:is(#billingsApp,#receivablesApp) .bg-history-link{justify-self:start;display:inline-block;border:0;background:transparent;box-shadow:none;color:#366997;padding:2px 0;min-height:24px;font:inherit;font-size:11px;font-weight:500;text-align:left;cursor:pointer;line-height:1.5}
+:is(#billingsApp,#receivablesApp) .bg-history-link:hover{text-decoration:underline}
+:is(#billingsApp,#receivablesApp) .bg-history-link:focus-visible{outline:2px solid #4386d6;outline-offset:2px}
+:is(#billingsApp,#receivablesApp) .bg-invoice-progress{display:block;font-size:10.5px;color:#667d94;line-height:1.6;margin-top:3px;font-weight:400;white-space:normal}
+:is(#billingsApp,#receivablesApp) .bg-mobile-audit{margin:10px 0 0;border-top:1px solid #e5edf5;padding-top:8px}
+:is(#billingsApp,#receivablesApp) .bg-document-reference{display:flex;align-items:center;gap:7px;margin-bottom:5px}
+@media(min-width:621px){
+ :is(#billingsApp,#receivablesApp) .bg-inline-row.bg-audit-row>td{padding:12px 10px!important;font-size:12px}
+ :is(#billingsApp,#receivablesApp) .bg-inline-row.bg-audit-row>.bg-audit-money{font-weight:400;font-variant-numeric:tabular-nums;white-space:nowrap}
+ :is(#billingsApp,#receivablesApp) .bg-audit-row .bg-inline-actions{justify-content:center;gap:12px;flex-wrap:nowrap}
+ :is(#billingsApp,#receivablesApp) .bg-audit-row .bg-inline-actions button{font-size:11px;padding:3px 2px;min-height:36px;border:0;background:none;box-shadow:none;color:#075bd8}
+ :is(#billingsApp,#receivablesApp) .bg-audit-row .bg-arrow-toggle{display:inline-flex;align-items:center;justify-content:center;width:32px;min-width:32px;height:36px;padding:0;border:0;border-radius:4px;background:transparent;cursor:pointer}
+ :is(#billingsApp,#receivablesApp) .bg-audit-row .bg-arrow-toggle:hover{background:#edf4fc}
+ :is(#billingsApp,#receivablesApp) .bg-audit-row .bg-arrow-toggle::before{margin:0;flex:none}
+ :is(#billingsApp,#receivablesApp) .bg-audit-row>.bg-toggle-cell{text-align:center}
+ :is(#billingsApp,#receivablesApp) .bg-audit-row .bg-inline-project{max-width:22rem;font-weight:600}
+ :is(#billingsApp,#receivablesApp) .bg-audit-row .bg-inline-warning,:is(#billingsApp,#receivablesApp) .bg-audit-row .bg-inline-notice{max-width:22rem;margin-top:3px}
+}
+.bg-dialog .bg-history-project{margin:0 0 8px;font-size:14px;overflow-wrap:anywhere}
+.bg-dialog .bg-history-list{display:grid;gap:10px}
+.bg-dialog .bg-history-entry{border:1px solid #dce6ef;border-radius:8px;padding:12px 14px;background:#fff}
+.bg-dialog .bg-history-entry>header{display:flex;justify-content:space-between;gap:10px;font-size:14px;color:#244b73}
+.bg-dialog .bg-history-entry>header>span{font-size:12px;color:#6b8097}
+.bg-dialog .bg-history-entry p{font-size:13px;line-height:1.6;margin:6px 0;overflow-wrap:anywhere}
+.bg-dialog .bg-history-entry .bg-history-date-change{color:#8c5b17;background:#fff8ec;border-radius:4px;padding:6px 8px}
+.bg-dialog .bg-history-entry button{min-height:38px;font-size:12px;margin-top:4px}
+@media(max-width:620px){
+ :is(#billingsApp,#receivablesApp) .bg-mobile-audit .bg-document-date{grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;align-items:center}
+ :is(#billingsApp,#receivablesApp) .bg-mobile-audit .bg-document-stamp{grid-column:1;grid-row:2}
+ :is(#billingsApp,#receivablesApp) .bg-mobile-audit .bg-history-link{grid-column:2;grid-row:1/3;min-height:44px;display:flex;align-items:center;max-width:110px;white-space:normal}
+ .bg-dialog .bg-history-entry{padding:10px}
+ .bg-dialog .bg-history-entry button{min-height:44px}
+}
+@media(pointer:coarse){:is(#billingsApp,#receivablesApp) .bg-audit-row :is(.bg-arrow-toggle,.bg-history-link,.bg-inline-actions button){min-height:44px}}
