@@ -168,3 +168,55 @@
 :is(#billingsApp,#receivablesApp) .bg-source-record>.bg-source-actions:has(.bg-source-account-menu){grid-column:1/-1;grid-row:3}
 :is(#billingsApp,#receivablesApp) .bg-source-record>:is(.mobile-receivable-detail,.employee-cash-mobile-summary){grid-column:1/-1}
 :is(#billingsApp,#receivablesApp) .bg-source-record .bg-source-reference>span{display:inline-block;margin-left:7px}
+
+/* P31-6: desktop native table rows, not a card spanning the table. */
+@media(min-width:621px){
+  :is(#billingsApp,#receivablesApp) .bg-inline-row>td{
+    display:table-cell;vertical-align:middle;padding:14px 10px!important;
+    background:#fff!important;border:0!important;border-bottom:1px solid #e5edf5!important;
+    border-radius:0!important;line-height:1.5;font-size:12px;height:auto;white-space:normal;
+  }
+  :is(#billingsApp,#receivablesApp) .bg-inline-row:hover>td{background:#f8fafc!important}
+  :is(#billingsApp,#receivablesApp) .bg-inline-toggle{
+    display:inline-flex;align-items:center;gap:7px;min-height:36px;padding:3px 0;
+    border:0;background:none;color:#264f79;font:inherit;font-weight:650;cursor:pointer;white-space:nowrap;
+  }
+  :is(#billingsApp,#receivablesApp) .bg-inline-toggle::before{
+    content:'';width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;
+    transform:rotate(-45deg);margin:0 4px 0 1px;flex:none;
+  }
+  :is(#billingsApp,#receivablesApp) .bg-inline-toggle[aria-expanded=true]::before{transform:rotate(45deg)}
+  :is(#billingsApp,#receivablesApp) .bg-inline-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap}
+  :is(#billingsApp,#receivablesApp) .bg-inline-actions button{
+    min-height:36px;padding:4px 2px;min-width:0;border:0;background:none;box-shadow:none;
+    color:#075bd8;font-size:11px;font-weight:750;line-height:1.5;white-space:nowrap;cursor:pointer;
+  }
+  :is(#billingsApp,#receivablesApp) .bg-inline-project{font-size:12px;font-weight:650;display:block;overflow-wrap:anywhere;max-width:24rem}
+  :is(#billingsApp,#receivablesApp) .bg-inline-primary{font-size:14px;font-weight:750;font-variant-numeric:tabular-nums;white-space:nowrap}
+  :is(#billingsApp,#receivablesApp) .bg-inline-muted{font-size:11px;color:#7b8da0}
+  :is(#billingsApp,#receivablesApp) .bg-inline-customer,
+  :is(#billingsApp,#receivablesApp) .bg-inline-amount-label{display:block;font-size:11px;color:#6b8097;margin-top:2px}
+  :is(#billingsApp,#receivablesApp) .bg-inline-attention{display:block;color:#89632e;font-size:11px;line-height:1.6;overflow-wrap:anywhere}
+  :is(#billingsApp,#receivablesApp) .bg-inline-warning,
+  :is(#billingsApp,#receivablesApp) .bg-inline-notice{display:block;max-width:20rem;color:#8b5b1e;font-size:11px;line-height:1.6;white-space:normal}
+  :is(#billingsApp,#receivablesApp) .bg-inline-notice{color:#52738f}
+  :is(#billingsApp,#receivablesApp) .bg-inline-state{font-size:11px;color:#52738f;white-space:normal}
+  :is(#billingsApp,#receivablesApp) .bg-group-details-row[hidden]{display:none!important}
+  :is(#billingsApp,#receivablesApp) .bg-group-details-row>td{padding:0!important;border:0!important;position:static!important;background:#fff!important}
+  :is(#billingsApp,#receivablesApp) .bg-group-details-row .bg-row-details{
+    border:0;border-radius:0;border-left:0!important;box-shadow:none;background:#f8fafc;
+    padding:0 16px 12px 28px;box-sizing:border-box;
+  }
+  :is(#billingsApp,#receivablesApp) .bg-row-details>.bg-originals{margin-top:0;padding-top:10px;border-top:1px solid #e5edf5}
+  :is(#billingsApp,#receivablesApp) .bg-inline-row button:focus-visible{outline:2px solid #4386d6;outline-offset:3px}
+}
+@media(min-width:901px){
+  #billingsApp .billing-list-table>tbody>.bg-inline-row>td:nth-child(3){position:sticky!important;left:0!important;z-index:2!important}
+}
+@media(min-width:1200px){
+  #billingsApp .billing-list-table>tbody>.bg-inline-row>td:nth-last-child(3){position:sticky!important;left:auto!important;right:188px!important;z-index:3!important}
+  #billingsApp .billing-list-table>tbody>.bg-inline-row>td:last-child{position:sticky!important;left:auto!important;right:0!important;z-index:3!important}
+}
+@supports(width:1cqi){
+ :is(#billingsApp,#receivablesApp) .bg-group-details-row>td>.bg-row-details{width:100%;max-width:100cqi;position:sticky;left:0}
+}

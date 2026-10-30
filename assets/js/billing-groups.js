@@ -46,6 +46,36 @@
       (t.retentionOutstanding||t.pendingCheque?'<div class="bg-extra-facts">'+(t.retentionOutstanding?'<span>保留款待收 <b>'+money(t.retentionOutstanding)+'</b></span>':'')+(t.pendingCheque?'<span>待兌現預留 <b>'+money(t.pendingCheque)+'</b></span>':'')+'</div>':'')+
       (g.termsChanged?'<p class="bg-warning">原單內容已變動；請核對修訂後再出本次文件。</p>':g.settlementChanged?'<p class="bg-info">收款狀態已更新；列表為即時餘額，重新出單前請修訂確認。</p>':'');
   }
+  // P31-6: native summary cells share the existing table columns. Read-only presentation.
+  function inlineGroupRow(g,kind,header){
+    const titles=Array.from(header?.cells||[],cell=>cell.textContent.trim());
+    const billing=kind==='billing',d=g.document,t=g.totals;
+    if(billing? !['請款單號','客戶','案場','請款金額','操作'].every(v=>titles.includes(v))
+      : !['請款資訊','客戶／案場','本期應收','操作'].every(v=>titles.includes(v))||!titles.some(v=>['應收沖銷','收款進度'].includes(v)))return null;
+    const row=document.createElement('tr');row.className='bg-group-row bg-inline-row';row.dataset.bgGroup=d.id;
+    const toggle='<button type="button" class="bg-inline-toggle" data-bg-expand aria-expanded="false">合併 '+d.sourceIds.length+' 張</button>';
+    const actions='<div class="bg-inline-actions"><button type="button" class="commission-link" data-bg-edit>對外明細</button><button type="button" class="commission-link" data-bg-pdf>PDF</button></div>';
+    const extras=(t.retentionOutstanding?'<small class="bg-inline-attention">保留款待收 '+money(t.retentionOutstanding)+'</small>':'')+(t.pendingCheque?'<small class="bg-inline-attention">待兌現預留 '+money(t.pendingCheque)+'</small>':'');
+    const warning=g.termsChanged?'<small class="bg-inline-warning" role="status">原單已變動，出單前請核對修訂。</small>':g.settlementChanged?'<small class="bg-inline-notice" role="status">收款已更新，出單前請核對修訂。</small>':'';
+    titles.forEach(title=>{
+      const cell=document.createElement('td');cell.dataset.bgColumn=title;
+      let html='<span class="bg-inline-muted" title="展開原單核對">—</span>';
+      if(title==='選取'){html='';cell.setAttribute('aria-label','合併群組，請由合併按鈕展開原單');}
+      else if(title===(billing?'請款單號':'請款資訊')){html=toggle;cell.className='bg-inline-identity';}
+      else if(title==='日期')html='<span class="bg-inline-muted">依原單</span>';
+      else if(title==='客戶')html=esc(d.customerName);
+      else if(title===(billing?'案場':'客戶／案場')){html='<b class="bg-inline-project">'+esc(d.displayProjectName)+'</b>'+(!billing?'<small class="bg-inline-customer">'+esc(d.customerName)+'</small>':'')+extras+warning;cell.className='bg-inline-party';}
+      else if(title==='操作'){html=actions;cell.className='bg-inline-controls';}
+      else if(billing&&title==='請款金額'||!billing&&['應收沖銷','收款進度'].includes(title)){
+        html=(!billing?'<small class="bg-inline-amount-label">本期未沖銷</small>':'')+'<b class="bg-inline-primary">'+money(billing?t.grossTotal:t.outstanding)+'</b>';cell.className='num bg-inline-amount';
+        cell.setAttribute('aria-label',(billing?'請款合計':'本期未沖銷')+' '+money(billing?t.grossTotal:t.outstanding));
+      }else if(title==='發票')html='<span class="bg-inline-muted">依原單</span>';
+      else if(title==='狀態')html='<span class="bg-inline-state">'+statusText(g)+'</span>';
+      else if(['保留款','應收金額','已沖銷','未沖銷','本期應收'].includes(title))cell.className='num';
+      cell.innerHTML=html;row.append(cell);
+    });
+    return row;
+  }
   function groupReadOnlyFacts(g){
     const n=document.createElement('details'),t=g.totals;n.className='bg-finance-details';
     n.innerHTML='<summary>金額與文件資訊</summary><div class="bg-finance-values">'+[['原請款合計',t.grossTotal],['本期應收',t.receivable],['本期已沖銷',t.received],['本期未沖銷',t.outstanding],['保留款待收',t.retentionOutstanding],['待兌現預留',t.pendingCheque]].map(([label,value])=>'<span>'+label+'<b>'+money(value)+'</b></span>').join('')+'</div><p>第 '+g.document.revision+' 版 · '+g.document.sourceIds.length+' 張原單／發票各自保留，不另計一筆應收。待兌現預留包含在本期未沖銷中，不另加計。</p>';
@@ -107,7 +137,7 @@
   }
   function wireGroup(box,g,kind,content){
     const key=kind+':'+g.document.id,button=$('[data-bg-expand]',box);
-    const update=()=>{const opened=expand.has(key);content.hidden=!opened;button.setAttribute('aria-expanded',String(opened));button.textContent='原單 '+g.document.sourceIds.length+' 張';button.setAttribute('aria-label',(opened?'收合':'展開')+'原單（'+g.document.sourceIds.length+' 張）');};
+    const update=()=>{const opened=expand.has(key);content.hidden=!opened;button.setAttribute('aria-expanded',String(opened));button.textContent=(box.classList.contains('bg-inline-row')?'合併 ':'原單 ')+g.document.sourceIds.length+' 張';button.setAttribute('aria-label',(opened?'收合':'展開')+'原單（'+g.document.sourceIds.length+' 張）');};
     button.onclick=()=>{if(expand.has(key))expand.delete(key);else expand.add(key);update()};update();
     $('[data-bg-edit]',box).onclick=()=>openEditor(g.document.sourceIds,g.document.id);
     $('[data-bg-pdf]',box).onclick=()=>printSaved(g.document.id);
@@ -139,16 +169,22 @@
       });
       if(!rows.length)return;
       const extra=[];rows.forEach(row=>{if(row.nextElementSibling?.classList.contains('receipt-history-row'))extra.push(row.nextElementSibling)});
-      const wrapper=document.createElement('tr');wrapper.className='bg-group-row';wrapper.dataset.bgGroup=g.document.id;
-      const td=document.createElement('td');td.colSpan=Math.max(1,rows[0].children.length);wrapper.append(td);
-      const box=document.createElement('section');box.className='bg-group';box.innerHTML=groupSummary(g,kind);td.append(box);
-      const content=document.createElement('div');content.className='bg-originals';content.hidden=true;
-      // Compact source rows below retain each original action and source identity.
+      const inline=inlineGroupRow(g,kind,body.parentElement.tHead?.rows[0]);
+      const wrapper=inline||document.createElement('tr');
+      if(!inline){wrapper.className='bg-group-row';wrapper.dataset.bgGroup=g.document.id;}
+      const details=inline?document.createElement('tr'):wrapper;
+      if(inline){details.className='bg-group-details-row';details.hidden=true;details.dataset.bgDetails=g.document.id;}
+      const td=document.createElement('td');td.colSpan=Math.max(1,rows[0].children.length);details.append(td);
+      const box=document.createElement('section');box.className=inline?'bg-group bg-row-details':'bg-group';
+      if(!inline)box.innerHTML=groupSummary(g,kind);td.append(box);
+      const content=document.createElement('div');content.className='bg-originals';content.hidden=!inline;
+      // Existing compact source summaries and their bound accounting controls stay unchanged.
       const scroll=document.createElement('div');scroll.className='bg-original-table-scroll';const table=document.createElement('table');table.className=body.parentElement.className;
       const head=body.parentElement.querySelector(':scope>thead');if(head)table.append(head.cloneNode(true));const inner=document.createElement('tbody');table.append(inner);scroll.append(table);content.append(scroll);box.append(content);
-      rows[0].before(wrapper);rows.forEach(row=>{const detail=row.nextElementSibling;inner.append(row);if(extra.includes(detail))inner.append(detail)});
+      rows[0].before(wrapper);if(inline)wrapper.after(details);
+      rows.forEach(row=>{const detail=row.nextElementSibling;inner.append(row);if(extra.includes(detail))inner.append(detail)});
       compactOriginalTable(table,g,kind);content.append(groupReadOnlyFacts(g));
-      wireGroup(box,g,kind,content);
+      wireGroup(inline||box,g,kind,inline?details:content);
     });
     groups.forEach(g=>{
       const ids=new Set(memberKeys(g,kind));
