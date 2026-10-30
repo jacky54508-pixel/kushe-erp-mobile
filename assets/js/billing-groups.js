@@ -39,11 +39,16 @@
   function statusText(g){return g.totals.outstanding>0?(g.totals.received>0?'部分收款':'待收款'):g.totals.retentionOutstanding>0?'本期收清・保留款待收':'全部收清';}
   function groupSummary(g,kind){
     const d=g.document,t=g.totals;
-    return '<div class="bg-heading"><div><span class="bg-eyebrow">對外合併請款 · '+d.sourceIds.length+' 張原單</span><h3>'+esc(d.displayProjectName)+'</h3><p>'+esc(d.customerName)+'｜發票各自保留</p></div><div class="bg-amount"><small>本期未沖銷</small><strong>'+money(t.outstanding)+'</strong><span class="bg-state">'+statusText(g)+'</span></div></div><div class="bg-stats"><span>原請款合計 <b>'+money(t.grossTotal)+'</b></span><span>本期應收 <b>'+money(t.receivable)+'</b></span>'+(t.retentionOutstanding?'<span>保留款待收 <b>'+money(t.retentionOutstanding)+'</b></span>':'')+(t.pendingCheque?'<span>待兌現預留 <b>'+money(t.pendingCheque)+'</b></span>':'')+'</div>'+(g.termsChanged?'<p class="bg-warning">原單內容已變動；請核對修訂後再出本次文件。</p>':g.settlementChanged?'<p class="bg-info">收款狀態已更新；列表為即時餘額，重新出單前請修訂確認。</p>':'')+'<div class="bg-actions"><button type="button" class="commission-secondary" data-bg-expand aria-expanded="false">展開原單</button><button type="button" class="commission-secondary" data-bg-edit>對外明細</button><button type="button" class="commission-primary" data-bg-pdf>PDF</button><span>第 '+d.revision+' 版｜不另計一筆應收</span></div>';
+    // P31-3: presentation only. Use the existing group totals and action hooks.
+    return '<div class="bg-summary"><div class="bg-identity"><div class="bg-titleline"><span class="bg-kind">對外合併</span><h3>'+esc(d.displayProjectName)+'</h3></div><p class="bg-caption"><span>'+esc(d.customerName)+'</span><span>'+d.sourceIds.length+' 張原單 · 發票各自保留</span></p></div>'+
+      '<div class="bg-money-grid"><div class="bg-metric"><small>原請款合計</small><b>'+money(t.grossTotal)+'</b></div><div class="bg-metric"><small>本期應收</small><b>'+money(t.receivable)+'</b></div><div class="bg-metric bg-amount"><small>本期未沖銷</small><strong>'+money(t.outstanding)+'</strong><span class="bg-state">'+statusText(g)+'</span></div></div>'+
+      '<div class="bg-actions"><button type="button" class="commission-primary" data-bg-edit>對外明細</button><button type="button" class="commission-secondary" data-bg-expand aria-expanded="false">原單 '+d.sourceIds.length+' 張</button><button type="button" class="commission-secondary" data-bg-pdf>PDF</button><span class="bg-version">第 '+d.revision+' 版 · 不另計應收</span></div></div>'+
+      (t.retentionOutstanding||t.pendingCheque?'<div class="bg-extra-facts">'+(t.retentionOutstanding?'<span>保留款待收 <b>'+money(t.retentionOutstanding)+'</b></span>':'')+(t.pendingCheque?'<span>待兌現預留 <b>'+money(t.pendingCheque)+'</b></span>':'')+'</div>':'')+
+      (g.termsChanged?'<p class="bg-warning">原單內容已變動；請核對修訂後再出本次文件。</p>':g.settlementChanged?'<p class="bg-info">收款狀態已更新；列表為即時餘額，重新出單前請修訂確認。</p>':'');
   }
   function wireGroup(box,g,kind,content){
     const key=kind+':'+g.document.id,button=$('[data-bg-expand]',box);
-    const update=()=>{const opened=expand.has(key);content.hidden=!opened;button.setAttribute('aria-expanded',String(opened));button.textContent=opened?'收合原單':'展開原單（'+g.document.sourceIds.length+' 張）';};
+    const update=()=>{const opened=expand.has(key);content.hidden=!opened;button.setAttribute('aria-expanded',String(opened));button.textContent='原單 '+g.document.sourceIds.length+' 張';button.setAttribute('aria-label',(opened?'收合':'展開')+'原單（'+g.document.sourceIds.length+' 張）');};
     button.onclick=()=>{if(expand.has(key))expand.delete(key);else expand.add(key);update()};update();
     $('[data-bg-edit]',box).onclick=()=>openEditor(g.document.sourceIds,g.document.id);
     $('[data-bg-pdf]',box).onclick=()=>printSaved(g.document.id);

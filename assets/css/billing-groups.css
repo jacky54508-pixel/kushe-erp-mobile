@@ -27,3 +27,70 @@
 #billingsApp .billing-document-entry-notice{flex-basis:100%;margin:0;padding:10px 12px;background:#fff5e7;color:#875314;border-radius:8px;font-size:13px;line-height:1.65;overflow-wrap:anywhere}
 #billingsApp .billing-document-actions [hidden]{display:none!important}
 @media(max-width:760px){#billingsApp .billing-document-actions{padding:12px;gap:10px;align-items:stretch;flex-direction:row}#billingsApp .billing-document-selection{flex-basis:100%}#billingsApp .billing-document-buttons{display:grid;grid-template-columns:minmax(0,1fr) auto;flex:1 1 100%;margin:0;gap:8px}#billingsApp #createExternalBillingDocument{grid-column:1/-1;width:100%;min-height:46px;font-size:14px}#billingsApp .billing-document-buttons button{padding:10px 12px}#billingsApp .billing-document-extra>span{flex-basis:100%}}
+
+/* P31-3: compact list summaries only. No editor, PDF or original-row styles. */
+:is(#billingsApp,#receivablesApp) .bg-group-row>td{padding:8px 0!important;position:static!important;left:auto!important;right:auto!important;z-index:auto!important;box-shadow:none!important}
+:is(#billingsApp,#receivablesApp) .bg-group{box-sizing:border-box;padding:12px 16px;border:1px solid #d9e4ef;border-left:3px solid #5a83b6;border-radius:10px;background:#f8fafd;box-shadow:none;container:billing-summary / inline-size}
+:is(#billingsApp,#receivablesApp) .bg-summary{display:grid;grid-template-columns:minmax(180px,1fr) minmax(315px,1.18fr) auto;gap:12px 18px;align-items:center;min-width:0}
+:is(#billingsApp,#receivablesApp) .bg-identity{min-width:0}
+:is(#billingsApp,#receivablesApp) .bg-titleline{display:flex;align-items:center;gap:6px 9px;flex-wrap:wrap;min-width:0}
+:is(#billingsApp,#receivablesApp) .bg-kind{display:inline-flex;align-items:center;flex:none;border:1px solid #d9e6f4;border-radius:5px;background:#edf3fa;padding:2px 6px;font-size:11px;line-height:1.5;font-weight:600;color:#456989}
+:is(#billingsApp,#receivablesApp) .bg-identity h3{margin:0;color:#173d65;font-size:17px;line-height:1.5;letter-spacing:.01em;overflow-wrap:anywhere;min-width:0}
+:is(#billingsApp,#receivablesApp) .bg-caption{display:flex;flex-wrap:wrap;gap:2px 10px;margin:4px 0 0;color:#647b93;font-size:12px;line-height:1.6;white-space:normal;overflow-wrap:anywhere}
+:is(#billingsApp,#receivablesApp) .bg-money-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:center;gap:12px;min-width:0}
+:is(#billingsApp,#receivablesApp) .bg-metric{min-width:0;text-align:right;font-variant-numeric:tabular-nums;line-height:1.5}
+:is(#billingsApp,#receivablesApp) .bg-metric small{display:block;color:#657a92;font-size:11px;font-weight:500;white-space:normal}
+:is(#billingsApp,#receivablesApp) .bg-metric>b{display:block;margin-top:2px;color:#234a72;font-size:16px;line-height:1.5;overflow-wrap:anywhere}
+:is(#billingsApp,#receivablesApp) .bg-amount strong{display:block;margin-top:1px;font-size:19px;line-height:1.5;color:#0d56ab;overflow-wrap:anywhere}
+:is(#billingsApp,#receivablesApp) .bg-amount .bg-state{display:block;margin:1px 0 0;color:#526c85;font-size:11px;line-height:1.5;white-space:normal}
+:is(#billingsApp,#receivablesApp) .bg-summary>.bg-actions{display:grid;grid-template-columns:auto auto auto;gap:5px 6px;align-items:center;margin:0}
+:is(#billingsApp,#receivablesApp) .bg-summary>.bg-actions>button{box-sizing:border-box;min-width:0;min-height:40px;border-radius:8px;padding:8px 12px;font-size:12px;line-height:1.5;white-space:nowrap;font-weight:650;box-shadow:none}
+:is(#billingsApp,#receivablesApp) .bg-summary [data-bg-edit]{background:#0b5ecb;color:#fff;border:1px solid #0b5ecb}
+:is(#billingsApp,#receivablesApp) .bg-summary [data-bg-edit]:hover{background:#084fae;border-color:#084fae}
+:is(#billingsApp,#receivablesApp) .bg-summary :is([data-bg-expand],[data-bg-pdf]){background:#fff;color:#355c83;border:1px solid #d0deee}
+:is(#billingsApp,#receivablesApp) .bg-summary :is([data-bg-expand],[data-bg-pdf]):hover{background:#edf4fc;border-color:#9fb9d8}
+:is(#billingsApp,#receivablesApp) .bg-summary [data-bg-expand]::after{content:'';display:inline-block;width:6px;height:6px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:translateY(-2px) rotate(45deg);margin-left:9px;vertical-align:middle}
+:is(#billingsApp,#receivablesApp) .bg-summary [data-bg-expand][aria-expanded=true]::after{transform:translateY(1px) rotate(225deg)}
+:is(#billingsApp,#receivablesApp) .bg-summary>.bg-actions>.bg-version{grid-column:1/-1;justify-self:end;margin:0;color:#73869b;font-size:11px;line-height:1.5;white-space:normal}
+:is(#billingsApp,#receivablesApp) .bg-extra-facts{display:flex;flex-wrap:wrap;gap:4px 18px;padding-top:7px;margin-top:8px;border-top:1px solid #e1e8f1;color:#61778f;font-size:12px;line-height:1.6}
+:is(#billingsApp,#receivablesApp) .bg-extra-facts b{margin-left:5px;color:#365d80;font-variant-numeric:tabular-nums}
+:is(#billingsApp,#receivablesApp) .bg-group>.bg-originals{margin-top:10px;padding-top:10px}
+:is(#billingsApp,#receivablesApp) .bg-group>:is(.bg-warning,.bg-info){margin:8px 0 0;padding:7px 10px}
+:is(#billingsApp,#receivablesApp) .bg-group .bg-summary button:focus-visible{outline:2px solid #1766c0;outline-offset:3px}
+/* Bind only summaries to the visible scroller width; original tables keep their scrolling. */
+@supports(width:1cqi){
+ :is(#billingsApp,#receivablesApp) .billing-list-panel>.commission-table-wrap:has(>table>tbody>.bg-group-row){container-type:inline-size}
+ :is(#billingsApp,#receivablesApp) .bg-group-row>td>.bg-group{width:100%;max-width:100cqi;position:sticky;left:0}
+}
+@container billing-summary (max-width:960px){
+ :is(#billingsApp,#receivablesApp) .bg-summary{grid-template-columns:minmax(180px,1fr) minmax(300px,1fr);gap:10px 16px}
+ :is(#billingsApp,#receivablesApp) .bg-summary>.bg-actions{grid-column:1/-1;grid-template-columns:1fr auto auto auto;gap:8px}
+ :is(#billingsApp,#receivablesApp) .bg-summary>.bg-actions>.bg-version{grid-column:1;grid-row:1;justify-self:start}
+ :is(#billingsApp,#receivablesApp) .bg-summary>.bg-actions>[data-bg-edit]{grid-column:2;grid-row:1}
+ :is(#billingsApp,#receivablesApp) .bg-summary>.bg-actions>[data-bg-expand]{grid-column:3;grid-row:1}
+ :is(#billingsApp,#receivablesApp) .bg-summary>.bg-actions>[data-bg-pdf]{grid-column:4;grid-row:1}
+}
+@container billing-summary (max-width:600px){
+ :is(#billingsApp,#receivablesApp) .bg-summary{grid-template-columns:minmax(0,1fr);gap:10px}
+ :is(#billingsApp,#receivablesApp) .bg-money-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px}
+ :is(#billingsApp,#receivablesApp) .bg-metric{text-align:left}
+ :is(#billingsApp,#receivablesApp) .bg-metric>b{font-size:15px}
+ :is(#billingsApp,#receivablesApp) .bg-amount{grid-column:1/-1;display:flex;align-items:baseline;gap:4px 8px;flex-wrap:wrap;padding:7px 9px;border-radius:7px;background:#edf3fa}
+ :is(#billingsApp,#receivablesApp) .bg-amount strong{margin:0;font-size:18px}
+ :is(#billingsApp,#receivablesApp) .bg-amount .bg-state{margin:0 0 0 auto}
+ :is(#billingsApp,#receivablesApp) .bg-summary>.bg-actions{grid-template-columns:minmax(0,1.1fr) minmax(0,1.1fr) minmax(0,.7fr);gap:5px 6px}
+ :is(#billingsApp,#receivablesApp) .bg-summary>.bg-actions>button{min-height:44px;padding:8px 6px}
+ :is(#billingsApp,#receivablesApp) .bg-summary>.bg-actions>[data-bg-edit]{grid-column:1;grid-row:1}
+ :is(#billingsApp,#receivablesApp) .bg-summary>.bg-actions>[data-bg-expand]{grid-column:2;grid-row:1}
+ :is(#billingsApp,#receivablesApp) .bg-summary>.bg-actions>[data-bg-pdf]{grid-column:3;grid-row:1}
+ :is(#billingsApp,#receivablesApp) .bg-summary>.bg-actions>.bg-version{grid-column:1/-1;grid-row:2;justify-self:start}
+}
+@media(max-width:620px){
+ :is(#billingsApp,#receivablesApp) .bg-group-mobile{padding:11px 12px;margin-bottom:0}
+ :is(#billingsApp,#receivablesApp) .bg-identity h3{font-size:16px}
+}
+@container billing-summary (max-width:600px){
+ :is(#billingsApp,#receivablesApp) .bg-summary{gap:8px}
+ :is(#billingsApp,#receivablesApp) .bg-amount{padding:4px 9px}
+ :is(#billingsApp,#receivablesApp) .bg-summary>.bg-actions>.bg-version{display:none}
+}
