@@ -40,7 +40,7 @@ try:
   check('native canonical and equivalent original pixels match',p.locator('#paper').screenshot()==q.locator('#paper').screenshot())
   p.reload();p.wait_for_function('window.__billingPrintReady===true');check('native reload retains all data with no account access',p.locator('.matrix tbody tr:not(.grand)').count()==18 and p.evaluate('qaStorageWrites')==0)
   broken=copy.deepcopy(payload);broken['document']['totals']['grossTotal']+=1;p.goto(base+'src/external-billing-print.html#'+encoded(broken));check('native invalid totals block redirect and printing',p.locator('#print').is_disabled() and p.locator('.error').count()==1)
-  historical=copy.deepcopy(payload);historical['historical']=True;p.goto(base+'src/external-billing-print.html#'+encoded(historical));check('native prior version remains reference only',p.locator('.historic').count()==1 and '非本次付款通知' in p.locator('.historic').inner_text())
+  historical=copy.deepcopy(payload);historical['historical']=True;hp=context.new_page();hp.on('pageerror',lambda e:errors.append(str(e)));hp.on('request',lambda r:requests.append(r.url.split('#')[0]));hp.goto(base+'src/external-billing-print.html#'+encoded(historical));check('native prior version remains reference only',hp.locator('.historic').count()==1 and '非本次付款通知' in hp.locator('.historic').inner_text())
   check('no uncaught errors or external account requests',not errors and all(x.startswith(base) for x in requests))
   browser.close()
 except Exception as e:
