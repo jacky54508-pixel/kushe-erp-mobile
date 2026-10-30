@@ -220,7 +220,15 @@
     if(!historical&&(g.issues.length||g.termsChanged||g.settlementChanged)){notifyError('原單或收款狀態已更新，請先開啟「對外明細」核對保存新版本；舊版仍可在版本紀錄查看。');return}
     try{
       const payload={schema:'kushe-external-billing-print-v1',historical:Boolean(historical),document:copy(d)};delete payload.document.history;delete payload.document.lastRequestFingerprint;delete payload.document.lastRequestKey;
-      const url=new URL('external-billing-print.html?v=p31-1-unified-1',location.href);url.hash=encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(payload)))));
+      // P31-4: current documents reuse the selected original's public template only.
+      // This read-only projection never changes the original bill or the saved group.
+      if(!historical){
+        const primary=store.getState().billings.find(row=>String(row.id)===d.targetBillingId);
+        if(!primary||!window.KusheBillingPrint?.buildExternalView)throw new Error('原請款列印模組未完整載入，請保留輸入後重新整理；未修改帳款');
+        const view=window.KusheBillingPrint.buildExternalView(primary);
+        payload.template={schema:'kushe-original-billing-template-v1',billingId:d.targetBillingId,company:copy(view.company),publicNote:view.publicNote||'',historicalDetails:view.lines.some(line=>line.sourcePricingType==='historical-supplement')};
+      }
+      const url=new URL('external-billing-print.html?v=p31-4-original-template-1',location.href);url.hash=encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(payload)))));
       if(url.href.length>1500000)throw new Error('文件內容過大，請減少對外明細後再匯出');
       const a=document.createElement('a');a.href=url.href;a.target='_blank';a.rel='noopener';document.body.append(a);a.click();a.remove();
     }catch(e){notifyError(e.message)}
