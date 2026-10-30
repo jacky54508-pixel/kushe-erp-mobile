@@ -1,0 +1,54 @@
+name: P31-4 isolated original PDF template verification
+on:
+  push:
+    branches: [p31-4-build-20261030]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      QA_ROOT_DIR: ${{ github.workspace }}/qa
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 0eceb5894d2295afe96ca43d93c1bd2598963037
+          path: qa/src
+          fetch-depth: 1
+      - name: Verify exact tested print patch and all protected files
+        run: python3 harness/.p31-4-build/build.py
+      - name: Check all JavaScript syntax
+        run: find qa/src/assets/js -name '*.js' -print0 | xargs -0 -n1 node --check
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated browser dependencies
+        run: |
+          pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Native print navigation and original-template parity
+        run: python harness/.p31-4-build/native.py
+      - name: Publish clean review candidate only
+        working-directory: qa/src
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- assets/js/billing-groups.js assets/js/external-billing-print.js billing-print.html external-billing-print.html index.html
+          test "$(git diff --cached --name-only | wc -l)" -eq 5
+          git diff --cached --check
+          git commit -m 'P31-4: reuse original billing PDF template for consolidated documents' -m 'Print-only adaptation of validated saved details and original totals. Original template CSS, business Store, invoices, receipts, grouping and card layout unchanged. 242 local synthetic checks and 39 JavaScript syntax checks passed. Exact complete source verified and native isolated print checks passed before this candidate. No ERP account or business-data access. Main and beta are not advanced by this workflow.'
+          git rev-parse HEAD > ../evidence/candidate.txt
+          git rev-parse HEAD^{tree} > ../evidence/tree.txt
+          git push origin HEAD:refs/heads/p31-4-ready-20261030
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p31-4-native-print-evidence
+          path: qa/evidence
+          retention-days: 7
