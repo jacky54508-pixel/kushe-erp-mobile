@@ -51,11 +51,14 @@
   function mountList(root,kind,context){
     if(!root)return;
     const model=index(),groups=model.documents.filter(g=>g.canGroup);
-    let tools=document.createElement('div');tools.className='bg-list-toolbar';
+    // P31-2: billing owns the permanent create button. Only document navigation
+    // is attached here; mount can be repeated without duplicating the toolbar.
+    const integrated=kind==='billing'?$('[data-bg-document-tools]',root):null;
+    let tools=integrated||$('.bg-list-toolbar',root),place=$('.billing-bundle-toolbar',root)||$('.commission-filters',root)||$('.commissions-heading',root);
+    if(!tools){tools=document.createElement('div');tools.className='bg-list-toolbar';place?.after(tools)}
     const hasDocs=model.documents.length>0;
-    tools.innerHTML=(kind==='billing'?'<button type="button" class="commission-primary" data-bg-create '+(context.selected().length<2?'disabled':'')+'>建立對外合併請款</button>':'')+(hasDocs?'<button type="button" class="commission-secondary" data-bg-library>合併文件（'+model.documents.length+'）</button><button type="button" class="commission-secondary" data-bg-mode aria-pressed="'+rawModes.has(kind)+'">'+(rawModes.has(kind)?'改看合併群組':'查看原始清單')+'</button>':'')+'<span>'+(hasDocs?'分組模式按整組篩選；群組合計不另加到帳款。':'先勾選同客戶的原請款；只新增對外文件，不重新建帳。')+'</span>';
-    const place=$('.billing-bundle-toolbar',root)||$('.commission-filters',root)||$('.commissions-heading',root);place?.after(tools);
-    $('[data-bg-create]',tools)?.addEventListener('click',()=>openEditor(context.selected().map(r=>String(r.id))));
+    tools.innerHTML=(hasDocs?'<button type="button" class="commission-secondary" data-bg-library>合併文件（'+model.documents.length+'）</button><button type="button" class="commission-secondary" data-bg-mode aria-pressed="'+rawModes.has(kind)+'">'+(rawModes.has(kind)?'改看合併群組':'查看原始清單')+'</button>':'')+'<span>'+(hasDocs?'分組模式按整組篩選；群組合計不另加到帳款。':'先勾選同客戶的原請款；只新增對外文件，不重新建帳。')+'</span>';
+    tools.hidden=Boolean(integrated&&!hasDocs);
     $('[data-bg-library]',tools)?.addEventListener('click',openLibrary);
     $('[data-bg-mode]',tools)?.addEventListener('click',()=>{if(rawModes.has(kind))rawModes.delete(kind);else rawModes.add(kind);context.render()});
     if(model.issues.length){const warning=document.createElement('p');warning.className='bg-warning';warning.textContent=model.issues.join('；')+'。未能安全分組的原單仍分別顯示。';tools.after(warning)}
@@ -223,4 +226,5 @@
     }catch(e){notifyError(e.message)}
   }
   window.KusheBillingGroups=Object.freeze({filterRows,mountList,activeFor,openEditor,openLibrary,printSaved});
+  window.dispatchEvent(new CustomEvent('kushe:billing-groups-ready'));
 }());
