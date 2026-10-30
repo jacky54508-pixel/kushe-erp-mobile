@@ -1,0 +1,40 @@
+name: P31-5 isolated compact source list verification
+on:
+  push:
+    branches: [p31-5-build-20261030]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: f11e9c2a1df78d4eafa43e2acd4995f48ae71fde
+          path: source
+          fetch-depth: 1
+      - name: Verify exact three-file source and all JavaScript syntax
+        run: python harness/.p31-5-build/apply.py source
+      - name: Publish clean candidate only
+        working-directory: source
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'P31-5: one primary amount and compact original-source summaries' -m 'Three UI/loading files only. Preserve original action nodes, individual receipt/cheque/retention paths and all source identifiers. Read-only financial details expandable; raw view, editor, Store and PDF unchanged. 459 local isolated synthetic checks and 39 JavaScript syntax checks passed. Full candidate tree verified against locally tested source. No live ERP login or business-data access; no main update.'
+          test "$(git rev-parse HEAD^{tree})" = '5d914a62c153301b28afab7dbd312113dd521788'
+          git rev-parse HEAD > ../harness/.p31-5-build/candidate.txt
+          git push origin HEAD:refs/heads/p31-5-ready-20261030
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p31-5-source-verification
+          path: |
+            harness/.p31-5-build/verification.json
+            harness/.p31-5-build/candidate.txt
+          retention-days: 7
