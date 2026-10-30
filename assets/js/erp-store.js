@@ -3332,7 +3332,8 @@
     const bankLinked=state.bankTransactions.some((row)=>String(row.billingId||'')===String(billing.id)||String(row.receivableId||'')===String(receivable.id)||[String(billing.id),String(receivable.id)].includes(String(row.sourceId||''))||receiptIds.has(String(row.sourceId||''))||receiptIds.has(String(row.receiptId||''))||receiptIds.has(String(row.retentionReceiptId||''))||(String(row.sourceNo||'')===String(billing.number||'')&&/receipt|receivable|retention|收款|應收|保留/i.test(`${row.sourceType||''} ${row.category||''}`)));
     const issuedInvoice=billingInvoiceStatus(billing)==='invoiced'||Boolean(String(billing.invoiceNo||'').trim())||billingInvoiceRecords(billing).some((row)=>invoiceStatus(row.status,row.invoiceNumber||row.number)==='issued'||Boolean(String(row.invoiceNumber||row.number||'').trim()));
     let reason='';
-    if(receivable.receivableCheques!==undefined&&(!Array.isArray(receivable.receivableCheques)||receivable.receivableCheques.length))reason='已有支票登記／歷程，為保留票據關聯不可改刪請款';
+    if(externalBillingMembership(billing.id).length)reason='已納入對外合併請款，原單編刪暫鎖定；請先核對並解除分組';
+    else if(receivable.receivableCheques!==undefined&&(!Array.isArray(receivable.receivableCheques)||receivable.receivableCheques.length))reason='已有支票登記／歷程，為保留票據關聯不可改刪請款';
     else if(receipts.length)reason='已有一般收款紀錄';
     else if(retentionReceipts.length)reason='已有保留款收回紀錄';
     else if(num(receivable.received)>0||num(receivable.legacyReceived)>0)reason='對應應收已有收款';
@@ -5110,6 +5111,211 @@
     persist(`刪除案場抽成結算 ${settlement.projectName||settlement.projectId||''}｜${settlement.employeeName||settlement.employeeId||''}`,{commissionSettlementId:settlementId});
     return true;
   }
+  // P31: document-only grouping. Existing business collections are never written here.
+  const EXTERNAL_BILLING_SCHEMA='kushe-external-billing-group-v1';
+  const EXTERNAL_BILLING_UNIFIED_SCHEMA='kushe-external-billing-group-v2';
+  function externalBillingRecords() {
+    const rows=state?.meta?.externalBillingDocuments;
+    if(rows===undefined)return [];
+    if(!Array.isArray(rows))throw new Error('對外合併文件資料格式待核對；原單保持原樣');
+    const ids=new Set();
+    rows.forEach(row=>{
+      if(!row||![EXTERNAL_BILLING_SCHEMA,EXTERNAL_BILLING_UNIFIED_SCHEMA].includes(row.schema)||typeof row.id!=='string'||!row.id||ids.has(row.id)||!['draft','active','archived'].includes(row.status)||!Number.isSafeInteger(row.revision)||row.revision<1||!Array.isArray(row.sourceIds)||row.sourceIds.length<2||row.sourceIds.length>30||new Set(row.sourceIds).size!==row.sourceIds.length||row.sourceIds.some(id=>typeof id!=='string'||!id)||!row.sourceIds.includes(row.targetBillingId)||typeof row.displayProjectName!=='string'||typeof row.customerName!=='string'||typeof row.customerId!=='string'||typeof row.documentDate!=='string'||!Array.isArray(row.history))throw new Error('對外合併文件識別或版本待核對；不隱藏原單');
+      ids.add(row.id);
+    });
+    return rows;
+  }
+  function externalBillingText(value,label,max=200,required=true) {
+    if(value!==undefined&&value!==null&&typeof value!=='string')throw new Error(label+'格式不正確');
+    const v=String(value??'').trim();
+    if((required&&!v)||v.length>max||/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(v))throw new Error('請填有效的'+label+'（最多 '+max+' 字）');
+    return v;
+  }
+  function externalBillingMoney(value,label) {
+    if(!['number','string'].includes(typeof value)||String(value).trim()===''||!Number.isSafeInteger(Number(value))||Number(value)<0)throw new Error(label+'金額待核對');
+    return Number(value);
+  }
+  function externalBillingSources(ids) {
+    if(!Array.isArray(ids)||ids.length<2||ids.length>30||new Set(ids).size!==ids.length||ids.some(id=>typeof id!=='string'||!id))throw new Error('請選擇 2～30 張不同的原請款單');
+    const sources=ids.map(id=>{
+      const ctx=billingDocumentContext(id),info=billingDocumentState(id),{billing,ar,invoice}=ctx;
+      if(info.issues.length)throw new Error((billing.number||id)+'：'+info.issues.join('；'));
+      if(!billing.customer||!billing.project||!ar?.id)throw new Error('原單缺少客戶、案場或應收識別；不能依名稱猜測');
+      for(const key of ['customer','project'])if(ar[key]&&String(ar[key])!==String(billing[key]))throw new Error('原單與應收歸屬不同');
+      const projects=state.projects.filter(p=>String(p.id)===String(billing.project)),customers=state.customers.filter(c=>String(c.id)===String(billing.customer));
+      if(projects.length!==1||customers.length!==1||String(projects[0].customer||projects[0].customerId||'')!==String(billing.customer))throw new Error('原單客戶／案場主檔無法唯一核對');
+      const anchors=historicalBillingAnchors(ctx.amounts),received=externalBillingMoney(ar.received??0,'原單已沖銷'),retentionReceived=externalBillingMoney(ar.retentionReceived??billing.retentionReceived??0,'已收保留款');
+      if(received>anchors.receivable||retentionReceived>anchors.retention)throw new Error('已沖銷／保留款收回超過原帳款，請先核對');
+      const pending=pendingChequeAmount(ar);
+      if(!Number.isSafeInteger(pending)||pending<0||pending>anchors.receivable-received)throw new Error('待兌現支票預留金額待核對');
+      const taxMode=info.supplement?.taxMode||billing.taxMode||'未稅';
+      if(!['未稅','含稅'].includes(taxMode))throw new Error('原單單價稅別待核對');
+      const rawLines=billingDocumentLines(billing);
+      const originalLines=rawLines.map((line,index)=>{
+        const number=(v)=>v===null||v===undefined||String(v).trim()===''||!Number.isFinite(Number(v))?null:Number(v);
+        return {sourceLineIndex:index,house:String(line.house||''),item:String(line.item||line.name||''),unit:String(line.unit||''),qty:number(line.qty??line.quantity),price:number(line.price??line.unitPrice),subtotal:number(line.subtotal??line.amount)};
+      });
+      // Documentary identity excludes settlement fields; receipts remain dynamic in lists.
+      const document={billingId:String(id),receivableId:String(ar.id),number:String(billing.number||''),date:String(billing.date||''),customerId:String(billing.customer),customerName:String(customers[0].name||billing.customerName||''),projectId:String(billing.project),projectName:String(billing.projectName||projects[0].name||''),taxMode,anchors,invoiceId:String(invoice?.id||''),invoiceNo:String(invoice?.invoiceNumber||invoice?.number||billing.invoiceNo||''),invoiceDate:String(invoice?.invoiceDate||invoice?.date||billing.invoiceDate||''),invoiceStatus:billingInvoiceStatus(billing),originalLines};
+      return {document,settlement:{billingId:String(id),received,outstanding:anchors.receivable-received,retentionReceived,retentionOutstanding:anchors.retention-retentionReceived,pendingCheque:pending,availableToCollect:anchors.receivable-received-pending},snapshot:ctx.snapshot};
+    });
+    if(new Set(sources.map(s=>s.document.customerId)).size!==1)throw new Error('只能合併同一客戶的原請款單；不按相同名稱推測');
+    if(new Set(sources.map(s=>s.document.receivableId)).size!==sources.length)throw new Error('不同請款共用同一應收，請先核對，不能重複計入');
+    return sources;
+  }
+  function externalBillingTotals(sources) {
+    const totals={untaxed:0,tax:0,grossTotal:0,retention:0,receivable:0,received:0,outstanding:0,retentionReceived:0,retentionOutstanding:0,pendingCheque:0,availableToCollect:0};
+    sources.forEach(s=>Object.keys(totals).forEach(key=>{totals[key]+=s.document.anchors[key]??s.settlement[key]??0;if(!Number.isSafeInteger(totals[key]))throw new Error('合併金額超過安全範圍')}));
+    return totals;
+  }
+  function externalBillingContext(sourceIds,documentId='') {
+    const records=externalBillingRecords(),previous=documentId?records.find(d=>d.id===documentId):null;
+    if(documentId&&!previous)throw new Error('找不到原合併文件');
+    if(previous?.status==='archived')throw new Error('已解除的分組不可直接覆寫；歷史文件仍保留');
+    if(previous&&storeStateFingerprint(previous.sourceIds)!==storeStateFingerprint(sourceIds))throw new Error('修訂不可暗中換原單；請先解除分組，再建立新文件');
+    const other=records.find(d=>d.id!==documentId&&d.status!=='archived'&&d.sourceIds.some(id=>sourceIds.includes(id)));
+    if(other)throw new Error('原單已在其他合併文件／草稿中，請開啟原組修訂，不可重複請款');
+    const sources=externalBillingSources(sourceIds),totals=externalBillingTotals(sources);
+    const snapshot=storeStateFingerprint({sources:sources.map(s=>({snapshot:s.snapshot,document:s.document,settlement:s.settlement})),previous:previous||null});
+    return {sources,totals,snapshot,previous:previous?storeStateClone(previous):null};
+  }
+  function externalBillingSections(values,sources,confirmed) {
+    if(!Array.isArray(values)||values.length!==sources.length)throw new Error('每張原單都必須各有一組對外明細');
+    const seen=new Set();
+    return values.map(section=>{
+      const source=sources.find(s=>s.document.billingId===section?.billingId);
+      if(!source||seen.has(section.billingId))throw new Error('對外明細來源重複或不是本次原單');seen.add(section.billingId);
+      if(!['未稅','含稅'].includes(section.taxMode))throw new Error('請選擇各組對外明細的單價方式');
+      if(!Array.isArray(section.lines)||section.lines.length>200||(confirmed&&!section.lines.length))throw new Error('每組請填 1～200 筆真實明細');
+      const lines=section.lines.map(line=>{
+        if(!line||typeof line!=='object'||Array.isArray(line))throw new Error('對外明細格式錯誤');
+        const parsed={house:externalBillingText(line.house,'戶別',100,false),item:externalBillingText(line.item,'施工項目',200,confirmed),unit:externalBillingText(line.unit,'單位',20,confirmed)};
+        for(const key of ['qty','price']){
+          const v=line[key],blank=v===null||v===undefined||v==='';
+          if(blank&&!confirmed){parsed[key]=null;continue}
+          const n=Number(v);
+          if(blank||!['number','string'].includes(typeof v)||!Number.isFinite(n)||n<0||(key==='qty'&&n<=0)||n>1e10||Math.abs(n*10000-Math.round(n*10000))>0.001)throw new Error('數量須大於零、單價不小於零，最多四位小數');
+          parsed[key]=n;
+        }
+        parsed.amount=parsed.qty===null||parsed.price===null?null:Math.round(parsed.qty*parsed.price);
+        if(parsed.amount!==null&&!Number.isSafeInteger(parsed.amount))throw new Error('明細金額超過安全範圍');
+        return parsed;
+      });
+      const target=section.taxMode==='未稅'?source.document.anchors.untaxed:source.document.anchors.grossTotal;
+      const total=lines.reduce((sum,l)=>sum+(l.amount||0),0);
+      if(!Number.isSafeInteger(total))throw new Error('明細合計超過安全範圍');
+      if(confirmed&&total!==target)throw new Error(source.document.projectName+' 對外明細合計 '+total+' 不等於原'+section.taxMode+' '+target+'；不會修改原帳款');
+      const reason=externalBillingText(section.reason,'重編依據／說明',1000,false);
+      // Comparing only meaningful display fields avoids source IDs becoming new allocations.
+      const originals=source.document.originalLines.map(l=>({house:l.house,item:l.item,unit:l.unit,qty:l.qty,price:l.price}));
+      const same=section.taxMode===source.document.taxMode&&storeStateFingerprint(originals)===storeStateFingerprint(lines.map(({amount,...l})=>l));
+      if(confirmed&&!same&&!reason)throw new Error('重新編排 '+source.document.projectName+' 的品項／數量／單價，請填寫依據；不要為湊差額改價');
+      return {billingId:section.billingId,taxMode:section.taxMode,lines,reason,total,target};
+    });
+  }
+  // P31-1: one external table; originals remain immutable accounting anchors.
+  function externalBillingUnified(value,sources,confirmed) {
+    if(!value||typeof value!=='object'||Array.isArray(value)||!['未稅','含稅'].includes(value.taxMode))throw new Error('請選擇整份對外明細的單價方式；不自動換算稅別');
+    if(!Array.isArray(value.lines)||value.lines.length>300||(confirmed&&!value.lines.length))throw new Error('整份對外明細請填 1～300 筆，不會自動裁切');
+    const lines=value.lines.map(line=>{
+      if(!line||typeof line!=='object'||Array.isArray(line))throw new Error('對外明細格式錯誤');
+      const parsed={house:externalBillingText(line.house,'戶別',100,false),item:externalBillingText(line.item,'施工項目',200,confirmed),unit:externalBillingText(line.unit,'單位',20,confirmed)};
+      for(const key of ['qty','price']){
+        const v=line[key],blank=v===null||v===undefined||typeof v==='string'&&!v.trim();
+        if(blank&&!confirmed){parsed[key]=null;continue}
+        const n=Number(v);
+        if(blank||!['number','string'].includes(typeof v)||!Number.isFinite(n)||n<0||(key==='qty'&&n<=0)||n>1e10||Math.abs(n*10000-Math.round(n*10000))>0.001)throw new Error('數量須大於零、單價不小於零，最多四位小數');
+        parsed[key]=n;
+      }
+      parsed.amount=parsed.qty===null||parsed.price===null?null:Math.round(parsed.qty*parsed.price);
+      if(parsed.amount!==null&&!Number.isSafeInteger(parsed.amount))throw new Error('明細金額超過安全範圍');
+      return parsed;
+    });
+    const totals=externalBillingTotals(sources),target=value.taxMode==='未稅'?totals.untaxed:totals.grossTotal;
+    const total=lines.reduce((sum,line)=>sum+(line.amount??0),0);
+    if(!Number.isSafeInteger(total))throw new Error('對外明細合計超過安全範圍');
+    if(confirmed&&total!==target)throw new Error('整份對外明細合計 '+total+' 與原單'+value.taxMode+'合計 '+target+' 不一致；不會修改原帳款');
+    const reason=externalBillingText(value.reason,'合併編排說明',1000,false);
+    const originals=sources.flatMap(s=>s.document.originalLines.map(l=>({house:l.house,item:l.item,unit:l.unit,qty:l.qty,price:l.price})));
+    const same=sources.every(s=>s.document.taxMode===value.taxMode)&&storeStateFingerprint(originals)===storeStateFingerprint(lines.map(({amount,...l})=>l));
+    if(confirmed&&!same&&!reason)throw new Error('合併後更改品項、數量或單價，請填寫「合併編排說明」；不為湊差額任意改價');
+    return {taxMode:value.taxMode,lines,reason,total,target};
+  }
+  async function saveExternalBillingDocument(values={}) {
+    requireStoreTransactionDraft();
+    const key=externalBillingText(values.idempotencyKey,'操作識別',200),records=externalBillingRecords();
+    const intent={...values};delete intent.expectedSnapshot;
+    const requestFingerprint=storeStateFingerprint(intent),existingRequest=records.filter(d=>d.lastRequestKey===key);
+    if(existingRequest.length){
+      if(existingRequest.length!==1||existingRequest[0].lastRequestFingerprint!==requestFingerprint)throw new Error('相同操作識別但內容不同，已停止重送');
+      return existingRequest[0];
+    }
+    const id=externalBillingText(values.documentId,'文件識別',200,false),ctx=externalBillingContext(values.sourceIds,id),previous=ctx.previous;
+    if(typeof values.expectedSnapshot!=='string'||values.expectedSnapshot!==ctx.snapshot)throw new Error('原單、收款或合併文件已更新；請保留輸入並重新核對，尚未儲存');
+    const active=values.status==='active';
+    if(!['draft','active'].includes(values.status)||active&&values.confirmed!==true)throw new Error('請先確認原單、對外明細與發票金額均已核對');
+    if(previous?.status==='active'&&!active)throw new Error('有效版本不能降為草稿；請繼續修訂或解除分組');
+    const primary=ctx.sources.find(s=>s.document.billingId===values.targetBillingId);
+    if(!primary)throw new Error('對外案場必須選本組其中一張原單');
+    const documentDate=billingDocumentDate(values.documentDate,'文件日期'),note=externalBillingText(values.note,'對外備註',2000,false);
+    let detail,schema=EXTERNAL_BILLING_SCHEMA;
+    if(values.detailMode==='unified'){
+      if(values.sections!==undefined)throw new Error('統一明細不可同時帶入分區明細，以免重複計算');
+      detail={detailMode:'unified',unified:externalBillingUnified(values.unified,ctx.sources,active)};schema=EXTERNAL_BILLING_UNIFIED_SCHEMA;
+    }else{
+      if(values.detailMode!==undefined||values.unified!==undefined||previous?.schema===EXTERNAL_BILLING_UNIFIED_SCHEMA)throw new Error('對外文件版本已更新，請保留輸入並使用新版統一明細');
+      const sections=externalBillingSections(values.sections,ctx.sources,active);
+      if(sections.reduce((n,s)=>n+s.lines.length,0)>300)throw new Error('合併文件最多 300 筆對外明細；不會自動裁切');
+      detail={sections};
+    }
+    if(previous?.history.length>=50)throw new Error('此文件版本已達 50 版，請先整理文件；不覆寫舊版');
+    const now=new Date().toISOString(),doc={schema,id:id||'external-'+uid(),revision:(previous?.revision||0)+1,status:values.status,sourceIds:values.sourceIds.slice(),targetBillingId:values.targetBillingId,displayProjectName:primary.document.projectName,customerId:primary.document.customerId,customerName:primary.document.customerName,documentDate,note,...detail,sourceSnapshots:ctx.sources.map(s=>storeStateClone(s.document)),settlementSnapshots:ctx.sources.map(s=>storeStateClone(s.settlement)),totals:ctx.totals,createdAt:previous?.createdAt||now,updatedAt:now,confirmedAt:active?now:'',history:previous?[...previous.history,((({history,...record})=>record)(previous))]:[],lastRequestKey:key,lastRequestFingerprint:requestFingerprint};
+    const next=records.map(r=>r.id===id?doc:r);if(!id)next.unshift(doc);
+    // This is the sole business-snapshot assignment: a NEW documentary metadata namespace.
+    state.meta.externalBillingDocuments=next;
+    persist((active?'確認':'暫存')+'對外合併文件 '+doc.displayProjectName,{externalBillingDocumentId:doc.id,revision:doc.revision,sourceBillingIds:doc.sourceIds.slice(),documentOnly:true});
+    return doc;
+  }
+  async function archiveExternalBillingDocument(id,values={}) {
+    requireStoreTransactionDraft();const records=externalBillingRecords(),doc=records.find(d=>d.id===id);
+    if(!doc||doc.status==='archived')throw new Error('分組不存在或已解除');
+    if(values.confirmed!==true||values.expectedDocument!==storeStateFingerprint(doc))throw new Error('文件已更新，請重新核對解除分組');
+    const reason=externalBillingText(values.reason,'解除原因',500),next={...doc,status:'archived',archivedAt:new Date().toISOString(),archiveReason:reason};
+    state.meta.externalBillingDocuments=records.map(d=>d.id===id?next:d);
+    persist('解除對外請款分組 '+doc.displayProjectName,{externalBillingDocumentId:id,documentOnly:true});return next;
+  }
+  function externalBillingDocumentIndex() {
+    let records;try{records=externalBillingRecords()}catch(error){return {documents:[],issues:[error.message]}}
+    const documents=records.map(doc=>{
+      const issues=[];let sources=[],totals=null;
+      try{
+        sources=externalBillingSources(doc.sourceIds);totals=externalBillingTotals(sources);
+        if(records.some(d=>d!==doc&&d.status==='active'&&doc.status==='active'&&d.sourceIds.some(id=>doc.sourceIds.includes(id))))throw new Error('原單重複出現在多組有效文件，不隱藏原單');
+        if(!Array.isArray(doc.sourceSnapshots)||!Array.isArray(doc.settlementSnapshots)||doc.sourceSnapshots.length!==doc.sourceIds.length||doc.settlementSnapshots.length!==doc.sourceIds.length)throw new Error('保存文件的來源快照格式待核對');
+        const savedSources=doc.sourceSnapshots.map((document,i)=>{
+          if(document.billingId!==doc.sourceIds[i]||doc.settlementSnapshots[i]?.billingId!==document.billingId)throw new Error('保存文件的原單對照不一致');
+          return {document,settlement:doc.settlementSnapshots[i]};
+        });
+        if(storeStateFingerprint(externalBillingTotals(savedSources))!==storeStateFingerprint(doc.totals))throw new Error('保存文件合計與原單快照不同');
+        if(doc.schema===EXTERNAL_BILLING_UNIFIED_SCHEMA){
+          if(doc.detailMode!=='unified'||doc.sections!==undefined)throw new Error('統一對外明細格式待核對');
+          const parsed=externalBillingUnified(doc.unified,savedSources,doc.status==='active');
+          if(storeStateFingerprint(parsed)!==storeStateFingerprint(doc.unified))throw new Error('保存的統一明細金額或格式待核對');
+        }else{
+          if(!Array.isArray(doc.sections)||doc.unified!==undefined)throw new Error('保存的分區明細格式待核對');
+          if(doc.status==='active')externalBillingSections(doc.sections,savedSources,true);
+        }
+      }catch(error){issues.push(error.message)}
+      const termsChanged=issues.length>0||storeStateFingerprint(sources.map(s=>s.document))!==storeStateFingerprint(doc.sourceSnapshots);
+      const settlementChanged=issues.length>0||storeStateFingerprint(sources.map(s=>s.settlement))!==storeStateFingerprint(doc.settlementSnapshots);
+      return {document:storeStateClone(doc),documentSnapshot:storeStateFingerprint(doc),sources,totals,issues,termsChanged,settlementChanged,canGroup:doc.status==='active'&&issues.length===0};
+    });
+    return {documents,issues:documents.flatMap(d=>d.issues.map(message=>(d.document.displayProjectName||d.document.id)+'：'+message))};
+  }
+  function externalBillingMembership(id) {
+    try{return externalBillingRecords().filter(d=>d.status==='active'&&d.sourceIds.includes(String(id)))}catch(_){return []}
+  }
+
   // P30: historical detail is documentary only. Never rebuild financial sources from it.
   function billingNeedsRecordedTotals(billing) {
     return billing?.sourceType==='legacy-ar-invoice-rebuild'||!Array.isArray(billing?.lines)||billing.lines.length===0||!billingSafety(billing).editable;
@@ -6780,6 +6986,7 @@
     return { changed:true, settings:{...next}, defaultTaxChanged };
   }
   const STORE_WRITER_NAMES=new Set([
+    'saveExternalBillingDocument','archiveExternalBillingDocument',
     'saveHistoricalBillingDetails',
     'saveReceivableCheque','cancelReceivableCheque','clearReceivableCheque',
     'repairDailyBillingLinks','saveSystemSettings',
@@ -6800,7 +7007,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ historicalQuotationChoices, billingDocumentState, billingDocumentLines, saveHistoricalBillingDetails, dailyDraftSnapshot, dailyDraftReview, receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ externalBillingContext, externalBillingDocumentIndex, saveExternalBillingDocument, archiveExternalBillingDocument, historicalQuotationChoices, billingDocumentState, billingDocumentLines, saveHistoricalBillingDetails, dailyDraftSnapshot, dailyDraftReview, receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
