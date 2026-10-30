@@ -52,28 +52,24 @@
     const billing=kind==='billing',d=g.document,t=g.totals;
     if(billing? !['請款單號','客戶','案場','請款金額','操作'].every(v=>titles.includes(v))
       : !['請款資訊','客戶／案場','本期應收','操作'].every(v=>titles.includes(v))||!titles.some(v=>['應收沖銷','收款進度'].includes(v)))return null;
-    const row=document.createElement('tr');row.className='bg-group-row bg-inline-row';row.dataset.bgGroup=d.id;
+    const amountIndex=titles.findIndex(title=>billing?title==='請款金額':['應收沖銷','收款進度'].includes(title));
+    // P31-7: only the two sides span existing columns; the primary amount stays in its native column.
+    if(amountIndex<1||amountIndex>=titles.length-1)return null;
+    const row=document.createElement('tr');row.className='bg-group-row bg-inline-row bg-balanced-row';row.dataset.bgGroup=d.id;
     const toggle='<button type="button" class="bg-inline-toggle" data-bg-expand aria-expanded="false">合併 '+d.sourceIds.length+' 張</button>';
     const actions='<div class="bg-inline-actions"><button type="button" class="commission-link" data-bg-edit>對外明細</button><button type="button" class="commission-link" data-bg-pdf>PDF</button></div>';
     const extras=(t.retentionOutstanding?'<small class="bg-inline-attention">保留款待收 '+money(t.retentionOutstanding)+'</small>':'')+(t.pendingCheque?'<small class="bg-inline-attention">待兌現預留 '+money(t.pendingCheque)+'</small>':'');
     const warning=g.termsChanged?'<small class="bg-inline-warning" role="status">原單已變動，出單前請核對修訂。</small>':g.settlementChanged?'<small class="bg-inline-notice" role="status">收款已更新，出單前請核對修訂。</small>':'';
-    titles.forEach(title=>{
-      const cell=document.createElement('td');cell.dataset.bgColumn=title;
-      let html='<span class="bg-inline-muted" title="展開原單核對">—</span>';
-      if(title==='選取'){html='';cell.setAttribute('aria-label','合併群組，請由合併按鈕展開原單');}
-      else if(title===(billing?'請款單號':'請款資訊')){html=toggle;cell.className='bg-inline-identity';}
-      else if(title==='日期')html='<span class="bg-inline-muted">依原單</span>';
-      else if(title==='客戶')html=esc(d.customerName);
-      else if(title===(billing?'案場':'客戶／案場')){html='<b class="bg-inline-project">'+esc(d.displayProjectName)+'</b>'+(!billing?'<small class="bg-inline-customer">'+esc(d.customerName)+'</small>':'')+extras+warning;cell.className='bg-inline-party';}
-      else if(title==='操作'){html=actions;cell.className='bg-inline-controls';}
-      else if(billing&&title==='請款金額'||!billing&&['應收沖銷','收款進度'].includes(title)){
-        html=(!billing?'<small class="bg-inline-amount-label">本期未沖銷</small>':'')+'<b class="bg-inline-primary">'+money(billing?t.grossTotal:t.outstanding)+'</b>';cell.className='num bg-inline-amount';
-        cell.setAttribute('aria-label',(billing?'請款合計':'本期未沖銷')+' '+money(billing?t.grossTotal:t.outstanding));
-      }else if(title==='發票')html='<span class="bg-inline-muted">依原單</span>';
-      else if(title==='狀態')html='<span class="bg-inline-state">'+statusText(g)+'</span>';
-      else if(['保留款','應收金額','已沖銷','未沖銷','本期應收'].includes(title))cell.className='num';
-      cell.innerHTML=html;row.append(cell);
-    });
+    const identity=document.createElement('td');identity.colSpan=amountIndex;identity.className='bg-inline-identity bg-balanced-identity';
+    identity.setAttribute('aria-label','合併請款來源與對外案場');
+    identity.innerHTML='<div class="bg-inline-start">'+toggle+'<div class="bg-inline-title"><b class="bg-inline-project">'+esc(d.displayProjectName)+'</b><small class="bg-inline-customer">'+esc(d.customerName)+'</small>'+extras+warning+'</div></div>';
+    const amount=document.createElement('td');amount.colSpan=1;amount.dataset.bgColumn=titles[amountIndex];amount.className='num bg-inline-amount';
+    amount.innerHTML=(!billing?'<small class="bg-inline-amount-label">本期未沖銷</small>':'')+'<b class="bg-inline-primary">'+money(billing?t.grossTotal:t.outstanding)+'</b>';
+    amount.setAttribute('aria-label',(billing?'請款合計':'本期未沖銷')+' '+money(billing?t.grossTotal:t.outstanding));
+    const controls=document.createElement('td');controls.colSpan=titles.length-amountIndex-1;controls.className='bg-inline-controls bg-balanced-controls';
+    controls.setAttribute('aria-label','原發票與應收說明及對外文件操作');
+    controls.innerHTML='<div class="bg-inline-end"><div class="bg-inline-context"><span class="bg-inline-state">'+statusText(g)+'</span><span class="bg-inline-policy">發票各自保留<span aria-hidden="true"> · </span>應收依原單</span></div>'+actions+'</div>';
+    row.append(identity,amount,controls);
     return row;
   }
   function groupReadOnlyFacts(g){
