@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
-      - name: Verify and extract exact isolated source
+      - name: Verify isolated source before running
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -27,29 +27,16 @@ jobs:
           archive=base64.b64decode((root/'harness.json.gz.b64').read_text(),validate=False)
           assert hashlib.sha256(archive).hexdigest()=='97d2bcc953d95cb4520632e42566c429226289345b6b124f71319f4b9aed0391'
           files=json.loads(gzip.decompress(archive))
-          expected={'lab/backend_probe.py':'c87c1d12e3e8bb6ae8bb83811bc76f5a81090d979b5df26605e8a95bda51bbab','lab/run-lab.sh':'d1022b3ec69e6cdd102dfc9e49f8a9fd4d05b0c599fdf66d17ed894a7bb1b379'}
-          assert set(files)==set(expected)
-          for name,text in files.items():
-              assert hashlib.sha256(text.encode()).hexdigest()==expected[name]
-          s=files['lab/run-lab.sh']
-          changes={
-              'PORT=9999':'PORT=18430',
-              '  -p 127.0.0.1:18430:9999 supabase/gotrue:v2.197.0 >/dev/null':'  supabase/gotrue:v2.197.0 >/dev/null',
-              'export LAB_AUTH_CONTAINER="$auth"':'auth_pid="$(docker inspect --format \'{{.State.Pid}}\' "$auth")"\ntest "$auth_pid" -gt 0\nexport PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"\nprobe=(sudo --preserve-env=LAB_JWT_SECRET,KUSHE_EMPTY_AUTH_LAB,LAB_AUTH_CONTAINER,LAB_DB_PASSWORD,PLAYWRIGHT_BROWSERS_PATH nsenter --target "$auth_pid" --net env "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}" "$(command -v python)")\nexport LAB_AUTH_CONTAINER="$auth"',
-              "python - <<'PY'\nimport time, urllib.request":"\"${probe[@]}\" - <<'PY'\nimport time, urllib.request",
-              'python lab/backend_probe.py':'"${probe[@]}" lab/backend_probe.py',
-          }
-          for old,new in changes.items():
-              assert s.count(old)==1
-              s=s.replace(old,new)
-          assert hashlib.sha256(s.encode()).hexdigest()=='5b701b5aa28e832ce9895ac7b06588d1258a5790d8d13eac8a1525243ec85288'
-          files['lab/run-lab.sh']=s
-          expected['lab/run-lab.sh']=hashlib.sha256(s.encode()).hexdigest()
-          for name,text in files.items():
-              p=root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text)
-          ast.parse(files['lab/backend_probe.py'])
+          assert set(files)=={'lab/backend_probe.py','lab/run-lab.sh'}
+          code=files['lab/backend_probe.py']
+          assert hashlib.sha256(code.encode()).hexdigest()=='c87c1d12e3e8bb6ae8bb83811bc76f5a81090d979b5df26605e8a95bda51bbab'
+          ast.parse(code)
+          (root/'lab/backend_probe.py').write_text(code)
+          shell=root/'lab/run-lab.sh'
+          assert hashlib.sha256(shell.read_bytes()).hexdigest()=='98e2b793a07016d5291cd456564234956a496a9683eadb6bc7f3c179533b8fea'
+          hashes={name:hashlib.sha256((root/name).read_bytes()).hexdigest() for name in files}
           (root/'evidence').mkdir(exist_ok=True)
-          (root/'evidence/source-hashes.json').write_text(json.dumps(expected,indent=2))
+          (root/'evidence/source-hashes.json').write_text(json.dumps(hashes,indent=2))
           PY
           bash -n .p32-3-isolation/lab/run-lab.sh
       - name: Install version-pinned laboratory tools
