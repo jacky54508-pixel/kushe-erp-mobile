@@ -94,9 +94,9 @@ with sync_playwright() as p:
     check(bool(r["duplicateBillingError"]),"duplicate billing was not blocked",r)
     check(r["work"]["performance"]==0 and r["work"]["commission"]==0 and r["work"]["billable"]==False and r["work"]["workRate"]==2000,"pure work separation",r)
     pA=next(x for x in r["payroll"] if x["employeeName"]=="鏈路員工甲")
-    pB=next(x for x in r["payroll"] if x["employeeName"]=="鏈路員工乙")
+    pB=[x for x in r["payroll"] if x["employeeName"]=="鏈路員工乙"]
     check(pA["baseSalary"]==2000 and pA["commission"]==3500 and pA["total"]==5500,"payroll A",r)
-    check(pB["commission"]==0,"payroll B zero allocation",r)
+    check(len(pB)==0 or (len(pB)==1 and pB[0]["commission"]==0 and pB[0]["total"]==0),"zero-allocation employee must not gain salary",r)
     check(r["inventory"]["opening"]==10 and r["inventory"]["afterReceipt"]==15 and r["inventory"]["afterUsage"]==12,"inventory math",r)
     check(r["inventory"]["receiptAmount"]==500 and r["inventory"]["payableAmount"]==500 and r["inventory"]["payableSourceType"]=="inventory-receipt","inventory payable",r)
     check(r["inventory"]["usageMode"]=="inventory-cost-only" and r["inventory"]["payableCountBeforeUsage"]==r["inventory"]["payableCountAfterUsage"],"usage duplicated payable",r)
