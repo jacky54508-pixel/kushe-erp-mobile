@@ -1,0 +1,66 @@
+name: P32-1 isolated MFA input source verification
+on:
+  push:
+    branches: [p32-1-build-20261102]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 1e8494734be7db92cad77069f6607f9dfbfbf233
+          path: candidate
+          persist-credentials: false
+      - name: Apply only the exact locally tested patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64,gzip,hashlib
+          p=gzip.decompress(base64.b64decode(Path('harness/.p32-1-build/patch.b64').read_text(),validate=True))
+          assert hashlib.sha256(p).hexdigest()=='9d942cdfff237ab41e37801c1bb7c2eaa12b47958b67463922e7c6782b8419d2'
+          Path('patch.diff').write_bytes(p)
+          PY
+          cd candidate
+          test "$(git rev-parse HEAD^{tree})" = '562f2040a8cebc0b20c2cf02b9f7ddc3747afcad'
+          git apply --check ../patch.diff
+          git apply ../patch.diff
+          git diff --check
+          python3 - <<'PY'
+          import subprocess
+          changes=subprocess.check_output(['git','diff','--name-only'],text=True).splitlines()
+          assert changes==['assets/css/app.css','assets/js/app.js','index.html'],changes
+          PY
+          find . -name '*.js' -not -path './.git/*' -print0 | xargs -0 -n1 node --check
+          git add assets/css/app.css assets/js/app.js index.html
+          test "$(git write-tree)" = 'eb78c9504e96e8b495a7ec42f44f2e9d487c8ac4'
+      - name: Create review candidate only, not main or beta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd candidate
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          SHA=$(git commit-tree eb78c9504e96e8b495a7ec42f44f2e9d487c8ac4 -p 1e8494734be7db92cad77069f6607f9dfbfbf233 <<'EOF'
+          P32-1: preserve whole MFA codes and native autofill input
+
+          Three UI files only. Real app and auth-gate exercised with synthetic network/storage in 65 isolated browser checks; 39 JS syntax checks passed. Full source tree verified equal to locally tested source. No authentication policy, session persistence, MFA registration, cloud, business data, database, PDF or production changes. This does not enable passkeys or passwordless authentication. Main and beta are not advanced by this workflow.
+          EOF
+          )
+          git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" push origin "$SHA:refs/heads/p32-1-ready-20261102"
+          printf '{"commit":"%s","tree":"eb78c9504e96e8b495a7ec42f44f2e9d487c8ac4","local_browser_checks":65,"js_syntax_files":39}\n' "$SHA" > ../source-verification.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p32-1-source-verification
+          path: source-verification.json
+          retention-days: 7
