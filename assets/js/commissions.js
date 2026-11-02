@@ -36,26 +36,35 @@
   const money = (value) => new Intl.NumberFormat('zh-TW', { style:'currency', currency:'TWD', maximumFractionDigits:0 }).format(Number(value) || 0);
   const number = (value) => Number(value) || 0;
   const normalizedProjectName = (value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('zh-Hant');
-  function splitPerformanceAmount(amount, count, index) {
-    const parts = Math.max(0, Math.trunc(number(count)));
-    const partIndex = Math.max(0, Math.trunc(number(index)));
-    if (!parts || partIndex >= parts) return 0;
-    const cents = Math.round(number(amount) * 100);
-    const base = Math.floor(cents / parts);
-    const remainder = cents - base * parts;
-    return (base + (partIndex < remainder ? 1 : 0)) / 100;
+  function normalizedPerformanceShares(employeeIds, rawShares = {}) {
+    const ids=[...(employeeIds||[])].map((value)=>String(value||"")).filter(Boolean);
+    if(!ids.length)return null;
+    if(ids.length===1)return {[ids[0]]:100};
+    if(!rawShares||typeof rawShares!=="object"||Array.isArray(rawShares))return null;
+    const shares={};let total=0;
+    for(const id of ids){
+      if(!Object.prototype.hasOwnProperty.call(rawShares,id)||String(rawShares[id]??"").trim()==="")return null;
+      const raw=Number(rawShares[id]);
+      if(!Number.isFinite(raw)||raw<0||raw>100)return null;
+      const value=Math.round(raw*100)/100;shares[id]=value;total+=value;
+    }
+    total=Math.round(total*100)/100;
+    return Math.abs(total-100)<=0.001?shares:null;
   }
-  function previewCommissionTotal(amount, employeeIds, employees, commissionRates = {}, commissionBases = {}, taxIncludedAmount = amount) {
-    const sortedEmployeeIds = [...(employeeIds || [])].sort((a, b) => {
-      const left = String(a);
-      const right = String(b);
-      return left < right ? -1 : left > right ? 1 : 0;
-    });
-    const performanceIndexByEmployeeId = new Map(sortedEmployeeIds.map((employeeId, index) => [employeeId, index]));
+  function performanceAllocationMap(amount, employeeIds, rawShares = {}) {
+    const ids=[...(employeeIds||[])].map((value)=>String(value||"")).filter(Boolean).sort(),shares=normalizedPerformanceShares(ids,rawShares);
+    if(!shares)return null;
+    const cents=Math.round(Math.max(0,number(amount))*100),rows=ids.map((id)=>{const exact=cents*shares[id]/100,base=Math.floor(exact);return {id,base,fraction:exact-base}});
+    let remaining=cents-rows.reduce((sum,row)=>sum+row.base,0);
+    [...rows].sort((a,b)=>b.fraction-a.fraction||a.id.localeCompare(b.id)).forEach((row)=>{if(remaining>0){row.base+=1;remaining-=1}});
+    return new Map(rows.map((row)=>[row.id,row.base/100]));
+  }
+  function previewCommissionTotal(amount, employeeIds, employees, commissionRates = {}, commissionBases = {}, taxIncludedAmount = amount, performanceShares = {}) {
+    const sortedEmployeeIds=[...(employeeIds||[])].map(String).sort(),preTax=performanceAllocationMap(amount,sortedEmployeeIds,performanceShares),taxIncluded=performanceAllocationMap(taxIncludedAmount,sortedEmployeeIds,performanceShares);
+    if(!preTax||!taxIncluded)return null;
     return sortedEmployeeIds.reduce((sum, employeeId) => {
-      const employee = (employees || []).find((row) => row.id === employeeId) || {},basis=(commissionBases[employeeId]||employee.commissionBasis)==='taxIncluded'?'taxIncluded':'preTax',basisAmount=basis==='taxIncluded'?taxIncludedAmount:amount;
-      const performance = splitPerformanceAmount(basisAmount,sortedEmployeeIds.length,performanceIndexByEmployeeId.get(employeeId));
-      const raw=Object.prototype.hasOwnProperty.call(commissionRates,employeeId)?Number(commissionRates[employeeId]):employee.commissionRate===undefined||employee.commissionRate===null||employee.commissionRate===''?25:Number(employee.commissionRate);
+      const employee=(employees||[]).find((row)=>String(row.id)===employeeId)||{},basis=(commissionBases[employeeId]||employee.commissionBasis)==="taxIncluded"?"taxIncluded":"preTax",performance=(basis==="taxIncluded"?taxIncluded:preTax).get(employeeId)||0;
+      const raw=Object.prototype.hasOwnProperty.call(commissionRates,employeeId)?Number(commissionRates[employeeId]):employee.commissionRate===undefined||employee.commissionRate===null||employee.commissionRate===""?25:Number(employee.commissionRate);
       const rate=Number.isFinite(raw)&&raw>=0&&raw<=100?raw:25;
       return sum + Math.round(performance * rate / 100);
     }, 0);
@@ -280,7 +289,7 @@
     if(!dailyDetailActive)dailyDetailContext={trigger,x:window.scrollX,y:window.scrollY};
     dailyDetailActive=true;
     const field=dailyDetailField;
-    const workforce=batch.logs.map((log)=>`<article class="daily-detail-worker"><h4>${esc(label(state,'employees',log.employee,log.employeeName||'—'))}</h4><dl>${field('案場',label(state,'projects',log.project,log.projectName||'—'))}${field('點工類型',log.workMode==='hourly'?'時薪':log.workMode==='daily'?'日薪':'不計點工')}${field('點工數量',log.workQty)}${field('點工單價',log.workRate,true)}${field('點工金額',store.dailyWorkAmount(log),true)}${field('業績',log.performance,true)}${field('抽成比例',log.rate===null||log.rate===undefined?'—':log.rate+'%')}${field('抽成',log.commission,true)}</dl>${log.note?`<p>備註：${esc(log.note)}</p>`:''}</article>`).join('');
+    const workforce=batch.logs.map((log)=>`<article class="daily-detail-worker"><h4>${esc(label(state,'employees',log.employee,log.employeeName||'—'))}</h4><dl>${field('案場',label(state,'projects',log.project,log.projectName||'—'))}${field('點工類型',log.workMode==='hourly'?'時薪':log.workMode==='daily'?'日薪':'不計點工')}${field('點工數量',log.workQty)}${field('點工單價',log.workRate,true)}${field('點工金額',store.dailyWorkAmount(log),true)}${field('業績',log.performance,true)}${field('業績分配',Number.isFinite(Number(log.performanceShare))?number(log.performanceShare)+'%':'歷史未記錄')}${field('抽成比例',log.rate===null||log.rate===undefined?'—':log.rate+'%')}${field('抽成',log.commission,true)}</dl>${log.note?`<p>備註：${esc(log.note)}</p>`:''}</article>`).join('');
     const projects=dailyDetailGroups(batch).map(({id,first,items})=>{
       const billing=batch.billingSummary.groups.get(id),displayItems=window.KusheDisplaySort?.sortWorkRows?window.KusheDisplaySort.sortWorkRows(items):items;
       const houses=new Map();displayItems.forEach((item)=>{const house=item.house||'未指定戶別';if(!houses.has(house))houses.set(house,[]);houses.get(house).push(item)});
@@ -760,6 +769,15 @@
     let employeeOptions=store.masterOptions('employees');
     const defaultCommissionRate=employee=>employee.commissionRate===undefined||employee.commissionRate===null||employee.commissionRate===''?25:number(employee.commissionRate);
     const commissionRateDraft=Object.fromEntries(employeeOptions.map(employee=>{const saved=logs.find(log=>String(log.employee)===String(employee.id)&&Number.isFinite(Number(log.rate)))?.rate;return [String(employee.id),saved!==undefined?number(saved):defaultCommissionRate(employee)]}));
+    const performanceShareDraft={};
+    employeeOptions.forEach(employee=>{
+      const id=String(employee.id),employeeLogs=logs.filter(log=>String(log.employee)===id);
+      if(!employeeLogs.length)return;
+      const explicit=employeeLogs.map(log=>Number(log.performanceShare));
+      if(explicit.every(Number.isFinite)&&explicit.every(value=>Math.abs(value-explicit[0])<0.001)){performanceShareDraft[id]=Math.round(explicit[0]*100)/100;return}
+      const basis=employeeLogs.reduce((sum,log)=>sum+Math.max(0,number(log.groupTotal)),0),performance=employeeLogs.reduce((sum,log)=>sum+Math.max(0,number(log.untaxedPerformance??log.performance)),0);
+      if(basis>0)performanceShareDraft[id]=Math.round(performance/basis*10000)/100;
+    });
     const defaultCommissionBasis=employee=>employee.commissionBasis==='taxIncluded'?'taxIncluded':'preTax';
     const commissionBasisDraft=Object.fromEntries(employeeOptions.map(employee=>{const saved=logs.find(log=>String(log.employee)===String(employee.id)&&log.commissionBasis)?.commissionBasis;return [String(employee.id),saved==='taxIncluded'?'taxIncluded':saved==='preTax'?'preTax':'projectDefault']}));
     const defaultWorkRate=(employee,mode)=>number(mode==='hourly'?employee.hourlyRate:employee.dailyRate);
@@ -798,6 +816,11 @@
       if(!selectedIds.length||isWorkOnly){commissionRatePanel.innerHTML='';commissionRatePanel.hidden=true;return}
       commissionRatePanel.hidden=false;
       commissionRatePanel.innerHTML=`<div class="daily-commission-rate-heading"><div><b>本次抽成設定</b><small>比例與基準只影響本次每日施工；既有歷史不會跟著改。</small></div></div><div class="daily-commission-rate-list">${selectedIds.map(id=>{const employee=employeeOptions.find(item=>String(item.id)===id);if(!employee)return '';const fallback=defaultCommissionRate(employee),value=Object.prototype.hasOwnProperty.call(commissionRateDraft,id)?commissionRateDraft[id]:fallback,basis=commissionBasisDraft[id]||'projectDefault';return `<div class="daily-commission-rate-row"><span class="daily-commission-rate-employee"><b>${esc(employee.name)}</b><small>預設 ${fallback}%｜${defaultCommissionBasis(employee)==='taxIncluded'?'含稅':'未稅'}</small></span><label><span>本次抽成</span><span class="daily-commission-rate-input"><input type="number" inputmode="decimal" name="dailyCommissionRate" data-employee-id="${esc(id)}" min="0" max="100" step="0.01" value="${esc(value)}" aria-label="${esc(employee.name)} 本次抽成比例"><em>%</em></span></label><label class="daily-commission-basis-field"><span>計算基準</span><select name="dailyCommissionBasis" data-employee-id="${esc(id)}" aria-label="${esc(employee.name)} 本次抽成基準"><option value="projectDefault" ${basis==='projectDefault'?'selected':''}>依案場／公司設定</option><option value="preTax" ${basis==='preTax'?'selected':''}>未稅</option><option value="taxIncluded" ${basis==='taxIncluded'?'selected':''}>含稅</option></select></label></div>`}).join('')}</div>`;
+      const multi=selectedIds.length>1,heading=$(".daily-commission-rate-heading",commissionRatePanel);
+      if(heading){const title=$("b",heading),copy=$("small",heading);if(title)title.textContent="本次業績／抽成設定";if(copy)copy.textContent=multi?"多人施工必須明確分配業績，合計 100%；系統不再自動平均。":"單一員工自動取得 100% 業績。";const tools=document.createElement("div");tools.className="daily-performance-share-tools";tools.innerHTML=`<span id="dailyPerformanceShareStatus"></span>${multi?'<button type="button" class="commission-secondary" id="dailyEqualPerformanceShare">平均分配</button>':""}`;heading.appendChild(tools)}
+      $$(".daily-commission-rate-row",commissionRatePanel).forEach((row,index)=>{const id=selectedIds[index],employee=employeeOptions.find(item=>String(item.id)===id),share=Object.prototype.hasOwnProperty.call(performanceShareDraft,id)?performanceShareDraft[id]:(multi?"":100),label=document.createElement("label");row.classList.add("daily-commission-allocation-row");label.className="daily-performance-share-field";label.innerHTML=`<span>業績分配</span><span class="daily-commission-rate-input"><input type="number" inputmode="decimal" name="dailyPerformanceShare" data-employee-id="${esc(id)}" min="0" max="100" step="0.01" value="${esc(share)}" ${multi?"":"readonly"} placeholder="${multi?"必填":""}" aria-label="${esc(employee?.name||id)} 本次業績分配比例"><em>%</em></span>`;row.querySelector(".daily-commission-rate-employee")?.insertAdjacentElement("afterend",label)});
+      $$("input[name=\"dailyPerformanceShare\"]",commissionRatePanel).forEach(input=>{input.oninput=()=>{performanceShareDraft[String(input.dataset.employeeId)]=input.value;calc()};input.onchange=input.oninput});
+      $("#dailyEqualPerformanceShare",commissionRatePanel)?.addEventListener("click",()=>{const inputs=$$("input[name=\"dailyPerformanceShare\"]",commissionRatePanel),units=10000,base=Math.floor(units/Math.max(1,inputs.length)),extra=units-base*inputs.length;inputs.forEach((input,index)=>{const value=(base+(index<extra?1:0))/100;input.value=String(value);performanceShareDraft[String(input.dataset.employeeId)]=value});calc()});
       $$('input[name="dailyCommissionRate"]',commissionRatePanel).forEach(input=>{input.oninput=()=>{commissionRateDraft[String(input.dataset.employeeId)]=input.value;calc()};input.onchange=input.oninput});
       $$('select[name="dailyCommissionBasis"]',commissionRatePanel).forEach(select=>{select.onchange=()=>{commissionBasisDraft[String(select.dataset.employeeId)]=select.value;calc()}});
     };
@@ -827,8 +850,9 @@
       const isWorkOnly=form.elements.entryMode?.value==='workOnly';
       let gross=0,untaxed=0,taxIncluded=0,billing=0;
       if(!isWorkOnly)$$('.daily-line',body).forEach((row)=>{const isLump=row.dataset.pricingType==='lump_sum',qty=number($('.daily-line-qty',row).value),price=number($('.daily-line-price',row).value),subtotal=isLump?0:qty*price,taxMode=$('.daily-line-tax',row).value,lineUntaxed=taxMode==='含稅'?Math.round(subtotal/(1+(number(state.settings.defaultTax)||5)/100)):subtotal,lineTaxIncluded=taxMode==='含稅'?subtotal:lineUntaxed+Math.round(lineUntaxed*(number(state.settings.defaultTax)||5)/100);gross+=subtotal;untaxed+=lineUntaxed;taxIncluded+=lineTaxIncluded;if(!isLump&&$('.daily-billable input',row).checked)billing+=lineUntaxed;row.dataset.previewSubtotal=String(subtotal);$('.daily-line-total',row).textContent=isLump?'進度紀錄':money(subtotal);$('.daily-line-untaxed',row).textContent=isLump?'總價不重複累計':`未稅 ${money(lineUntaxed)}`});
-      const ids=$$('input[name="dailyEmployees"]:checked',form).map(input=>String(input.value)),rates=Object.fromEntries($$('input[name="dailyCommissionRate"]',form).map(input=>[input.dataset.employeeId,input.value])),bases=Object.fromEntries($$('select[name="dailyCommissionBasis"]',form).map(select=>[select.dataset.employeeId,select.value])),commission=!isWorkOnly&&form.elements.commissionEnabled.checked?previewCommissionTotal(untaxed,ids,state.employees,rates,bases,taxIncluded):0,mode=form.elements.workMode.value,qty=number(form.elements.workQty.value),workRates=Object.fromEntries($$('input[name="dailyWorkRate"]',form).map(input=>[String(input.dataset.employeeId),number(input.value)])),work=mode==='none'?0:ids.reduce((sum,id)=>sum+qty*number(workRates[id]??workRateDraft[id]),0);
-      $('#dailyGrossTotal',layer).textContent=money(gross);$('#dailyUntaxedTotal',layer).textContent=money(untaxed);$('#dailyCommissionTotal',layer).textContent=money(commission);$('#dailyBillingTotal',layer).textContent=money(billing);$('#dailyWorkTotal',layer).textContent=money(work);if(workQtyLabel)workQtyLabel.textContent=mode==='hourly'?'點工時數':'點工天數';$$('[data-work-card]',workRatePanel).forEach(card=>{const input=$('input[name="dailyWorkRate"]',card),total=$('[data-work-card-total]',card),rate=number(input?.value);if(total)total.textContent=rate>0&&qty>0?money(rate*qty):'尚未計算'});$$('.daily-house-group',body).forEach(group=>{$('.daily-house-subtotal',group).textContent=money(isWorkOnly?0:$$('.daily-line',group).reduce((sum,row)=>sum+number(row.dataset.previewSubtotal),0))});
+      const ids=$$('input[name="dailyEmployees"]:checked',form).map(input=>String(input.value)),rates=Object.fromEntries($$('input[name="dailyCommissionRate"]',form).map(input=>[input.dataset.employeeId,input.value])),bases=Object.fromEntries($$('select[name="dailyCommissionBasis"]',form).map(select=>[select.dataset.employeeId,select.value])),shares=Object.fromEntries($$('input[name="dailyPerformanceShare"]',form).map(input=>[input.dataset.employeeId,input.value])),shareValues=normalizedPerformanceShares(ids,shares),commissionPreview=!isWorkOnly&&form.elements.commissionEnabled.checked?previewCommissionTotal(untaxed,ids,state.employees,rates,bases,taxIncluded,shares):0,commission=commissionPreview===null?null:commissionPreview,mode=form.elements.workMode.value,qty=number(form.elements.workQty.value),workRates=Object.fromEntries($$('input[name="dailyWorkRate"]',form).map(input=>[String(input.dataset.employeeId),number(input.value)])),work=mode==='none'?0:ids.reduce((sum,id)=>sum+qty*number(workRates[id]??workRateDraft[id]),0);
+      $('#dailyGrossTotal',layer).textContent=money(gross);$('#dailyUntaxedTotal',layer).textContent=money(untaxed);$('#dailyCommissionTotal',layer).textContent=commission===null?'分配未完成':money(commission);$('#dailyBillingTotal',layer).textContent=money(billing);$('#dailyWorkTotal',layer).textContent=money(work);if(workQtyLabel)workQtyLabel.textContent=mode==='hourly'?'點工時數':'點工天數';$$('[data-work-card]',workRatePanel).forEach(card=>{const input=$('input[name="dailyWorkRate"]',card),total=$('[data-work-card-total]',card),rate=number(input?.value);if(total)total.textContent=rate>0&&qty>0?money(rate*qty):'尚未計算'});$$('.daily-house-group',body).forEach(group=>{$('.daily-house-subtotal',group).textContent=money(isWorkOnly?0:$$('.daily-line',group).reduce((sum,row)=>sum+number(row.dataset.previewSubtotal),0))});
+      const shareStatus=$("#dailyPerformanceShareStatus",commissionRatePanel);if(shareStatus){const rawTotal=Object.values(shares).reduce((sum,value)=>sum+(Number(value)||0),0);shareStatus.textContent=shareValues?"業績分配 100%":ids.length>1?`分配合計 ${Math.round(rawTotal*100)/100}%（需 100%）`:"業績分配 100%";shareStatus.dataset.valid=String(Boolean(shareValues))}$$("input[name=\"dailyPerformanceShare\"]",commissionRatePanel).forEach(input=>input.setAttribute("aria-invalid",String(ids.length>1&&!shareValues)));
       totals.hidden=isWorkOnly;
       const filled=$$('.daily-line',body).filter(row=>Number($('.daily-line-qty',row).value)>0),houses=new Set(filled.map(row=>groupKey(groupProject(row),groupHouse(row.closest('.daily-house-group')))));
       $('#dailyDraftCount',form).textContent=isWorkOnly?`${ids.length} 位員工 · 點工薪資 ${money(work)}`:`${ids.length} 位員工 · ${houses.size} 戶 · ${filled.length} 項施工`;
@@ -1094,7 +1118,7 @@
   function readDailyDraft(form,context,rows=$$('.daily-line',form).sort((a,b)=>number(a.dataset.draftOrder)-number(b.dataset.draftOrder))) {
       const workOnly=Boolean(context?.workOnly?.());
       const lines=workOnly?[]:rows.map(row=>({project:$('.daily-line-project',row).value,house:$('.daily-line-house',row).value.trim(),item:row.dataset.itemName||$('.daily-line-item',row).value.trim(),itemName:row.dataset.itemName||$('.daily-line-item',row).value.trim(),unit:$('.daily-line-unit',row).value.trim()||'式',qty:context?.strictRows?$('.daily-line-qty',row).value:number($('.daily-line-qty',row).value),inputPrice:number($('.daily-line-price',row).value),unitPrice:number($('.daily-line-price',row).value),taxMode:$('.daily-line-tax',row).value,billable:row.dataset.pricingType!=='lump_sum'&&$('.daily-billable input',row).checked,sourceType:row.dataset.sourceType||'manual',pricingType:row.dataset.pricingType||'actual',quotationId:row.dataset.quotationId||'',quotationLineId:row.dataset.quotationLineId||'',quotationNo:row.dataset.quotationNo||'',quoteId:row.dataset.quotationId||'',quoteLineId:row.dataset.quotationLineId||'',lumpSumAmount:number(row.dataset.lumpSumAmount),workItemId:row.dataset.workItemId||''}));
-      return {date:form.elements.date.value,employeeIds:$$('input[name="dailyEmployees"]:checked',form).map(input=>input.value),commissionRates:Object.fromEntries($$('input[name="dailyCommissionRate"]',form).map(input=>[input.dataset.employeeId,input.value])),commissionBases:Object.fromEntries($$('select[name="dailyCommissionBasis"]',form).map(select=>[select.dataset.employeeId,select.value])),workRates:Object.fromEntries($$('input[name="dailyWorkRate"]',form).map(input=>[input.dataset.employeeId,input.value])),lines,workOnly,commissionEnabled:workOnly?false:form.elements.commissionEnabled.checked,workMode:form.elements.workMode.value,workQty:number(form.elements.workQty.value),note:(workOnly?form.elements.workDescription.value:form.elements.note.value).trim()};
+      return {date:form.elements.date.value,employeeIds:$$('input[name="dailyEmployees"]:checked',form).map(input=>input.value),performanceShares:Object.fromEntries($('input[name="dailyPerformanceShare"]',form).map(input=>[input.dataset.employeeId,input.value])),commissionRates:Object.fromEntries($$('input[name="dailyCommissionRate"]',form).map(input=>[input.dataset.employeeId,input.value])),commissionBases:Object.fromEntries($$('select[name="dailyCommissionBasis"]',form).map(select=>[select.dataset.employeeId,select.value])),workRates:Object.fromEntries($$('input[name="dailyWorkRate"]',form).map(input=>[input.dataset.employeeId,input.value])),lines,workOnly,commissionEnabled:workOnly?false:form.elements.commissionEnabled.checked,workMode:form.elements.workMode.value,workQty:number(form.elements.workQty.value),note:(workOnly?form.elements.workDescription.value:form.elements.note.value).trim()};
   }
   async function submitDaily(event) {
     event.preventDefault();const form=event.currentTarget,context=form._dailySubmitContext;
