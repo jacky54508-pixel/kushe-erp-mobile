@@ -1,0 +1,42 @@
+name: P34 50-percent commission pool and historical audit
+on:
+  push:
+    branches:
+      - p34-50pct-pool-20261103
+      - p34-formal-rc-20261103
+      - beta
+      - main
+    paths:
+      - 'assets/js/commissions.js'
+      - 'assets/js/erp-store.js'
+      - 'assets/js/commission-history-audit.js'
+      - 'assets/js/p33-3-historical-commission-preview.js'
+      - '.p34-tests/**'
+      - '.github/workflows/p34-commission-pool.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: All ERP JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in assets/js/*.js; do node --check "$file"; done
+      - name: Install isolated Chromium
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Isolated test server
+        run: python -m http.server 8784 --bind 127.0.0.1 >/tmp/p34-http.log 2>&1 &
+      - name: Commission pool, rollback and historical read-only tests
+        run: python .p34-tests/test.py

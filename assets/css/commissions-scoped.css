@@ -1132,3 +1132,50 @@
   :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-tools { flex-shrink:0; padding:8px 12px; gap:8px; }
   :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-error { padding:0 12px 8px; }
 }
+
+/* P33-3: 2026-10-07 historical commission read-only preview */
+.p33-preview{margin:16px 0 18px;border:1px solid #cbd7e8;border-radius:12px;background:#f7faff;color:#173250}
+.p33-preview>summary{cursor:pointer;padding:14px 16px;font-weight:800;font-size:14px}
+.p33-preview[open]>summary{border-bottom:1px solid #dbe5f1}
+.p33-preview-body{padding:12px 16px 16px;font-size:13px;line-height:1.6}
+.p33-preview-body>p{margin:4px 0 12px}
+.p33-preview-totals{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 14px}
+.p33-preview-totals>span{flex:1 1 120px;min-width:0;background:#fff;border:1px solid #e1e9f2;border-radius:9px;padding:10px 12px;color:#53657a}
+.p33-preview-totals b{display:block;color:#152b48;font-size:17px}
+.p33-preview-group{margin-top:12px;background:white;border:1px solid #e1e9f2;border-radius:10px;padding:12px}
+.p33-preview-group h4{margin:0 0 10px;font-size:14px}
+.p33-preview-scroll{max-width:100%;overflow-x:auto}
+.p33-preview-scroll table{width:100%;min-width:650px;border-collapse:collapse;font-size:12px}
+.p33-preview-scroll th,.p33-preview-scroll td{padding:8px 9px;text-align:left;border-bottom:1px solid #edf1f6;white-space:nowrap}
+.p33-preview-scroll th{background:#f1f5fa;color:#4f637a}
+.p33-preview-group p{margin:10px 0 0}
+.p33-preview-warning{color:#8d4a00!important;font-weight:600}
+.p33-preview-footnote{font-size:12px;color:#64748b}
+@media(max-width:640px){.p33-preview-body{padding:12px}.p33-preview>summary{padding:12px}}
+
+/* P34: per-job total commission pool 50%, read-only legacy audit. */
+.daily-commission-pool-status{margin:8px 0 0;padding:9px 12px;border-radius:9px;border:1px solid #d4e2f0;background:#f2f7ff;font-weight:700;font-size:12px;color:#245780}
+.daily-commission-pool-status[data-valid="true"]{background:#f0faf5;color:#157252;border-color:#cbe7d8}
+.daily-commission-pool-status[data-valid="false"]{background:#fff7f0;color:#a54c1e;border-color:#f0d2b8}
+.commission-audit-overlay{position:fixed;inset:0;background:rgba(9,24,47,.7);z-index:11000;display:flex;justify-content:center;align-items:center;padding:16px}
+.commission-audit-window{background:#fff;border-radius:16px;max-width:1150px;width:100%;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;color:#162b43;box-shadow:0 22px 65px #07132966}
+.commission-audit-window>header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:18px 22px;border-bottom:1px solid #dde5ef}
+.commission-audit-window>header small{display:block;color:#517093;font-size:12px}
+.commission-audit-window>header h2{margin:3px 0;font-size:20px}
+.commission-audit-window button{padding:9px 14px;border:1px solid #c8d8e9;border-radius:8px;background:#f5f8fc;color:#1d456a;cursor:pointer}
+.commission-audit-body{padding:18px 22px;overflow:auto;min-height:0;font-size:13px}
+.commission-audit-summary{border:1px solid #d7e2ef;background:#f7faff;border-radius:12px;padding:14px}
+.commission-audit-summary>p{margin:0 0 10px}
+.commission-audit-summary>div{display:flex;flex-wrap:wrap;gap:10px}
+.commission-audit-summary>div span{flex:1 1 150px;min-width:0;padding:11px;border-radius:8px;background:#fff;border:1px solid #e3ebf3}
+.commission-audit-summary>div b{display:block;margin-top:3px;font-size:17px}
+.commission-audit-summary>p:last-child{margin-top:10px;margin-bottom:0;color:#6e4a1d}
+.commission-audit-controls{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:18px 0 12px}
+.commission-audit-controls select{padding:8px 12px;margin-left:8px;border:1px solid #cbd8e6;border-radius:8px}
+.commission-audit-table-wrap{overflow:auto;max-width:100%}
+.commission-audit-table-wrap>p{color:#5d6e82}
+.commission-audit-table-wrap table{width:100%;min-width:740px;border-collapse:collapse}
+.commission-audit-table-wrap th,.commission-audit-table-wrap td{padding:10px 8px;border-bottom:1px solid #e6edf5;text-align:left;vertical-align:top}
+.commission-audit-table-wrap th{background:#f1f5fa;position:sticky;top:0;z-index:1}
+.commission-audit-table-wrap td small{display:block;margin-top:5px;color:#677b91;font-size:11px;white-space:normal}
+@media(max-width:650px){.commission-audit-overlay{padding:4px}.commission-audit-window{max-height:99vh}.commission-audit-body{padding:12px}.commission-audit-window>header{padding:14px}.commission-audit-controls{flex-wrap:wrap}}

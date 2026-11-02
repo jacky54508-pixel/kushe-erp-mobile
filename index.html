@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="assets/css/materials-scoped.css?v=p25-inventory-payables-1">
   <link rel="stylesheet" href="assets/css/employees-scoped.css?v=20260921-p18-5b-employees-mobile1">
   <link rel="stylesheet" href="assets/css/banks-scoped.css?v=20260922-p18-5c2-bank-reconciliation-mobile1">
-  <link rel="stylesheet" href="assets/css/commissions-scoped.css?v=p29-daily-grid-1">
+  <link rel="stylesheet" href="assets/css/commissions-scoped.css?v=p34-50pct-pool-audit-1">
   <link rel="stylesheet" href="assets/css/payroll-scoped.css?v=20261001-p20-8f-action-alignment1">
   <link rel="stylesheet" href="assets/css/reports-scoped.css?v=20260929-p18-5e1a-reports-foundation1">
   <link rel="stylesheet" href="assets/css/settings-scoped.css?v=20260930-p19-3a0-device-trust1">
@@ -89,14 +89,10 @@
       <form id="mfaForm" novalidate data-mfa-state="cancelled" aria-busy="false">
         <fieldset class="mfa-otp-fieldset">
           <legend>6 位驗證碼</legend>
-          <div class="mfa-otp" id="mfaOtp" aria-label="6 位驗證碼">
-            <input disabled class="mfa-digit" data-mfa-digit="0" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="1" aria-label="第 1 位驗證碼">
-            <input disabled class="mfa-digit" data-mfa-digit="1" type="text" inputmode="numeric" maxlength="1" aria-label="第 2 位驗證碼">
-            <input disabled class="mfa-digit" data-mfa-digit="2" type="text" inputmode="numeric" maxlength="1" aria-label="第 3 位驗證碼">
-            <input disabled class="mfa-digit" data-mfa-digit="3" type="text" inputmode="numeric" maxlength="1" aria-label="第 4 位驗證碼">
-            <input disabled class="mfa-digit" data-mfa-digit="4" type="text" inputmode="numeric" maxlength="1" aria-label="第 5 位驗證碼">
-            <input disabled class="mfa-digit" data-mfa-digit="5" type="text" inputmode="numeric" maxlength="1" aria-label="第 6 位驗證碼">
+          <div class="mfa-otp mfa-otp-single" id="mfaOtp">
+            <input disabled id="mfaCode" name="mfaCode" class="mfa-digit mfa-code" data-mfa-digit="0" type="text" inputmode="numeric" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" maxlength="32" pattern="[0-9]{6}" aria-label="6 位驗證碼" aria-describedby="mfaCodeHint" placeholder="6 位驗證碼">
           </div>
+          <p class="mfa-code-hint" id="mfaCodeHint">可一次貼上 6 位數字；也可使用裝置提供的驗證碼自動填入。填妥後按「驗證並進入 ERP」。</p>
         </fieldset>
         <label class="mfa-trust-option">
           <input id="mfaTrustDevice" type="checkbox">
@@ -372,7 +368,7 @@
   <script src="assets/js/kpi-navigation.js?v=p21-kpi-drawer-2"></script>
   <script src="assets/js/auth-gate.js?v=p32-6-trusted-device-1"></script>
   <script src="assets/js/legacy-adapter.js?v=20260809-nav4"></script>
-  <script src="assets/js/erp-store.js?v=p31-1-unified-1"></script>
+  <script src="assets/js/erp-store.js?v=p34-50pct-pool-audit-1"></script>
   <script src="assets/js/cloud-sync.js?v=p24-cross-device-heal-2"></script>
   <script src="assets/js/recovery.js?v=20260909-p17-1b-2-integration1"></script>
   <script src="assets/js/receivable-cheques.js?v=p29-6-cheques-1"></script>
@@ -380,7 +376,9 @@
   <script src="assets/js/commission-settlement-print.js?v=p23-display-order-2"></script>
   <script src="assets/js/project-billing-defaults.js?v=p29-2-project-defaults-1"></script>
   <script src="assets/js/daily-draft-review.js?v=p29-7-draft-review-1"></script>
-  <script src="assets/js/commissions.js?v=p29-7-draft-review-1"></script>
+  <script src="assets/js/p33-3-historical-commission-preview.js?v=p34-50pct-pool-audit-1"></script>
+  <script src="assets/js/commission-history-audit.js?v=p34-50pct-pool-audit-1"></script>
+  <script src="assets/js/commissions.js?v=p34-50pct-pool-audit-1"></script>
   <script src="assets/js/daily-pay-compact.js?v=p29-1-pay-compact-1"></script>
   <script src="assets/js/unbilled-work.js?v=p23-display-order-2"></script>
   <script src="assets/js/payables.js?v=p26-account-rows-4"></script>

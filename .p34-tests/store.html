@@ -1,0 +1,15 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>P34 isolated commission pool test</title></head><body>
+<script>
+window.KUSHE_PHASE1_CONFIG={};
+window.KusheAuthGate={session:()=>({access_token:'p34-synthetic'}),user:()=>({id:'p34-test-user',email:'test@example.invalid'}),requireAuth:async()=>true,requireMfa:async()=>true};
+window.KusheLegacyData={refresh(){}};
+window.KusheRecovery={showResult(){}};
+const seed={customers:[{id:'c0',name:'合成建設',createdAt:'2026-11-01T00:00:00Z',updatedAt:'2026-11-01T00:00:00Z'}],
+projects:[],employees:[],dailyLogs:[],commissions:[],attendance:[],payroll:[],billings:[],receivables:[],invoices:[],receipts:[],retentionReceipts:[],salaryPayments:[],commissionSettlements:[],
+bankTransactions:[],banks:[{id:'p34-bank',name:'模擬銀行',openingBalance:50000,income:0,expense:0,balance:50000,createdAt:'2026-11-01T00:00:00Z',updatedAt:'2026-11-01T00:00:00Z'}],
+payables:[],payments:[],vendors:[],materials:[],materialUsages:[],inventoryReceipts:[],projectCosts:[],dailyItemPresets:[],quotations:[],quotationPrices:[],quotationTemplates:[],audit:[],settings:{defaultTax:5,quotationUnitPresets:['式']},meta:{}};
+localStorage.setItem('KuSheERP25_EMERGENCY',JSON.stringify(seed));
+</script>
+<script src="/assets/js/erp-store.js"></script>
+<script src="/assets/js/commission-history-audit.js"></script>
+</body></html>
