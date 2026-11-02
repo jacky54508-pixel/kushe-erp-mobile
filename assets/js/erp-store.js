@@ -3179,6 +3179,24 @@
       : Math.max(0, Math.round(retentionBaseAmount * retentionRate / 100));
     return { constructionAmount, untaxed, tax, grossTotal, retention: Math.min(retention, grossTotal), retentionRate, retentionBase, retentionBaseAmount, receivable: Math.max(0, grossTotal - retention), rate, taxMode };
   }
+  function cloneBillingRef(value, inArray = false) {
+    if(value===null||typeof value==='string'||typeof value==='boolean')return value;
+    if(typeof value==='number'){
+      if(!Number.isFinite(value))throw new Error('請款來源包含無效數字，請重新開啟請款草稿');
+      return value;
+    }
+    if(value===undefined){
+      if(inArray)throw new Error('請款來源陣列包含空值，請重新開啟請款草稿');
+      return undefined;
+    }
+    if(Array.isArray(value))return value.map((entry)=>cloneBillingRef(entry,true));
+    if(value&&typeof value==='object'&&Object.getPrototypeOf(value)===Object.prototype){
+      const result={};
+      Object.entries(value).forEach(([key,entry])=>{if(entry!==undefined)result[key]=cloneBillingRef(entry,false)});
+      return result;
+    }
+    throw new Error('請款來源格式不正確，請重新開啟請款草稿');
+  }
   function sourceMatches(ref, log, item, index) {
     const groupKey = log.groupId || log.id;
     if (ref.sourceGroupKey && ref.sourceGroupKey !== groupKey) return false;
@@ -3279,8 +3297,8 @@
   }
   async function createBilling(values) {
     requireStoreTransactionDraft();
-    const sourceRefs = (values.sourceItemRefs || []).filter(Boolean);
-    const sourceContractRefs=(values.sourceContractRefs||[]).filter((ref)=>ref&&ref.contractKey&&num(ref.billingAmount)>0);
+    const sourceRefs = (values.sourceItemRefs || []).filter(Boolean).map((ref)=>cloneBillingRef(ref));
+    const sourceContractRefs=(values.sourceContractRefs||[]).filter((ref)=>ref&&ref.contractKey&&num(ref.billingAmount)>0).map((ref)=>cloneBillingRef(ref));
     if (!sourceRefs.length&&!sourceContractRefs.length) throw new Error('請至少選擇一筆施工紀錄或總價進度款');
     const canonical = [];
     sourceRefs.forEach((ref) => {
@@ -3297,13 +3315,13 @@
     const billing = {
       id, date, number, customer:values.customer||'', customerName:values.customerName||'', project:values.project||'', projectName:values.projectName||'',
       billingMonth:values.billingMonth||monthOf(date), periodStart:values.periodStart||'', periodEnd:values.periodEnd||'', taxMode:totals.taxMode,
-      lines:(values.lines||[]).map((line)=>({...line,qty:num(line.qty),price:num(line.price),subtotal:Math.round(num(line.qty)*num(line.price)),sourceRefs:(line.sourceRefs||[]).map((ref)=>({...ref}))})),
+      lines:(values.lines||[]).map((line)=>({...line,qty:num(line.qty),price:num(line.price),subtotal:Math.round(num(line.qty)*num(line.price)),sourceRefs:(line.sourceRefs||[]).map((ref)=>cloneBillingRef(ref)),sourceContractRefs:(line.sourceContractRefs||[]).map((ref)=>cloneBillingRef(ref))})),
       amount:totals.untaxed, tax:totals.tax, grossTotal:totals.grossTotal, preTaxAmount:totals.untaxed, taxAmount:totals.tax, taxIncludedAmount:totals.grossTotal,
       retention:totals.retention, retentionAmount:totals.retention, retentionRate:totals.retentionRate, retentionBase:totals.retentionBase, retentionEnabled:totals.retention>0,
       retentionMode:values.retentionMode||'none', retentionReceived:0, remainingRetention:totals.retention, retentionStatus:retentionState(totals.retention,0), total:totals.receivable,
       invoiceStatus:values.invoiceStatus==='no_invoice'?'no_invoice':String(values.invoiceNo||'').trim()?'invoiced':'invoice_pending',
       hasInvoice:values.invoiceStatus!=='no_invoice', invoiceNo:values.invoiceStatus==='no_invoice'?'':String(values.invoiceNo||'').trim(), invoiceDate:values.invoiceStatus==='no_invoice'?'':values.invoiceDate||'', status:'未收款', note:values.note||'',
-      sourceType:sourceRefs.length&&canonicalContracts.length?'mixed-pricing':canonicalContracts.length?'quotation-progress':'daily-work', sourceItemRefs:sourceRefs.map((ref)=>({...ref})),sourceContractRefs:canonicalContracts.map((ref)=>({...ref})), createdAt:now, updatedAt:now
+      sourceType:sourceRefs.length&&canonicalContracts.length?'mixed-pricing':canonicalContracts.length?'quotation-progress':'daily-work', sourceItemRefs:sourceRefs.map((ref)=>cloneBillingRef(ref)),sourceContractRefs:canonicalContracts.map((ref)=>cloneBillingRef(ref)), createdAt:now, updatedAt:now
     };
     const receivable = {id:uid(),billingId:id,date,customer:billing.customer,customerName:billing.customerName,project:billing.project,projectName:billing.projectName,sourceNo:number,invoiceNo:billing.invoiceNo,taxMode:billing.taxMode,untaxedAmount:billing.amount,tax:billing.tax,grossTotal:billing.grossTotal,preTaxAmount:billing.preTaxAmount,taxAmount:billing.taxAmount,taxIncludedAmount:billing.taxIncludedAmount,retention:billing.retention,retentionAmount:billing.retentionAmount,retentionRate:billing.retentionRate,retentionBase:billing.retentionBase,retentionEnabled:billing.retentionEnabled,retentionReceived:0,remainingRetention:billing.retentionAmount,retentionStatus:billing.retentionStatus,amount:billing.total,received:0,bankId:'',receiptDate:'',dueDate:values.dueDate||'',status:'未收',note:'由新版請款單自動建立',createdAt:now,updatedAt:now};
     billing.receivableId = receivable.id;
@@ -3421,12 +3439,12 @@
         if(amount<=0)throw new Error('總價進度請款金額必須大於 0');
         if(otherBilled+amount>contractAmount)throw new Error(`${item} 累計請款不可超過合約總價`);
         contractAmounts.set(ref.contractKey,amount);
-        return {...line,date,item,unit,qty:1,price:amount,amount,subtotal:amount,sourceRefs:(line.sourceRefs||[]).map((entry)=>({...entry})),sourceContractRefs:(line.sourceContractRefs||[]).map((entry)=>entry.contractKey===ref.contractKey?{...entry,billingAmount:amount}:{...entry})};
+        return {...line,date,item,unit,qty:1,price:amount,amount,subtotal:amount,sourceRefs:(line.sourceRefs||[]).map((entry)=>cloneBillingRef(entry)),sourceContractRefs:(line.sourceContractRefs||[]).map((entry)=>cloneBillingRef(entry.contractKey===ref.contractKey?{...entry,billingAmount:amount}:entry))};
       }
       const qty=normalizedBillingLineInput(input.qty,'數量'),price=normalizedBillingLineInput(input.price,'單價');
-      return {...line,date,item,unit,qty,price,subtotal:Math.round(qty*price),sourceRefs:(line.sourceRefs||[]).map((entry)=>({...entry})),sourceContractRefs:(line.sourceContractRefs||[]).map((entry)=>({...entry}))};
+      return {...line,date,item,unit,qty,price,subtotal:Math.round(qty*price),sourceRefs:(line.sourceRefs||[]).map((entry)=>cloneBillingRef(entry)),sourceContractRefs:(line.sourceContractRefs||[]).map((entry)=>cloneBillingRef(entry))};
     });
-    const sourceContractRefs=(billing.sourceContractRefs||[]).map((ref)=>contractAmounts.has(ref.contractKey)?{...ref,billingAmount:contractAmounts.get(ref.contractKey)}:{...ref});
+    const sourceContractRefs=(billing.sourceContractRefs||[]).map((ref)=>cloneBillingRef(contractAmounts.has(ref.contractKey)?{...ref,billingAmount:contractAmounts.get(ref.contractKey)}:ref));
     const invoiceNo=String(values.invoiceNo??billing.invoiceNo??'').trim(),requestedInvoice=values.invoiceStatus??values.invoiceChoice,invoiceStatusValue=requestedInvoice===undefined?billingInvoiceStatus(billing):requestedInvoice==='no_invoice'?'no_invoice':invoiceNo?'invoiced':'invoice_pending';
     const retentionMode=['5','10','custom'].includes(values.retentionMode)?values.retentionMode:'none',retentionRate=retentionMode==='custom'?Math.max(0,num(values.retentionRate)):0,retentionCustom=retentionMode==='custom'?Math.max(0,num(values.retentionCustom)):0;
     const calculatedValues={lines:normalizedLines,taxMode:values.taxMode==='含稅'?'含稅':'未稅',invoiceStatus:invoiceStatusValue,retentionMode,retentionRate,retentionCustom,retentionBase:values.retentionBase==='preTax'?'preTax':'taxIncluded'},totals=calculateBilling(calculatedValues),now=new Date().toISOString(),date=String(values.date||billing.date||businessDate(new Date(now)));
