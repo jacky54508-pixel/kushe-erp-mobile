@@ -1132,3 +1132,23 @@
   :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-tools { flex-shrink:0; padding:8px 12px; gap:8px; }
   :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-error { padding:0 12px 8px; }
 }
+
+/* P33-3: 2026-10-07 historical commission read-only preview */
+.p33-preview{margin:16px 0 18px;border:1px solid #cbd7e8;border-radius:12px;background:#f7faff;color:#173250}
+.p33-preview>summary{cursor:pointer;padding:14px 16px;font-weight:800;font-size:14px}
+.p33-preview[open]>summary{border-bottom:1px solid #dbe5f1}
+.p33-preview-body{padding:12px 16px 16px;font-size:13px;line-height:1.6}
+.p33-preview-body>p{margin:4px 0 12px}
+.p33-preview-totals{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 14px}
+.p33-preview-totals>span{flex:1 1 120px;min-width:0;background:#fff;border:1px solid #e1e9f2;border-radius:9px;padding:10px 12px;color:#53657a}
+.p33-preview-totals b{display:block;color:#152b48;font-size:17px}
+.p33-preview-group{margin-top:12px;background:white;border:1px solid #e1e9f2;border-radius:10px;padding:12px}
+.p33-preview-group h4{margin:0 0 10px;font-size:14px}
+.p33-preview-scroll{max-width:100%;overflow-x:auto}
+.p33-preview-scroll table{width:100%;min-width:650px;border-collapse:collapse;font-size:12px}
+.p33-preview-scroll th,.p33-preview-scroll td{padding:8px 9px;text-align:left;border-bottom:1px solid #edf1f6;white-space:nowrap}
+.p33-preview-scroll th{background:#f1f5fa;color:#4f637a}
+.p33-preview-group p{margin:10px 0 0}
+.p33-preview-warning{color:#8d4a00!important;font-weight:600}
+.p33-preview-footnote{font-size:12px;color:#64748b}
+@media(max-width:640px){.p33-preview-body{padding:12px}.p33-preview>summary{padding:12px}}
