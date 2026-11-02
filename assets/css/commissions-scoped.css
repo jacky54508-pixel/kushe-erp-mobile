@@ -1132,3 +1132,21 @@
   :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-tools { flex-shrink:0; padding:8px 12px; gap:8px; }
   :is(body[data-route="commissions"],body[data-route="attendance"]) #commissionsApp .daily-quantity-error { padding:0 12px 8px; }
 }
+
+
+/* P33 explicit employee performance allocation */
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-commission-rate-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-performance-share-tools{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-performance-share-tools>span{font-size:11px;font-weight:850;color:#b45309}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-performance-share-tools>span[data-valid="true"]{color:#087a5b}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-performance-share-tools .commission-secondary{min-height:32px;padding:0 10px;font-size:11px}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-commission-allocation-row{grid-template-columns:minmax(140px,1fr) minmax(145px,190px) minmax(145px,190px) minmax(190px,250px);gap:10px}
+:is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-performance-share-field input[aria-invalid="true"]{border-color:#d97706;background:#fffaf0;box-shadow:0 0 0 3px rgba(217,119,6,.1)}
+@media(max-width:980px){
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-commission-allocation-row{grid-template-columns:minmax(140px,1fr) minmax(145px,190px)}
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-commission-rate-heading{align-items:flex-start;flex-direction:column}
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-performance-share-tools{justify-content:flex-start}
+}
+@media(max-width:620px){
+  :is(body[data-route="commissions"], body[data-route="attendance"]) #commissionsApp .daily-commission-allocation-row{grid-template-columns:1fr}
+}
