@@ -2572,7 +2572,12 @@
   }
   function projectCommissionBasisAmounts(employeeId,month,projectId) {
     const employee=String(employeeId||''),targetMonth=String(month||''),project=String(projectId||''),logs=(state.dailyLogs||[]).filter((log)=>String(log.employee||log.employeeId||'')===employee&&monthOf(log.date)===targetMonth&&String(log.project||log.projectId||'')===project);
-    const daily=logs.reduce((totals,log)=>{const amounts=commissionBasisAmounts(log.items||[]);totals.preTax+=num(log.untaxedPerformance??log.performance)||amounts.preTax;totals.taxIncluded+=num(log.taxIncludedPerformance)||amounts.taxIncluded;return totals},{preTax:0,taxIncluded:0});
+    const daily=logs.reduce((totals,log)=>{
+      const amounts=commissionBasisAmounts(log.items||[]);
+      const preTaxBase=hasOwn(log,'untaxedCommissionBaseAmount')?num(log.untaxedCommissionBaseAmount):amounts.preTax;
+      const taxIncludedBase=hasOwn(log,'taxIncludedCommissionBaseAmount')?num(log.taxIncludedCommissionBaseAmount):amounts.taxIncluded;
+      totals.preTax+=preTaxBase;totals.taxIncluded+=taxIncludedBase;return totals;
+    },{preTax:0,taxIncluded:0});
     const billableItems=logs.flatMap((log)=>(log.items||[]).filter((item)=>item.billable!==false&&item.pricingType!=='lump_sum'));
     const linkedIds=[...new Set(billableItems.map((item)=>String(item.billingId||'').trim()).filter(Boolean))];
     const hasLinked=linkedIds.length>0,hasMissingLink=billableItems.some((item)=>!String(item.billingId||'').trim());
@@ -2696,48 +2701,14 @@
     });
     return [...projects.values()].map((row) => ({...row,earliest:row.dates.filter(Boolean).sort()[0]||'—',latest:row.dates.filter(Boolean).sort().at(-1)||'—'})).sort((a,b) => String(a.earliest).localeCompare(String(b.earliest)));
   }
-  function resolvePerformanceShares(employeeIds, rawShares = {}) {
-    const ids=[...new Set((employeeIds||[]).map((value)=>String(value||'')).filter(Boolean))];
-    if(!ids.length)throw new Error('請至少選擇一位員工');
-    if(ids.length===1)return Object.freeze({[ids[0]]:100});
-    if(!rawShares||typeof rawShares!=='object'||Array.isArray(rawShares))throw new Error('多人施工請設定每位員工的業績分配比例，合計必須為 100%');
-    const result={};let total=0;
-    ids.forEach((id)=>{
-      if(!hasOwn(rawShares,id)||String(rawShares[id]??'').trim()==='')throw new Error('多人施工請設定每位員工的業績分配比例，合計必須為 100%');
-      const raw=Number(rawShares[id]);
-      if(!Number.isFinite(raw)||raw<0||raw>100)throw new Error('業績分配比例必須介於 0～100%');
-      const value=Math.round(raw*100)/100;result[id]=value;total+=value;
-    });
-    total=Math.round(total*100)/100;
-    if(Math.abs(total-100)>0.001)throw new Error(`多人施工的業績分配合計必須為 100%，目前為 ${total}%`);
-    return Object.freeze(result);
-  }
-  function performanceAllocationMap(amount, employeeIds, performanceShares) {
-    const ids=[...(employeeIds||[])].map((value)=>String(value||'')).filter(Boolean).sort();
-    const shares=resolvePerformanceShares(ids,performanceShares),cents=Math.round(Math.max(0,num(amount))*100);
-    const rows=ids.map((id)=>{const exact=cents*shares[id]/100,base=Math.floor(exact);return {id,base,fraction:exact-base}});
-    let remaining=cents-rows.reduce((sum,row)=>sum+row.base,0);
-    [...rows].sort((a,b)=>b.fraction-a.fraction||a.id.localeCompare(b.id)).forEach((row)=>{if(remaining>0){row.base+=1;remaining-=1}});
-    return new Map(rows.map((row)=>[row.id,row.base/100]));
-  }
-  function inferredPerformanceShares(members, basisAmount) {
-    const ids=members.map((log)=>String(log.employee||log.employeeId||'')),explicit={};
-    if(members.every((log)=>Number.isFinite(Number(log.performanceShare)))){
-      members.forEach((log)=>{explicit[String(log.employee||log.employeeId||'')]=Number(log.performanceShare)});
-      try{return resolvePerformanceShares(ids,explicit)}catch(_){}
-    }
-    const base=Math.max(0,num(basisAmount)),inferred={};
-    if(base>0){
-      members.forEach((log)=>{inferred[String(log.employee||log.employeeId||'')]=Math.max(0,num(log.untaxedPerformance??log.performance))/base*100});
-      const total=Object.values(inferred).reduce((sum,value)=>sum+value,0);
-      if(total>0){
-        Object.keys(inferred).forEach((id)=>{inferred[id]=inferred[id]*100/total});
-        try{return resolvePerformanceShares(ids,inferred)}catch(_){}
-      }
-    }
-    const equal=100/Math.max(1,ids.length);ids.forEach((id)=>{inferred[id]=equal});
-    const last=ids.at(-1);if(last)inferred[last]+=100-Object.values(inferred).reduce((sum,value)=>sum+value,0);
-    return resolvePerformanceShares(ids,inferred);
+  function splitPerformanceAmount(amount, count, index) {
+    const parts = Math.max(0, Math.trunc(num(count)));
+    const partIndex = Math.max(0, Math.trunc(num(index)));
+    if (!parts || partIndex >= parts) return 0;
+    const cents = Math.round(num(amount) * 100);
+    const base = Math.floor(cents / parts);
+    const remainder = cents - base * parts;
+    return (base + (partIndex < remainder ? 1 : 0)) / 100;
   }
   function validateStrictDailyBatch(values, previous, options) {
     const fail=(message,index,field)=>{const error=new Error(index===undefined?message:`第 ${index+1} 筆施工：${message}`);error.code='DAILY_BATCH_INPUT_INVALID';error.dailyRowIndex=index;error.dailyField=field;throw error};
@@ -2921,7 +2892,7 @@
         if(rate<=0)throw new Error(`員工 ${employee.name||employeeId} 尚未設定有效${workMode==='hourly'?'時薪':'日薪'}，請先至員工主檔設定`);
         if(workMode==='daily'&&state.dailyLogs.some((row)=>String(row.employee)===String(employeeId)&&row.date===date&&row.workMode==='daily'&&row.isPrimaryWork!==false))throw new Error(`員工 ${employee.name||employeeId} ${date} 已有日薪點工紀錄，請編輯原紀錄或改用時薪，避免重複計薪`);
         const prior=previous.find((row)=>String(row.employee)===String(employeeId));
-        const log={id:uid(),batchId,groupId:`${batchId}:work-only`,date,employee:employeeId,employeeName:employee.name||'',customer:'',customerName:'',project:'',projectName:'無固定案場／純點工',payType:'點工',items:[],groupTotal:0,grossTotal:0,billingTotal:0,billable:false,billingStatus:'',billingId:'',billingNo:'',performance:0,untaxedPerformance:0,taxIncludedPerformance:0,commissionBasis:'preTax',commissionBaseAmount:0,commissionEnabled:false,rate:0,commission:0,workMode,workQty,workRate:rate,isPrimaryWork:true,workOnly:true,note:String(values.note||'').trim(),createdAt:prior?.createdAt||previous[0]?.createdAt||now,updatedAt:now};
+        const log={id:uid(),batchId,groupId:`${batchId}:work-only`,date,employee:employeeId,employeeName:employee.name||'',customer:'',customerName:'',project:'',projectName:'無固定案場／純點工',payType:'點工',items:[],groupTotal:0,grossTotal:0,billingTotal:0,billable:false,billingStatus:'',billingId:'',billingNo:'',performance:0,untaxedPerformance:0,taxIncludedPerformance:0,untaxedCommissionBaseAmount:0,taxIncludedCommissionBaseAmount:0,commissionBasis:'preTax',commissionBaseAmount:0,commissionEnabled:false,rate:0,commission:0,workMode,workQty,workRate:rate,isPrimaryWork:true,workOnly:true,note:String(values.note||'').trim(),createdAt:prior?.createdAt||previous[0]?.createdAt||now,updatedAt:now};
         state.dailyLogs.unshift(log);
         syncDailyLogLinks(log);
       });
@@ -2947,8 +2918,11 @@
     });
     const byProject = new Map();
     prepared.forEach((line) => { if (!byProject.has(line.project)) byProject.set(line.project, []); byProject.get(line.project).push(line); });
-    const sortedEmployeeIds = [...employeeIds].map((value)=>String(value)).sort((a, b) => a.localeCompare(b));
-    const performanceShares=resolvePerformanceShares(sortedEmployeeIds,values.performanceShares);
+    const sortedEmployeeIds = [...employeeIds].sort((a, b) => {
+      const left = String(a), right = String(b);
+      return left < right ? -1 : left > right ? 1 : 0;
+    });
+    const performanceIndexByEmployeeId = new Map(sortedEmployeeIds.map((employeeId, index) => [employeeId, index]));
     const commissionRates=values.commissionRates&&typeof values.commissionRates==='object'&&!Array.isArray(values.commissionRates)?values.commissionRates:{},commissionBases=values.commissionBases&&typeof values.commissionBases==='object'&&!Array.isArray(values.commissionBases)?values.commissionBases:{};
     employeeIds.forEach((employeeId) => {
       const employee = state.employees.find((row) => row.id === employeeId) || {};
@@ -2966,11 +2940,11 @@
         const basisAmounts=commissionBasisAmounts(projectLines),total=basisAmounts.preTax,taxIncludedTotal=basisAmounts.taxIncluded;
         const billableTotal = projectLines.filter((line) => line.billable).reduce((sum, line) => sum + num(line.untaxedSubtotal), 0);
         const canAddWork = firstProject && !(workMode === 'daily' && hasDaily);
-        const untaxedAllocations=performanceAllocationMap(total,sortedEmployeeIds,performanceShares),taxIncludedAllocations=performanceAllocationMap(taxIncludedTotal,sortedEmployeeIds,performanceShares),employeeKey=String(employeeId),untaxedPerformance=untaxedAllocations.get(employeeKey)||0,taxIncludedPerformance=taxIncludedAllocations.get(employeeKey)||0,commissionBaseAmount=commissionBasis==='taxIncluded'?taxIncludedPerformance:untaxedPerformance,performance=untaxedPerformance,performanceShare=performanceShares[employeeKey];
+        const untaxedPerformance=splitPerformanceAmount(total,sortedEmployeeIds.length,performanceIndexByEmployeeId.get(employeeId)),taxIncludedPerformance=splitPerformanceAmount(taxIncludedTotal,sortedEmployeeIds.length,performanceIndexByEmployeeId.get(employeeId)),untaxedCommissionBaseAmount=total,taxIncludedCommissionBaseAmount=taxIncludedTotal,commissionBaseAmount=commissionBasis==='taxIncluded'?taxIncludedCommissionBaseAmount:untaxedCommissionBaseAmount,performance=untaxedPerformance;
         const commissionEnabledForLog=values.commissionEnabled!==false,commissionAmount=commissionEnabledForLog?Math.round(commissionBaseAmount*commissionRate/100):0;
         const resolvedWorkMode = canAddWork ? workMode : 'none';
         const hasCommission=commissionAmount>0;
-        const log = {id:uid(),batchId,groupId:`${batchId}:${projectId}`,date,employee:employeeId,employeeName:employee.name||'',customer:project.customer||'',customerName:customer.name||project.customerName||'',project:projectId,projectName:project.name||'',payType:hasCommission&&resolvedWorkMode!=='none'?'業績抽成／點工':hasCommission?'業績抽成':resolvedWorkMode!=='none'?'點工':'僅業績',items:projectLines.map((line)=>({...line})),groupTotal:total,grossTotal:projectLines.reduce((sum,line)=>sum+num(line.subtotal),0),billingTotal:billableTotal,billable:billableTotal>0,billingStatus:billableTotal>0?'未請款':'',billingId:'',billingNo:'',performance,untaxedPerformance,taxIncludedPerformance,performanceShare,commissionBasis,commissionBaseAmount,commissionEnabled:commissionEnabledForLog,rate:commissionRate,commission:commissionAmount,workMode:resolvedWorkMode,workQty:canAddWork?workQty:0,workRate:canAddWork?employeeWorkRate:0,isPrimaryWork:canAddWork,workOnly:false,note:values.note||'',createdAt:previous[0]?.createdAt||now,updatedAt:now};
+        const log = {id:uid(),batchId,groupId:`${batchId}:${projectId}`,date,employee:employeeId,employeeName:employee.name||'',customer:project.customer||'',customerName:customer.name||project.customerName||'',project:projectId,projectName:project.name||'',payType:hasCommission&&resolvedWorkMode!=='none'?'業績抽成／點工':hasCommission?'業績抽成':resolvedWorkMode!=='none'?'點工':'僅業績',items:projectLines.map((line)=>({...line})),groupTotal:total,grossTotal:projectLines.reduce((sum,line)=>sum+num(line.subtotal),0),billingTotal:billableTotal,billable:billableTotal>0,billingStatus:billableTotal>0?'未請款':'',billingId:'',billingNo:'',performance,untaxedPerformance,taxIncludedPerformance,untaxedCommissionBaseAmount,taxIncludedCommissionBaseAmount,commissionBasis,commissionBaseAmount,commissionEnabled:commissionEnabledForLog,rate:commissionRate,commission:commissionAmount,workMode:resolvedWorkMode,workQty:canAddWork?workQty:0,workRate:canAddWork?employeeWorkRate:0,isPrimaryWork:canAddWork,workOnly:false,note:values.note||'',createdAt:previous[0]?.createdAt||now,updatedAt:now};
         state.dailyLogs.unshift(log); syncDailyLogLinks(log); firstProject = false;
       });
     });
@@ -3073,11 +3047,10 @@
     patches.forEach(({group,items},groupId)=>{
       const members=batchRows(batchId).filter(log=>(log.groupId||log.id)===groupId),oldItems=members[0].items,oldBasis=commissionBasisAmounts(oldItems),newBasis=commissionBasisAmounts(items),deltaPre=newBasis.preTax-oldBasis.preTax,deltaTax=newBasis.taxIncluded-oldBasis.taxIncluded,deltaGross=items.reduce((sum,row)=>sum+num(row.subtotal),0)-oldItems.reduce((sum,row)=>sum+num(row.subtotal),0),sorted=members.map(log=>log.employee).sort();
       if(!Number.isFinite(newBasis.taxIncluded)||newBasis.taxIncluded>Number.MAX_SAFE_INTEGER||newBasis.preTax>Number.MAX_SAFE_INTEGER)fail('施工合計超過可儲存範圍');
-      const shares=inferredPerformanceShares(members,oldBasis.preTax),oldPre=performanceAllocationMap(oldBasis.preTax,sorted,shares),newPre=performanceAllocationMap(newBasis.preTax,sorted,shares),oldTax=performanceAllocationMap(oldBasis.taxIncluded,sorted,shares),newTax=performanceAllocationMap(newBasis.taxIncluded,sorted,shares);
       members.forEach(log=>{
-        const key=String(log.employee),preDelta=(newPre.get(key)||0)-(oldPre.get(key)||0),taxDelta=(newTax.get(key)||0)-(oldTax.get(key)||0),basis=normalizeCommissionBasis(log.commissionBasis),oldBase=num(log.commissionBaseAmount??log.performance),newBase=oldBase+(basis==='taxIncluded'?taxDelta:preDelta),commissionDelta=log.commissionEnabled===false?0:Math.round(newBase*num(log.rate)/100)-Math.round(oldBase*num(log.rate)/100),oldPerformance=num(log.performance),performanceShare=shares[key];
-        if(newBase<0||oldPerformance+preDelta<0||num(log.commission)+commissionDelta<0)fail('調整後金額與原施工業績不一致，請先查核');
-        Object.assign(log,{items:structuredClone(items),groupTotal:num(log.groupTotal)+deltaPre,grossTotal:num(log.grossTotal)+deltaGross,billingTotal:num(log.billingTotal)+deltaPre,performance:oldPerformance+preDelta,untaxedPerformance:num(log.untaxedPerformance??oldPerformance)+preDelta,taxIncludedPerformance:num(log.taxIncludedPerformance??(oldTax.get(key)||0))+taxDelta,performanceShare,commissionBaseAmount:newBase,commission:num(log.commission)+commissionDelta,updatedAt:now});
+        const i=sorted.indexOf(log.employee),preDelta=splitPerformanceAmount(newBasis.preTax,sorted.length,i)-splitPerformanceAmount(oldBasis.preTax,sorted.length,i),taxDelta=splitPerformanceAmount(newBasis.taxIncluded,sorted.length,i)-splitPerformanceAmount(oldBasis.taxIncluded,sorted.length,i),basis=normalizeCommissionBasis(log.commissionBasis),newBase=basis==='taxIncluded'?newBasis.taxIncluded:newBasis.preTax,nextCommission=log.commissionEnabled===false?0:Math.round(newBase*num(log.rate)/100),commissionDelta=nextCommission-num(log.commission),oldPerformance=num(log.performance);
+        if(newBase<0||oldPerformance+preDelta<0||nextCommission<0)fail('調整後金額與原施工業績不一致，請先查核');
+        Object.assign(log,{items:structuredClone(items),groupTotal:num(log.groupTotal)+deltaPre,grossTotal:num(log.grossTotal)+deltaGross,billingTotal:num(log.billingTotal)+deltaPre,performance:oldPerformance+preDelta,untaxedPerformance:num(log.untaxedPerformance??oldPerformance)+preDelta,taxIncludedPerformance:num(log.taxIncludedPerformance??splitPerformanceAmount(oldBasis.taxIncluded,sorted.length,i))+taxDelta,untaxedCommissionBaseAmount:newBasis.preTax,taxIncludedCommissionBaseAmount:newBasis.taxIncluded,commissionBaseAmount:newBase,commission:nextCommission,updatedAt:now});
         // Attendance, work wages, billing headers and all source IDs remain intact.
         const linked=state.commissions.find(row=>row.sourceType==='daily-log'&&row.sourceId===log.id);
         if(linked)Object.assign(linked,{untaxedAmount:log.untaxedPerformance,commissionBaseAmount:newBase,commission:log.commission,updatedAt:now});
@@ -3206,6 +3179,24 @@
       : Math.max(0, Math.round(retentionBaseAmount * retentionRate / 100));
     return { constructionAmount, untaxed, tax, grossTotal, retention: Math.min(retention, grossTotal), retentionRate, retentionBase, retentionBaseAmount, receivable: Math.max(0, grossTotal - retention), rate, taxMode };
   }
+  function cloneBillingRef(value, inArray = false) {
+    if(value===null||typeof value==='string'||typeof value==='boolean')return value;
+    if(typeof value==='number'){
+      if(!Number.isFinite(value))throw new Error('請款來源包含無效數字，請重新開啟請款草稿');
+      return value;
+    }
+    if(value===undefined){
+      if(inArray)throw new Error('請款來源陣列包含空值，請重新開啟請款草稿');
+      return undefined;
+    }
+    if(Array.isArray(value))return value.map((entry)=>cloneBillingRef(entry,true));
+    if(value&&typeof value==='object'&&Object.getPrototypeOf(value)===Object.prototype){
+      const result={};
+      Object.entries(value).forEach(([key,entry])=>{if(entry!==undefined)result[key]=cloneBillingRef(entry,false)});
+      return result;
+    }
+    throw new Error('請款來源格式不正確，請重新開啟請款草稿');
+  }
   function sourceMatches(ref, log, item, index) {
     const groupKey = log.groupId || log.id;
     if (ref.sourceGroupKey && ref.sourceGroupKey !== groupKey) return false;
@@ -3306,8 +3297,8 @@
   }
   async function createBilling(values) {
     requireStoreTransactionDraft();
-    const sourceRefs = (values.sourceItemRefs || []).filter(Boolean);
-    const sourceContractRefs=(values.sourceContractRefs||[]).filter((ref)=>ref&&ref.contractKey&&num(ref.billingAmount)>0);
+    const sourceRefs = (values.sourceItemRefs || []).filter(Boolean).map((ref)=>cloneBillingRef(ref));
+    const sourceContractRefs=(values.sourceContractRefs||[]).filter((ref)=>ref&&ref.contractKey&&num(ref.billingAmount)>0).map((ref)=>cloneBillingRef(ref));
     if (!sourceRefs.length&&!sourceContractRefs.length) throw new Error('請至少選擇一筆施工紀錄或總價進度款');
     const canonical = [];
     sourceRefs.forEach((ref) => {
@@ -3324,13 +3315,13 @@
     const billing = {
       id, date, number, customer:values.customer||'', customerName:values.customerName||'', project:values.project||'', projectName:values.projectName||'',
       billingMonth:values.billingMonth||monthOf(date), periodStart:values.periodStart||'', periodEnd:values.periodEnd||'', taxMode:totals.taxMode,
-      lines:(values.lines||[]).map((line)=>({...line,qty:num(line.qty),price:num(line.price),subtotal:Math.round(num(line.qty)*num(line.price)),sourceRefs:(line.sourceRefs||[]).map((ref)=>({...ref}))})),
+      lines:(values.lines||[]).map((line)=>({...line,qty:num(line.qty),price:num(line.price),subtotal:Math.round(num(line.qty)*num(line.price)),sourceRefs:(line.sourceRefs||[]).map((ref)=>cloneBillingRef(ref)),sourceContractRefs:(line.sourceContractRefs||[]).map((ref)=>cloneBillingRef(ref))})),
       amount:totals.untaxed, tax:totals.tax, grossTotal:totals.grossTotal, preTaxAmount:totals.untaxed, taxAmount:totals.tax, taxIncludedAmount:totals.grossTotal,
       retention:totals.retention, retentionAmount:totals.retention, retentionRate:totals.retentionRate, retentionBase:totals.retentionBase, retentionEnabled:totals.retention>0,
       retentionMode:values.retentionMode||'none', retentionReceived:0, remainingRetention:totals.retention, retentionStatus:retentionState(totals.retention,0), total:totals.receivable,
       invoiceStatus:values.invoiceStatus==='no_invoice'?'no_invoice':String(values.invoiceNo||'').trim()?'invoiced':'invoice_pending',
       hasInvoice:values.invoiceStatus!=='no_invoice', invoiceNo:values.invoiceStatus==='no_invoice'?'':String(values.invoiceNo||'').trim(), invoiceDate:values.invoiceStatus==='no_invoice'?'':values.invoiceDate||'', status:'未收款', note:values.note||'',
-      sourceType:sourceRefs.length&&canonicalContracts.length?'mixed-pricing':canonicalContracts.length?'quotation-progress':'daily-work', sourceItemRefs:sourceRefs.map((ref)=>({...ref})),sourceContractRefs:canonicalContracts.map((ref)=>({...ref})), createdAt:now, updatedAt:now
+      sourceType:sourceRefs.length&&canonicalContracts.length?'mixed-pricing':canonicalContracts.length?'quotation-progress':'daily-work', sourceItemRefs:sourceRefs.map((ref)=>cloneBillingRef(ref)),sourceContractRefs:canonicalContracts.map((ref)=>cloneBillingRef(ref)), createdAt:now, updatedAt:now
     };
     const receivable = {id:uid(),billingId:id,date,customer:billing.customer,customerName:billing.customerName,project:billing.project,projectName:billing.projectName,sourceNo:number,invoiceNo:billing.invoiceNo,taxMode:billing.taxMode,untaxedAmount:billing.amount,tax:billing.tax,grossTotal:billing.grossTotal,preTaxAmount:billing.preTaxAmount,taxAmount:billing.taxAmount,taxIncludedAmount:billing.taxIncludedAmount,retention:billing.retention,retentionAmount:billing.retentionAmount,retentionRate:billing.retentionRate,retentionBase:billing.retentionBase,retentionEnabled:billing.retentionEnabled,retentionReceived:0,remainingRetention:billing.retentionAmount,retentionStatus:billing.retentionStatus,amount:billing.total,received:0,bankId:'',receiptDate:'',dueDate:values.dueDate||'',status:'未收',note:'由新版請款單自動建立',createdAt:now,updatedAt:now};
     billing.receivableId = receivable.id;
@@ -3448,12 +3439,12 @@
         if(amount<=0)throw new Error('總價進度請款金額必須大於 0');
         if(otherBilled+amount>contractAmount)throw new Error(`${item} 累計請款不可超過合約總價`);
         contractAmounts.set(ref.contractKey,amount);
-        return {...line,date,item,unit,qty:1,price:amount,amount,subtotal:amount,sourceRefs:(line.sourceRefs||[]).map((entry)=>({...entry})),sourceContractRefs:(line.sourceContractRefs||[]).map((entry)=>entry.contractKey===ref.contractKey?{...entry,billingAmount:amount}:{...entry})};
+        return {...line,date,item,unit,qty:1,price:amount,amount,subtotal:amount,sourceRefs:(line.sourceRefs||[]).map((entry)=>cloneBillingRef(entry)),sourceContractRefs:(line.sourceContractRefs||[]).map((entry)=>cloneBillingRef(entry.contractKey===ref.contractKey?{...entry,billingAmount:amount}:entry))};
       }
       const qty=normalizedBillingLineInput(input.qty,'數量'),price=normalizedBillingLineInput(input.price,'單價');
-      return {...line,date,item,unit,qty,price,subtotal:Math.round(qty*price),sourceRefs:(line.sourceRefs||[]).map((entry)=>({...entry})),sourceContractRefs:(line.sourceContractRefs||[]).map((entry)=>({...entry}))};
+      return {...line,date,item,unit,qty,price,subtotal:Math.round(qty*price),sourceRefs:(line.sourceRefs||[]).map((entry)=>cloneBillingRef(entry)),sourceContractRefs:(line.sourceContractRefs||[]).map((entry)=>cloneBillingRef(entry))};
     });
-    const sourceContractRefs=(billing.sourceContractRefs||[]).map((ref)=>contractAmounts.has(ref.contractKey)?{...ref,billingAmount:contractAmounts.get(ref.contractKey)}:{...ref});
+    const sourceContractRefs=(billing.sourceContractRefs||[]).map((ref)=>cloneBillingRef(contractAmounts.has(ref.contractKey)?{...ref,billingAmount:contractAmounts.get(ref.contractKey)}:ref));
     const invoiceNo=String(values.invoiceNo??billing.invoiceNo??'').trim(),requestedInvoice=values.invoiceStatus??values.invoiceChoice,invoiceStatusValue=requestedInvoice===undefined?billingInvoiceStatus(billing):requestedInvoice==='no_invoice'?'no_invoice':invoiceNo?'invoiced':'invoice_pending';
     const retentionMode=['5','10','custom'].includes(values.retentionMode)?values.retentionMode:'none',retentionRate=retentionMode==='custom'?Math.max(0,num(values.retentionRate)):0,retentionCustom=retentionMode==='custom'?Math.max(0,num(values.retentionCustom)):0;
     const calculatedValues={lines:normalizedLines,taxMode:values.taxMode==='含稅'?'含稅':'未稅',invoiceStatus:invoiceStatusValue,retentionMode,retentionRate,retentionCustom,retentionBase:values.retentionBase==='preTax'?'preTax':'taxIncluded'},totals=calculateBilling(calculatedValues),now=new Date().toISOString(),date=String(values.date||billing.date||businessDate(new Date(now)));
@@ -5011,13 +5002,13 @@
       if(targets.some((log)=>dailyLogCommissionSettlementLock(log).locked))throw new Error('此案場抽成已有實際發放紀錄，不能直接改含稅／未稅基準。');
       const formalBasis=projectCommissionBasisAmounts(employeeId,month,projectId);
       if(!formalBasis.resolved)throw new Error(`此案場無法唯一核對正式請款金額：${formalBasis.reason||'請確認請款關聯'}`);
-      const weights=targets.map((log)=>Math.max(0,num(log.untaxedPerformance??log.performance)||commissionBasisAmounts(log.items||[]).preTax)),weightTotal=weights.reduce((sum,value)=>sum+value,0);
+      const weights=targets.map((log)=>Math.max(0,commissionBasisAmounts(log.items||[]).preTax)),weightTotal=weights.reduce((sum,value)=>sum+value,0);
       targets.forEach((log,index)=>{
-        const ratio=formalBasis.source==='billing'?(weightTotal>0?weights[index]/weightTotal:1/targets.length):1,untaxed=formalBasis.source==='billing'?formalBasis.preTax*ratio:(num(log.untaxedPerformance??log.performance)||commissionBasisAmounts(log.items||[]).preTax),taxIncluded=formalBasis.source==='billing'?formalBasis.taxIncluded*ratio:(num(log.taxIncludedPerformance)||commissionBasisAmounts(log.items||[]).taxIncluded),base=basis==='taxIncluded'?taxIncluded:untaxed,nextCommission=log.commissionEnabled===false?0:Math.round(base*num(log.rate)/100);
-        log.untaxedPerformance=untaxed;log.performance=untaxed;log.taxIncludedPerformance=taxIncluded;log.commissionBasis=basis;log.commissionBaseAmount=base;log.commission=nextCommission;log.updatedAt=new Date().toISOString();
+        const sourceAmounts=commissionBasisAmounts(log.items||[]),ratio=formalBasis.source==='billing'?(weightTotal>0?weights[index]/weightTotal:1/targets.length):1,untaxedBase=formalBasis.source==='billing'?formalBasis.preTax*ratio:sourceAmounts.preTax,taxIncludedBase=formalBasis.source==='billing'?formalBasis.taxIncluded*ratio:sourceAmounts.taxIncluded,base=basis==='taxIncluded'?taxIncludedBase:untaxedBase,nextCommission=log.commissionEnabled===false?0:Math.round(base*num(log.rate)/100);
+        log.untaxedCommissionBaseAmount=untaxedBase;log.taxIncludedCommissionBaseAmount=taxIncludedBase;log.commissionBasis=basis;log.commissionBaseAmount=base;log.commission=nextCommission;log.updatedAt=new Date().toISOString();
         const linked=(state.commissions||[]).filter((row)=>row.sourceType==='daily-log'&&String(row.sourceId||'')===String(log.id));
         if(linked.length!==1)throw new Error('抽成來源關聯不是唯一一筆，為避免帳務錯誤已停止修改。');
-        Object.assign(linked[0],{untaxedAmount:untaxed,commissionBasis:basis,commissionBaseAmount:base,rate:num(log.rate),commission:nextCommission,updatedAt:log.updatedAt});
+        Object.assign(linked[0],{untaxedAmount:num(log.untaxedPerformance??log.performance),commissionBasis:basis,commissionBaseAmount:base,rate:num(log.rate),commission:nextCommission,updatedAt:log.updatedAt});
       });
     }
     const employeeRecord=state.employees.find((row)=>String(row.id)===employeeId),employeeValue=records[0]?.employee??records[0]?.employeeId??employeeRecord?.id;
