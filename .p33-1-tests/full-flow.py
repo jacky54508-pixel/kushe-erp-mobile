@@ -14,7 +14,7 @@ def run():
 
           // The page fixture seeded a legacy synthetic bank. load() must bootstrap it into
           // the versioned store before any modern writer is used.
-          const boot=await store.readCommittedSnapshot();
+          const boot=await store.readCommittedSnapshot().catch(e=>{throw new Error('[BOOT_SNAPSHOT] '+e.message)});
           if(!boot.revision?.id||boot.revision.sequence!==1) throw new Error('legacy bootstrap revision missing');
           const seededBank=store.getState().banks.find(x=>x.id==='bank-p33');
           if(!seededBank||seededBank.balance!==100000) throw new Error('synthetic bank bootstrap mismatch');
@@ -147,7 +147,7 @@ def run():
           if(audit.summary.blockingIssueCount!==0) throw new Error('financial audit blockers: '+JSON.stringify(audit.issues.filter(x=>x.severity==='BLOCKING')));
 
           // Read committed snapshot verifies IndexedDB + emergency mirror + journal consistency.
-          const committed=await store.readCommittedSnapshot();
+          const committed=await store.readCommittedSnapshot().catch(e=>{throw new Error('[FINAL_SNAPSHOT] '+e.message)});
           const finalState=store.getState();
           const summary={
             bank:{opening:bank.openingBalance,income:bank.income,expense:bank.expense,balance:bank.balance},
