@@ -260,6 +260,12 @@
       const strong=await window.KusheAuthGate.requireMfa();
       if(!mfaCurrent(flow))return;
       if(!strong)throw new Error('MFA assurance not elevated');
+      if($('#mfaTrustDevice')?.checked){
+        try{window.KusheAuthGate.trustCurrentDevice?.()}
+        catch(_){window.KusheAuthGate.clearTrustedDevice?.()}
+      }else{
+        window.KusheAuthGate.clearTrustedDevice?.();
+      }
       resetMfaUi();
       await startAuthenticatedApp({skipMfa:true,authEpoch:epoch});
     }catch(error){
@@ -540,7 +546,10 @@
       return false;
     }
     let authenticated = false;
-    try { authenticated = await window.KusheAuthGate.requireAuth(); } catch (_) {}
+    try {
+      if(!window.KusheAuthGate.session?.()) await window.KusheAuthGate.restoreTrustedSession?.();
+      authenticated = await window.KusheAuthGate.requireAuth();
+    } catch (_) {}
     if(!authUiCurrent(epoch))return false;
     setLoginBusy(false);
     if (!authenticated) {
