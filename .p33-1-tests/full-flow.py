@@ -12,16 +12,14 @@ def run():
           const store=window.KuSheERPStore;
           await store.load();
 
-          // First create one normal record so the Store has a committed business revision.
-          const customer=await store.saveCustomer({name:'P33 全流程建設'});
+          // The page fixture seeded a legacy synthetic bank. load() must bootstrap it into
+          // the versioned store before any modern writer is used.
+          const boot=await store.readCommittedSnapshot();
+          if(!boot.revision?.id||boot.revision.sequence!==1) throw new Error('legacy bootstrap revision missing');
+          const seededBank=store.getState().banks.find(x=>x.id==='bank-p33');
+          if(!seededBank||seededBank.balance!==100000) throw new Error('synthetic bank bootstrap mismatch');
 
-          // Seed a synthetic bank only inside this isolated browser database.
-          const initial=await store.readCommittedSnapshot();
-          const seeded=JSON.parse(JSON.stringify(initial.data));
-          seeded.settings=seeded.settings&&typeof seeded.settings==='object'?seeded.settings:{quotationUnitPresets:['式']};
-          seeded.meta=seeded.meta&&typeof seeded.meta==='object'?seeded.meta:{};
-          seeded.banks=[{id:'bank-p33',name:'P33 測試銀行',bank:'測試銀行',account:'000-test',openingBalance:100000,income:0,expense:0,balance:100000,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}];
-          await store.replaceSnapshot(seeded,{baseline:initial.baseline,confirmed:true});
+          const customer=await store.saveCustomer({name:'P33 全流程建設'});
           const project=await store.saveProject({
             name:'P33 全流程案場',customer:customer.id,status:'進行中',
             defaultRetentionMode:'10',defaultRetentionRate:10,defaultRetentionBase:'taxIncluded',
