@@ -3,6 +3,9 @@
 
   const config = window.KUSHE_PHASE1_CONFIG || {};
   const SESSION_KEY = config.authSessionStorageKey || 'kushe_erp_supabase_auth_v1';
+  const TRUSTED_SESSION_KEY = SESSION_KEY + '__trusted_v1';
+  const TRUSTED_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+  const TRUSTED_IDLE_MS = 24 * 60 * 60 * 1000;
   let authGeneration = 0;
   let activeValidation = null;
   let activeCompanyContext = null;
@@ -108,8 +111,37 @@
     }
   }
 
+  function readTrustedDevice(now = Date.now()) {
+    try {
+      const value = JSON.parse(localStorage.getItem(TRUSTED_SESSION_KEY) || 'null');
+      if (!value || value.version !== 1 || !String(value.user_id || '').trim() || !String(value.refresh_token || '').trim()) return null;
+      const createdAt = Number(value.created_at), lastUsedAt = Number(value.last_used_at), expiresAt = Number(value.expires_at);
+      if (![createdAt,lastUsedAt,expiresAt].every(Number.isFinite)) return null;
+      if (expiresAt <= now || now - lastUsedAt > TRUSTED_IDLE_MS || expiresAt - createdAt > TRUSTED_MAX_AGE_MS + 1000) return null;
+      return value;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function clearTrustedDevice() {
+    try { localStorage.removeItem(TRUSTED_SESSION_KEY); } catch (_) {}
+  }
+
+  function syncTrustedDevice(value) {
+    const current = readTrustedDevice();
+    if (!current || current.user_id !== value?.user?.id || sessionAal(value) !== 'aal2' || !String(value?.refresh_token || '').trim()) return;
+    const next = {
+      ...current,
+      refresh_token: String(value.refresh_token),
+      last_used_at: Date.now()
+    };
+    try { localStorage.setItem(TRUSTED_SESSION_KEY, JSON.stringify(next)); } catch (_) {}
+  }
+
   function saveSession(value) {
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(value));
+    syncTrustedDevice(value);
     authGeneration += 1;
   }
 
@@ -118,6 +150,54 @@
     activeCompanyContext = null;
     try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
     try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
+    clearTrustedDevice();
+  }
+
+  function trustedDeviceStatus() {
+    const value = readTrustedDevice();
+    return value ? Object.freeze({ active:true, userId:value.user_id, expiresAt:value.expires_at, lastUsedAt:value.last_used_at }) : Object.freeze({ active:false });
+  }
+
+  function trustCurrentDevice() {
+    const current = readSession();
+    if (!current?.user?.id || !String(current.refresh_token || '').trim() || sessionAal(current) !== 'aal2') {
+      throw new AuthRequestError(403, 'trusted_device_requires_aal2');
+    }
+    const now = Date.now();
+    const record = {
+      version:1,
+      user_id:current.user.id,
+      refresh_token:String(current.refresh_token),
+      created_at:now,
+      last_used_at:now,
+      expires_at:now + TRUSTED_MAX_AGE_MS
+    };
+    try { localStorage.setItem(TRUSTED_SESSION_KEY, JSON.stringify(record)); }
+    catch (_) { throw new AuthRequestError(0, 'trusted_device_storage_failed'); }
+    return trustedDeviceStatus();
+  }
+
+  async function restoreTrustedSession() {
+    if (readSession()) return true;
+    const trusted = readTrustedDevice();
+    if (!trusted) { clearTrustedDevice(); return false; }
+    const generation = authGeneration;
+    try {
+      const payload = await requestJson('/auth/v1/token?grant_type=refresh_token', {
+        method:'POST',
+        body:{ refresh_token:trusted.refresh_token }
+      });
+      if (generation !== authGeneration) return false;
+      const next = normalizeSession(payload);
+      if (!next.user?.id || next.user.id !== trusted.user_id || sessionAal(next) !== 'aal2') {
+        throw new AuthRequestError(403, 'trusted_session_not_aal2');
+      }
+      saveSession(next);
+      return true;
+    } catch (error) {
+      if (!transientAuthError(error)) clearTrustedDevice();
+      return false;
+    }
   }
 
   function responseErrorCode(payload) {
@@ -268,6 +348,7 @@
     if (generation !== authGeneration) throw new AuthRequestError(409, 'stale_auth_response', 'stale');
     if (storedUser(payload?.user)?.id !== next.user.id) throw new AuthRequestError(0, 'principal_mismatch');
     activeCompanyContext = null;
+    clearTrustedDevice();
     saveSession(next);
     return next.user;
   }
@@ -581,5 +662,5 @@ function assertCurrentAuth(current, generation) {
     return session()?.user || null;
   }
 
-  window.KusheAuthGate = Object.freeze({ requireAuth, requireMfa, mfaStatus, enrollTotp, removeUnverifiedTotp, createMfaChallenge, verifyMfa, login, resolveCompanyContext, companyContext, canView, canWrite, firstAllowedRoute, permissionSnapshot, changePassword, logout, session, user });
+  window.KusheAuthGate = Object.freeze({ requireAuth, requireMfa, mfaStatus, enrollTotp, removeUnverifiedTotp, createMfaChallenge, verifyMfa, restoreTrustedSession, trustCurrentDevice, clearTrustedDevice, trustedDeviceStatus, login, resolveCompanyContext, companyContext, canView, canWrite, firstAllowedRoute, permissionSnapshot, changePassword, logout, session, user });
 }());
