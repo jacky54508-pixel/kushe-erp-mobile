@@ -10,6 +10,12 @@ changes={
  "def check(name: str, okay: bool):":"def check(name: str, okay: bool, *, fatal: bool = True):",
  "    if not okay:\n        raise AssertionError(name)":"    if not okay and fatal:\n        raise AssertionError(name)",
  "        lower=login()['access_token']\n        check('fresh_login_still_requires_second_factor'":"        pending=login()\n        lower=pending['access_token']\n        check('fresh_login_still_requires_second_factor'",
+ "        def signed(t):":"        server_expiry={}\n        def signed(t):",
+ "            w=c['webauthn']; flow=w['type']; opts=w['credential_options']":"            server_expiry[c['id']]=int(c.get('expires_at') or 0)\n            w=c['webauthn']; flow=w['type']; opts=w['credential_options']",
+ "        time.sleep(16)":'''        delay=server_expiry[expired['challenge_id']]-time.time()+2
+        check('server_expiry_deadline_bounded',0<delay<=310)
+        RESULTS.append({'diagnostic':'expiry_uses_server_deadline','wait_seconds':round(delay,1)})
+        time.sleep(delay)''',
  "        bad=signed(lower)":'''        def reject_without_elevation(name, payload):
             nonlocal pending, lower
             code, response = verify(lower, payload)
