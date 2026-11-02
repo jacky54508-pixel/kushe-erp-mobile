@@ -1,9 +1,17 @@
 <!doctype html><html><head><meta charset="utf-8"><title>P33 isolated store audit</title></head><body>
 <script>
 window.KUSHE_PHASE1_CONFIG={authSessionStorageKey:'p33_audit_auth',supabaseUrl:'https://audit.invalid',supabasePublishableKey:'sb_publishable_audit'};
-window.KusheAuthGate={user:()=>({id:'audit-user',email:'audit@example.invalid'}),requireMfa:async()=>true};
+window.KusheAuthGate={
+  user:()=>({id:'audit-user',email:'audit@example.invalid'}),
+  session:()=>({access_token:'synthetic-token'}),
+  requireAuth:async()=>true,
+  requireMfa:async()=>true
+};
 window.KusheLegacyData={refresh(){}};
 window.KusheRecovery={showResult(){}};
+window.KusheCloudSync={
+  commitTemporarySnapshot:async(data,ctx)=>({data:structuredClone(data),syncVersion:(ctx?.syncVersion||1)+1,updatedAt:new Date().toISOString(),fingerprint:'synthetic'})
+};
 </script>
 <script src="/assets/js/erp-store.js"></script>
 </body></html>
