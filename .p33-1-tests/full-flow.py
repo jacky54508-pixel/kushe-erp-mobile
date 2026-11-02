@@ -12,17 +12,16 @@ def run():
           const store=window.KuSheERPStore;
           await store.load();
 
+          // First create one normal record so the Store has a committed business revision.
+          const customer=await store.saveCustomer({name:'P33 全流程建設'});
+
           // Seed a synthetic bank only inside this isolated browser database.
           const initial=await store.readCommittedSnapshot();
           const seeded=JSON.parse(JSON.stringify(initial.data));
-          // A blank portable snapshot may omit empty/default containers; the replacement gate
-          // intentionally requires both. Add them only to this synthetic fixture.
           seeded.settings=seeded.settings&&typeof seeded.settings==='object'?seeded.settings:{quotationUnitPresets:['式']};
           seeded.meta=seeded.meta&&typeof seeded.meta==='object'?seeded.meta:{};
           seeded.banks=[{id:'bank-p33',name:'P33 測試銀行',bank:'測試銀行',account:'000-test',openingBalance:100000,income:0,expense:0,balance:100000,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}];
           await store.replaceSnapshot(seeded,{baseline:initial.baseline,confirmed:true});
-
-          const customer=await store.saveCustomer({name:'P33 全流程建設'});
           const project=await store.saveProject({
             name:'P33 全流程案場',customer:customer.id,status:'進行中',
             defaultRetentionMode:'10',defaultRetentionRate:10,defaultRetentionBase:'taxIncluded',
