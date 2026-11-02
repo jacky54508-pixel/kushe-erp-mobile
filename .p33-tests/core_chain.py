@@ -28,13 +28,13 @@ with sync_playwright() as p:
       const commissions=state.commissions.filter(x=>daily.some(d=>d.id===x.sourceId));
       const unbilled=store.unbilledWork({project:project.id})[0];
       const detail=unbilled.details[0];
-      const sourceRef={workItemId:detail.workItemId||"",sourceGroupKey:detail.sourceGroupKey||"",sourceItemIndex:detail.sourceItemIndex,dailyLogIds:[...(detail.dailyLogIds||[])],date:detail.date||"",pricingType:detail.pricingType||"actual",taxMode:detail.taxMode||"未稅",quotationId:detail.quotationId||"",quotationLineId:detail.quotationLineId||""};
+      const sourceRef=()=>({workItemId:detail.workItemId||"",sourceGroupKey:detail.sourceGroupKey||"",sourceItemIndex:detail.sourceItemIndex,dailyLogIds:[...(detail.dailyLogIds||[])],date:detail.date||"",pricingType:detail.pricingType||"actual",taxMode:detail.taxMode||"未稅",quotationId:detail.quotationId||"",quotationLineId:detail.quotationLineId||""});
 
       stage="createBilling"; const billing=await store.createBilling({
         date:"2026-11-10",customer:customer.id,customerName:customer.name,project:project.id,projectName:project.name,billingMonth:"2026-11",
         taxMode:"未稅",invoiceStatus:"no_invoice",retentionMode:"none",retentionBase:"taxIncluded",
-        lines:[{date:detail.date,house:String(detail.house||"").trim(),item:detail.item,unit:detail.unit,qty:detail.qty,price:detail.price,note:detail.note||"",pricingType:detail.pricingType||"actual",taxMode:detail.taxMode||"未稅",sourceRefs:[sourceRef]}],
-        sourceItemRefs:[sourceRef],sourceContractRefs:[],note:"chain"
+        lines:[{date:detail.date,house:String(detail.house||"").trim(),item:detail.item,unit:detail.unit,qty:detail.qty,price:detail.price,note:detail.note||"",pricingType:detail.pricingType||"actual",taxMode:detail.taxMode||"未稅",sourceRefs:[sourceRef()]}],
+        sourceItemRefs:[sourceRef()],sourceContractRefs:[],note:"chain"
       });
       state=store.getState();
       const ar=state.receivables.filter(x=>x.billingId===billing.id);
@@ -44,8 +44,8 @@ with sync_playwright() as p:
         await store.createBilling({
           date:"2026-11-11",customer:customer.id,customerName:customer.name,project:project.id,projectName:project.name,billingMonth:"2026-11",
           taxMode:"未稅",invoiceStatus:"no_invoice",retentionMode:"none",retentionBase:"taxIncluded",
-          lines:[{date:detail.date,house:String(detail.house||"").trim(),item:detail.item,unit:detail.unit,qty:detail.qty,price:detail.price,note:detail.note||"",pricingType:detail.pricingType||"actual",taxMode:detail.taxMode||"未稅",sourceRefs:[sourceRef]}],
-          sourceItemRefs:[sourceRef],sourceContractRefs:[],note:"duplicate"
+          lines:[{date:detail.date,house:String(detail.house||"").trim(),item:detail.item,unit:detail.unit,qty:detail.qty,price:detail.price,note:detail.note||"",pricingType:detail.pricingType||"actual",taxMode:detail.taxMode||"未稅",sourceRefs:[sourceRef()]}],
+          sourceItemRefs:[sourceRef()],sourceContractRefs:[],note:"duplicate"
         });
       }catch(e){duplicateBillingError=String(e.message||e)}
 
