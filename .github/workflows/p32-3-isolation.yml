@@ -21,7 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           echo '2ec7ad86e01cb24b5fec78cbef10747c88384fbe314c50e9f97d3200356522dc  .p32-3-isolation/tests/auth-service.py' | sha256sum -c -
-          echo '575fbffaa6b0a55a988dd9b2867db7459ead12094adde99b036cad4d68c9072c  .p32-3-isolation/tests/launch.py' | sha256sum -c -
+          echo '9fd428faa78e6d73a5fbf7d2aa919c36f4304ab8b9b4ae5f5b179b142695f221  .p32-3-isolation/tests/launch.py' | sha256sum -c -
           git diff --exit-code 84fc3a5867595b93fabcee87633a416019c0f572 HEAD -- assets index.html '*print*' enterprise tools
           python -m py_compile .p32-3-isolation/tests/auth-service.py .p32-3-isolation/tests/launch.py
       - name: Install pinned public laboratory dependencies

@@ -11,6 +11,12 @@ changes = {
     "if okay and p.returncode: raise RuntimeError('Subprocess failed: ' + ' '.join(args[:3]))": "if okay and p.returncode:\n        safe = p.stderr[-1000:]\n        for secret in (SECRET, PASSWORD, DB_PASSWORD): safe = safe.replace(secret, '[REDACTED]')\n        raise RuntimeError('Subprocess failed: ' + ' '.join(args[:3]) + '; ' + safe)",
     "sh(['docker','network','rm',NET],okay=False)": "sh(['docker','network','rm',NET],okay=False)\n    check('Ephemeral test containers and internal network were removed', not sh(['docker','inspect',AUTH,PG],okay=False).strip('[]\\n ') and not sh(['docker','network','inspect',NET],okay=False).strip('[]\\n '))"
 }
+changes["check('Real official Auth service is ready',bool(healthy) and status==200)"] = """if not healthy or status != 200:
+            log = subprocess.run(['docker','logs',AUTH],text=True,capture_output=True,timeout=10)
+            safe = (log.stdout + log.stderr)[-12000:]
+            for secret in (SECRET, PASSWORD, DB_PASSWORD): safe = safe.replace(secret, '[REDACTED]')
+            (E/'startup-failure.txt').write_text(safe)
+        check('Real official Auth service is ready',bool(healthy) and status==200)"""
 for before, after in changes.items():
     assert s.count(before) == 1, before
     s = s.replace(before, after)
