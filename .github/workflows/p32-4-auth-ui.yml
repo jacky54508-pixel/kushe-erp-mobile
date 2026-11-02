@@ -1,0 +1,54 @@
+name: P32-4 isolated login UI and real Auth - NOT deployment
+on:
+  push:
+    branches: [p32-4-auth-ui-isolation-20261102]
+permissions:
+  contents: read
+jobs:
+  isolated-ui:
+    if: github.repository == 'jacky54508-pixel/kushe-erp-mobile' && github.ref == 'refs/heads/p32-4-auth-ui-isolation-20261102'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          sparse-checkout: .p32-4-isolation/
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Verify and unpack exact test-only source
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64,gzip,json,hashlib,ast
+          root=Path('.p32-4-isolation')
+          data=base64.b64decode(''.join((root/f'source-{i}.b64').read_text() for i in range(4)),validate=True)
+          assert hashlib.sha256(data).hexdigest()=='b7f17005291e97117a6f21cc9194e7b02acdbc6a3703d16deb795f4ddd4f6584'
+          files=json.loads(gzip.decompress(data))
+          expected={'lab/auth_helpers.py':'52cdfe2069185eca5d888e80618370663bcea7d00a39c3febae10403e4dbca38','lab/run-lab.sh':'eff67d493a72f3c4b79dc7c89790a37ab70248bc5080cbe47d1c7272a9e3ef31','lab/ui_probe.py':'12306a9d6ad99c0e2ec9666e53c0ac047ea2c54bbaa92f9ef92fb0af8ba5fffd','lab/web/auth-lab.js':'f9809c7d1c4c8ed1a585f134c508a7b106a9ff5cc13d6c89cdb8b6d11508aab6','lab/web/index.html':'617bf27c32cfe45773b30988246ff0e7be5a18d3f2c273200449b49f1b2bbeaf','lab/web/style.css':'d094ef400ca668a89da32bb9454009047bc8e267f3336225338d59c5a41b0093'}
+          assert set(files)==set(expected)
+          for name,text in files.items():
+              assert hashlib.sha256(text.encode()).hexdigest()==expected[name]
+              p=root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text)
+              if p.suffix=='.py':ast.parse(text)
+          (root/'evidence').mkdir(exist_ok=True)
+          (root/'evidence/source-sha256.json').write_text(json.dumps(expected,indent=2))
+          PY
+          node --check .p32-4-isolation/lab/web/auth-lab.js
+          bash -n .p32-4-isolation/lab/run-lab.sh
+      - name: Install pinned browser test tools
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m pip freeze > .p32-4-isolation/evidence/python-packages.txt
+          python -m playwright install --with-deps chromium
+      - name: Exercise real lab Auth and explicit fault cases through standalone UI
+        run: bash .p32-4-isolation/lab/run-lab.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: p32-4-sanitized-ui-evidence
+          path: .p32-4-isolation/evidence/
+          retention-days: 7
+          if-no-files-found: warn
