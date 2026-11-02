@@ -27,3 +27,7 @@ jobs:
         run: python -m http.server 8766 --bind 127.0.0.1 >/tmp/p33-1-http.log 2>&1 &
       - name: Commission business-rule regression
         run: python .p33-1-tests/test.py
+      - name: Start full-flow isolated server
+        run: python -m http.server 8767 --bind 127.0.0.1 >/tmp/p33-full-http.log 2>&1 &
+      - name: Full accounting flow regression
+        run: python .p33-1-tests/full-flow.py
