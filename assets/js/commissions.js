@@ -45,20 +45,12 @@
     const remainder = cents - base * parts;
     return (base + (partIndex < remainder ? 1 : 0)) / 100;
   }
-  function previewCommissionTotal(amount, employeeIds, employees, commissionRates = {}, commissionBases = {}, taxIncludedAmount = amount) {
-    const sortedEmployeeIds = [...(employeeIds || [])].sort((a, b) => {
-      const left = String(a);
-      const right = String(b);
-      return left < right ? -1 : left > right ? 1 : 0;
-    });
-    return sortedEmployeeIds.reduce((sum, employeeId) => {
-      const employee = (employees || []).find((row) => row.id === employeeId) || {},basis=(commissionBases[employeeId]||employee.commissionBasis)==='taxIncluded'?'taxIncluded':'preTax',basisAmount=basis==='taxIncluded'?taxIncludedAmount:amount;
-      const raw=Object.prototype.hasOwnProperty.call(commissionRates,employeeId)?Number(commissionRates[employeeId]):employee.commissionRate===undefined||employee.commissionRate===null||employee.commissionRate===''?25:Number(employee.commissionRate);
-      const rate=Number.isFinite(raw)&&raw>=0&&raw<=100?raw:25;
-      // Business rule: personal performance is shared for reporting, but each employee's commission
-      // is calculated from the full project construction amount, not the shared performance amount.
-      return sum + Math.round(basisAmount * rate / 100);
-    }, 0);
+  function previewCommissionTotal(amount, employeeIds, employees, commissionRates = {}) {
+    return [...(employeeIds||[])].reduce((sum,employeeId)=>{
+      const employee=(employees||[]).find((row)=>String(row.id)===String(employeeId))||{};
+      const raw=Object.prototype.hasOwnProperty.call(commissionRates,employeeId)?Number(commissionRates[employeeId]):Number(employee.commissionRate??25);
+      return sum+(Number.isFinite(raw)&&raw>=0&&raw<=50?Math.round(amount*raw/100):0);
+    },0);
   }
   const parseHouseBatch = (value) => {
     const seen = new Set();
@@ -565,7 +557,7 @@
     $('#commissionsApp').innerHTML = `
       <section class="commissions-heading workforce-heading">
         <div><h1>出勤／業績管理</h1><p>整合每日作業、點工薪資、員工業績與抽成結算</p></div>
-        <div class="workforce-heading-actions"><button class="commission-secondary" id="manualCommission" type="button">新增手動抽成</button><button class="commission-primary" id="addCommission" type="button">＋ 新增每日作業</button></div>
+        <div class="workforce-heading-actions"><button class="commission-secondary" id="openCommissionAudit" type="button">歷史抽成查核（唯讀）</button><button class="commission-secondary" id="manualCommission" type="button">新增手動抽成</button><button class="commission-primary" id="addCommission" type="button">＋ 新增每日作業</button></div>
       </section>
       ${workforceKpis(view)}
       <section class="commission-panel commission-filters workforce-filters" aria-label="共用搜尋與篩選">
@@ -586,6 +578,7 @@
   function bind() {
     $('#addCommission')?.addEventListener('click', () => openDailyDrawer());
     $('#manualCommission')?.addEventListener('click', () => openDrawer());
+    $('#openCommissionAudit')?.addEventListener('click',()=>window.KuSheCommissionHistoryAudit?.open?.(store));
     $('#commissionMonthFilter').addEventListener('change', (event) => { commitSearchForAction(); filters.month = event.target.value; refreshWorkforceResults(); });
     $('#commissionEmployeeFilter').addEventListener('change', (event) => { commitSearchForAction(); filters.employee = event.target.value; refreshWorkforceResults(); });
     $('#commissionProjectFilter').addEventListener('change', (event) => { commitSearchForAction(); filters.project = event.target.value; refreshWorkforceResults(); });
@@ -760,7 +753,17 @@
     const projectOptions=(selected='')=>`<option value="">請選擇案場</option>${store.masterOptions('projects').map(project=>`<option value="${esc(project.id)}" ${String(project.id)===String(selected)?'selected':''}>${esc(label(store.getState(),'customers',project.customer,project.customerName||'未指定客戶'))}｜${esc(project.name)}</option>`).join('')}`;
     let employeeOptions=store.masterOptions('employees');
     const defaultCommissionRate=employee=>employee.commissionRate===undefined||employee.commissionRate===null||employee.commissionRate===''?25:number(employee.commissionRate);
-    const commissionRateDraft=Object.fromEntries(employeeOptions.map(employee=>{const saved=logs.find(log=>String(log.employee)===String(employee.id)&&Number.isFinite(Number(log.rate)))?.rate;return [String(employee.id),saved!==undefined?number(saved):defaultCommissionRate(employee)]}));
+    const splitPoolEvenly=ids=>{
+      const sorted=[...new Set(ids.map(String))].sort(),each=sorted.length?Math.floor(5000/sorted.length):0,extra=sorted.length?5000%sorted.length:0;
+      return Object.fromEntries(sorted.map((id,i)=>[id,(each+(i<extra?1:0))/100]));
+    };
+    const selectedEmployeeIds=()=>$('input[name="dailyEmployees"]:checked',form).map(input=>String(input.value));
+    const originalShares=Object.fromEntries(logs.map(log=>[String(log.employee),Number(log.rate)]));
+    const commissionRateDraft=Object.fromEntries(employeeOptions.map(employee=>{
+      const id=String(employee.id);
+      return [id,Object.prototype.hasOwnProperty.call(originalShares,id)?originalShares[id]:0];
+    }));
+    if(!logs.length)Object.assign(commissionRateDraft,splitPoolEvenly([...employeeIds]));
     const defaultCommissionBasis=employee=>employee.commissionBasis==='taxIncluded'?'taxIncluded':'preTax';
     const commissionBasisDraft=Object.fromEntries(employeeOptions.map(employee=>{const saved=logs.find(log=>String(log.employee)===String(employee.id)&&log.commissionBasis)?.commissionBasis;return [String(employee.id),saved==='taxIncluded'?'taxIncluded':saved==='preTax'?'preTax':'projectDefault']}));
     const defaultWorkRate=(employee,mode)=>number(mode==='hourly'?employee.hourlyRate:employee.dailyRate);
@@ -798,7 +801,7 @@
       const selectedIds=$$('input[name="dailyEmployees"]:checked',form).map(input=>String(input.value)),isWorkOnly=form.elements.entryMode?.value==='workOnly';
       if(!selectedIds.length||isWorkOnly){commissionRatePanel.innerHTML='';commissionRatePanel.hidden=true;return}
       commissionRatePanel.hidden=false;
-      commissionRatePanel.innerHTML=`<div class="daily-commission-rate-heading"><div><b>本次抽成設定</b><small>比例與基準只影響本次每日施工；既有歷史不會跟著改。</small></div></div><div class="daily-commission-rate-list">${selectedIds.map(id=>{const employee=employeeOptions.find(item=>String(item.id)===id);if(!employee)return '';const fallback=defaultCommissionRate(employee),value=Object.prototype.hasOwnProperty.call(commissionRateDraft,id)?commissionRateDraft[id]:fallback,basis=commissionBasisDraft[id]||'projectDefault';return `<div class="daily-commission-rate-row"><span class="daily-commission-rate-employee"><b>${esc(employee.name)}</b><small>預設 ${fallback}%｜${defaultCommissionBasis(employee)==='taxIncluded'?'含稅':'未稅'}</small></span><label><span>本次抽成</span><span class="daily-commission-rate-input"><input type="number" inputmode="decimal" name="dailyCommissionRate" data-employee-id="${esc(id)}" min="0" max="100" step="0.01" value="${esc(value)}" aria-label="${esc(employee.name)} 本次抽成比例"><em>%</em></span></label><label class="daily-commission-basis-field"><span>計算基準</span><select name="dailyCommissionBasis" data-employee-id="${esc(id)}" aria-label="${esc(employee.name)} 本次抽成基準"><option value="projectDefault" ${basis==='projectDefault'?'selected':''}>依案場／公司設定</option><option value="preTax" ${basis==='preTax'?'selected':''}>未稅</option><option value="taxIncluded" ${basis==='taxIncluded'?'selected':''}>含稅</option></select></label></div>`}).join('')}</div>`;
+      commissionRatePanel.innerHTML=`<div class="daily-commission-rate-heading"><div><b>本次抽成設定</b><small>總抽成比例固定 50%；預設平均分配，可自行調整個人比例；既有歷史不會跟著改。</small></div></div><div class="daily-commission-rate-list">${selectedIds.map(id=>{const employee=employeeOptions.find(item=>String(item.id)===id);if(!employee)return '';const fallback=defaultCommissionRate(employee),value=Object.prototype.hasOwnProperty.call(commissionRateDraft,id)?commissionRateDraft[id]:fallback,basis=commissionBasisDraft[id]||'projectDefault';return `<div class="daily-commission-rate-row"><span class="daily-commission-rate-employee"><b>${esc(employee.name)}</b><small>以請款未稅額 × 個人比例；0% 表示不參與抽成</small></span><label><span>本次抽成</span><span class="daily-commission-rate-input"><input type="number" inputmode="decimal" name="dailyCommissionRate" data-employee-id="${esc(id)}" min="0" max="50" step="0.01" value="${esc(value)}" aria-label="${esc(employee.name)} 本次抽成比例"><em>%</em></span></label></div>`}).join('')}</div><p id="dailyCommissionPoolStatus" class="daily-commission-pool-status" aria-live="polite"></p>`;
       $$('input[name="dailyCommissionRate"]',commissionRatePanel).forEach(input=>{input.oninput=()=>{commissionRateDraft[String(input.dataset.employeeId)]=input.value;calc()};input.onchange=input.oninput});
       $$('select[name="dailyCommissionBasis"]',commissionRatePanel).forEach(select=>{select.onchange=()=>{commissionBasisDraft[String(select.dataset.employeeId)]=select.value;calc()}});
     };
@@ -828,12 +831,15 @@
       const isWorkOnly=form.elements.entryMode?.value==='workOnly';
       let gross=0,untaxed=0,taxIncluded=0,billing=0;
       if(!isWorkOnly)$$('.daily-line',body).forEach((row)=>{const isLump=row.dataset.pricingType==='lump_sum',qty=number($('.daily-line-qty',row).value),price=number($('.daily-line-price',row).value),subtotal=isLump?0:qty*price,taxMode=$('.daily-line-tax',row).value,lineUntaxed=taxMode==='含稅'?Math.round(subtotal/(1+(number(state.settings.defaultTax)||5)/100)):subtotal,lineTaxIncluded=taxMode==='含稅'?subtotal:lineUntaxed+Math.round(lineUntaxed*(number(state.settings.defaultTax)||5)/100);gross+=subtotal;untaxed+=lineUntaxed;taxIncluded+=lineTaxIncluded;if(!isLump&&$('.daily-billable input',row).checked)billing+=lineUntaxed;row.dataset.previewSubtotal=String(subtotal);$('.daily-line-total',row).textContent=isLump?'進度紀錄':money(subtotal);$('.daily-line-untaxed',row).textContent=isLump?'總價不重複累計':`未稅 ${money(lineUntaxed)}`});
-      const ids=$$('input[name="dailyEmployees"]:checked',form).map(input=>String(input.value)),rates=Object.fromEntries($$('input[name="dailyCommissionRate"]',form).map(input=>[input.dataset.employeeId,input.value])),bases=Object.fromEntries($$('select[name="dailyCommissionBasis"]',form).map(select=>[select.dataset.employeeId,select.value])),commission=!isWorkOnly&&form.elements.commissionEnabled.checked?previewCommissionTotal(untaxed,ids,state.employees,rates,bases,taxIncluded):0,mode=form.elements.workMode.value,qty=number(form.elements.workQty.value),workRates=Object.fromEntries($$('input[name="dailyWorkRate"]',form).map(input=>[String(input.dataset.employeeId),number(input.value)])),work=mode==='none'?0:ids.reduce((sum,id)=>sum+qty*number(workRates[id]??workRateDraft[id]),0);
-      $('#dailyGrossTotal',layer).textContent=money(gross);$('#dailyUntaxedTotal',layer).textContent=money(untaxed);$('#dailyCommissionTotal',layer).textContent=money(commission);$('#dailyBillingTotal',layer).textContent=money(billing);$('#dailyWorkTotal',layer).textContent=money(work);if(workQtyLabel)workQtyLabel.textContent=mode==='hourly'?'點工時數':'點工天數';$$('[data-work-card]',workRatePanel).forEach(card=>{const input=$('input[name="dailyWorkRate"]',card),total=$('[data-work-card-total]',card),rate=number(input?.value);if(total)total.textContent=rate>0&&qty>0?money(rate*qty):'尚未計算'});$$('.daily-house-group',body).forEach(group=>{$('.daily-house-subtotal',group).textContent=money(isWorkOnly?0:$$('.daily-line',group).reduce((sum,row)=>sum+number(row.dataset.previewSubtotal),0))});
+      const ids=selectedEmployeeIds(),rates=Object.fromEntries($('input[name="dailyCommissionRate"]',form).map(input=>[input.dataset.employeeId,input.value])),commission=!isWorkOnly&&form.elements.commissionEnabled.checked?previewCommissionTotal(untaxed,ids,state.employees,rates):0,mode=form.elements.workMode.value,qty=number(form.elements.workQty.value),workRates=Object.fromEntries($$('input[name="dailyWorkRate"]',form).map(input=>[String(input.dataset.employeeId),number(input.value)])),work=mode==='none'?0:ids.reduce((sum,id)=>sum+qty*number(workRates[id]??workRateDraft[id]),0);
+      $('#dailyGrossTotal',layer).textContent=money(gross);$('#dailyUntaxedTotal',layer).textContent=money(untaxed);const pctTotal=ids.reduce((sum,id)=>sum+(Number(rates[id])||0),0),pctValid=ids.length>0&&ids.every(id=>{const raw=String(rates[id]??'').trim(),x=Number(raw);return raw!==''&&Number.isFinite(x)&&x>=0&&x<=50&&Math.abs(x*100-Math.round(x*100))<0.000001;})&&Math.abs(pctTotal-50)<0.000001;
+      const poolStatus=$('#dailyCommissionPoolStatus',form);
+      if(poolStatus){poolStatus.dataset.valid=String(pctValid);poolStatus.textContent=form.elements.commissionEnabled.checked?'總抽成分配 '+pctTotal.toFixed(2)+'% / 50%'+(pctValid?' ✓':'（須合計 50% 才能儲存）'):'本次不計抽成';}
+      $('#dailyCommissionTotal',layer).textContent=!isWorkOnly&&form.elements.commissionEnabled.checked&&!pctValid?'比例待調整':money(commission);$('#dailyBillingTotal',layer).textContent=money(billing);$('#dailyWorkTotal',layer).textContent=money(work);if(workQtyLabel)workQtyLabel.textContent=mode==='hourly'?'點工時數':'點工天數';$$('[data-work-card]',workRatePanel).forEach(card=>{const input=$('input[name="dailyWorkRate"]',card),total=$('[data-work-card-total]',card),rate=number(input?.value);if(total)total.textContent=rate>0&&qty>0?money(rate*qty):'尚未計算'});$$('.daily-house-group',body).forEach(group=>{$('.daily-house-subtotal',group).textContent=money(isWorkOnly?0:$$('.daily-line',group).reduce((sum,row)=>sum+number(row.dataset.previewSubtotal),0))});
       totals.hidden=isWorkOnly;
       const filled=$$('.daily-line',body).filter(row=>Number($('.daily-line-qty',row).value)>0),houses=new Set(filled.map(row=>groupKey(groupProject(row),groupHouse(row.closest('.daily-house-group')))));
       $('#dailyDraftCount',form).textContent=isWorkOnly?`${ids.length} 位員工 · 點工薪資 ${money(work)}`:`${ids.length} 位員工 · ${houses.size} 戶 · ${filled.length} 項施工`;
-      const staff=ids.map(id=>{const employee=employeeOptions.find(item=>String(item.id)===id);return `${employee?.name||id} ${rates[id]??commissionRateDraft[id]}%（${bases[id]==='taxIncluded'?'含稅':bases[id]==='preTax'?'未稅':'依案場／公司'}）`});
+      const staff=ids.map(id=>{const employee=employeeOptions.find(item=>String(item.id)===id);return `${employee?.name||id} ${rates[id]??commissionRateDraft[id]}%（未稅）`});
       $('#dailyPaySummary',form).textContent=[!isWorkOnly&&form.elements.commissionEnabled.checked?(staff.join('、')||'抽成：請選員工'):'不計抽成',mode==='none'?'不計點工':`${mode==='hourly'?'時薪':'日薪'} × ${qty} · ${money(work)}`].join(' ｜ ');
 
     };
@@ -1034,13 +1040,13 @@
     const initialGroups=new Map();lines.forEach((line,index)=>{const key=groupKey(line.project,line.house);if(!initialGroups.has(key))initialGroups.set(key,[]);initialGroups.get(key).push({...line,draftOrder:index})});draftSequence=lines.length;
     initialGroups.forEach(groupLines=>createGroup(groupLines[0].project,groupLines[0].house,groupLines));
     $('#addDailyLine',layer).onclick=()=>{const block=createProjectBlock('');createGroup('','',[emptyLine()],block);calc();$('.daily-house-project',block).focus()};
-    $$('input[name="dailyEmployees"]',form).forEach(input=>{input.onchange=()=>{renderCommissionRatePanel();renderWorkRatePanel();calc()}});
+    $('input[name="dailyEmployees"]',form).forEach(input=>{input.onchange=()=>{Object.assign(commissionRateDraft,splitPoolEvenly(selectedEmployeeIds()));renderCommissionRatePanel();renderWorkRatePanel();calc()}});
     $$('input[name="entryMode"]',form).forEach(input=>{input.onchange=applyEntryMode});
     form.elements.workMode.onchange=()=>{const mode=form.elements.workMode.value;if(mode!==currentWorkRateMode)resetWorkRatesForMode(mode);renderWorkRatePanel();calc()};form.elements.workMode.oninput=form.elements.workMode.onchange;
     form.elements.workQty.oninput=()=>{renderWorkRatePanel();calc()};form.elements.workQty.onchange=form.elements.workQty.oninput;form.elements.commissionEnabled.oninput=calc;form.elements.commissionEnabled.onchange=calc;
     const showRowError=(error,rows)=>{
       const row=Number.isInteger(error?.dailyRowIndex)?rows[error.dailyRowIndex]:null,rateField=error?.dailyField==='workRate'?$$('input[name="dailyWorkRate"]',form).find(input=>String(input.dataset.employeeId)===String(error.employeeId||'')):null;
-      const field=error?.dailyField==='employee'?$('input[name="dailyEmployees"]',form):error?.dailyField==='workRate'?rateField:error?.dailyField==='workQty'?form.elements.workQty:error?.dailyField==='note'?(form.elements.entryMode?.value==='workOnly'?form.elements.workDescription:form.elements.note):row?(error.dailyField==='house'?$('.daily-house-name',row.closest('.daily-house-group')):error.dailyField==='project'?projectInput(row):error.dailyField==='qty'?$('.daily-line-qty',row):error.dailyField==='quotation'?$('.daily-line-choice',row):$('.daily-line-item',row)):null;
+      const field=error?.dailyField==='employee'?$('input[name="dailyEmployees"]',form):error?.dailyField==='workRate'?rateField:error?.dailyField==='commissionRate'?$('input[name="dailyCommissionRate"]',form):error?.dailyField==='workQty'?form.elements.workQty:error?.dailyField==='note'?(form.elements.entryMode?.value==='workOnly'?form.elements.workDescription:form.elements.note):row?(error.dailyField==='house'?$('.daily-house-name',row.closest('.daily-house-group')):error.dailyField==='project'?projectInput(row):error.dailyField==='qty'?$('.daily-line-qty',row):error.dailyField==='quotation'?$('.daily-line-choice',row):$('.daily-line-item',row)):null;
       if(field){field.closest('details')?.setAttribute('open','');field.setAttribute('aria-invalid','true');field.focus();field.scrollIntoView({block:'nearest',inline:'nearest'})}
       const hint=row?$('.daily-quote-hint',row):null;if(hint)hint.textContent=error.message;
     };
@@ -1052,6 +1058,14 @@
       else if(mode!=='none'&&(!Number.isFinite(qty)||qty<=0)){const error=new Error('請填寫有效的點工天數／時數');error.dailyField='workQty';throw error}
       if(mode!=='none')selected.forEach(input=>{const rate=$$('input[name="dailyWorkRate"]',form).find(node=>String(node.dataset.employeeId)===String(input.value)),employee=employeeOptions.find(item=>String(item.id)===String(input.value));if(!rate||number(rate.value)<=0){const error=new Error(`員工 ${employee?.name||input.value} 尚未設定有效${mode==='hourly'?'時薪':'日薪'}，請先至員工主檔設定`);error.dailyField='workRate';error.employeeId=input.value;throw error}});
       if(isWorkOnly)return;
+      if(form.elements.commissionEnabled.checked){
+        const inputs=$('input[name="dailyCommissionRate"]',form);
+        const bps=inputs.map(input=>{const raw=input.value.trim(),v=Number(raw);return raw!==''&&Number.isFinite(v)&&Math.abs(v*100-Math.round(v*100))<0.000001?Math.round(v*100):NaN});
+        if(!inputs.length||bps.some((x)=>!Number.isFinite(x)||x<0||x>5000)||bps.reduce((sum,x)=>sum+x,0)!==5000){
+          const error=new Error('所有抽成員工比例必須合計 50%，每人 0～50%，最多兩位小數；本筆尚未儲存。');
+          error.dailyField='commissionRate';throw error;
+        }
+      }
       const ids=new Set();
       rows.forEach((row,index)=>{const draft=rowDraft(row),project=current.projects.find(item=>String(item.id)===String(draft.project)),fail=(message,field)=>{const error=new Error(`第 ${index+1} 筆施工：${message}`);Object.assign(error,{dailyRowIndex:index,dailyField:field});throw error};if(!project||!project.customer||!current.customers.some(item=>String(item.id)===String(project.customer)))fail('請選擇有有效客戶關聯的案場','project');if(!draft.house&&!(legacyItems.has(draft.workItemId)&&!String(legacyItems.get(draft.workItemId).house||'').trim()))fail('請填寫戶別','house');if(!draft.item)fail('請填寫施工品項','item');if(!/^\d+(?:\.\d+)?$/.test(draft.qty.trim())||!Number.isFinite(Number(draft.qty))||Number(draft.qty)<=0||Number(draft.qty)>Number.MAX_SAFE_INTEGER)fail('數量必須是有限正數，不可空白','qty');if(draft.sourceType==='quotation'||draft.quotationId||draft.quotationLineId){if(!draft.quotationId||!draft.quotationLineId||!quoteChoices(draft.project).some(item=>String(item.quotationId)===draft.quotationId&&String(item.quotationLineId)===draft.quotationLineId))fail('報價項目已失效，請重新選擇正式報價來源','quotation')}else if(draft.sourceType!=='manual')fail('請選擇報價品項或明確使用手動施工','quotation');if(draft.workItemId&&ids.has(draft.workItemId))fail('施工來源識別重複','item');if(draft.workItemId)ids.add(draft.workItemId)});
       if(!rows.length)throw new Error('請至少填寫一筆施工項目');
