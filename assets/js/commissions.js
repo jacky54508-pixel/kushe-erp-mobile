@@ -51,13 +51,13 @@
       const right = String(b);
       return left < right ? -1 : left > right ? 1 : 0;
     });
-    const performanceIndexByEmployeeId = new Map(sortedEmployeeIds.map((employeeId, index) => [employeeId, index]));
     return sortedEmployeeIds.reduce((sum, employeeId) => {
       const employee = (employees || []).find((row) => row.id === employeeId) || {},basis=(commissionBases[employeeId]||employee.commissionBasis)==='taxIncluded'?'taxIncluded':'preTax',basisAmount=basis==='taxIncluded'?taxIncludedAmount:amount;
-      const performance = splitPerformanceAmount(basisAmount,sortedEmployeeIds.length,performanceIndexByEmployeeId.get(employeeId));
       const raw=Object.prototype.hasOwnProperty.call(commissionRates,employeeId)?Number(commissionRates[employeeId]):employee.commissionRate===undefined||employee.commissionRate===null||employee.commissionRate===''?25:Number(employee.commissionRate);
       const rate=Number.isFinite(raw)&&raw>=0&&raw<=100?raw:25;
-      return sum + Math.round(performance * rate / 100);
+      // Business rule: personal performance is shared for reporting, but each employee's commission
+      // is calculated from the full project construction amount, not the shared performance amount.
+      return sum + Math.round(basisAmount * rate / 100);
     }, 0);
   }
   const parseHouseBatch = (value) => {
