@@ -28,3 +28,5 @@ jobs:
           python -m http.server 8765 --bind 127.0.0.1 >/tmp/p33-http.log 2>&1 &
       - name: Commission allocation regression
         run: python .p33-tests/commission_allocation.py
+      - name: Core source-chain regression
+        run: python .p33-tests/core_chain.py
