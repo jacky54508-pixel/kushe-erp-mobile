@@ -16,6 +16,6 @@ const seed={
   bankTransactions:[],payroll:[],attendance:[],dailyLogs:[],dailyItemPresets:[],quotations:[],quotationPrices:[],quotationTemplates:[],audit:[],
   settings:{quotationUnitPresets:['式']},meta:{}
 };
-localStorage.setItem('KuSheERP25_EMERGENCY',JSON.stringify(seed));
+if(!localStorage.getItem('KuSheERP25_EMERGENCY'))localStorage.setItem('KuSheERP25_EMERGENCY',JSON.stringify(seed));
 </script>
 <script src="/assets/js/erp-store.js"></script>
