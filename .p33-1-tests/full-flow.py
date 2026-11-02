@@ -11,6 +11,7 @@ def run():
         result=page.evaluate("""async () => {
           const store=window.KuSheERPStore;
           await store.load();
+          const step=async(name,work)=>{try{return await work()}catch(e){throw new Error('['+name+'] '+(e?.message||e))}};
 
           // The page fixture seeded a legacy synthetic bank. load() must bootstrap it into
           // the versioned store before any modern writer is used.
@@ -19,39 +20,39 @@ def run():
           const seededBank=store.getState().banks.find(x=>x.id==='bank-p33');
           if(!seededBank||seededBank.balance!==100000) throw new Error('synthetic bank bootstrap mismatch');
 
-          const customer=await store.saveCustomer({name:'P33 全流程建設'});
-          const project=await store.saveProject({
+          const customer=await step('saveCustomer',()=>store.saveCustomer({name:'P33 全流程建設'}));
+          const project=await step('saveProject',()=>store.saveProject({
             name:'P33 全流程案場',customer:customer.id,status:'進行中',
             defaultRetentionMode:'10',defaultRetentionRate:10,defaultRetentionBase:'taxIncluded',
             defaultInvoiceChoice:'invoice_required',defaultTaxMode:'未稅',
             defaultCommissionBasis:'preTax'
-          });
-          const e1=await store.saveEmployee({name:'P33 員工甲',dailyRate:2000,hourlyRate:0,commissionRate:25,commissionBasis:'preTax',status:'在職'});
-          const e2=await store.saveEmployee({name:'P33 員工乙',dailyRate:2000,hourlyRate:0,commissionRate:25,commissionBasis:'preTax',status:'在職'});
+          }));
+          const e1=await step('saveEmployee-e1',()=>store.saveEmployee({name:'P33 員工甲',dailyRate:2000,hourlyRate:0,commissionRate:25,commissionBasis:'preTax',status:'在職'}));
+          const e2=await step('saveEmployee-e2',()=>store.saveEmployee({name:'P33 員工乙',dailyRate:2000,hourlyRate:0,commissionRate:25,commissionBasis:'preTax',status:'在職'}));
 
           // Daily work: two workers share displayed performance, but each commission uses full 14,000.
-          const batch=await store.saveDailyBatch({
+          const batch=await step('saveDailyBatch',()=>store.saveDailyBatch({
             date:'2026-11-02',employeeIds:[e1.id,e2.id],
             commissionRates:{[e1.id]:25,[e2.id]:25},
             commissionBases:{[e1.id]:'preTax',[e2.id]:'preTax'},
             workRates:{},
             lines:[{project:project.id,house:'A1',item:'門片修繕',itemName:'門片修繕',unit:'式',qty:14,inputPrice:1000,unitPrice:1000,taxMode:'未稅',billable:true,sourceType:'manual',pricingType:'actual'}],
             workOnly:false,commissionEnabled:true,workMode:'none',workQty:0,note:'P33 全流程'
-          });
+          }));
           let state=store.getState();
           const logs=state.dailyLogs.filter(x=>(x.batchId||x.id)===batch);
           if(logs.length!==2||logs.some(x=>x.performance!==7000||x.commission!==3500||x.commissionBaseAmount!==14000)) throw new Error('daily commission rule failed');
 
           const first=logs[0], item=first.items[0];
           const ref={workItemId:item.workItemId,sourceGroupKey:first.groupId,sourceItemIndex:0,dailyLogIds:logs.map(x=>x.id)};
-          const billing=await store.createBilling({
+          const billing=await step('createBilling',()=>store.createBilling({
             date:'2026-11-03',customer:customer.id,customerName:customer.name,project:project.id,projectName:project.name,
             lines:[{date:'2026-11-02',house:'A1',item:'門片修繕',unit:'式',qty:14,price:1000,sourceRefs:[ref]}],
             sourceItemRefs:[ref],sourceContractRefs:[],
             taxMode:'未稅',invoiceStatus:'invoice_pending',
             retentionMode:'10',retentionBase:'taxIncluded',retentionRate:10,
             dueDate:'2026-12-03',note:'P33 全流程請款'
-          });
+          }));
           state=store.getState();
           let ar=state.receivables.find(x=>x.id===billing.receivableId);
           if(!ar) throw new Error('receivable not created');
@@ -60,7 +61,7 @@ def run():
           if(state.billings.length!==1||state.receivables.length!==1) throw new Error('billing/AR duplicate');
           if(logs.some(l=>l.items[0].billingId===undefined)) throw new Error('source copies not linked');
 
-          await store.updateBillingInvoice(billing.id,{invoiceChoice:'invoice_required',invoiceNo:'P3312345678',invoiceDate:'2026-11-03'});
+          await step('updateBillingInvoice',()=>store.updateBillingInvoice(billing.id,{invoiceChoice:'invoice_required',invoiceNo:'P3312345678',invoiceDate:'2026-11-03'}));
           state=store.getState();
           const outInvoice=state.invoices.find(x=>x.sourceType==='billing'&&x.sourceId===billing.id);
           if(!outInvoice||outInvoice.status!=='issued'||outInvoice.netAmount!==14000||outInvoice.taxAmount!==700||outInvoice.grossAmount!==14700) throw new Error('output invoice linkage mismatch');
@@ -72,9 +73,9 @@ def run():
             bankId:'bank-p33',bankAccountId:'bank-p33',paymentMethod:'銀行轉帳',
             collectionType:'bank',note:'P33 應收全數沖銷',idempotencyKey:'p33-receipt-1'
           };
-          const receipt=await store.addReceipt(receiptValues);
+          const receipt=await step('addReceipt',()=>store.addReceipt(receiptValues));
           // Exact retry must not duplicate receipt or bank transaction.
-          const receiptReplay=await store.addReceipt(receiptValues);
+          const receiptReplay=await step('addReceipt-replay',()=>store.addReceipt(receiptValues));
           if(receiptReplay.id!==receipt.id) throw new Error('receipt idempotency replay mismatch');
 
           state=store.getState(); ar=state.receivables.find(x=>x.id===billing.receivableId);
@@ -94,8 +95,8 @@ def run():
           const planA=store.salaryPaymentPlan(groupA.key,[keyA]);
           if(!planA.allowed||planA.selectedCommission!==3500||planA.selectedPayable!==3500) throw new Error('salary payment plan mismatch');
           const salaryValues={payrollId:groupA.primaryPayrollId,date:'2026-11-11',amount:3500,commissionSelectionKeys:[keyA],bankId:'bank-p33',bankAccountId:'bank-p33',paymentMethod:'銀行轉帳',fee:10,feePayer:'company',note:'P33 薪資',idempotencyKey:'p33-salary-1'};
-          const salaryPayment=await store.addSalaryPayment(salaryValues);
-          const salaryReplay=await store.addSalaryPayment(salaryValues);
+          const salaryPayment=await step('addSalaryPayment',()=>store.addSalaryPayment(salaryValues));
+          const salaryReplay=await step('addSalaryPayment-replay',()=>store.addSalaryPayment(salaryValues));
           if(salaryReplay.id!==salaryPayment.id) throw new Error('salary payment idempotency mismatch');
           state=store.getState();bank=state.banks.find(x=>x.id==='bank-p33');
           if(state.salaryPayments.length!==1||state.bankTransactions.filter(x=>x.sourceId===salaryPayment.id).length!==1) throw new Error('salary bank linkage duplicate');
@@ -103,8 +104,8 @@ def run():
 
           // Retention receipt is separate from current AR settlement.
           const retentionValues={receivableId:ar.id,date:'2026-11-20',amount:1470,bankId:'bank-p33',bankAccountId:'bank-p33',paymentMethod:'銀行轉帳',fee:20,feePayer:'company',note:'P33 保留款',idempotencyKey:'p33-retention-1'};
-          const retention=await store.addRetentionReceipt(retentionValues);
-          const retentionReplay=await store.addRetentionReceipt(retentionValues);
+          const retention=await step('addRetentionReceipt',()=>store.addRetentionReceipt(retentionValues));
+          const retentionReplay=await step('addRetentionReceipt-replay',()=>store.addRetentionReceipt(retentionValues));
           if(retentionReplay.id!==retention.id) throw new Error('retention idempotency mismatch');
           state=store.getState(); ar=state.receivables.find(x=>x.id===billing.receivableId);bank=state.banks.find(x=>x.id==='bank-p33');
           if(ar.retentionReceived!==1470||ar.remainingRetention!==0) throw new Error('retention summary mismatch');
@@ -112,10 +113,10 @@ def run():
           if(bank.income!==14420||bank.balance!==110910) throw new Error('retention bank credit mismatch');
 
           // Material purchase -> payable -> bank payment -> stock usage.
-          const vendor=await store.saveVendor({name:'P33 材料商',taxId:'12345678'});
+          const vendor=await step('saveVendor',()=>store.saveVendor({name:'P33 材料商',taxId:'12345678'}));
           const materialValues={name:'P33 測試材料',code:'P33-MAT',vendor:vendor.id,unit:'桶',unitPrice:100,model:'',note:'P33',inventoryMode:'purchase',openingStock:0,purchaseQuantity:10,purchaseDate:'2026-11-05',idempotencyKey:'p33-material-create-1'};
-          const material=await store.saveMaterial(materialValues);
-          const materialReplay=await store.saveMaterial(materialValues);
+          const material=await step('saveMaterial',()=>store.saveMaterial(materialValues));
+          const materialReplay=await step('saveMaterial-replay',()=>store.saveMaterial(materialValues));
           if(materialReplay.id!==material.id) throw new Error('material creation idempotency mismatch');
           state=store.getState();
           const inventoryReceipt=state.inventoryReceipts.find(x=>x.material===material.id);
@@ -124,8 +125,8 @@ def run():
           if(state.materials.find(x=>x.id===material.id).stock!==10) throw new Error('inventory stock receipt mismatch');
 
           const payableValues={payableId:payable.id,date:'2026-11-06',amount:1000,bankId:'bank-p33',bankAccountId:'bank-p33',paymentMethod:'銀行轉帳',fee:5,feePayer:'company',note:'P33 應付',idempotencyKey:'p33-payable-payment-1'};
-          const pp=await store.addPayablePayment(payableValues);
-          const ppReplay=await store.addPayablePayment(payableValues);
+          const pp=await step('addPayablePayment',()=>store.addPayablePayment(payableValues));
+          const ppReplay=await step('addPayablePayment-replay',()=>store.addPayablePayment(payableValues));
           if(ppReplay.id!==pp.id) throw new Error('payable payment idempotency mismatch');
           state=store.getState();bank=state.banks.find(x=>x.id==='bank-p33');
           const paidPayable=state.payables.find(x=>x.id===payable.id);
@@ -133,13 +134,13 @@ def run():
           if(state.payments.length!==1||state.bankTransactions.filter(x=>x.sourceId===pp.id).length!==1) throw new Error('payable bank linkage duplicate');
           if(bank.expense!==4515||bank.balance!==109905) throw new Error('payable bank debit mismatch');
 
-          const usage=await store.saveMaterialUsage({date:'2026-11-07',employee:e1.id,project:project.id,material:material.id,vendor:vendor.id,quantity:2,unitPrice:100,note:'P33 領料'});
+          const usage=await step('saveMaterialUsage',()=>store.saveMaterialUsage({date:'2026-11-07',employee:e1.id,project:project.id,material:material.id,vendor:vendor.id,quantity:2,unitPrice:100,note:'P33 領料'}));
           state=store.getState();
           if(state.materials.find(x=>x.id===material.id).stock!==8) throw new Error('material usage stock deduction mismatch');
           if(usage.payableId) throw new Error('inventory usage must not create second payable');
 
           // Input invoice links to the existing payable without changing its principal.
-          const inputInvoice=await store.saveInvoice({invoiceType:'input',sourceId:payable.id,payableId:payable.id,taxMode:'未稅',amount:1000,status:'issued',invoiceNumber:'P33IN0001',invoiceDate:'2026-11-06',note:'P33 進項'});
+          const inputInvoice=await step('saveInvoice-input',()=>store.saveInvoice({invoiceType:'input',sourceId:payable.id,payableId:payable.id,taxMode:'未稅',amount:1000,status:'issued',invoiceNumber:'P33IN0001',invoiceDate:'2026-11-06',note:'P33 進項'}));
           if(inputInvoice.netAmount!==1000||inputInvoice.taxAmount!==50||inputInvoice.sourceId!==payable.id) throw new Error('input invoice mismatch');
 
           // Global consistency audit must find no blocking errors in this synthetic modern flow.
