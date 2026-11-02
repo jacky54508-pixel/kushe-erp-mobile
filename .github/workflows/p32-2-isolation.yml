@@ -1,0 +1,29 @@
+name: P32-2 isolated WebAuthn protocol laboratory
+on:
+  push:
+    branches: [p32-2-auth-isolation-20261102]
+permissions:
+  contents: read
+jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned laboratory tools
+        run: |
+          python -m pip install playwright==1.57.0 cryptography==46.0.4
+          python -m playwright install --with-deps chromium
+      - name: Test synthetic virtual authenticator only
+        run: python .p32-2-isolation/tests/native-webauthn.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p32-2-isolated-protocol-evidence
+          path: .p32-2-isolation/evidence/
+          retention-days: 7
