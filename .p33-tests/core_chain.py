@@ -13,14 +13,16 @@ with sync_playwright() as p:
     page.goto("http://127.0.0.1:8765/.p33-tests/store.html")
     page.wait_for_function("() => !!window.KuSheERPStore")
     r=page.evaluate("""async () => {
-      const store=window.KuSheERPStore; await store.load();
-      const customer=await store.saveCustomer({name:"鏈路測試建設"});
-      const project=await store.saveProject({name:"鏈路測試案場",customer:customer.id,status:"進行中",defaultRetentionMode:"none",defaultRetentionBase:"taxIncluded",defaultInvoiceChoice:"no_invoice",defaultTaxMode:"未稅",defaultCommissionBasis:"preTax"});
-      const a=await store.saveEmployee({name:"鏈路員工甲",dailyRate:2000,commissionRate:25,commissionBasis:"preTax",status:"在職"});
-      const b=await store.saveEmployee({name:"鏈路員工乙",dailyRate:2000,commissionRate:25,commissionBasis:"preTax",status:"在職"});
+      const store=window.KuSheERPStore; let stage="load";
+      try{
+      await store.load();
+      stage="saveCustomer"; const customer=await store.saveCustomer({name:"鏈路測試建設"});
+      stage="saveProject"; const project=await store.saveProject({name:"鏈路測試案場",customer:customer.id,status:"進行中",defaultRetentionMode:"none",defaultRetentionBase:"taxIncluded",defaultInvoiceChoice:"no_invoice",defaultTaxMode:"未稅",defaultCommissionBasis:"preTax"});
+      stage="saveEmployeeA"; const a=await store.saveEmployee({name:"鏈路員工甲",dailyRate:2000,commissionRate:25,commissionBasis:"preTax",status:"在職"});
+      stage="saveEmployeeB"; const b=await store.saveEmployee({name:"鏈路員工乙",dailyRate:2000,commissionRate:25,commissionBasis:"preTax",status:"在職"});
       const line={project:project.id,house:"A1",item:"鏈路施工",itemName:"鏈路施工",unit:"式",qty:2,inputPrice:7000,unitPrice:7000,taxMode:"未稅",billable:true,sourceType:"manual",pricingType:"actual"};
 
-      const batch=await store.saveDailyBatch({date:"2026-11-10",employeeIds:[a.id,b.id],performanceShares:{[a.id]:100,[b.id]:0},commissionRates:{[a.id]:25,[b.id]:25},commissionBases:{[a.id]:"preTax",[b.id]:"preTax"},workRates:{},lines:[line],workOnly:false,commissionEnabled:true,workMode:"none",workQty:0,note:"chain"});
+      stage="saveDailyBatch"; const batch=await store.saveDailyBatch({date:"2026-11-10",employeeIds:[a.id,b.id],performanceShares:{[a.id]:100,[b.id]:0},commissionRates:{[a.id]:25,[b.id]:25},commissionBases:{[a.id]:"preTax",[b.id]:"preTax"},workRates:{},lines:[line],workOnly:false,commissionEnabled:true,workMode:"none",workQty:0,note:"chain"});
       let state=store.getState();
       const daily=state.dailyLogs.filter(x=>x.batchId===batch);
       const commissions=state.commissions.filter(x=>daily.some(d=>d.id===x.sourceId));
@@ -28,7 +30,7 @@ with sync_playwright() as p:
       const detail=unbilled.details[0];
       const sourceRef={workItemId:detail.workItemId||"",sourceGroupKey:detail.sourceGroupKey||"",sourceItemIndex:detail.sourceItemIndex,dailyLogIds:[...(detail.dailyLogIds||[])],date:detail.date||"",pricingType:detail.pricingType||"actual",taxMode:detail.taxMode||"未稅",quotationId:detail.quotationId||"",quotationLineId:detail.quotationLineId||""};
 
-      const billing=await store.createBilling({
+      stage="createBilling"; const billing=await store.createBilling({
         date:"2026-11-10",customer:customer.id,customerName:customer.name,project:project.id,projectName:project.name,billingMonth:"2026-11",
         taxMode:"未稅",invoiceStatus:"no_invoice",retentionMode:"none",retentionBase:"taxIncluded",
         lines:[{date:detail.date,house:String(detail.house||"").trim(),item:detail.item,unit:detail.unit,qty:detail.qty,price:detail.price,note:detail.note||"",pricingType:detail.pricingType||"actual",taxMode:detail.taxMode||"未稅",sourceRefs:[sourceRef]}],
@@ -47,24 +49,25 @@ with sync_playwright() as p:
         });
       }catch(e){duplicateBillingError=String(e.message||e)}
 
-      const workBatch=await store.saveDailyBatch({date:"2026-11-12",employeeIds:[a.id],workRates:{[a.id]:2000},lines:[],workOnly:true,commissionEnabled:false,workMode:"daily",workQty:1,note:"純點工測試"});
+      stage="saveWorkOnly"; const workBatch=await store.saveDailyBatch({date:"2026-11-12",employeeIds:[a.id],workRates:{[a.id]:2000},lines:[],workOnly:true,commissionEnabled:false,workMode:"daily",workQty:1,note:"純點工測試"});
       state=store.getState();
       const workLog=state.dailyLogs.find(x=>x.batchId===workBatch);
       const payroll=store.monthlyPayrollGroups().filter(x=>x.month==="2026-11").map(x=>({employeeId:x.employeeId,employeeName:x.employeeName,baseSalary:x.baseSalary,commission:x.commission,total:x.total}));
 
-      const vendor=await store.saveVendor({name:"鏈路材料廠商"});
-      const material=await store.saveMaterial({name:"鏈路材料",code:"P33-MAT",unit:"支",vendor:vendor.id,unitPrice:100,inventoryMode:"opening",openingStock:10,note:""});
-      const receipt=await store.addInventoryReceipt({material:material.id,quantity:5,unitPrice:100,date:"2026-11-10",note:"進貨",idempotencyKey:"p33-inv-1"});
+      stage="saveVendor"; const vendor=await store.saveVendor({name:"鏈路材料廠商"});
+      stage="saveMaterial"; const material=await store.saveMaterial({name:"鏈路材料",code:"P33-MAT",unit:"支",vendor:vendor.id,unitPrice:100,inventoryMode:"opening",openingStock:10,note:""});
+      stage="addInventoryReceipt"; const receipt=await store.addInventoryReceipt({material:material.id,quantity:5,unitPrice:100,date:"2026-11-10",note:"進貨",idempotencyKey:"p33-inv-1"});
       state=store.getState();
       const invPayable=state.payables.find(x=>x.id===receipt.payableId);
       const payableCountBeforeUsage=state.payables.length;
-      const usage=await store.saveMaterialUsage({date:"2026-11-11",employee:a.id,project:project.id,material:material.id,vendor:vendor.id,quantity:3,unitPrice:100,note:"領料"});
+      stage="saveMaterialUsage"; const usage=await store.saveMaterialUsage({date:"2026-11-11",employee:a.id,project:project.id,material:material.id,vendor:vendor.id,quantity:3,unitPrice:100,note:"領料"});
       state=store.getState();
       const materialAfter=state.materials.find(x=>x.id===material.id);
       const payableCountAfterUsage=state.payables.length;
-      const audit=store.financialIntegrityAudit();
+      stage="financialIntegrityAudit"; const audit=store.financialIntegrityAudit();
 
       return {
+        __stage:"complete",
         daily:daily.map(x=>({employee:x.employee,performance:x.performance,share:x.performanceShare,commission:x.commission,groupTotal:x.groupTotal})),
         commissions:commissions.map(x=>({employee:x.employee,untaxedAmount:x.untaxedAmount,commission:x.commission})),
         unbilled:{amount:unbilled.amount,count:unbilled.count,details:unbilled.details.length},
@@ -78,8 +81,10 @@ with sync_playwright() as p:
         auditSummary:audit.summary,
         auditBlocking:(audit.issues||[]).filter(x=>x.severity==="BLOCKING").map(x=>({section:x.section,code:x.code,message:x.message}))
       };
+      }catch(error){return {__error:String(error?.message||error),__stage:stage,stack:String(error?.stack||"")}}
     }""")
     print(json.dumps(r,ensure_ascii=False,indent=2))
+    check("__error" not in r,"core chain JS error",r)
     check(sorted((x["performance"],x["share"],x["commission"]) for x in r["daily"])==[(0,0,0),(14000,100,3500)],"daily allocation",r)
     check(len(r["commissions"])==1 and r["commissions"][0]["untaxedAmount"]==14000 and r["commissions"][0]["commission"]==3500,"commission link",r)
     check(r["unbilled"]=={"amount":14000,"count":1,"details":1},"unbilled dedupe",r)
