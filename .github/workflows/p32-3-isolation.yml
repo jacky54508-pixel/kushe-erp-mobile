@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-          fetch-depth: 2
+          fetch-depth: 0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
@@ -21,14 +21,15 @@ jobs:
         run: |
           set -euo pipefail
           echo '2ec7ad86e01cb24b5fec78cbef10747c88384fbe314c50e9f97d3200356522dc  .p32-3-isolation/tests/auth-service.py' | sha256sum -c -
-          git diff --exit-code HEAD^ HEAD -- assets index.html '*print*' enterprise tools
-          python -m py_compile .p32-3-isolation/tests/auth-service.py
+          echo '575fbffaa6b0a55a988dd9b2867db7459ead12094adde99b036cad4d68c9072c  .p32-3-isolation/tests/launch.py' | sha256sum -c -
+          git diff --exit-code 84fc3a5867595b93fabcee87633a416019c0f572 HEAD -- assets index.html '*print*' enterprise tools
+          python -m py_compile .p32-3-isolation/tests/auth-service.py .p32-3-isolation/tests/launch.py
       - name: Install pinned public laboratory dependencies
         run: |
           python -m pip install playwright==1.57.0 PyJWT==2.10.1
           python -m playwright install --with-deps chromium
       - name: Real Auth plus fresh empty database; no company services
-        run: python .p32-3-isolation/tests/auth-service.py
+        run: python .p32-3-isolation/tests/launch.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
