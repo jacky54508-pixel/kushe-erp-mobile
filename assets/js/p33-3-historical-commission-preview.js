@@ -94,6 +94,26 @@
       html += '</div>';
     });
     if (audit.warnings.length) html += '<p class="p33-preview-warning">付款保護：'+audit.warnings.map(esc).join('；')+'</p>';
+
+    var gate = store && typeof store.p33Oct07CommissionRepairPreview==='function'
+      ? store.p33Oct07CommissionRepairPreview(batch.batchId) : null;
+    if (gate) {
+      html += '<section class="p33-preview-group"><h4>P33-4 指定歷史更正安全檢查</h4>';
+      html += '<p><strong>'+(gate.allowed?'符合交易前檢查條件（仍未執行更正）':'安全門禁未通過，禁止更正')+'</strong></p>';
+      html += '<p>限定 2026/10/07・宏觀展業・劉佳勳／柯智耀，僅調整兩位員工各 $1,750 抽成差額及 10 月未付款薪資。</p>';
+      if (gate.payroll.length) {
+        html += '<div class="p33-preview-scroll"><table><thead><tr><th>員工</th><th>10 月原薪資</th><th>10 月修正後試算</th><th>差額</th><th>付款狀態</th></tr></thead><tbody>';
+        gate.payroll.forEach(function (row) {
+          html += '<tr><td>'+esc(row.employeeName)+'</td><td>'+money(row.oldPayrollTotal)+'</td><td>'+money(row.expectedPayrollTotal)+'</td><td>'+money(row.difference)+'</td><td>'+esc(row.payrollStatus)+'</td></tr>';
+        });
+        html += '</tbody></table></div>';
+      }
+      if (gate.blockers.length) {
+        html += '<p class="p33-preview-warning">停止原因：'+gate.blockers.map(function (row) { return esc(row.message); }).join('；')+'</p>';
+      }
+      html += '<p>此處仍為唯讀驗收畫面。沒有更正按鈕，不會寫入任何歷史資料；請款、應收、銀行、其他日期及正式版 main 都不在變更範圍內。</p></section>';
+    }
+
     html += '<p class="p33-preview-footnote">根據此裝置已載入的 ERP 紀錄試算；此預覽不代表已核准更正，且無任何儲存按鈕。</p></div></details>';
     return html;
   }

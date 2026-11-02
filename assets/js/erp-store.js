@@ -7008,7 +7008,175 @@
     persist('更新系統設定', { fields:Object.keys(next), defaultTaxChanged });
     return { changed:true, settings:{...next}, defaultTaxChanged };
   }
+
+  // P33-4: narrowly scoped 2026-10-07 historical commission correction.
+  const P33_4_OCT07=Object.freeze({date:'2026-10-07',month:'2026-10',project:'宏觀展業',employees:['劉佳勳','柯智耀'],grossWork:14000,personalPerformance:7000,rate:25,oldCommission:1750,correctCommission:3500,perEmployeeDelta:1750});
+  function exactP33(value,expected){return typeof value==='number'&&Number.isFinite(value)&&Math.abs(value-expected)<0.001}
+  function p33Oct07CommissionRepairPlan(batchId){
+    const scope=P33_4_OCT07,blockers=[],block=(code,message)=>{if(!blockers.some((row)=>row.code===code))blockers.push({code,message})};
+    const id=String(batchId||'').trim(),logs=id?(state.dailyLogs||[]).filter((log)=>String(log.batchId||log.id||'')===id):[];
+    const arr=(x)=>Array.isArray(x)?x:[];
+    const employeeId=(x)=>String(x?.employee||x?.employeeId||'');
+    const projectId=(x)=>String(x?.project||x?.projectId||'');
+    const pairs=[],payrollChanges=[],relatedBillingIds=new Set();
+    if(!id)block('BATCH_ID_REQUIRED','請先選擇 10/7 每日施工紀錄');
+    if(logs.length!==2)block('BATCH_SCOPE','指定施工批次必須剛好有兩位員工');
+    const first=logs[0],groupId=String(first?.groupId||'');
+    if(!groupId||logs.some((log)=>String(log.groupId||'')!==groupId||String(log.batchId||log.id||'')!==id))
+      block('GROUP_IDENTITY','兩筆施工來源的批次與案場群組不唯一');
+    if(logs.some((log)=>String(log.date||'')!==scope.date))
+      block('DATE_MISMATCH','只允許 2026/10/07 的施工紀錄');
+    if(groupId&&(state.dailyLogs||[]).some((log)=>String(log.groupId||'')===groupId&&!logs.includes(log)))
+      block('SHARED_GROUP_OUTSIDE_BATCH','相同來源群組被其他施工批次引用');
+    const pid=projectId(first),projectMatches=(state.projects||[]).filter((row)=>String(row.id||'')===pid);
+    if(projectMatches.length!==1||String(projectMatches[0]?.name||'').trim()!==scope.project||logs.some((log)=>projectId(log)!==pid))
+      block('PROJECT_IDENTITY','案場必須唯一對應宏觀展業，且兩筆施工案場 ID 相同');
+    const items=arr(first?.items),itemTotal=items.reduce((sum,item)=>{
+      const saved=Number(item?.untaxedSubtotal),fallback=Number(item?.qty)*Number(item?.price);
+      return sum+(Number.isFinite(saved)&&saved>0?saved:fallback);
+    },0);
+    if(!items.length||!exactP33(itemTotal,scope.grossWork)||logs.some((log)=>JSON.stringify(arr(log.items))!==JSON.stringify(items)))
+      block('WORK_SOURCE_PARITY','兩位員工的施工明細、副本與未稅總額必須一致，合計 $14,000');
+    if(logs.some((log)=>!exactP33(log.groupTotal,scope.grossWork)||!exactP33(log.performance,scope.personalPerformance)||
+       (log.untaxedPerformance!==undefined&&!exactP33(log.untaxedPerformance,scope.personalPerformance))||
+       !exactP33(log.rate,scope.rate)||!exactP33(log.commission,scope.oldCommission)||
+       normalizeCommissionBasis(log.commissionBasis)!=='preTax'||
+       (log.commissionBaseAmount!==undefined&&!exactP33(log.commissionBaseAmount,scope.personalPerformance))||
+       (log.untaxedCommissionBaseAmount!==undefined&&!exactP33(log.untaxedCommissionBaseAmount,scope.personalPerformance))))
+      block('OLD_COMMISSION_FACTS','原始紀錄必須為未稅每人業績 $7,000、抽成 25%／$1,750，且尚未部分修正');
+    if(logs.length===2&&new Set(logs.map(employeeId)).size!==2)block('DUPLICATE_EMPLOYEE','同批次員工 ID 重複');
+    const names=[];
+    for(const log of logs){
+      const eid=employeeId(log),matches=(state.employees||[]).filter((row)=>String(row.id||'')===eid),name=String(matches[0]?.name||'').trim();
+      names.push(name);
+      if(matches.length!==1||!scope.employees.includes(name)||String(log.employeeName||'').trim()!==name)
+        block('EMPLOYEE_IDENTITY','員工主檔和施工來源必須唯一對應劉佳勳、柯智耀');
+      const sources=(state.commissions||[]).filter((row)=>row.sourceType==='daily-log'&&String(row.sourceId||'')===String(log.id||''));
+      const source=sources[0];
+      if(sources.length!==1||employeeId(source)!==eid||projectId(source)!==pid||
+         String(source?.date||'')!==scope.date||!exactP33(source?.rate,scope.rate)||
+         !exactP33(source?.commission,scope.oldCommission)||!exactP33(source?.untaxedAmount,scope.personalPerformance)||
+         String(source?.status||'')!=='已列入薪資'||normalizeCommissionBasis(source?.commissionBasis)!=='preTax'||
+         (source?.commissionBaseAmount!==undefined&&!exactP33(source.commissionBaseAmount,scope.personalPerformance)))
+        block('COMMISSION_SOURCE_LINK',(name||'指定員工')+' 每日施工與抽成來源 ID、業績、狀態或金額不一致');
+      if(source&&sources.length===1)pairs.push({log,source,employeeId:eid,name});
+    }
+    if(names.length!==2||new Set(names).size!==2||scope.employees.some((name)=>!names.includes(name)))
+      block('EMPLOYEE_PAIR','兩位指定員工姓名及身份必須完全一致');
+    // Billing and receivable are evidence only, never updated.
+    const bills=(state.billings||[]).filter((billing)=>{
+      const refs=arr(billing.sourceItemRefs).concat(arr(billing.lines).flatMap((line)=>arr(line.sourceRefs)));
+      return refs.some((ref)=>String(ref.sourceGroupKey||'')===groupId);
+    });
+    items.forEach((item)=>{
+      if(item.billable===false||String(item.billingStatus||'')!=='已請款'||!String(item.billingId||''))
+        block('BILLING_ITEM_STATUS','來源施工明細不是全部已請款，需先核對');
+      if(item.billingId)relatedBillingIds.add(String(item.billingId));
+    });
+    bills.forEach((bill)=>relatedBillingIds.add(String(bill.id||'')));
+    if(bills.length!==1||relatedBillingIds.size!==1||!relatedBillingIds.has(String(bills[0]?.id||''))||projectId(bills[0])!==pid)
+      block('BILLING_RELATION','施工來源必須唯一連回同案場的一張請款單');
+    const bill=bills[0],receivables=(state.receivables||[]).filter((row)=>bill&&String(row.billingId||'')===String(bill.id||'')),ar=receivables[0];
+    if(receivables.length!==1||(bill?.receivableId&&String(bill.receivableId)!==String(ar?.id||'')))
+      block('RECEIVABLE_RELATION','請款單必須唯一連結應收帳款');
+    const receipts=(state.receipts||[]).filter((row)=>ar&&String(row.receivableId||'')===String(ar.id||''));
+    const retention=(state.retentionReceipts||[]).filter((row)=>ar&&String(row.receivableId||'')===String(ar.id||''));
+    if(receipts.length||retention.length||num(ar?.received)>0||num(ar?.retentionReceived)>0)
+      block('RECEIPT_CHANGED','此來源已有收款或保留款收回，需重新核對');
+    const views=monthlyPayrollGroups();
+    for(const pair of pairs){
+      const e=pair.employeeId,records=(state.payroll||[]).filter((row)=>employeeId(row)===e&&monthOf(row.month)===scope.month);
+      const matches=views.filter((row)=>String(row.employeeId||'')===e&&String(row.month||'')===scope.month);
+      const payroll=records[0],view=matches[0];
+      if(records.length!==1||matches.length!==1||payroll?.status!=='未付款')
+        block('PAYROLL_RECORD_IDENTITY',pair.name+' 10 月未付款薪資紀錄必須唯一');
+      const commissions=(state.commissions||[]).filter((row)=>employeeId(row)===e&&monthOf(row.date)===scope.month&&row.status==='已列入薪資');
+      const oldSum=commissions.reduce((sum,row)=>sum+num(row.commission),0);
+      if(!payroll||!view||!exactP33(payroll.commission,oldSum)||!exactP33(payroll.total,payrollNet(payroll))||!exactP33(view.commission,oldSum))
+        block('PAYROLL_RECONCILIATION',pair.name+' 10 月薪資或抽成來源加總不一致');
+      const sources=arr(view?.sources).filter((row)=>row.type==='抽成'&&row.sourceType==='daily-log'&&String(row.sourceId||'')===String(pair.log.id||''));
+      if(sources.length!==1||!exactP33(sources[0]?.amount,scope.oldCommission))
+        block('PAYROLL_SOURCE_IDENTITY',pair.name+' 月薪來源不存在、重複或金額不符');
+      const payment=view?payrollPaymentTruth(view):null,historyLock=payrollHistoryLock(e,scope.month),
+            sourceLock=commissionSettlementLock(pair.source),dailyLock=dailyLogCommissionSettlementLock(pair.log);
+      const salaryExists=(state.salaryPayments||[]).some((row)=>(employeeId(row)===e&&monthOf(row.month||row.date)===scope.month)||
+        records.some((record)=>String(row.payrollId||'')===String(record.id||'')));
+      const paid=Boolean(!payment||payment.integrity!=='none'||payment.hasVerifiedPayment||payment.history?.length||
+        payment.explicitPayments?.length||payment.verifiedLegacyTransactions?.length||payment.projectSettlementHistory?.length||
+        payment.missingBankPaymentIds?.length||payment.missingProjectSettlementIds?.length||
+        payment.bankTransactionIds?.length||historyLock.locked||sourceLock.locked||dailyLock.locked||salaryExists||
+        (payroll&&(payroll.paidAt||payroll.payDate||payroll.paymentTransactionId||num(payroll.paidAmount)>0)));
+      if(paid)block('PAYMENT_OR_SETTLEMENT_LOCK',pair.name+' 已付款、已結算或付款證據無法確認，禁止更正');
+      payrollChanges.push({employeeId:e,employeeName:pair.name,payrollId:String(payroll?.id||''),
+        oldPayrollTotal:num(payroll?.total),expectedPayrollTotal:num(payroll?.total)+scope.perEmployeeDelta,
+        payrollStatus:view?.status||payroll?.status||'待查核',commissionSourceId:String(pair.source.id),dailyLogId:String(pair.log.id),
+        oldCommission:scope.oldCommission,expectedCommission:scope.correctCommission,difference:scope.perEmployeeDelta});
+    }
+    if(pairs.length!==2||payrollChanges.length!==2)block('SOURCE_COUNT','必須精確命中兩筆施工及抽成來源');
+    return {readOnly:true,allowed:blockers.length===0,blockers,batchId:id,groupId,date:scope.date,project:scope.project,
+      constructionTotal:scope.grossWork,oldCommissionTotal:scope.oldCommission*2,correctCommissionTotal:scope.correctCommission*2,
+      totalDifference:scope.perEmployeeDelta*2,sourceCount:pairs.length,payroll:payrollChanges,
+      billingIds:[...relatedBillingIds],receivableId:String(ar?.id||''),receiptCount:receipts.length,
+      baseline:storeFingerprintDigest(storeStateFingerprint(state))};
+  }
+  function p33Oct07CommissionRepairPreview(batchId){return p33Oct07CommissionRepairPlan(batchId)}
+  function p33Oct07CommissionRepair(batchId,approval){
+    requireStoreTransactionDraft();
+    const phrase='P33-4|2026-10-07|宏觀展業|劉佳勳+柯智耀',reason=String(approval?.reason||'').trim();
+    if(approval?.confirmed!==true||String(approval?.phrase||'')!==phrase||reason.length<4)
+      throw storeError('P33-4 需要逐筆確認、專用口令及修正原因','P33_4_CONFIRMATION_REQUIRED');
+    const plan=p33Oct07CommissionRepairPlan(batchId);
+    if(!plan.allowed)throw storeError('P33-4 安全核對未通過，未修改任何資料：'+plan.blockers.map((x)=>x.message).join('；'),'P33_4_PRECHECK_FAILED');
+    if(!String(approval?.baseline||'')||String(approval.baseline)!==plan.baseline)
+      throw storeError('P33-4 檢查後來源已變更，請重新唯讀預覽','P33_4_STALE_PREVIEW');
+    const dIds=new Set(plan.payroll.map((x)=>x.dailyLogId)),cIds=new Set(plan.payroll.map((x)=>x.commissionSourceId)),
+      pIds=new Set(plan.payroll.map((x)=>x.payrollId));
+    const protectedKeys=Object.keys(state).filter((x)=>!['dailyLogs','commissions','payroll','meta','audit'].includes(x)),
+      protectedBefore=Object.fromEntries(protectedKeys.map((x)=>[x,storeStateFingerprint(state[x])])),
+      unrelatedBefore={
+        dailyLogs:storeStateFingerprint(state.dailyLogs.filter((x)=>!dIds.has(String(x.id)))),
+        commissions:storeStateFingerprint(state.commissions.filter((x)=>!cIds.has(String(x.id)))),
+        payroll:storeStateFingerprint(state.payroll.filter((x)=>!pIds.has(String(x.id))))
+      };
+    const now=new Date().toISOString(),scope=P33_4_OCT07;
+    for(const row of plan.payroll){
+      const daily=state.dailyLogs.find((x)=>String(x.id||'')===row.dailyLogId),
+        comm=state.commissions.find((x)=>String(x.id||'')===row.commissionSourceId),
+        payroll=state.payroll.find((x)=>String(x.id||'')===row.payrollId);
+      if(!daily||!comm||!payroll)throw storeError('P33-4 指定來源不存在','P33_4_TARGET_MISSING');
+      daily.commission=scope.correctCommission;daily.commissionBaseAmount=scope.grossWork;
+      daily.untaxedCommissionBaseAmount=scope.grossWork;daily.updatedAt=now;
+      comm.commission=scope.correctCommission;comm.commissionBaseAmount=scope.grossWork;comm.updatedAt=now;
+      payroll.commission+=scope.perEmployeeDelta;payroll.total+=scope.perEmployeeDelta;payroll.updatedAt=now;
+    }
+    const salaryAfter=monthlyPayrollGroups();
+    for(const row of plan.payroll){
+      const daily=state.dailyLogs.find((x)=>String(x.id||'')===row.dailyLogId),
+        comm=state.commissions.find((x)=>String(x.id||'')===row.commissionSourceId),
+        payroll=state.payroll.find((x)=>String(x.id||'')===row.payrollId),
+        view=salaryAfter.find((x)=>String(x.employeeId)===row.employeeId&&String(x.month)===scope.month);
+      if(!exactP33(daily.commission,3500)||!exactP33(daily.commissionBaseAmount,14000)||
+        !exactP33(comm.commission,3500)||!exactP33(comm.commissionBaseAmount,14000)||
+        !exactP33(payroll.total,row.expectedPayrollTotal)||!exactP33(payroll.total,payrollNet(payroll))||
+        !view||!exactP33(view.total,row.expectedPayrollTotal)||view.paid!==0||view.status!=='未付款')
+        throw storeError('P33-4 更正後薪資、付款或抽成核對失敗','P33_4_POSTCHECK_FAILED');
+    }
+    for(const key of protectedKeys)if(protectedBefore[key]!==storeStateFingerprint(state[key]))
+      throw storeError('P33-4 非目標資料被改動：'+key,'P33_4_PROTECTED_DATA_CHANGED');
+    for(const [key,ids] of [['dailyLogs',dIds],['commissions',cIds],['payroll',pIds]])
+      if(unrelatedBefore[key]!==storeStateFingerprint(state[key].filter((x)=>!ids.has(String(x.id)))))
+        throw storeError('P33-4 非目標紀錄被改動：'+key,'P33_4_UNRELATED_DATA_CHANGED');
+    persist('P33-4 10/7 宏觀展業雙員工抽成更正',{scope:'P33-4',date:scope.date,batchId:plan.batchId,
+      project:scope.project,employeeIds:plan.payroll.map((x)=>x.employeeId),sourceIds:plan.payroll.map((x)=>x.commissionSourceId),
+      delta:plan.totalDifference,reason});
+    return {applied:true,scope:'P33-4',date:scope.date,project:scope.project,billingUnchanged:true,
+      changes:plan.payroll.map((x)=>({employeeName:x.employeeName,difference:x.difference,
+        oldCommission:x.oldCommission,correctCommission:x.expectedCommission,
+        oldPayrollTotal:x.oldPayrollTotal,newPayrollTotal:x.expectedPayrollTotal}))};
+  }
+
   const STORE_WRITER_NAMES=new Set([
+    'p33Oct07CommissionRepair',
     'saveExternalBillingDocument','archiveExternalBillingDocument',
     'saveHistoricalBillingDetails',
     'saveReceivableCheque','cancelReceivableCheque','clearReceivableCheque',
@@ -7030,7 +7198,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ externalBillingContext, externalBillingDocumentIndex, saveExternalBillingDocument, archiveExternalBillingDocument, historicalQuotationChoices, billingDocumentState, billingDocumentLines, saveHistoricalBillingDetails, dailyDraftSnapshot, dailyDraftReview, receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ p33Oct07CommissionRepairPreview, p33Oct07CommissionRepair, externalBillingContext, externalBillingDocumentIndex, saveExternalBillingDocument, archiveExternalBillingDocument, historicalQuotationChoices, billingDocumentState, billingDocumentLines, saveHistoricalBillingDetails, dailyDraftSnapshot, dailyDraftReview, receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
