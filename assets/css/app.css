@@ -1617,3 +1617,11 @@ html,body,.app-shell{max-width:100%;overflow-x:hidden}
   .mfa-otp{gap:5px}
   .mfa-digit{height:48px;font-size:20px!important;line-height:48px!important}
 }
+
+/* P32-1: only the MFA code field. Auth policy and ERP/PDF surfaces unchanged. */
+#mfaView .mfa-otp-single{display:block;max-width:390px}
+#mfaView .mfa-otp-single .mfa-code{width:100%;height:58px;letter-spacing:.28em;font-variant-numeric:tabular-nums;caret-color:#0c2f5a}
+#mfaView .mfa-otp-single .mfa-code::placeholder{letter-spacing:.04em;font-size:16px;font-weight:500;color:#71839a}
+#mfaView .mfa-otp-single .mfa-code[aria-invalid="true"]{border-color:#b33c36!important}
+#mfaView .mfa-code-hint{max-width:390px;margin:10px auto 0;color:#607086;font-size:13px;line-height:1.65;text-align:left}
+@media(max-width:620px){#mfaView .mfa-otp-single .mfa-code{height:54px;min-height:54px}#mfaView .mfa-code-hint{font-size:12px}}

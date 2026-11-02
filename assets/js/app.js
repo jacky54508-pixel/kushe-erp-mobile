@@ -75,9 +75,12 @@
       && Boolean(flow.userId) && window.KusheAuthGate?.user?.()?.id === flow.userId;
   }
   function mfaDigits(){return $$('.mfa-digit')}
-  function mfaCode(){return mfaDigits().map((node)=>String(node.value||'').replace(/\D/g,'')).join('').slice(0,6)}
-  function clearMfaDigits(){mfaDigits().forEach((node)=>{node.value=''})}
-  function focusMfaDigit(index=0){mfaDigits()[Math.max(0,Math.min(5,index))]?.focus()}
+  // P32-1: preserve complete codes supplied by password managers and native autofill.
+  // Do not truncate or extract digits from unrelated clipboard content.
+  function normalizeMfaCode(value){return String(value??'').replace(/[０-９]/g,char=>String(char.charCodeAt(0)-0xff10)).replace(/\s/g,'')}
+  function mfaCode(){return normalizeMfaCode(mfaDigits().map(node=>node.value||'').join(''))}
+  function clearMfaDigits(){mfaDigits().forEach((node)=>{node.value='';node.removeAttribute('aria-invalid')})}
+  function focusMfaDigit(index=0){const inputs=mfaDigits();inputs[Math.max(0,Math.min(inputs.length-1,index))]?.focus()}
   function mfaReady() {
     // Ready means the user may submit a code; a fresh challenge is created on submit.
     return mfaCurrent(mfaFlow) && mfaFlow.state === 'ready' && Boolean(mfaFlow.factorId)
@@ -499,26 +502,31 @@
     $('#mfaResetAccepted')?.addEventListener('change',renderMfaState);
     $('#mfaResetSubmit')?.addEventListener('click',()=>void confirmMfaReset());
     $('#mfaForm')?.addEventListener('submit',completeMfa);
-    $('#mfaOtp')?.addEventListener('input',(event)=>{
+    // One native input allows whole-code autofill, normal caret movement and paste.
+    // Only an explicit form submit verifies; a fill/paste never submits on its own.
+    const updateMfaCode=(event)=>{
       const input=event.target.closest?.('.mfa-digit');if(!input||!mfaReady())return;
-      input.value=String(input.value||'').replace(/\D/g,'').slice(-1);
-      const index=Number(input.dataset.mfaDigit)||0;
-      if(input.value&&index<5)focusMfaDigit(index+1);
-      setMfaMessage();renderMfaState();
-    });
-    $('#mfaOtp')?.addEventListener('keydown',(event)=>{
-      const input=event.target.closest?.('.mfa-digit');if(!input||!mfaReady())return;
-      const index=Number(input.dataset.mfaDigit)||0;
-      if(event.key==='Backspace'&&!input.value&&index>0){event.preventDefault();focusMfaDigit(index-1)}
-      if(event.key==='ArrowLeft'&&index>0){event.preventDefault();focusMfaDigit(index-1)}
-      if(event.key==='ArrowRight'&&index<5){event.preventDefault();focusMfaDigit(index+1)}
-    });
+      if(event.isComposing)return;
+      const value=normalizeMfaCode(input.value);
+      if(input.value!==value)input.value=value;
+      const valid=/^[0-9]{0,6}$/.test(value);
+      input.setAttribute('aria-invalid',String(!valid));
+      setMfaMessage(valid?'':'請只輸入 6 位驗證碼；不會自動截取較長的內容。',!valid);
+      renderMfaState();
+    };
+    ['input','change','compositionend'].forEach(type=>$('#mfaOtp')?.addEventListener(type,updateMfaCode));
     $('#mfaOtp')?.addEventListener('paste',(event)=>{
-      if(!mfaReady()){event.preventDefault();return}
-      const digits=String(event.clipboardData?.getData('text')||'').replace(/\D/g,'').slice(0,6);
-      if(!digits)return;
-      event.preventDefault();mfaDigits().forEach((node,index)=>{node.value=digits[index]||''});
-      focusMfaDigit(Math.max(0,Math.min(5,digits.length-1)));setMfaMessage();renderMfaState();
+      const input=event.target.closest?.('.mfa-digit');
+      if(!input||!mfaReady()){event.preventDefault();return}
+      event.preventDefault();
+      const code=normalizeMfaCode(event.clipboardData?.getData('text')||'');
+      if(!/^[0-9]{6}$/.test(code)){
+        clearMfaDigits();input.setAttribute('aria-invalid','true');
+        setMfaMessage('請貼上完整的 6 位驗證碼，不要包含其他文字。',true);
+        renderMfaState();focusMfaDigit();return;
+      }
+      input.value=code;input.setAttribute('aria-invalid','false');
+      setMfaMessage();renderMfaState();focusMfaDigit();
     });
     $('#mfaLogout')?.addEventListener('click',()=>void handleLogout());
     $('#changePasswordForm')?.addEventListener('submit', handleChangePassword);
