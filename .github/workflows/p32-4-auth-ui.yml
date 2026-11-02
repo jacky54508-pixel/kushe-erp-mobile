@@ -31,6 +31,19 @@ jobs:
           assert set(files)==set(expected)
           for name,text in files.items():
               assert hashlib.sha256(text.encode()).hexdigest()==expected[name]
+          s=files['lab/ui_probe.py']
+          old='page.evaluate("window.__originalGet=navigator.credentials.get.bind(navigator.credentials);navigator.credentials.get=()=>Promise.reject(new DOMException(\'cancel\',\'NotAllowedError\'))")'
+          new='page.evaluate("() => { navigator.credentials.get = () => Promise.reject(new DOMException(\'cancel\', \'NotAllowedError\')); }")'
+          assert s.count(old)==1
+          s=s.replace(old,new)
+          old2="outcome='FAIL';error=str(e) if isinstance(e,AssertionError) else type(e).__name__"
+          new2="outcome='FAIL';error=str(e) if isinstance(e,AssertionError) else type(e).__name__;\n        NOTES.append({'diagnostic_frames':[{'file':Path(f.filename).name,'line':f.lineno,'function':f.name} for f in traceback.extract_tb(e.__traceback__) if Path(f.filename).name=='ui_probe.py']})"
+          assert s.count(old2)==1
+          s=s.replace(old2,new2)
+          assert hashlib.sha256(s.encode()).hexdigest()=='e6c96e5b00450d93e5fb3ccc10d9a0b527dd5efb456ad18d0228cf667b8e5e77'
+          files['lab/ui_probe.py']=s
+          expected['lab/ui_probe.py']=hashlib.sha256(s.encode()).hexdigest()
+          for name,text in files.items():
               p=root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text)
               if p.suffix=='.py':ast.parse(text)
           (root/'evidence').mkdir(exist_ok=True)
