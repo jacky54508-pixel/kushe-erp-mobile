@@ -595,7 +595,52 @@
     });
   }
   function currentHashRoute() { return validRoute(decodeURIComponent(window.location.hash.slice(1))); }
+
+  // P36: A missing company context is not the same as a verified "no permission".
+  // Revalidate the same logged-in principal without touching ERP state or changing role policy.
+  let permissionRecoveryPending = null;
+  let permissionRecoveryTarget = null;
+  function confirmedCompanyContext() {
+    const gate=window.KusheAuthGate,context=gate?.companyContext?.(),user=gate?.user?.();
+    return context&&context.shadowVerified===true&&context.status==='active'&&
+      Boolean(user?.id)&&String(context.userId||'')===String(user.id)?context:null;
+  }
+  function recoverCompanyPermission(requested,options={}) {
+    permissionRecoveryTarget={requested,options};
+    if(permissionRecoveryPending)return;
+    // Hide potentially stale business UI until the server confirms the membership again.
+    setAuthView(false);
+    setLoginMessage('正在安全重新驗證公司身分與查看權限…');
+    permissionRecoveryPending=(async()=>{
+      const gate=window.KusheAuthGate;
+      try{
+        const beforeUser=String(gate?.user?.()?.id||'');
+        if(!beforeUser||!await gate?.requireMfa?.())
+          throw new Error('登入狀態已失效，請重新登入並完成雙重驗證。');
+        const result=await gate.resolveCompanyContext();
+        if(!result||!confirmedCompanyContext()||String(result.userId||'')!==beforeUser)
+          throw new Error('無法確認原登入帳號的公司權限，請重新登入。');
+        const originalUser=String(result.legacySourceUserId||'');
+        if(!originalUser||String(result.userId)!==originalUser||result.role==='employee')
+          throw new Error('目前登入帳號不是完整 ERP 管理權限帳號，已停止進入管理系統。');
+        setLoginMessage();
+        setAuthView(true);
+        applyRoleNavigationPermissions();
+        const pending=permissionRecoveryTarget;
+        if(pending&&gate.canView?.(pending.requested))
+          navigate(pending.requested,{...pending.options,replace:true,instant:true});
+        else if(pending)toast('公司權限已重新核對；此帳號未獲授權查看該功能');
+      }catch(error){
+        setAuthView(false);
+        setLoginMessage(String(error?.message||'無法重新驗證公司權限，請重新登入。'),true);
+      }finally{
+        permissionRecoveryPending=null;
+        permissionRecoveryTarget=null;
+      }
+    })();
+  }
   function renderRoute(module, options = {}) {
+    if(!confirmedCompanyContext()) { recoverCompanyPermission(knownRoute(module),options); return; }
     const route = validRoute(module);
     ui.route = route;
     const isDashboard = route === 'dashboard';
@@ -716,8 +761,12 @@
   }
   function navigate(module, options = {}) {
     const requested=knownRoute(module);
-    const route = validRoute(requested);
-    if(route!==requested)toast('此帳號沒有此功能的查看權限');
+    if(!confirmedCompanyContext()){recoverCompanyPermission(requested,options);return;}
+    if(!window.KusheAuthGate?.canView?.(requested)){
+      toast('此帳號沒有此功能的查看權限');
+      return;
+    }
+    const route=requested;
     if (!options.replace && currentHashRoute() !== route) history.pushState({ route }, '', `#${route}`);
     else if (options.replace) history.replaceState({ route }, '', `#${route}`);
     renderRoute(route, options);
@@ -744,7 +793,7 @@
     document.addEventListener('kushe:dashboard-navigate',(event)=>navigate(event.detail?.module));
     $$('[data-route]').forEach((node)=>node.addEventListener('click',()=>navigate(node.dataset.route)));
     $('#openLegacyModule').addEventListener('click', openLegacyModule);
-    window.addEventListener('popstate',()=>renderRoute(currentHashRoute()));
+    window.addEventListener('popstate',()=>renderRoute(knownRoute(decodeURIComponent(window.location.hash.slice(1)))));
   }
   function dateKeys(data) {
     const values=[]; ['billings','receivables','payables','receipts','salaryPayments','bankTransactions','dailyLogs','attendance','materialUsages','invoices'].forEach((key)=>(data[key]||[]).forEach((row)=>{const value=String(row.date||row.month||'').slice(0,7);if(/^\d{4}-\d{2}$/.test(value))values.push(value)}));
