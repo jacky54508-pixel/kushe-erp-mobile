@@ -1,12 +1,12 @@
 <!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>P33-4 isolated historic correction test</title></head><body>
 <script>
 window.KUSHE_PHASE1_CONFIG={};
-window.KusheAuthGate={session:()=>({access_token:'p33-4-synthetic'}),user:()=>({id:'p33-test-user',email:'test@example.invalid'}),requireAuth:async()=>true,requireMfa:async()=>true};
+window.KusheAuthGate={session:()=>({access_token:'p33-4-synthetic'}),user:()=>({id:'p33-test-user',email:'test@example.invalid'}),requireAuth:async()=>true,requireMfa:async()=>true,companyContext:()=>({role:'owner'}),canWrite:()=>true};
 window.KusheLegacyData={refresh(){}};
 window.KusheRecovery={showResult(){}};
 const mode=new URLSearchParams(location.search).get('mode')||'normal';
 const item={workItemId:'p33-work-1',item:'工程施作',house:'A1',qty:14,price:1000,untaxedSubtotal:14000,subtotal:14000,billable:true,billingStatus:'已請款',billingId:'p33-billing'};
-const log=(employee,name,n)=>({id:'p33-log-'+n,batchId:'p33-batch',groupId:'p33-group',date:'2026-10-07',employee,employeeName:name,customer:'p33-customer',project:'p33-project',projectName:'宏觀展業',groupTotal:14000,grossTotal:14000,billingTotal:14000,billable:true,billingStatus:'已請款',billingId:'p33-billing',billingNo:'B20261007-001',performance:7000,untaxedPerformance:7000,taxIncludedPerformance:7350,rate:25,commission:1750,commissionBaseAmount:7000,commissionBasis:'preTax',commissionEnabled:true,items:[{...item}],workMode:'none',workQty:0,workRate:0,isPrimaryWork:false,createdAt:'2026-10-07T00:00:00Z'});
+const log=(employee,name,n)=>({id:'p33-log-'+n,batchId:'p33-batch',groupId:'p33-group',date:'2026-10-07',employee,employeeName:name,customer:'p33-customer',project:'p33-project',projectName:'宏觀展業',groupTotal:14000,grossTotal:14000,billingTotal:14000,billable:true,billingStatus:'已請款',billingId:'p33-billing',billingNo:'B20261102-002',performance:7000,untaxedPerformance:7000,taxIncludedPerformance:7350,rate:25,commission:1750,commissionBaseAmount:7000,commissionBasis:'preTax',commissionEnabled:true,items:[{...item}],workMode:'none',workQty:0,workRate:0,isPrimaryWork:false,createdAt:'2026-10-07T00:00:00Z'});
 const commission=(employee,name,n)=>({id:'p33-com-'+n,sourceType:'daily-log',sourceId:'p33-log-'+n,date:'2026-10-07',employee,employeeName:name,customer:'p33-customer',project:'p33-project',projectName:'宏觀展業',untaxedAmount:7000,commissionBasis:'preTax',commissionBaseAmount:7000,rate:25,commission:1750,status:'已列入薪資'});
 const payroll=(employee,n)=>({id:'p33-payroll-'+n,employee,month:'2026-10',baseSalary:0,commission:1750,fuel:0,meal:0,other:0,overtime:0,bonus:0,allowance:0,advance:0,laborInsurance:0,incomeTax:0,deduction:0,total:1750,status:'未付款'});
 const ref={sourceGroupKey:'p33-group',workItemId:'p33-work-1',sourceItemIndex:0,dailyLogIds:['p33-log-a','p33-log-b']};
@@ -17,8 +17,8 @@ const seed={
   dailyLogs:[log('p33-employee-a','劉佳勳','a'),log('p33-employee-b','柯智耀','b')],
   commissions:[commission('p33-employee-a','劉佳勳','a'),commission('p33-employee-b','柯智耀','b')],
   payroll:[payroll('p33-employee-a','a'),payroll('p33-employee-b','b')],
-  billings:[{id:'p33-billing',number:'B20261007-001',date:'2026-10-07',customer:'p33-customer',project:'p33-project',amount:14000,tax:700,grossTotal:14700,total:14700,receivableId:'p33-ar',sourceType:'daily-work',sourceItemRefs:[ref],lines:[{item:'工程施作',qty:14,price:1000,sourceRefs:[{...ref}]}]}],
-  receivables:[{id:'p33-ar',billingId:'p33-billing',sourceNo:'B20261007-001',project:'p33-project',amount:14700,received:0,retentionReceived:0,status:'未收'}],
+  billings:[{id:'p33-billing',number:'B20261102-002',date:'2026-10-07',customer:'p33-customer',project:'p33-project',amount:14000,tax:700,grossTotal:14700,total:14700,receivableId:'p33-ar',sourceType:'daily-work',sourceItemRefs:[ref],lines:[{item:'工程施作',qty:14,price:1000,sourceRefs:[{...ref}]}]}],
+  receivables:[{id:'p33-ar',billingId:'p33-billing',sourceNo:'B20261102-002',project:'p33-project',amount:14700,received:0,retentionReceived:0,status:'未收'}],
   receipts:[],retentionReceipts:[],salaryPayments:[],commissionSettlements:[],
   bankTransactions:[],banks:[{id:'p33-bank',name:'測試銀行',openingBalance:50000,balance:50000,income:0,expense:0}],
   attendance:[],payables:[],payments:[],invoices:[],vendors:[],materials:[],materialUsages:[],inventoryReceipts:[],projectCosts:[],dailyItemPresets:[],quotations:[],quotationPrices:[],quotationTemplates:[],audit:[],
@@ -30,5 +30,8 @@ if(mode==='duplicate'){seed.dailyLogs.push({...seed.dailyLogs[0],id:'p33-log-dup
 if(mode==='name-mismatch'){seed.dailyLogs[1].employeeName='另一位員工';}
 if(mode==='wrong-amount'){seed.dailyLogs[1].commission=1800;}
 if(mode==='partial'){seed.dailyLogs[1].commissionBaseAmount=14000;}
+if(mode==='wrong-invoice'){seed.billings[0].number='B20990101-001';}
+if(mode==='settled'){seed.commissionSettlements.push({id:'p35-settle',employee:'p33-employee-a',project:'p33-project',sourceCommissionIds:['p33-com-a']});}
+if(mode==='not-owner'){window.KusheAuthGate.companyContext=()=>({role:'admin'});}
 localStorage.setItem('KuSheERP25_EMERGENCY',JSON.stringify(seed));
 </script><script src="/assets/js/erp-store.js"></script></body></html>
