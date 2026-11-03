@@ -1,0 +1,55 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>P36 permissions navigation fixture</title></head><body>
+<div id="loginView"><form id="loginForm"><input id="loginEmail"><input id="loginPassword"><button id="loginSubmit">登入</button></form><p id="loginStatus"></p><p id="loginError"></p></div>
+<div id="mfaView" hidden><form id="mfaForm"></form></div>
+<div id="employeeShellView" hidden></div>
+<div id="toastHost"></div>
+<div id="appShell" hidden>
+  <div id="welcomeTitle"></div><div id="todayLabel"></div>
+  <button id="sidebarToggle"></button><button id="mobileMenuButton"></button>
+  <button id="mobileNavBackdrop"></button><button id="notificationButton"></button><button id="userMenuButton"></button><button id="messageButton"></button>
+  <button id="viewAllAttention"></button><div id="userPopover"></div>
+  <select id="dashboardMonth"></select><select id="periodMode"></select>
+  <input id="globalSearch"><button id="globalSearchClear"></button><div id="searchPopover"></div>
+  <button id="openLegacyModule"></button>
+  <nav><a href="#dashboard" data-module="dashboard" class="nav-item">首頁</a>
+  <a href="#billings" data-module="billings" class="nav-item">請款</a>
+  <a href="#employees" data-module="employees" class="nav-item">員工</a></nav>
+  <button id="quickBilling" type="button" data-module="billings">前往請款</button>
+  <button id="quickEmployee" type="button" data-module="employees">前往員工</button>
+  <div id="dashboard"></div>
+  <div id="commissionsView"></div><div id="unbilledWorkView"></div>
+  <div id="billingsView"></div><div id="billingDraftView"></div>
+  <div id="receivablesView"></div><div id="payablesView"></div>
+  <div id="banksView"></div><div id="invoicesView"></div><div id="materialsView"></div>
+  <div id="employeesView"></div><div id="payrollView"></div><div id="reportsView"></div>
+  <div id="settingsView"></div><div id="projectsView"></div><div id="quotationsView"></div>
+  <div id="moduleView"><span id="moduleTitle"></span><span id="moduleBreadcrumb"></span><div id="moduleIcon"></div></div>
+</div>
+<script>
+window.KUSHE_PHASE1_CONFIG={moduleLabels:{dashboard:'首頁',billings:'請款單管理',employees:'員工管理',projects:'案場'},uiStorageKey:'p36-synthetic-ui'};
+const roles={owner:['dashboard','billings','employees','projects'],accounting:['dashboard','billings'],employee:['projects']};
+window.__p36={alive:true,ctx:null,requestedRole:'owner',revalidateRejected:false,permissionRefreshes:0,loadCount:0,commits:0};
+const currentUser=()=>window.__p36.alive?{id:'test-owner'}:null;
+const newContext=()=>({
+ userId:'test-owner',role:window.__p36.requestedRole,
+ legacySourceUserId:window.__p36.requestedRole==='employee'?'different-legacy-account':'test-owner',
+ status:'active',shadowVerified:true
+});
+window.KusheAuthGate={
+ session:()=>window.__p36.alive?{user:{id:'test-owner'}}:null,
+ user:currentUser,
+ requireAuth:async()=>window.__p36.alive,
+ requireMfa:async()=>window.__p36.alive&&!window.__p36.revalidateRejected,
+ resolveCompanyContext:async()=>{window.__p36.permissionRefreshes++;if(window.__p36.revalidateRejected)throw new Error('server validation failed');window.__p36.ctx=newContext();return window.__p36.ctx},
+ companyContext:()=>window.__p36.ctx,
+ canView:route=>Boolean(window.__p36.ctx&&roles[window.__p36.ctx.role]?.includes(route)),
+ firstAllowedRoute:()=>window.__p36.ctx&&roles[window.__p36.ctx.role]?.[0]||''
+};
+const frozenSeed=Object.freeze({dailyLogs:Object.freeze([]),payroll:Object.freeze([]),commissions:Object.freeze([])});
+window.KuSheERPStore={getState:()=>frozenSeed,load:async()=>{window.__p36.loadCount++;return frozenSeed},readCommittedSnapshot:async()=>({data:frozenSeed})};
+window.KusheCloudSync={deviceSecurityStatus:()=>({trusted:true}),startAutoBackup:async()=>{},stopAutoBackup:()=>{},close:()=>{}};
+window.KusheDashboard={init:()=>{},refresh:()=>{}};
+window.KusheIcons={render:()=>{}};
+</script>
+<script src="/assets/js/app.js"></script>
+</body></html>

@@ -75,9 +75,12 @@
       && Boolean(flow.userId) && window.KusheAuthGate?.user?.()?.id === flow.userId;
   }
   function mfaDigits(){return $$('.mfa-digit')}
-  function mfaCode(){return mfaDigits().map((node)=>String(node.value||'').replace(/\D/g,'')).join('').slice(0,6)}
-  function clearMfaDigits(){mfaDigits().forEach((node)=>{node.value=''})}
-  function focusMfaDigit(index=0){mfaDigits()[Math.max(0,Math.min(5,index))]?.focus()}
+  // P32-1: preserve complete codes supplied by password managers and native autofill.
+  // Do not truncate or extract digits from unrelated clipboard content.
+  function normalizeMfaCode(value){return String(value??'').replace(/[０-９]/g,char=>String(char.charCodeAt(0)-0xff10)).replace(/\s/g,'')}
+  function mfaCode(){return normalizeMfaCode(mfaDigits().map(node=>node.value||'').join(''))}
+  function clearMfaDigits(){mfaDigits().forEach((node)=>{node.value='';node.removeAttribute('aria-invalid')})}
+  function focusMfaDigit(index=0){const inputs=mfaDigits();inputs[Math.max(0,Math.min(inputs.length-1,index))]?.focus()}
   function mfaReady() {
     // Ready means the user may submit a code; a fresh challenge is created on submit.
     return mfaCurrent(mfaFlow) && mfaFlow.state === 'ready' && Boolean(mfaFlow.factorId)
@@ -505,26 +508,31 @@
     $('#mfaResetAccepted')?.addEventListener('change',renderMfaState);
     $('#mfaResetSubmit')?.addEventListener('click',()=>void confirmMfaReset());
     $('#mfaForm')?.addEventListener('submit',completeMfa);
-    $('#mfaOtp')?.addEventListener('input',(event)=>{
+    // One native input allows whole-code autofill, normal caret movement and paste.
+    // Only an explicit form submit verifies; a fill/paste never submits on its own.
+    const updateMfaCode=(event)=>{
       const input=event.target.closest?.('.mfa-digit');if(!input||!mfaReady())return;
-      input.value=String(input.value||'').replace(/\D/g,'').slice(-1);
-      const index=Number(input.dataset.mfaDigit)||0;
-      if(input.value&&index<5)focusMfaDigit(index+1);
-      setMfaMessage();renderMfaState();
-    });
-    $('#mfaOtp')?.addEventListener('keydown',(event)=>{
-      const input=event.target.closest?.('.mfa-digit');if(!input||!mfaReady())return;
-      const index=Number(input.dataset.mfaDigit)||0;
-      if(event.key==='Backspace'&&!input.value&&index>0){event.preventDefault();focusMfaDigit(index-1)}
-      if(event.key==='ArrowLeft'&&index>0){event.preventDefault();focusMfaDigit(index-1)}
-      if(event.key==='ArrowRight'&&index<5){event.preventDefault();focusMfaDigit(index+1)}
-    });
+      if(event.isComposing)return;
+      const value=normalizeMfaCode(input.value);
+      if(input.value!==value)input.value=value;
+      const valid=/^[0-9]{0,6}$/.test(value);
+      input.setAttribute('aria-invalid',String(!valid));
+      setMfaMessage(valid?'':'請只輸入 6 位驗證碼；不會自動截取較長的內容。',!valid);
+      renderMfaState();
+    };
+    ['input','change','compositionend'].forEach(type=>$('#mfaOtp')?.addEventListener(type,updateMfaCode));
     $('#mfaOtp')?.addEventListener('paste',(event)=>{
-      if(!mfaReady()){event.preventDefault();return}
-      const digits=String(event.clipboardData?.getData('text')||'').replace(/\D/g,'').slice(0,6);
-      if(!digits)return;
-      event.preventDefault();mfaDigits().forEach((node,index)=>{node.value=digits[index]||''});
-      focusMfaDigit(Math.max(0,Math.min(5,digits.length-1)));setMfaMessage();renderMfaState();
+      const input=event.target.closest?.('.mfa-digit');
+      if(!input||!mfaReady()){event.preventDefault();return}
+      event.preventDefault();
+      const code=normalizeMfaCode(event.clipboardData?.getData('text')||'');
+      if(!/^[0-9]{6}$/.test(code)){
+        clearMfaDigits();input.setAttribute('aria-invalid','true');
+        setMfaMessage('請貼上完整的 6 位驗證碼，不要包含其他文字。',true);
+        renderMfaState();focusMfaDigit();return;
+      }
+      input.value=code;input.setAttribute('aria-invalid','false');
+      setMfaMessage();renderMfaState();focusMfaDigit();
     });
     $('#mfaLogout')?.addEventListener('click',()=>void handleLogout());
     $('#changePasswordForm')?.addEventListener('submit', handleChangePassword);
@@ -587,7 +595,52 @@
     });
   }
   function currentHashRoute() { return validRoute(decodeURIComponent(window.location.hash.slice(1))); }
+
+  // P36: A missing company context is not the same as a verified "no permission".
+  // Revalidate the same logged-in principal without touching ERP state or changing role policy.
+  let permissionRecoveryPending = null;
+  let permissionRecoveryTarget = null;
+  function confirmedCompanyContext() {
+    const gate=window.KusheAuthGate,context=gate?.companyContext?.(),user=gate?.user?.();
+    return context&&context.shadowVerified===true&&context.status==='active'&&
+      Boolean(user?.id)&&String(context.userId||'')===String(user.id)?context:null;
+  }
+  function recoverCompanyPermission(requested,options={}) {
+    permissionRecoveryTarget={requested,options};
+    if(permissionRecoveryPending)return;
+    // Hide potentially stale business UI until the server confirms the membership again.
+    setAuthView(false);
+    setLoginMessage('正在安全重新驗證公司身分與查看權限…');
+    permissionRecoveryPending=(async()=>{
+      const gate=window.KusheAuthGate;
+      try{
+        const beforeUser=String(gate?.user?.()?.id||'');
+        if(!beforeUser||!await gate?.requireMfa?.())
+          throw new Error('登入狀態已失效，請重新登入並完成雙重驗證。');
+        const result=await gate.resolveCompanyContext();
+        if(!result||!confirmedCompanyContext()||String(result.userId||'')!==beforeUser)
+          throw new Error('無法確認原登入帳號的公司權限，請重新登入。');
+        const originalUser=String(result.legacySourceUserId||'');
+        if(!originalUser||String(result.userId)!==originalUser||result.role==='employee')
+          throw new Error('目前登入帳號不是完整 ERP 管理權限帳號，已停止進入管理系統。');
+        setLoginMessage();
+        setAuthView(true);
+        applyRoleNavigationPermissions();
+        const pending=permissionRecoveryTarget;
+        if(pending&&gate.canView?.(pending.requested))
+          navigate(pending.requested,{...pending.options,replace:true,instant:true});
+        else if(pending)toast('公司權限已重新核對；此帳號未獲授權查看該功能');
+      }catch(error){
+        setAuthView(false);
+        setLoginMessage(String(error?.message||'無法重新驗證公司權限，請重新登入。'),true);
+      }finally{
+        permissionRecoveryPending=null;
+        permissionRecoveryTarget=null;
+      }
+    })();
+  }
   function renderRoute(module, options = {}) {
+    if(!confirmedCompanyContext()) { recoverCompanyPermission(knownRoute(module),options); return; }
     const route = validRoute(module);
     ui.route = route;
     const isDashboard = route === 'dashboard';
@@ -708,8 +761,12 @@
   }
   function navigate(module, options = {}) {
     const requested=knownRoute(module);
-    const route = validRoute(requested);
-    if(route!==requested)toast('此帳號沒有此功能的查看權限');
+    if(!confirmedCompanyContext()){recoverCompanyPermission(requested,options);return;}
+    if(!window.KusheAuthGate?.canView?.(requested)){
+      toast('此帳號沒有此功能的查看權限');
+      return;
+    }
+    const route=requested;
     if (!options.replace && currentHashRoute() !== route) history.pushState({ route }, '', `#${route}`);
     else if (options.replace) history.replaceState({ route }, '', `#${route}`);
     renderRoute(route, options);
@@ -736,7 +793,7 @@
     document.addEventListener('kushe:dashboard-navigate',(event)=>navigate(event.detail?.module));
     $$('[data-route]').forEach((node)=>node.addEventListener('click',()=>navigate(node.dataset.route)));
     $('#openLegacyModule').addEventListener('click', openLegacyModule);
-    window.addEventListener('popstate',()=>renderRoute(currentHashRoute()));
+    window.addEventListener('popstate',()=>renderRoute(knownRoute(decodeURIComponent(window.location.hash.slice(1)))));
   }
   function dateKeys(data) {
     const values=[]; ['billings','receivables','payables','receipts','salaryPayments','bankTransactions','dailyLogs','attendance','materialUsages','invoices'].forEach((key)=>(data[key]||[]).forEach((row)=>{const value=String(row.date||row.month||'').slice(0,7);if(/^\d{4}-\d{2}$/.test(value))values.push(value)}));
