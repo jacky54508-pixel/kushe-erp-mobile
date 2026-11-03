@@ -45,7 +45,11 @@ def legacy_case(browser,mode):
       const before=JSON.stringify(s.getState());
       const report=window.KuSheCommissionHistoryAudit.inspect(s.getState(),s);
       if(JSON.stringify(s.getState())!==before)throw Error('audit changed business data');
-      if(typeof s.p33Oct07CommissionRepair==='function')throw Error('unsafe legacy P33-4 writer was left public');
+      if(typeof s.p33Oct07CommissionRepair!=='function')throw Error('P35 guarded single-record writer not registered');
+      let forbidden=false;
+      try{await s.p33Oct07CommissionRepair('p33-batch',{});}
+      catch(e){forbidden=true}
+      if(!forbidden||JSON.stringify(s.getState())!==before)throw Error('P35 writer without confirmation must reject without changing data');
       return {counts:report.counts,delta:report.candidateDelta,row:report.rows[0]&&{status:report.rows[0].status,issues:report.rows[0].issues,staff:report.rows[0].staff.map(x=>({old:x.old,newAmount:x.newAmount,delta:x.delta}))},readOnly:report.readOnly};
     }""")
     ctx.close()

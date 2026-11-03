@@ -98,8 +98,8 @@
     var gate = store && typeof store.p33Oct07CommissionRepairPreview==='function'
       ? store.p33Oct07CommissionRepairPreview(batch.batchId) : null;
     if (gate) {
-      html += '<section class="p33-preview-group"><h4>10/7 舊抽成唯讀參考（已停用舊修正）</h4>';
-      html += '<p><strong>'+(gate.allowed?'原資料可供唯讀核對；不代表允許執行更正':'原資料存在核對問題，禁止更正')+'</strong></p>';
+      html += '<section class="p33-preview-group"><h4>P35｜10/7 指定抽成安全更正</h4>';
+      html += '<p><strong>'+(gate.allowed?'來源核對符合條件；實際更正仍須完整備份和雙重確認':'原資料存在核對問題，禁止更正')+'</strong></p>';
       html += '<p>限定 2026/10/07・宏觀展業・劉佳勳／柯智耀，僅調整兩位員工各 $1,750 抽成差額及 10 月未付款薪資。</p>';
       if (gate.payroll.length) {
         html += '<div class="p33-preview-scroll"><table><thead><tr><th>員工</th><th>10 月原薪資</th><th>10 月修正後試算</th><th>差額</th><th>付款狀態</th></tr></thead><tbody>';
@@ -111,10 +111,16 @@
       if (gate.blockers.length) {
         html += '<p class="p33-preview-warning">停止原因：'+gate.blockers.map(function (row) { return esc(row.message); }).join('；')+'</p>';
       }
-      html += '<p>舊版 P33-4 更正入口已停用。請使用上方「歷史抽成查核（唯讀）」一次檢視全部來源；本畫面不能修改薪資、請款、應收或銀行。</p></section>';
+      if(gate.allowed && store && typeof store.p33Oct07CommissionRepair==='function'){
+        html += '<p>指定請款：<strong>B20261102-002</strong>。僅更正兩筆抽成及兩位員工 10 月未付薪資，保留所有其他帳務。執行前必須先下載完整備份，再明確確認。</p>';
+        html += '<button type="button" class="p35-open" data-p35-open="'+esc(gate.batchId)+'">核對備份並準備指定更正</button>';
+      }else{
+        html += '<p>目前為唯讀查核；不符合條件時沒有更正入口，請先查明來源、付款或已結算狀態。</p>';
+      }
+      html += '</section>';
     }
 
-    html += '<p class="p33-preview-footnote">根據此裝置已載入的 ERP 紀錄試算；此預覽不代表已核准更正，且無任何儲存按鈕。</p></div></details>';
+    html += '<p class="p33-preview-footnote">根據此裝置已載入的 ERP 紀錄試算；此處僅展示差異。開啟指定更正視窗仍不會寫入，必須在完成備份、輸入確認文字後才會啟動受保護的單批次交易。</p></div></details>';
     return html;
   }
   window.KuSheP33HistoricalPreview = Object.freeze({preview:preview,render:render});
