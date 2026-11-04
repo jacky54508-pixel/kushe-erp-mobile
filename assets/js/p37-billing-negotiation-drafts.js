@@ -139,7 +139,21 @@
    overlay.addEventListener('click',event=>{if(event.target===overlay)cleanup()});
    overlay.addEventListener('keydown',event=>{if(event.key==='Escape')cleanup()});
   }
-  window.KusheBillingAllowancePreflight?.mount(overlay,b);
+  // Fail visibly when the optional preflight script is missing, rather than silently hiding P37-3.
+  try {
+   const preflight=window.KusheBillingAllowancePreflight;
+   if(!preflight?.mount||preflight.mount(overlay,b)!==true){
+    const warning=document.createElement('p');
+    warning.className='p37-draft-status is-error';
+    warning.textContent='P37-3 安全檢查尚未載入；請重新整理 BETA 後重新開啟。草稿與正式帳務沒有變動。';
+    overlay.querySelector('.p37-neg-body')?.append(warning);
+   }
+  }catch(error){
+   const warning=document.createElement('p');
+   warning.className='p37-draft-status is-error';
+   warning.textContent='P37-3 安全檢查無法開啟：'+(error?.message||String(error))+'。本次沒有入帳。';
+   overlay.querySelector('.p37-neg-body')?.append(warning);
+  }
   return presented;
  }
  window.KusheBillingNegotiationDrafts=Object.freeze({anchor,read,save,open});
