@@ -26,13 +26,14 @@
 <p id="connection-status" class="message" role="status" aria-live="polite">尚未檢查。正式 ERP 雲端不在本頁允許的連線清單中。</p>
 </section>
 <section class="panel"><div class="panel-head"><div><h2>二、獨立測試帳號登入</h2><p>只接受既有的 Auth Lab 登入帳號；沒有註冊功能、沒有自動建立使用者。</p></div><span class="phase">權限驗證</span></div>
-<p class="notice">目前 P37 測試帳號白名單尚未配置。登入頁可驗收，但實際授權帳號登入需在後續獨立批准後進行。請勿使用正式 ERP 帳號密碼。</p>
+<p class="notice">僅限已通過 Auth Lab Email 驗證並列入 P37 白名單的測試帳號。請使用與正式 ERP 不同的密碼；首次設定請使用下方的安全重設入口。</p>
 <form id="login-form" autocomplete="off" novalidate>
 <div class="form-grid"><label>測試帳號 Email<input id="login-email" type="email" autocomplete="off" inputmode="email" maxlength="254" placeholder="僅使用 Auth Lab 測試帳號" required></label>
 <label>測試帳號密碼<input id="login-password" type="password" autocomplete="off" maxlength="200" minlength="1" placeholder="不會儲存在瀏覽器" required></label></div>
 <div class="actions"><button id="login-button" class="btn primary" type="submit">登入測試帳號</button><button class="btn secondary" id="logout-button" type="button" disabled>清除測試登入</button></div>
 </form>
 <p id="login-status" class="message" role="status" aria-live="polite">尚未登入。授權通過前無法讀取測試資料。</p>
+<p><a href="./reset-password.html">首次使用或忘記 P37 測試密碼？前往安全設定頁</a></p>
 </section>
 <section class="panel"><div class="panel-head"><div><h2>三、測試請款與折讓資料（唯讀）</h2><p>授權後只會顯示 P37 合成測試資料，不提供新增、修改、核定折讓或雲端同步寫入。</p></div><span class="phase">RLS 驗證</span></div>
 <button id="read-fixtures" type="button" class="btn secondary" disabled>讀取測試資料（唯讀）</button>
