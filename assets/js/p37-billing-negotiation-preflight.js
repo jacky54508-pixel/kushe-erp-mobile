@@ -160,6 +160,13 @@
       simButton.disabled=true;show('隔離模擬完成，沒有寫入、同步或正式折讓入帳。',false);
     }catch(e){simButton.disabled=true;show('模擬已停止：'+(e?.message||String(e)),true)}
   });
+  try{
+   if(window.KusheBillingVoucherPrecheck?.mount?.(section,baseline.id)!==true){
+    const note=document.createElement("p");note.className="p37-post-status is-error";note.textContent="P37-4 核對模組未載入，請重新整理 BETA；資料沒有變更。";section.appendChild(note);
+   }
+  }catch(error){
+   const note=document.createElement("p");note.className="p37-post-status is-error";note.textContent="P37-4 核對模組無法開啟："+(error?.message||String(error))+"；沒有入帳。";section.appendChild(note);
+  }
   return true;
  }
  window.KusheBillingAllowancePreflight=Object.freeze({preflight,simulatePure,simulate,mount});
