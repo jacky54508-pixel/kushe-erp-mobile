@@ -167,6 +167,18 @@
   }catch(error){
    const note=document.createElement("p");note.className="p37-post-status is-error";note.textContent="P37-4 核對模組無法開啟："+(error?.message||String(error))+"；沒有入帳。";section.appendChild(note);
   }
+  // P37-5 read-only settlement projection. A missing module must not hide the error.
+  try{
+    if(window.KusheBillingLinkSimulation?.mount?.(section,baseline.id)!==true){
+      const warning=document.createElement('p');warning.className='p37-post-status is-error';
+      warning.textContent='P37-5 帳務串聯模擬未載入，請重新整理 BETA；資料沒有更動。';
+      section.appendChild(warning);
+    }
+  }catch(error){
+    const warning=document.createElement('p');warning.className='p37-post-status is-error';
+    warning.textContent='P37-5 無法開啟：'+(error?.message||String(error))+'。本次沒有入帳。';
+    section.appendChild(warning);
+  }
   return true;
  }
  window.KusheBillingAllowancePreflight=Object.freeze({preflight,simulatePure,simulate,mount});
