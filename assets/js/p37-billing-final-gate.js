@@ -146,6 +146,19 @@
     runButton.disabled=true;show('隔離驗證通過；尚未正式入帳，也沒有變更任何 ERP 資料。');
    }catch(e){runButton.disabled=true;show('隔離驗證停止：'+(e?.message||String(e)),true)}
   });
+  // P37-7: in-memory transaction, rollback and two-device mock sync only.
+  // A missing or broken module must not silently pass or expose any posting action.
+  try{
+    if(window.KusheP377SandboxTransactionCore?.mount?.(panel,id)!==true){
+      const warning=document.createElement('p');warning.className='p376-status is-error';
+      warning.textContent='P37-7 隔離交易核心未載入；請重新整理 BETA。原帳務沒有變更。';
+      panel.appendChild(warning);
+    }
+  }catch(error){
+    const warning=document.createElement('p');warning.className='p376-status is-error';
+    warning.textContent='P37-7 沙盒未能開啟：'+(error?.message||String(error))+'。沒有正式入帳。';
+    panel.appendChild(warning);
+  }
   return true;
  }
  window.KusheP376FinalGate=Object.freeze({proposal,validate,mount});

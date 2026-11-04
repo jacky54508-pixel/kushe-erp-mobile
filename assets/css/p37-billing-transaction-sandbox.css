@@ -1,0 +1,17 @@
+
+/* P37-7: isolated, beta-only transaction/recovery/mock-sync verification UI. */
+.p377-panel{margin:18px 0;padding:16px;border:1px solid #cbdbe9;border-radius:12px;background:#fbfdff;color:#273c56}
+.p377-panel h3{margin:0 0 9px;font-size:16px;color:#244367}
+.p377-panel>p{font-size:12px;line-height:1.75;color:#566c82;margin:10px 0}
+.p377-actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+.p377-actions button{padding:10px 12px;border:1px solid #b4c9dd;border-radius:9px;background:#eef5fc;color:#25476b;font:inherit;font-weight:700;cursor:pointer}
+.p377-actions [data-p377-sync]{background:#254a70;color:white;border-color:#254a70}
+.p377-actions button:disabled{opacity:.45;cursor:not-allowed}
+.p377-status{line-height:1.6;color:#315a7c}.p377-status.is-error{color:#a34425}
+.p377-result{margin-top:12px;padding:13px;border:1px solid #dae6f1;border-radius:10px;background:#fff;line-height:1.7;font-size:13px}
+.p377-ok{color:#2b6351;font-weight:750}
+.p377-values{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 18px}
+.p377-values>div{padding:8px 0;border-bottom:1px solid #e5edf5;display:flex;justify-content:space-between;gap:9px}
+.p377-values dt{color:#53667a}.p377-values dd{margin:0;color:#183b5d;font-weight:750;white-space:nowrap}
+.p377-warning{color:#74501f}
+@media(max-width:620px){.p377-panel{padding:12px}.p377-values{grid-template-columns:1fr}.p377-actions button{width:100%}}
