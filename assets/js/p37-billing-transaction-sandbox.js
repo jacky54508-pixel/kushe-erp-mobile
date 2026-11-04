@@ -252,6 +252,18 @@
     sync.disabled=true;show('純記憶體同步衝突測試通過；尚未驗證 ERP 實際跨裝置同步。');
    }catch(error){sync.disabled=true;show('跨裝置模擬已停止：'+(error?.message||String(error)),true)}
   });
+  // P37-8 uses an entirely separate synthetic IndexedDB. No formal ERP persistence is available here.
+  try{
+   if(window.KusheP378IsolatedDB?.mount?.(panel,billingId)!==true){
+    const warn=document.createElement('p');warn.className='p377-status is-error';
+    warn.textContent='P37-8 隔離資料庫模組尚未載入；請重新整理 BETA。沒有修改正式帳務。';
+    panel.appendChild(warn);
+   }
+  }catch(error){
+   const warn=document.createElement('p');warn.className='p377-status is-error';
+   warn.textContent='P37-8 隔離資料庫無法開啟：'+(error?.message||String(error))+'。正式資料未變。';
+   panel.appendChild(warn);
+  }
   return true;
  }
  window.KusheP377SandboxTransactionCore=Object.freeze({makeSandbox,checkSandbox,applySandbox,recoveryTest,

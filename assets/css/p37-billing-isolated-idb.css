@@ -1,0 +1,16 @@
+
+/* P37-8: isolated IndexedDB test panel only; no formal ERP visual or data overrides. */
+.p378-panel{margin:18px 0;padding:16px;border:1px solid #cedceb;border-radius:12px;background:#fbfdff;color:#233e59}
+.p378-panel h3{font-size:16px;margin:0 0 9px;color:#244469}
+.p378-panel>p{font-size:12px;line-height:1.7;color:#556c83;margin:10px 0}
+.p378-buttons{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+.p378-buttons button{font:inherit;font-weight:700;color:#284b70;background:#f1f6fc;border:1px solid #b8cce0;border-radius:9px;padding:10px 13px;cursor:pointer}
+.p378-buttons button:nth-child(2){background:#244a70;border-color:#244a70;color:#fff}
+.p378-buttons button:disabled{opacity:.45;cursor:not-allowed}
+.p378-status{color:#315c82;line-height:1.7}
+.p378-status.is-error{color:#ac4327}
+.p378-results{padding:12px 13px;border:1px solid #dbe7f1;border-radius:9px;background:#fff;line-height:1.6;font-size:13px}
+.p378-results p{margin:8px 0}
+.p378-ok{color:#276050;font-weight:750}
+.p378-warning{color:#805b29}
+@media(max-width:650px){.p378-panel{padding:12px}.p378-buttons button{width:100%}}
