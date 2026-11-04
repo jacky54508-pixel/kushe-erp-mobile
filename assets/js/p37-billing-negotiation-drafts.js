@@ -139,6 +139,7 @@
    overlay.addEventListener('click',event=>{if(event.target===overlay)cleanup()});
    overlay.addEventListener('keydown',event=>{if(event.key==='Escape')cleanup()});
   }
+  window.KusheBillingAllowancePreflight?.mount(overlay,b);
   return presented;
  }
  window.KusheBillingNegotiationDrafts=Object.freeze({anchor,read,save,open});

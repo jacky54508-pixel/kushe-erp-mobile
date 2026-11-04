@@ -1,0 +1,19 @@
+
+/* P37-3 sandbox-only allowance preflight. Scoped to the negotiation modal. */
+.p37-post-gate{margin:18px 0 0;padding:16px;border:1px solid #cfdbe8;border-radius:12px;background:#fafcfe}
+.p37-post-gate h3{font-size:16px;color:#233954;margin:0 0 8px}
+.p37-post-description,.p37-post-tax,.p37-post-notice{color:#526579;line-height:1.65;margin:8px 0}
+.p37-post-actions{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
+.p37-post-actions button{font:inherit;font-weight:700;border:1px solid #b9cadb;border-radius:9px;background:#f0f5fa;color:#28415e;padding:9px 13px;cursor:pointer}
+.p37-post-actions .p37-post-simulate{background:#24486b;color:#fff;border-color:#24486b}
+.p37-post-actions button:disabled{opacity:.45;cursor:not-allowed}
+.p37-post-status{margin:10px 0 0;color:#294c74;line-height:1.6}
+.p37-post-status.is-error,.p37-post-blocked{color:#a43e21}
+.p37-post-result{margin:10px 0;padding:10px 12px;border-radius:9px;background:#fff;border:1px solid #e1e8ef;color:#354964;line-height:1.6}
+.p37-post-result ul{margin:8px 0 0;padding-left:22px}
+.p37-post-ok{color:#2b5a4c;font-weight:650}
+.p37-post-values{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px}
+.p37-post-values>div{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #e7edf3;padding:6px 0}
+.p37-post-values dt{color:#516276}.p37-post-values dd{margin:0;font-weight:700;color:#1f3550}
+.p37-post-tax{font-size:12px}
+@media(max-width:540px){.p37-post-actions button{width:100%}.p37-post-values{grid-template-columns:1fr}.p37-post-gate{padding:12px}}
