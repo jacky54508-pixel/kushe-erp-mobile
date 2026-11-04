@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src https://ldktrfgzzzmklhsnfrol.supabase.co; form-action 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; img-src 'none'; font-src 'none'">
+<title>酷舍 ERP｜P37 雲端隔離測試</title>
+<link rel="stylesheet" href="./p37-lab.css?v=p37-9c-1">
+<script src="./p37-lab.js?v=p37-9c-1" defer></script>
+</head>
+<body>
+<div class="shell">
+<header class="topbar"><div class="brand"><span class="brand-mark">K</span><div><strong>酷舍 ERP</strong><small>獨立測試空間</small></div></div><span class="test-pill">P37-9C · BETA LAB</span></header>
+<main>
+<section class="intro"><p class="eyebrow">跨裝置折讓流程 · 安全驗收</p><h1>P37 專用雲端測試頁</h1>
+<p>本頁面只連接 <b>kushe-auth-lab</b>；不載入正式 ERP、正式同步模組或正式帳務資料。登入與資料讀取都受測試帳號白名單及雲端 RLS 控制。</p></section>
+<section class="stat-grid" aria-label="測試環境界線">
+<div><span>測試後端</span><strong>kushe-auth-lab</strong><small>專用 Supabase 專案</small></div>
+<div><span>資料權限</span><strong>RLS + 白名單</strong><small>不提供公開註冊</small></div>
+<div><span>資料操作</span><strong>僅唯讀</strong><small>正式折讓入帳關閉</small></div></section>
+<section class="panel"><div class="panel-head"><div><h2>一、連線與匿名權限檢查</h2><p>只向指定測試雲端發送唯讀請求，並確認匿名連線無法讀取測試請款。</p></div><span class="phase">連線驗證</span></div>
+<button type="button" id="check-connection" class="btn primary">執行連線隔離檢查</button>
+<p id="connection-status" class="message" role="status" aria-live="polite">尚未檢查。正式 ERP 雲端不在本頁允許的連線清單中。</p>
+</section>
+<section class="panel"><div class="panel-head"><div><h2>二、獨立測試帳號登入</h2><p>只接受既有的 Auth Lab 登入帳號；沒有註冊功能、沒有自動建立使用者。</p></div><span class="phase">權限驗證</span></div>
+<p class="notice">目前 P37 測試帳號白名單尚未配置。登入頁可驗收，但實際授權帳號登入需在後續獨立批准後進行。請勿使用正式 ERP 帳號密碼。</p>
+<form id="login-form" autocomplete="off" novalidate>
+<div class="form-grid"><label>測試帳號 Email<input id="login-email" type="email" autocomplete="off" inputmode="email" maxlength="254" placeholder="僅使用 Auth Lab 測試帳號" required></label>
+<label>測試帳號密碼<input id="login-password" type="password" autocomplete="off" maxlength="200" minlength="1" placeholder="不會儲存在瀏覽器" required></label></div>
+<div class="actions"><button id="login-button" class="btn primary" type="submit">登入測試帳號</button><button class="btn secondary" id="logout-button" type="button" disabled>清除測試登入</button></div>
+</form>
+<p id="login-status" class="message" role="status" aria-live="polite">尚未登入。授權通過前無法讀取測試資料。</p>
+</section>
+<section class="panel"><div class="panel-head"><div><h2>三、測試請款與折讓資料（唯讀）</h2><p>授權後只會顯示 P37 合成測試資料，不提供新增、修改、核定折讓或雲端同步寫入。</p></div><span class="phase">RLS 驗證</span></div>
+<button id="read-fixtures" type="button" class="btn secondary" disabled>讀取測試資料（唯讀）</button>
+<p id="data-status" class="message" role="status" aria-live="polite">尚未通過測試登入與白名單驗證。</p>
+<div id="fixture-list" class="fixture-list" aria-live="polite"></div></section>
+<section class="disclaimer"><h2>正式環境保護</h2><p>此頁雖設在 BETA 路徑，仍與正式網站共用瀏覽器來源（origin）；因此以專用連線端點、瀏覽器 CSP、獨立程式與不保存登入權杖降低交叉風險。若要完整的來源層級隔離，仍須另設獨立測試網域。</p>
+<p>尚未驗收真正的雙裝置雲端資料寫入、防重複交易及遠端回復；本階段只驗證獨立登入與唯讀連線隔離。耀時代M區折讓尚未正式入帳。</p></section>
+</main>
+<footer>酷舍企業有限公司 · P37-9C 測試工具｜不代表正式帳務、憑證或稅務作業已完成</footer>
+</div>
+<noscript>此頁需要啟用 JavaScript 才能執行測試登入和權限核對。</noscript>
+</body>
+</html>
