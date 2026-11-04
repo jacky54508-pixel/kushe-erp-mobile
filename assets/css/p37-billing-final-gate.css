@@ -1,0 +1,18 @@
+
+/* P37-6 final verification panel; scoped, no shared ERP style changes. */
+.p376-guard{margin:18px 0;padding:17px;border:1px solid #c4d6e8;border-radius:12px;background:#fbfdff;color:#293d55}
+.p376-guard h3{font-size:16px;margin:0 0 8px;color:#234268}
+.p376-guard>p{margin:8px 0;font-size:12px;line-height:1.7;color:#566b80}
+.p376-actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+.p376-actions button{font:inherit;font-weight:700;border:1px solid #b7cadf;border-radius:9px;padding:10px 13px;background:#f0f5fa;color:#244768;cursor:pointer}
+.p376-actions [data-p376-run]{background:#24466a;color:white;border-color:#24466a}
+.p376-actions button:disabled{opacity:.45;cursor:not-allowed}
+.p376-status{margin:9px 0;line-height:1.65;color:#2d577f}
+.p376-status.is-error{color:#ac442d}
+.p376-result{border:1px solid #dbe5ef;background:white;border-radius:10px;padding:12px 14px;line-height:1.65;font-size:13px}
+.p376-ok{color:#2e6354;font-weight:750}
+.p376-values{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 18px}
+.p376-values>div{display:flex;justify-content:space-between;gap:9px;border-bottom:1px solid #e6edf3;padding:7px 0}
+.p376-values dt{color:#52657b}.p376-values dd{margin:0;color:#193955;font-weight:700;white-space:nowrap}
+.p376-block{color:#755226;line-height:1.6}
+@media(max-width:630px){.p376-guard{padding:12px}.p376-values{grid-template-columns:1fr}.p376-actions button{width:100%}}

@@ -179,6 +179,18 @@
     warning.textContent='P37-5 無法開啟：'+(error?.message||String(error))+'。本次沒有入帳。';
     section.appendChild(warning);
   }
+  // P37-6: final read-only safety verification. No ERP write action is exposed.
+  try{
+    if(window.KusheP376FinalGate?.mount?.(section,baseline.id)!==true){
+      const warning=document.createElement('p');warning.className='p37-post-status is-error';
+      warning.textContent='P37-6 最終安全驗證未載入，請重新整理 BETA；沒有任何帳務變更。';
+      section.appendChild(warning);
+    }
+  }catch(error){
+    const warning=document.createElement('p');warning.className='p37-post-status is-error';
+    warning.textContent='P37-6 安全驗證無法開啟：'+(error?.message||String(error))+'。沒有入帳。';
+    section.appendChild(warning);
+  }
   return true;
  }
  window.KusheBillingAllowancePreflight=Object.freeze({preflight,simulatePure,simulate,mount});
