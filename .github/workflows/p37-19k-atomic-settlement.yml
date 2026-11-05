@@ -1,0 +1,45 @@
+name: P37-19K atomic synthetic settlement and rollback gate
+on:
+  push:
+    branches:
+      - p37-19k-atomic-settlement-review-20261106
+    paths:
+      - 'p37-lab/p37-19k-*'
+      - '.github/workflows/p37-19k-atomic-settlement.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Syntax, synthetic atomic rollback and full financial reconciliation
+        run: |
+          node --check p37-lab/p37-19k-atomic-settlement.cjs
+          node --check p37-lab/p37-19k-atomic-settlement.test.cjs
+          node --test p37-lab/p37-19k-atomic-settlement.test.cjs
+      - name: Independent allowance and real ERP consumer gap regressions
+        run: |
+          node --test p37-lab/p37-19j-multi-document-projection.test.cjs
+          node --test p37-lab/p37-19j-financial-integration-gaps.test.cjs
+          node --test p37-lab/p37-19c-formal-readonly.test.cjs
+          node --test p37-lab/p37-19b-consumer-projection.test.cjs
+      - name: Older atomic, receipt, RPC and auth release blocking regression
+        run: |
+          node --test p37-lab/p37-19-isolated-transaction.test.cjs
+          node --test p37-lab/p37-19d-precommit-review.test.cjs
+          node --test p37-lab/p37-19i/release-gate.test.cjs
+          node --test p37-lab/p37-19h/verified-sessions.test.mjs
+          node --test p37-lab/p37-19g/dual-client-rpc.test.mjs
+          node --test p37-lab/p37-19f/release-gate.test.cjs
+      - name: ERP Store, Cloud Sync and Finance UI syntax remains unchanged
+        run: |
+          node --check assets/js/erp-store.js
+          node --check assets/js/cloud-sync.js
+          node --check assets/js/dashboard.js
+          node --check assets/js/reports.js
+          node --check assets/js/receivable-cheques.js
