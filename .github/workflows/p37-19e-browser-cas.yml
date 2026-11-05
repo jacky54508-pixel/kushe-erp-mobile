@@ -1,0 +1,40 @@
+name: P37-19E isolated browser CAS and transaction rollback
+on:
+  push:
+    branches:
+      - p37-19e-isolated-browser-review-20261105
+    paths:
+      - 'p37-lab/p37-19e/**'
+      - '.github/workflows/p37-19e-browser-cas.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-browser-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Script and Python syntax check
+        run: |
+          node --check p37-lab/p37-19e/client.js
+          python -m py_compile p37-lab/p37-19e/mock_remote.py p37-lab/p37-19e/browser_test.py
+          node --check assets/js/erp-store.js
+          node --check assets/js/cloud-sync.js
+      - name: Re-run previous P37-19A/B/C/D safety checks
+        run: |
+          node --test p37-lab/p37-19-isolated-transaction.test.cjs
+          node --test p37-lab/p37-19b-consumer-projection.test.cjs
+          node --test p37-lab/p37-19c-formal-readonly.test.cjs
+          node --test p37-lab/p37-19d-precommit-review.test.cjs
+      - name: Install pinned Playwright and Chromium
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Two isolated real browser sessions and loopback CAS failure injection
+        run: python p37-lab/p37-19e/browser_test.py
