@@ -1,0 +1,46 @@
+name: P37-19O original ERP Store retention cheque bank commission
+on:
+  push:
+    branches:
+      - p37-19o-real-store-money-integration-20261106
+    paths:
+      - 'p37-lab/p37-19o/**'
+      - '.github/workflows/p37-19o-real-store-money.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  original-store-finance-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Original unmodified ERP Store SHA and test fixture syntax
+        run: |
+          node --check assets/js/erp-store.js
+          node --check p37-lab/p37-19o/o-augmentation.js
+          python -m py_compile p37-lab/p37-19o/server.py p37-lab/p37-19o/browser_e2e.py
+          python -c "import sys; sys.path.insert(0,'p37-lab/p37-19o'); from server import original_source_verified; print('Verified original Store bytes:', original_source_verified())"
+      - name: Previous P37-19N original Store fixture and prior safety regression
+        run: |
+          node --test p37-lab/p37-19l-store-cloud-cas.test.cjs
+          node --test p37-lab/p37-19k-atomic-settlement.test.cjs
+          node --test p37-lab/p37-19j-multi-document-projection.test.cjs
+          node --test p37-lab/p37-19j-financial-integration-gaps.test.cjs
+          node --test p37-lab/p37-19i/release-gate.test.cjs
+          node --test p37-lab/p37-19h/verified-sessions.test.mjs
+      - name: Install pinned Chromium test library
+        run: |
+          python -m pip install playwright==1.57.0
+          if ! command -v google-chrome >/dev/null 2>&1 && ! command -v chromium >/dev/null 2>&1; then
+            python -m playwright install chromium
+          fi
+      - name: Run previous exact ERP Store browser acceptance
+        run: python p37-lab/p37-19n/browser_e2e.py
+      - name: Real Store retention, cheque, bank and commission reader tests
+        run: python p37-lab/p37-19o/browser_e2e.py
