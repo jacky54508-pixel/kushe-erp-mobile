@@ -3857,7 +3857,35 @@
   function receivableSettlementTruth(ar, excludedReceipt = null) {
     return safeReceiptMoneySum([strictReceiptMoney(ar.legacyReceived??0,'既有歷史沖銷'),...state.receipts.filter((row)=>row!==excludedReceipt&&String(row.receivableId||'')===String(ar.id||'')).map((row)=>strictStoredReceiptPlan(row).settlementAmount)],'應收沖銷合計');
   }
+  // P37-14: fail closed for an allowance or credit note linked to a real receivable.
+  // Do not post, apply or alter any stored document or ERP balance.
+  function requireAllowancesFullyIntegrated(ar) {
+    const receivableId=String(ar?.id||'').trim();
+    if(!receivableId)throw new Error('應收來源識別缺失，禁止收款');
+    const billingId=String(ar?.billingId||'').trim(),sourceNo=String(ar?.sourceNo||'').trim();
+    const candidates=(state.billings||[]).filter(b=>
+      (billingId&&String(b.id||'')===billingId)||(sourceNo&&String(b.number||'')===sourceNo));
+    const billingIds=new Set([billingId,...candidates.map(b=>String(b.id||'').trim())].filter(Boolean));
+    const billingNos=new Set([sourceNo,...candidates.map(b=>String(b.number||'').trim())].filter(Boolean));
+    const invoiceNos=new Set([String(ar?.invoiceNo||'').trim(),...candidates.map(b=>String(b.invoiceNo||'').trim())].filter(Boolean));
+    for(const key of ['billingAllowances','billingNegotiationAdjustments','salesAllowances','salesCreditNotes']){
+      const rows=state[key];
+      if(rows===undefined||rows===null)continue;
+      if(!Array.isArray(rows))throw new Error('折讓帳資料格式待核對，已停止收款及保留款操作');
+      for(const row of rows){
+        if(!row||typeof row!=='object')continue;
+        const source=row.source&&typeof row.source==='object'?row.source:{};
+        const linked=[row.receivableId,source.receivableId].some(x=>String(x||'').trim()===receivableId)||
+          [row.billingId,source.billingId].some(x=>billingIds.has(String(x||'').trim())&&String(x||'').trim()!=='')||
+          [row.billingNo,row.sourceNo,source.billingNo].some(x=>billingNos.has(String(x||'').trim())&&String(x||'').trim()!=='')||
+          [row.invoiceNo,row.invoiceNumber,source.invoiceNo].some(x=>invoiceNos.has(String(x||'').trim())&&String(x||'').trim()!=='');
+        if(linked)throw new Error('此筆已關聯折讓紀錄；P37 正式折讓、收款、保留款與票據尚未完整整合，為防止重複沖銷已停止操作');
+      }
+    }
+    return true;
+  }
   function assertReceivableSettlementBaseline(ar) {
+    requireAllowancesFullyIntegrated(ar);
     const amount=strictReceiptMoney(ar.amount,'應收金額'),received=strictReceiptMoney(ar.received??0,'已沖銷應收'),truth=receivableSettlementTruth(ar);
     if(truth>amount)throw new Error('既有收款沖銷合計已超過應收金額，已停止操作');
     if(received!==truth)throw new Error('應收已沖銷金額與收款明細不一致，已停止操作');
@@ -3918,6 +3946,7 @@
     return linkedBankTransaction(receipt,['retention_receipt'],'保留款收回');
   }
   function syncRetentionSummary(ar, billing, now) {
+    requireAllowancesFullyIntegrated(ar);
     const retentionAmount=Math.max(0,num(ar.retentionAmount??ar.retention??billing?.retentionAmount??billing?.retention)),recorded=state.retentionReceipts.filter((row)=>row.receivableId===ar.id||row.billingId&&row.billingId===ar.billingId).reduce((sum,row)=>sum+num(row.amount),0),received=Math.min(retentionAmount,num(ar.legacyRetentionReceived)+recorded),remaining=Math.max(0,retentionAmount-received),nextState=retentionState(retentionAmount,received,ar.retentionStatus);
     Object.assign(ar,{retentionAmount,retention:retentionAmount,retentionReceived:received,remainingRetention:remaining,retentionStatus:nextState,updatedAt:now});
     if(billing){Object.assign(billing,{retentionAmount,retention:retentionAmount,retentionReceived:received,remainingRetention:remaining,retentionStatus:nextState,updatedAt:now});billing.status=num(ar.received)>=num(ar.amount)&&remaining===0?'全部收清':num(ar.received)>=num(ar.amount)?'已收款':num(ar.received)>0?'部分收款':'未收款'}
@@ -4199,6 +4228,7 @@
     const idempotencyKey=String(values.idempotencyKey||'').trim();
     const replay=paymentReplay('retention',state.retentionReceipts,values);if(replay.existing)return replay.existing;
     const ar=state.receivables.find((row)=>row.id===values.receivableId);if(!ar)throw new Error('找不到對應應收帳款');
+    requireAllowancesFullyIntegrated(ar);
     const billing=state.billings.find((row)=>row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||''));
     const retentionAmount=Math.max(0,num(ar.retentionAmount ?? ar.retention ?? billing?.retentionAmount ?? billing?.retention));
     const retentionReceived=Math.max(0,num(ar.retentionReceived ?? billing?.retentionReceived));
@@ -4216,6 +4246,7 @@
     requireStoreTransactionDraft();
     const receiptMatches=state.retentionReceipts.filter((row)=>String(row.id||'')===String(id||'')||String(row.retentionReceiptId||'')===String(id||''));if(receiptMatches.length!==1)throw new Error(receiptMatches.length?'保留款收回紀錄編號不唯一，已停止修改':'找不到保留款收回紀錄');const receipt=receiptMatches[0];
     const arMatches=state.receivables.filter((row)=>String(row.id||'')===String(receipt.receivableId||''));if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止修改':'找不到對應應收帳款');const ar=arMatches[0];
+    requireAllowancesFullyIntegrated(ar);
     const billing=state.billings.find((row)=>row.id===receipt.billingId||row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||''));
     const retentionAmount=Math.max(0,num(ar.retentionAmount??ar.retention??billing?.retentionAmount??billing?.retention));
     const settlement=incomeSettlement(values.amount,values.fee===undefined?receipt.fee:values.fee,values.feePayer===undefined?receipt.feePayer:values.feePayer),{amount,fee,feePayer,netAmount}=settlement;
@@ -4232,7 +4263,7 @@
   function deleteRetentionReceipt(id, token) {
     requireStoreTransactionDraft();
     const receiptMatches=state.retentionReceipts.filter((row)=>String(row.id||'')===String(id||'')||String(row.retentionReceiptId||'')===String(id||''));if(receiptMatches.length!==1)throw new Error(receiptMatches.length?'保留款收回紀錄編號不唯一，已停止刪除':'找不到保留款收回紀錄');const receipt=receiptMatches[0];
-    const arMatches=state.receivables.filter((row)=>String(row.id||'')===String(receipt.receivableId||''));if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止刪除':'找不到對應應收帳款');const ar=arMatches[0],billing=state.billings.find((row)=>row.id===receipt.billingId||row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||'')),plan=retentionMutationPlan(receipt),snapshot=token===accountingDeleteToken?null:JSON.parse(JSON.stringify(state)),now=new Date().toISOString();
+    const arMatches=state.receivables.filter((row)=>String(row.id||'')===String(receipt.receivableId||''));if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止刪除':'找不到對應應收帳款');const ar=arMatches[0];requireAllowancesFullyIntegrated(ar);const billing=state.billings.find((row)=>row.id===receipt.billingId||row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||'')),plan=retentionMutationPlan(receipt),snapshot=token===accountingDeleteToken?null:JSON.parse(JSON.stringify(state)),now=new Date().toISOString();
     try {
       adjustBankIncome(plan.bank,-plan.amount,now);state.bankTransactions=state.bankTransactions.filter((row)=>row!==plan.transaction);state.retentionReceipts=state.retentionReceipts.filter((row)=>row!==receipt);syncRetentionSummary(ar,billing,now);if(token!==accountingDeleteToken)persist(`刪除保留款收回紀錄 ${ar.sourceNo||''}`);return true;
     } catch(error) { if(snapshot)state=snapshot;throw error; }
