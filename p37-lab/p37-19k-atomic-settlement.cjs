@@ -91,7 +91,7 @@ function commissionPreview(env,report){
   const bankIncome=env.data.bankTransactions.filter(t=>receipts.some(r=>r.bankTransactionId===t.id))
    .reduce((n,t)=>n+m(t.amount,'synthetic bank income'),0);
   return {commissionId:link.id,eligibleForHypotheticalReview:fullySettled&&bankIncome>0,
-   unpaidBecause:fullySettled?'BANK_INCOME_NOT_VERIFIED':'RECEIVABLE_NOT_SETTLED',
+   unpaidBecause:!fullySettled?'RECEIVABLE_NOT_SETTLED':bankIncome===0?'BANK_INCOME_NOT_VERIFIED':'',
    syntheticBankIncome:bankIncome,formalCommissionUnlocked:false,
    payrollPaymentsCreated:0};
  });

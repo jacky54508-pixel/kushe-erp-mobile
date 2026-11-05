@@ -145,6 +145,7 @@ test('full verified synthetic settlement changes only hypothetical commission el
  assert.equal(full.nextReadOnlyReport.rows[0].outstanding,0);
  assert.equal(full.nextReadOnlyReport.rows[0].pendingChequeReserved,0);
  assert.equal(full.nextCommissionReview[0].eligibleForHypotheticalReview,true);
+ assert.equal(full.nextCommissionReview[0].unpaidBecause,'');
  assert.equal(full.nextCommissionReview[0].formalCommissionUnlocked,false);
  assert.equal(full.nextCommissionReview[1].eligibleForHypotheticalReview,false);
  const other=run(full.nextState,'receipt_add','OTHERBILL',{...receipt(52500,'P37-19-SYN-RECEIPT-B2',0,0),
@@ -231,7 +232,10 @@ test('production code still blocks receipt with allowance, and K module has no E
  assert.match(sync,/erp_state_cas_write_v2/);
  assert.doesNotMatch(html,/p37-19k/i);
  assert.doesNotMatch(store,/p37-19k/i);
- assert.doesNotMatch(src,/indexedDB|localStorage|service_role|supabase\.co|KusheERPStore|window\./i);
+ assert.doesNotMatch(src,/\b(?:indexedDB|localStorage|window)\s*(?:\.|\[|\()/i);
+ assert.doesNotMatch(src,/service_role|supabase\.co|KusheERPStore/i);
+ const imported=[...src.matchAll(/\brequire\((['\"])(.*?)\1\)/g)].map(x=>x[2]);
+ assert.deepEqual(imported,['node:crypto','./p37-19j-multi-document-projection.cjs']);
  const Jgap=require('./p37-19j-financial-integration-gaps.cjs').audit(root);
  assert.equal(Jgap.releaseStatus,'BLOCKED');assert.equal(Jgap.canPostAllowance,false);
 });
