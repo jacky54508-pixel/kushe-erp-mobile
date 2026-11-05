@@ -1,0 +1,36 @@
+name: P37-19F isolated Supabase evidence and release-blocking gates
+on:
+  push:
+    branches:
+      - p37-19f-supabase-evidence-review-20261105
+    paths:
+      - 'p37-lab/p37-19f/**'
+      - '.github/workflows/p37-19f-supabase-review.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Check syntax, SQL rollback-only scope, evidence and permanent posting block
+        run: |
+          node --check p37-lab/p37-19f/release-gate.cjs
+          node --check p37-lab/p37-19f/release-gate.test.cjs
+          node --test p37-lab/p37-19f/release-gate.test.cjs
+      - name: Regression P37-19A through P37-19D
+        run: |
+          node --test p37-lab/p37-19-isolated-transaction.test.cjs
+          node --test p37-lab/p37-19b-consumer-projection.test.cjs
+          node --test p37-lab/p37-19c-formal-readonly.test.cjs
+          node --test p37-lab/p37-19d-precommit-review.test.cjs
+      - name: Verify P37-19E browser fixture is isolated (no production browser run)
+        run: |
+          python3 -m py_compile p37-lab/p37-19e/mock_remote.py p37-lab/p37-19e/browser_test.py
+          node --check p37-lab/p37-19e/client.js
+          node --check assets/js/erp-store.js
+          node --check assets/js/cloud-sync.js
