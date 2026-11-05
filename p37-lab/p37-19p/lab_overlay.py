@@ -162,7 +162,7 @@ def build():
         source,
         "const retentionAmount=Math.max(0,num(ar.retentionAmount??ar.retention??billing?.retentionAmount??billing?.retention));",
         "const retentionAmount=p3719pLabApprovedRetention(ar,billing);",
-        expected=2, name="retention_update_and_original_branch_limit"
+        expected=1, name="retention_update_original_helper_only"
     )
     # The real Store reconstructs retention-derived fields on LOAD as well as
     # during receipt writers. Preserve original retention but recompute effective
