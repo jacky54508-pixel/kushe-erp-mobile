@@ -124,6 +124,13 @@
         if(!gate?.ok||gate.postingEnabled!==false||gate.officialTaxVerified!==false||!gate.review)
           stop('P37-6 來源唯讀驗證尚未通過');
         const plan=makePlan(gate.review),first=simulate(plan,[],0);
+        const bridge=window.KusheP3712LedgerBridge;
+        if(!bridge?.simulate)stop('P37-12 收款餘額串聯模組未載入，禁止宣告驗算完成');
+        const erp=window.KuSheERPStore?.getState?.();
+        const live=window.KuSheERPStore?.billingDocumentState?.(billingId);
+        if(!live||live.issues?.length||live.snapshot!==plan.source.snapshot)stop('ERP 帳務快照已變動，請重新開啟議價草稿');
+        const bridgeReport=bridge.simulate(erp,plan,live.snapshot,erp?.meta?.businessSnapshotRevision?.id===undefined?undefined:String(erp.meta.businessSnapshotRevision.id));
+        if(!bridgeReport.ok||bridgeReport.postingEnabled!==false||bridgeReport.cloudWrites!==0||bridgeReport.formalReceiptReaderConnected!==false)stop('P37-12 核對門禁異常');
         let blocked=false;
         try{simulate(plan,first.ledger,1)}catch(e){blocked=String(e?.message||'').includes('禁止重複')}
         if(!blocked)stop('同張折讓防重複檢查未通過');
@@ -139,7 +146,9 @@
           '</ul><p>借方 '+money(plan.totals.debit)+'、貸方 '+money(plan.totals.credit)+
           '；原請款、正式發票、收款、銀行及薪資抽成不變；模擬重複入帳已阻擋。</p>'+
           '<p><strong>正式入帳仍禁止：</strong>須完成真實折讓憑證核對、ERP 安全交易與跨裝置同步驗收。</p>';
-        out.hidden=false;status.textContent='P37-10 隔離金額、借貸平衡與防重複測試通過；正式 ERP 未修改。';
+        out.innerHTML+='<p><strong>P37-12 帳務連動：</strong>隔離折讓帳本及有效本期應收 '+money(bridgeReport.limit.effectiveReceivable)+'、有效保留款 '+money(bridgeReport.limit.effectiveRetention)+' 均已核對。原請款、應收及發票保持原值。</p>'+
+          '<p><strong>尚未正式入帳：</strong>原 ERP 收款及保留款模組仍須整合有效餘額規則，正式交易與合法折讓憑證尚未驗收。</p>';
+        out.hidden=false;status.textContent='P37-12 折讓帳本與有效收款上限隔離驗算通過；正式 ERP 未修改。';
         status.classList.remove('is-error');
       }catch(error){
         out.hidden=false;out.textContent=error?.message||String(error);
