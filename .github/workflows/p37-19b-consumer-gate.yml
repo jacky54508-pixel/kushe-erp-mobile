@@ -1,0 +1,34 @@
+name: P37-19B synthetic consumer consistency gate
+on:
+  push:
+    branches:
+      - p37-19b-consumer-review-20261105
+    paths:
+      - 'p37-lab/p37-19-isolated-transaction.js'
+      - 'p37-lab/p37-19b-consumer-projection.cjs'
+      - 'p37-lab/p37-19b-consumer-projection.test.cjs'
+      - 'assets/js/p37-billing-effective-consumers.js'
+      - 'assets/js/p37-billing-ledger-bridge.js'
+      - '.github/workflows/p37-19b-consumer-gate.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Syntax gate for isolated readers and ERP Store
+        run: |
+          node --check p37-lab/p37-19b-consumer-projection.cjs
+          node --check p37-lab/p37-19b-consumer-projection.test.cjs
+          node --check assets/js/erp-store.js
+          node --check assets/js/p37-billing-ledger-bridge.js
+          node --check assets/js/p37-billing-effective-consumers.js
+      - name: P37-19A regression gate
+        run: node --test p37-lab/p37-19-isolated-transaction.test.cjs
+      - name: P37-19B synthetic consumer consistency test
+        run: node --test p37-lab/p37-19b-consumer-projection.test.cjs
