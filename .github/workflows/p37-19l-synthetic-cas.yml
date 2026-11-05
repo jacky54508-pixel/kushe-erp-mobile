@@ -1,0 +1,46 @@
+name: P37-19L synthetic Store commit / cloud CAS handoff gate
+on:
+  push:
+    branches:
+      - p37-19l-synthetic-store-sync-gate-20261106
+    paths:
+      - 'p37-lab/p37-19l-*'
+      - '.github/workflows/p37-19l-synthetic-cas.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Validate synthetic local Store / remote CAS state machine
+        run: |
+          node --check p37-lab/p37-19l-store-cloud-cas.cjs
+          node --check p37-lab/p37-19l-store-cloud-cas.test.cjs
+          node --test p37-lab/p37-19l-store-cloud-cas.test.cjs
+      - name: Regress P37-19J/K synthetic finance and formal gap gates
+        run: |
+          node --test p37-lab/p37-19k-atomic-settlement.test.cjs
+          node --test p37-lab/p37-19j-multi-document-projection.test.cjs
+          node --test p37-lab/p37-19j-financial-integration-gaps.test.cjs
+      - name: Regress older synthetic guard and auth/isolated database review status
+        run: |
+          node --test p37-lab/p37-19-isolated-transaction.test.cjs
+          node --test p37-lab/p37-19b-consumer-projection.test.cjs
+          node --test p37-lab/p37-19c-formal-readonly.test.cjs
+          node --test p37-lab/p37-19d-precommit-review.test.cjs
+          node --test p37-lab/p37-19f/release-gate.test.cjs
+          node --test p37-lab/p37-19g/dual-client-rpc.test.mjs
+          node --test p37-lab/p37-19h/verified-sessions.test.mjs
+          node --test p37-lab/p37-19i/release-gate.test.cjs
+      - name: Verify original financial Store and Cloud Sync parse, no deployments
+        run: |
+          node --check assets/js/erp-store.js
+          node --check assets/js/cloud-sync.js
+          node --check assets/js/dashboard.js
+          node --check assets/js/reports.js
+          node --check assets/js/receivable-cheques.js
