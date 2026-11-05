@@ -1,0 +1,46 @@
+name: P37-19P sandbox-only adjusted money paths on real ERP Store copy
+on:
+  push:
+    branches:
+      - p37-19p-effective-settlement-lab-20261106
+    paths:
+      - 'p37-lab/p37-19p/**'
+      - '.github/workflows/p37-19p-effective-lab.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Original Store SHA, strict sandbox overlay anchors and syntax
+        run: |
+          python -m py_compile p37-lab/p37-19p/lab_overlay.py p37-lab/p37-19p/server.py p37-lab/p37-19p/browser_e2e.py
+          node --check assets/js/erp-store.js
+          node --check assets/js/p37-billing-effective-ledger.js
+          node --check p37-lab/p37-19p/p-augmentation.js
+          python p37-lab/p37-19p/lab_overlay.py --verify-only
+      - name: Rerun unchanged original financial Store contract
+        run: |
+          node --test p37-lab/p37-19k-atomic-settlement.test.cjs
+          node --test p37-lab/p37-19j-multi-document-projection.test.cjs
+          node --test p37-lab/p37-19j-financial-integration-gaps.test.cjs
+          node --test p37-lab/p37-19i/release-gate.test.cjs
+          node --test p37-lab/p37-19h/verified-sessions.test.mjs
+      - name: Install pinned Playwright
+        run: |
+          python -m pip install playwright==1.57.0
+          if ! command -v google-chrome >/dev/null 2>&1 && ! command -v chromium >/dev/null 2>&1; then
+            python -m playwright install chromium
+          fi
+      - name: Verify original Store remains correct when unchanged
+        run: python p37-lab/p37-19o/browser_e2e.py
+      - name: Validate ephemeral patch with P37-18 ledger in genuine Chromium
+        run: python p37-lab/p37-19p/browser_e2e.py
