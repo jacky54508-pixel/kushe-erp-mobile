@@ -44,6 +44,11 @@
    if(!totals?.ok||totals.entry?.adjustment?.gross!==-ctx.draft.discountGross||totals.entry?.adjustment?.tax!==-ctx.draft.discountTax)deny("折讓金額、稅額與議價草稿無法勾稽");
    if(Array.isArray(state?.billingAllowances)&&state.billingAllowances.some(x=>str(x.voucherNo||x.reference)===number&&number))deny("折讓憑證識別碼與既有正式紀錄重複");
    return {ok:issues.length===0,issues,postingEnabled:false,externallyVerified:false,
+     manualEvidence:issues.length?null:Object.freeze({
+       invoiceNo:ctx.invoiceNo,invoiceKind,voucherKind,buyer,filing,number,date,
+       agreement:v.agreement===true,issued:v.issued===true,platform:v.platform===true,
+       paperSigned:v.paperSigned===true,proofLocation:str(v.proofLocation)
+     }),
      originalInvoiceNo:ctx.invoiceNo,amounts:totals?.entry?.adjustment?{untaxed:-totals.entry.adjustment.untaxed,tax:-totals.entry.adjustment.tax,gross:-totals.entry.adjustment.gross}:null,
      note:"僅核對人工填寫的資料與 ERP 原始金額；不能證明財政部平台已存證或申報完成"};
   }catch(error){deny("安全檢查無法完成："+(error?.message||String(error)));return {ok:false,issues,postingEnabled:false,externallyVerified:false}}
@@ -79,7 +84,30 @@
    names.forEach(n=>{const x=field(n);v[n]=x.type==="checkbox"?x.checked:x.value});
    const report=check(billingId,v);result.hidden=false;
    if(report.ok){
-    out.textContent="人工欄位與議價金額核對完成；尚未官方驗證、尚未入帳。";
+        let reviewMessage="人工欄位與議價金額核對完成；尚未官方驗證、尚未入帳。";
+    try {
+      const final=window.KusheP376FinalGate?.validate?.(billingId);
+      if(!final?.ok||final.postingEnabled!==false)throw new Error("P37-6 原帳務核對未通過");
+      const plan=window.KusheP3710AllowancePlan?.makePlan?.(final.review);
+      const state=window.KuSheERPStore?.getState?.();
+      const doc=window.KuSheERPStore?.billingDocumentState?.(billingId);
+      if(!doc||doc.issues?.length||doc.snapshot!==plan?.source?.snapshot)throw new Error("原帳務快照已變動");
+      const bridge=window.KusheP3712LedgerBridge?.simulate?.(state,plan,doc.snapshot,state?.meta?.businessSnapshotRevision?.id);
+      const packet=window.KusheP3715VoucherPacket?.prepare?.({
+        plan,voucherReport:report,bridgeReport:bridge,state,
+        documentSnapshot:doc.snapshot,revisionId:state?.meta?.businessSnapshotRevision?.id
+      });
+      if(!packet||packet.postable!==false||packet.officiallyVerified!==false||packet.cloudWrites!==0)
+        throw new Error("P37-15 核對包未建立");
+      window.KusheP3715VoucherPacket.ensureSame(packet,{plan,state,documentSnapshot:doc.snapshot,
+        revisionId:state?.meta?.businessSnapshotRevision?.id});
+      reviewMessage="P37-15 人工憑證資料與原請款已核對，待會計及官方存證確認；尚未入帳。";
+      result.dataset.reviewReady="manual-only";
+    }catch(error){
+      reviewMessage="人工欄位核對通過，但 P37-15 來源安全核對未完成："+(error?.message||String(error))+"；沒有入帳。";
+      result.dataset.reviewReady="blocked";
+    }
+    out.textContent=reviewMessage;
     result.innerHTML="<p>發票："+esc(report.originalInvoiceNo)+"｜未稅折讓 "+fmt(report.amounts.untaxed)+"｜稅額 "+fmt(report.amounts.tax)+"｜含稅折讓 "+fmt(report.amounts.gross)+"</p><p>仍須會計確認實際憑證與財政部存證情形。正式入帳不開放。</p>";
    }else{
     out.textContent="安全檢查未通過，沒有修改任何 ERP 資料。";
