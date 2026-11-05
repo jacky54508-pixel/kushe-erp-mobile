@@ -1,0 +1,29 @@
+name: P37-19 isolated transaction gate
+on:
+  push:
+    branches:
+      - p37-19-guard-review-20261105
+      - beta
+    paths:
+      - 'p37-lab/p37-19-isolated-transaction.js'
+      - 'p37-lab/p37-19-isolated-transaction.test.cjs'
+      - 'assets/js/p37-billing-effective-ledger.js'
+      - '.github/workflows/p37-19-isolated-gate.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify script syntax
+        run: |
+          node --check p37-lab/p37-19-isolated-transaction.js
+          node --check assets/js/p37-billing-effective-ledger.js
+          node --check assets/js/erp-store.js
+      - name: Verify synthetic gates
+        run: node --test p37-lab/p37-19-isolated-transaction.test.cjs
