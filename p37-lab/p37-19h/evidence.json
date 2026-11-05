@@ -1,0 +1,17 @@
+{
+  "schema": "kushe-p37-19h-evidence-v1",
+  "checkedDate": "2026-11-06",
+  "isolatedProjectRef": "ldktrfgzzzmklhsnfrol",
+  "labEnabledMembers": 1,
+  "labMemberPasswordPresent": true,
+  "labMemberEmailConfirmed": true,
+  "labCasesAtRead": 0,
+  "labAllowancesAtRead": 0,
+  "distinctSignedSupabaseSessionsObserved": false,
+  "realAuthReadOnlyPreflightExecuted": false,
+  "realTwoAuthenticatedRPCRequestsExecuted": false,
+  "officialTaxVoucherVerified": false,
+  "receiptBankChequeIntegrationComplete": false,
+  "formalERPCloudTouched": false,
+  "productionReleaseAllowed": false
+}

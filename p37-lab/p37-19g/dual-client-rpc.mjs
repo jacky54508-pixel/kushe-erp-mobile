@@ -1,6 +1,7 @@
 // P37-19G: manual opt-in REAL lab RPC test. Never imported by ERP or auto-CI.
 // Requires separate test-only Auth logins, staged synthetic case, and admin cleanup.
 import {pathToFileURL} from 'node:url';
+import {verifyPair,signOut} from '../p37-19h/verified-sessions.mjs';
 const TARGET='https://ldktrfgzzzmklhsnfrol.supabase.co';
 const ID='00000000-0000-4000-8000-000000019019';
 const CASE='P37-9B-TEST-P37-19G-CLEANUP-20261105';
@@ -48,8 +49,15 @@ function validCase(row,userId){
 }
 export async function execute(cfg,fetcher=fetch){
  if(cfg?.url!==TARGET||cfg?.id!==ID)failure('INVALID_RUN_CONFIGURATION');
- const [a,b]=await Promise.all([login(cfg,fetcher),login(cfg,fetcher)]);
- if(a.token===b.token||a.userId!==b.userId)failure('SEPARATE_SESSION_PROOF_MISSING');
+ const loginResults=await Promise.allSettled([login(cfg,fetcher),login(cfg,fetcher)]);
+ const sessions=loginResults.filter(x=>x.status==='fulfilled').map(x=>x.value);
+ try {
+  if(sessions.length!==2)failure('SEPARATE_TEST_LOGINS_NOT_AVAILABLE');
+  const [a,b]=sessions;
+  if(a.token===b.token||a.userId!==b.userId)failure('SEPARATE_SESSION_PROOF_MISSING');
+  // H gate: BEFORE any business RPC, confirm distinct signed Supabase Auth
+  // sessions with real /auth/v1/user and RLS allowlist from this LAB.
+  await verifyPair({url:cfg.url,key:cfg.key},fetcher,a,b);
  const [ca,cb,allowances]=await Promise.all([
   rows(cfg,a.token,fetcher,casesPath()),
   rows(cfg,b.token,fetcher,casesPath()),
@@ -85,7 +93,14 @@ export async function execute(cfg,fetcher=fetch){
     Number(allowancesAfter[0].retention_reduction)!==2600)
    failure('POSTCHECK_FAILED_CLEANUP_REQUIRED');
  return {status:'LAB_HTTP_RPC_RACE_PASS',clients:2,winners:1,conflicts:1,
-    formalErpWrites:0,adminCleanupRequired:true,cleanupVerified:false};
+    formalErpWrites:0,adminCleanupRequired:true,cleanupVerified:false,
+    realDistinctAuthSessionsPrechecked:true};
+ } finally {
+  // Logout after RPC success, error, or stale version; never persist JWTs.
+  const results=await Promise.allSettled(sessions.map(s=>signOut({url:cfg.url,key:cfg.key},fetcher,s)));
+  if(results.some(x=>x.status!=='fulfilled'||x.value!==true))
+   failure('AUTH_SESSIONS_LOGOUT_NOT_VERIFIED');
+ }
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
  try{

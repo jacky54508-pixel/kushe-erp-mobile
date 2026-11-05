@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {config,execute} from './dual-client-rpc.mjs';
+const encode=x=>Buffer.from(JSON.stringify(x)).toString('base64url');
+const makeJwt=(subject,session)=>encode({alg:'HS256',typ:'JWT'})+'.'+encode({iss:'https://ldktrfgzzzmklhsnfrol.supabase.co/auth/v1',sub:subject,session_id:session,aud:'authenticated',role:'authenticated',is_anonymous:false,exp:Math.floor(Date.now()/1000)+3600})+'.SYNTHETIC_TEST_SIGNATURE';
 const dir=import.meta.dirname;
 function env(){
  return {P37_19G_ALLOW_REMOTE_TEST:'YES_LAB_ONLY',P37_19G_ADMIN_CLEANUP_READY:'YES',
@@ -46,15 +48,21 @@ test('staging and cleanup are manual, exact one-row, and make no permission chan
 test('mock concurrent HTTP behavior tests one winner, one rejected duplicate without network',async()=>{
  const cfg=config(env());
  const testId='00000000-0000-4000-8000-000000019019';
- let signIns=0,revision=0,allowances=[];
- const record={id:testId,owner_id:'P37-19G-SYN-USER',case_no:'P37-9B-TEST-P37-19G-CLEANUP-20261105',
+ let signIns=0,logouts=0,revision=0,allowances=[];
+ const record={id:testId,owner_id:'e6a1e159-9474-4a67-a0b4-c4718cd831b2',case_no:'P37-9B-TEST-P37-19G-CLEANUP-20261105',
   invoice_no:'P37-9B-INV-P37-19G-CLEANUP-20261105',revision:0,original_untaxed:1248000,
   original_tax:62400,original_gross:1310400,original_receivable:1185600,original_retention:124800};
  const reply=(status,value)=>({ok:status>=200&&status<300,status,json:async()=>value});
  async function mockFetch(url,options={}){
   const u=String(url);
-  if(u.endsWith('/auth/v1/token?grant_type=password'))
-    return reply(200,{access_token:'test-token-'+(++signIns),user:{id:record.owner_id}});
+  if(u.endsWith('/auth/v1/token?grant_type=password')){
+    signIns++;
+    const session=signIns===1?'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1':'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2';
+    return reply(200,{access_token:makeJwt(record.owner_id,session),user:{id:record.owner_id}});
+  }
+  if(u.endsWith('/auth/v1/user'))return reply(200,{id:record.owner_id,is_anonymous:false});
+  if(u.includes('/rest/v1/p37_lab_members?'))return reply(200,[{user_id:record.owner_id,enabled:true}]);
+  if(u.endsWith('/auth/v1/logout')){logouts++;return reply(204,null)}
   if(u.includes('/rest/v1/p37_lab_cases?'))return reply(200,[{...record,revision}]);
   if(u.includes('/rest/v1/p37_lab_allowances?'))return reply(200,[...allowances]);
   if(u.endsWith('/rest/v1/rpc/p37_lab_apply_synthetic_allowance')){
@@ -74,4 +82,6 @@ test('mock concurrent HTTP behavior tests one winner, one rejected duplicate wit
  assert.equal(result.cleanupVerified,false);
  assert.equal(result.adminCleanupRequired,true);
  assert.equal(signIns,2);
+ assert.equal(logouts,2);
+ assert.equal(result.realDistinctAuthSessionsPrechecked,true);
 });
