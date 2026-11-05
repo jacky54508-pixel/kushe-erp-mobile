@@ -1,0 +1,36 @@
+name: P37-19D synthetic precommit and cross-device race review
+on:
+  push:
+    branches:
+      - p37-19d-precommit-review-20261105
+    paths:
+      - 'p37-lab/p37-19d-precommit-review.cjs'
+      - 'p37-lab/p37-19d-precommit-review.test.cjs'
+      - '.github/workflows/p37-19d-precommit-review.yml'
+      - 'assets/js/p37-billing-formal-readonly-projection.js'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify syntax of existing ERP and new isolated preflight
+        run: |
+          node --check assets/js/erp-store.js
+          node --check assets/js/cloud-sync.js
+          node --check assets/js/p37-billing-formal-readonly-projection.js
+          node --check p37-lab/p37-19d-precommit-review.cjs
+          node --check p37-lab/p37-19d-precommit-review.test.cjs
+      - name: Re-run P37-19A isolated write protection
+        run: node --test p37-lab/p37-19-isolated-transaction.test.cjs
+      - name: Re-run P37-19B balance consumers
+        run: node --test p37-lab/p37-19b-consumer-projection.test.cjs
+      - name: Re-run P37-19C formal-shaped reader
+        run: node --test p37-lab/p37-19c-formal-readonly.test.cjs
+      - name: Run P37-19D stale CAS, cheque, receipt and retention gates
+        run: node --test p37-lab/p37-19d-precommit-review.test.cjs
