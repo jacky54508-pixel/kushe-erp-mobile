@@ -4,12 +4,15 @@ Reuses the SHA-verified P37-19N HTTP server; overrides its allowlisted
 fixture routes before instantiating the server. No production URL or data.
 """
 from pathlib import Path
-import sys
+import importlib.util
 
 ROOT = Path(__file__).resolve().parents[2]
 N = ROOT / "p37-lab" / "p37-19n"
-sys.path.insert(0, str(N))
-import server as n_server
+spec = importlib.util.spec_from_file_location("p37_19n_original_server", N / "server.py")
+if not spec or not spec.loader:
+    raise RuntimeError("P37-19O ORIGINAL_TEST_SERVER_MISSING")
+n_server = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(n_server)
 
 HERE = Path(__file__).resolve().parent
 n_server.ALLOWED = {
