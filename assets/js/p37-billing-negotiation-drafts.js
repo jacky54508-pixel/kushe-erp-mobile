@@ -80,6 +80,25 @@
   if(!records.length)return '<p>尚無本機草稿。</p>';
   return '<ol class="p37-draft-list">'+records.slice().reverse().map(v=>'<li><div><b>第 '+Number(v.version)+' 版</b><span>'+esc(new Date(v.savedAt).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false}))+'</span></div><p>核定含稅 '+fmt(v.approvedGross)+' ｜折讓 '+fmt(v.discountGross)+' ｜議價日期 '+esc(v.date)+'</p><p>備註：'+esc(v.reason)+'</p></li>').join('')+'</ol>';
  }
+ // P37-11 only rearranges presentation; no accounting write, no cloud access.
+ function prioritizeAllowanceReview(overlay){
+  const body=overlay?.querySelector?.('.p37-neg-body');
+  const history=body?.querySelector('.p37-draft-history');
+  const plan=body?.querySelector('.p3710-panel');
+  if(!body||!history||!plan||body.querySelector('.p37-advanced-audit'))return false;
+  const types=['p37-post-gate','p37v-check','p37-link-panel','p376-guard'];
+  const audits=types.map(name=>Array.from(body.children).find(node=>node.classList?.contains(name)));
+  if(audits.some(x=>!x))return false; // Preserve original diagnostics if modules were not loaded.
+  history.insertAdjacentElement('afterend',plan);
+  plan.open=true;
+  const advanced=document.createElement('details');
+  advanced.className='p37-advanced-audit';
+  advanced.innerHTML='<summary>進階安全檢查與隔離測試（P37-3～P37-8）</summary>'+
+   '<p>需要複查時才展開。這些功能不會自動執行，也不會正式入帳。</p>';
+  plan.insertAdjacentElement('afterend',advanced);
+  audits.forEach(node=>advanced.appendChild(node)); // Existing listeners remain attached.
+  return true;
+ }
  function open(reference){
   const preview=window.KusheBillingNegotiationPreview;
   if(!preview?.open)stop('P37-1 議價試算未載入');
@@ -154,6 +173,9 @@
    warning.textContent='P37-3 安全檢查無法開啟：'+(error?.message||String(error))+'。本次沒有入帳。';
    overlay.querySelector('.p37-neg-body')?.append(warning);
   }
+  // P37-11: surface P37-10 first, preserve old diagnostics when unavailable.
+  try{prioritizeAllowanceReview(overlay)}catch(_){/* unchanged original layout */}
+
   return presented;
  }
  window.KusheBillingNegotiationDrafts=Object.freeze({anchor,read,save,open});

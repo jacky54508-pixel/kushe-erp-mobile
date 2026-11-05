@@ -14,3 +14,16 @@
 .p37-neg-footer .p37-draft-save{background:#25476e;color:#fff;border-color:#25476e}
 .p37-neg-footer .p37-draft-save:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:600px){.p37-neg-footer .p37-draft-save{width:100%}}
+
+/* P37-11: concise billing allowance review, no global styles. */
+.p37-neg-body>.p3710-panel{display:block;margin:16px 0 12px;border:1px solid #c7d7ea;border-radius:12px;background:#f8fbff;color:#203958;overflow:hidden}
+.p37-neg-body>.p3710-panel>summary{cursor:pointer;padding:14px 16px;background:#edf4fd;font-weight:700;line-height:1.55;color:#1b4166}
+.p37-neg-body>.p3710-panel[open]>summary{border-bottom:1px solid #dbe7f4}
+.p37-neg-body>.p3710-panel>p,.p37-neg-body>.p3710-panel>.p378-buttons,.p37-neg-body>.p3710-panel>.p378-status,.p37-neg-body>.p3710-panel>.p378-results{margin:12px 16px}
+.p37-neg-body>.p3710-panel>.p378-results ul{padding-left:22px}
+.p37-neg-body>.p3710-panel>.p378-results li{margin:6px 0;overflow-wrap:anywhere}
+.p37-advanced-audit{margin:12px 0;border:1px solid #e1e7ef;border-radius:10px;background:#fff;overflow:hidden}
+.p37-advanced-audit>summary{cursor:pointer;background:#f7f9fc;padding:12px 15px;font-weight:650;color:#536679}
+.p37-advanced-audit>p{font-size:12px;color:#64748b;padding:0 15px;line-height:1.6}
+.p37-advanced-audit>.p37-post-gate,.p37-advanced-audit>.p37v-check,.p37-advanced-audit>.p37-link-panel,.p37-advanced-audit>.p376-guard{margin:15px}
+@media(max-width:600px){.p37-neg-body>.p3710-panel>summary{padding:12px}.p37-advanced-audit>summary{padding:12px}.p37-advanced-audit>.p37-post-gate,.p37-advanced-audit>.p37v-check,.p37-advanced-audit>.p37-link-panel,.p37-advanced-audit>.p376-guard{margin:9px}}
