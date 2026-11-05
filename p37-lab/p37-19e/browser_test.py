@@ -7,6 +7,7 @@ import copy
 import json
 import pathlib
 import sys
+import shutil
 from playwright.async_api import async_playwright
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -18,7 +19,8 @@ async def run():
     outbound = []
     try:
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(headless=True)
+            browser = await playwright.chromium.launch(headless=True,
+                executable_path=shutil.which('google-chrome') or shutil.which('chromium') or None)
             desktop = await browser.new_context(viewport={"width": 1280, "height": 850})
             mobile = await browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True,
                                                has_touch=True, device_scale_factor=2)

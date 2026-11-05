@@ -32,9 +32,11 @@ jobs:
           node --test p37-lab/p37-19b-consumer-projection.test.cjs
           node --test p37-lab/p37-19c-formal-readonly.test.cjs
           node --test p37-lab/p37-19d-precommit-review.test.cjs
-      - name: Install pinned Playwright and Chromium
+      - name: Install pinned Playwright and use isolated runner browser
         run: |
           python -m pip install playwright==1.57.0
-          python -m playwright install --with-deps chromium
+          if ! command -v google-chrome >/dev/null 2>&1 && ! command -v chromium >/dev/null 2>&1; then
+            python -m playwright install chromium
+          fi
       - name: Two isolated real browser sessions and loopback CAS failure injection
         run: python p37-lab/p37-19e/browser_test.py
