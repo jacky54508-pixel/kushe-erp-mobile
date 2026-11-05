@@ -27,7 +27,7 @@ function mock(opts={}){
    loginCount++;
    if(opts.secondLoginFailure&&loginCount===2)return reply(400,{code:'invalid_grant'});
    return reply(200,{access_token:token(opts.sameSession?SID1:loginCount===1?SID1:SID2,
-       opts.wrongSub?{sub:'c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c3'}:{}),
+       {...(opts.wrongSub?{sub:'c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c3'}:{}),...(opts.sameSession?{jti:loginCount}:{})}),
     user:{id:USER}});
   }
   if(route==='/auth/v1/user'&&method==='GET'){
