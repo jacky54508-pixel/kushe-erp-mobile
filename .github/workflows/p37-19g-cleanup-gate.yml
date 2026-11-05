@@ -1,0 +1,35 @@
+name: P37-19G lab cleanup and dual-client readiness regression
+on:
+  push:
+    branches:
+      - p37-19g-lab-cleanup-review-20261105
+    paths:
+      - 'p37-lab/p37-19g/**'
+      - '.github/workflows/p37-19g-cleanup-gate.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Only offline mock test and syntax; NO Supabase connection
+        run: |
+          node --check p37-lab/p37-19g/dual-client-rpc.mjs
+          node --check p37-lab/p37-19g/dual-client-rpc.test.mjs
+          node --test p37-lab/p37-19g/dual-client-rpc.test.mjs
+      - name: Previous P37-19A-D regression
+        run: |
+          node --test p37-lab/p37-19-isolated-transaction.test.cjs
+          node --test p37-lab/p37-19b-consumer-projection.test.cjs
+          node --test p37-lab/p37-19c-formal-readonly.test.cjs
+          node --test p37-lab/p37-19d-precommit-review.test.cjs
+      - name: P37-19F release blocking and ERP syntax
+        run: |
+          node --test p37-lab/p37-19f/release-gate.test.cjs
+          node --check assets/js/erp-store.js
+          node --check assets/js/cloud-sync.js

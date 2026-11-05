@@ -1,0 +1,19 @@
+{
+  "schema": "kushe-p37-19g-evidence-v1",
+  "verifiedDate": "2026-11-05",
+  "labProjectRef": "ldktrfgzzzmklhsnfrol",
+  "labProject": "kushe-auth-lab",
+  "realAdminCreateApplyExactCleanupTransactionPassed": true,
+  "discountGross": 27300,
+  "proposedGross": 1283100,
+  "proposedReceivable": 1160900,
+  "proposedRetention": 122200,
+  "labCasesAfter": 0,
+  "labAllowancesAfter": 0,
+  "authenticatedDeleteGranted": false,
+  "realTwoAuthenticatedHTTPClientsTested": false,
+  "HTTPPostcommitCleanupVerified": false,
+  "productionProjectTouched": false,
+  "companyERPDataChanged": false,
+  "formalPostingEnabled": false
+}
