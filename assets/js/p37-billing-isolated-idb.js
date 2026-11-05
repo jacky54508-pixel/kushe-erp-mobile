@@ -233,6 +233,16 @@
      ' 條，同時嘗試寫入只有 '+s.successfulTransactions+' 筆成功、'+s.rejectedTransactions+
      ' 筆被攔截；正式跨裝置雲端同步仍未測試。'};
   });
+  // P37-10 proposals are computed in memory, never posted to formal ERP.
+  try{
+   if(window.KusheP3710AllowancePlan?.mount?.(panel,billingId)!==true){
+    const warn=document.createElement('p');warn.className='p378-status is-error';
+    warn.textContent='P37-10 折讓擬議分錄模組未載入；正式入帳仍關閉。';panel.appendChild(warn);
+   }
+  }catch(error){
+   const warn=document.createElement('p');warn.className='p378-status is-error';
+   warn.textContent='P37-10 尚無法開啟：'+(error?.message||String(error));panel.appendChild(warn);
+  }
   return true;
  }
  window.KusheP378IsolatedDB=Object.freeze({DB_NAME,STABLE_ID,freshCase,checkCase,checkAuth,seed,read,apply,testPersistence,testConcurrent,mount});
