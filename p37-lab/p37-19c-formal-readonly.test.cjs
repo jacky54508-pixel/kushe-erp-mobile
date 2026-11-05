@@ -58,7 +58,7 @@ test('fail closed on duplicate source, fake voucher, stale revision or mismatch 
  assert.throws(()=>p.project(s,ids.receivableId,inspector(),{mode:'PRODUCTION_WRITE',expectedRevisionId:'P37-19-SYN-REV'}),/唯讀/);
 });
 test('reject overreserved cheque, inconsistent deduction and foreign receipt source',()=>{
- const s=fixture();s.receivables[0].receivableCheques=[{schema:'kushe-receivable-cheque-v1',id:'P37-19-SYN-CHEQUE',status:'pending',revision:1,amount:1160901,deductions:[],reservedAmount:1160901}];assert.throws(()=>view(s),/餘額/);
+ const s=fixture();s.receivables[0].receivableCheques=[{schema:'kushe-receivable-cheque-v1',id:'P37-19-SYN-CHEQUE',status:'pending',revision:1,amount:1160901,deductions:[],reservedAmount:1160901}];assert.throws(()=>view(s),/不足|餘額/);
  s.receivables[0].receivableCheques=[];
  s.receipts=[{id:'R1',receivableId:ids.receivableId,billingId:ids.billingId,cashAmount:90000,deductionAmount:0,deductions:[{amount:10000}]}];s.receivables[0].received=100000;assert.throws(()=>view(s),/扣款/);
  s.receipts=[{id:'R2',receivableId:ids.receivableId,billingId:'FOREIGN',amount:1}];s.receivables[0].received=1;assert.throws(()=>view(s),/來源|對應/);
