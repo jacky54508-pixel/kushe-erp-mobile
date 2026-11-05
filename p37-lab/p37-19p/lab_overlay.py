@@ -28,6 +28,19 @@ def replace_exact(source, old, new, expected=1, name="unknown"):
 INJECTED_READER = r"""
   // P37-19P: LAB COPY ONLY, NOT formal ERP. Never post in production.
   // Invoke the existing P37-18 cross-document source and tax-ledger reader.
+  // Source-identity fence: no real-looking account can even load this LAB copy.
+  const p3719pStartup=window.P37P;
+  if(window.location?.hostname!=='127.0.0.1'||
+     window.location?.protocol!=='http:'||
+     window.location?.pathname!=='/'||
+     p3719pStartup?.isolatedFixture!==true||
+     p3719pStartup?.scope!=='P37_19P_UNVERIFIED_SYNTHETIC_FINANCE_OVERLAY_ONLY'||
+     !Array.isArray(p3719pStartup.snapshot?.billings)||
+     !Array.isArray(p3719pStartup.snapshot?.receivables)||
+     p3719pStartup.snapshot.billings.some(x=>!/^P37-19-SYN-[A-Z0-9-]+$/.test(String(x?.id||'')))||
+     p3719pStartup.snapshot.receivables.some(x=>!/^P37-19-SYN-[A-Z0-9-]+$/.test(String(x?.id||'')))) {
+    throw new Error('P37-19P_LAB_BOOTSTRAP_NON_SYNTHETIC_SOURCE');
+  }
   function p3719pLabEffective(ar) {
     if(window.location?.hostname!=='127.0.0.1'||
        window.location?.protocol!=='http:'||
