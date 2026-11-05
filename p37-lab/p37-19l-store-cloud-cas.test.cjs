@@ -129,7 +129,7 @@ test('reverse race: B wins, A receives conflict; never auto-overwrite newer remo
 test('local store failures after each staged layer leave source and remote byte-identical and retryable',()=>{
  const failures=['AFTER_PRIMARY','AFTER_EMERGENCY','AFTER_TOKENS','BEFORE_COMMIT_VERIFIED'];
  for(const point of failures){
-  const s=make(),before=JSON.stringify(s),p=L.prepare(s,A,receipt(s,A,'CRASH-'+point,10000),ledger);
+  const s=make(),before=JSON.stringify(s),p=L.prepare(s,A,receipt(s,A,'CRASH-'+point.replaceAll('_','-'),10000),ledger);
   assert.throws(()=>L.localCommit(s,p,ledger,{failAt:point}),/INJECTED_LOCAL_ROLLBACK/);
   assert.equal(JSON.stringify(s),before);
   const successful=L.localCommit(s,p,ledger);
