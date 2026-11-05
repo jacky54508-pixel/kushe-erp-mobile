@@ -101,10 +101,18 @@
         throw new Error("P37-15 核對包未建立");
       window.KusheP3715VoucherPacket.ensureSame(packet,{plan,state,documentSnapshot:doc.snapshot,
         revisionId:state?.meta?.businessSnapshotRevision?.id});
-      reviewMessage="P37-15 人工憑證資料與原請款已核對，待會計及官方存證確認；尚未入帳。";
+
+      // P37-16 uses the REAL ERP Store's read-only pre-commit validator.
+      // This returns a pending candidate ONLY. No transaction is committed.
+      const precommit=window.KuSheERPStore?.billingAllowanceCandidateReview?.(packet);
+      if(!precommit?.ok||precommit.canPost!==false||precommit.posted!==false||
+        precommit.cloudWrites!==0||precommit.candidate?.status!=='PENDING_VERIFIED_EVIDENCE_NOT_POSTED')
+        throw new Error('P37-16 Store 安全門禁尚未通過');
+
+      reviewMessage="P37-16 原始請款、發票、應收及折讓憑證已完成 Store 唯讀核對；尚待會計及官方確認，正式入帳關閉。";
       result.dataset.reviewReady="manual-only";
     }catch(error){
-      reviewMessage="人工欄位核對通過，但 P37-15 來源安全核對未完成："+(error?.message||String(error))+"；沒有入帳。";
+      reviewMessage="人工欄位核對通過，但 P37-15／16 安全核對未完成："+(error?.message||String(error))+"；沒有入帳。";
       result.dataset.reviewReady="blocked";
     }
     out.textContent=reviewMessage;
