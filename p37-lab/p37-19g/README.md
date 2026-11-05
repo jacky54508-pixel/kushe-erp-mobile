@@ -14,3 +14,5 @@ Real lab admin cleanup within a single committed transaction: PASS. Actual indep
 GitHub Actions runs only mocked HTTP tests and static source checks, never authenticates to Supabase or executes staging scripts.
 
 ERP Store, Cloud Sync, invoice, receivable, bank, payroll and company data remain unchanged.
+
+Additional verification on 2026-11-05: a committed synthetic fixture existed (1 case), then a second independent privileged SQL transaction deleted the exact fixture and committed. A separate read-only query confirmed 0 cases and 0 allowances. This is NOT a verified dual authenticated HTTP RPC race.

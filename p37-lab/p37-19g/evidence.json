@@ -15,5 +15,9 @@
   "HTTPPostcommitCleanupVerified": false,
   "productionProjectTouched": false,
   "companyERPDataChanged": false,
-  "formalPostingEnabled": false
+  "formalPostingEnabled": false,
+  "separateCommittedFixtureStageAndAdminCleanupVerified": true,
+  "committedFixtureCasesAfterStage": 1,
+  "separateTransactionCleanupFinalCases": 0,
+  "separateTransactionCleanupFinalAllowances": 0
 }
