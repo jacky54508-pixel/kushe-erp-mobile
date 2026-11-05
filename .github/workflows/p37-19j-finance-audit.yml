@@ -1,0 +1,43 @@
+name: P37-19J synthetic effective finance and formal consumer audit
+on:
+  push:
+    branches:
+      - p37-19j-multidoc-finance-review-20261106
+    paths:
+      - 'p37-lab/p37-19j-*'
+      - '.github/workflows/p37-19j-finance-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Core syntax and isolated J read-only balance test
+        run: |
+          node --check p37-lab/p37-19j-multi-document-projection.cjs
+          node --check p37-lab/p37-19j-financial-integration-gaps.cjs
+          node --test p37-lab/p37-19j-multi-document-projection.test.cjs
+          node --test p37-lab/p37-19j-financial-integration-gaps.test.cjs
+      - name: P37-19C formal-shaped reader and J snapshot consistency
+        run: |
+          node --test p37-lab/p37-19c-formal-readonly.test.cjs
+          node --test p37-lab/p37-19b-consumer-projection.test.cjs
+      - name: Existing I-H-G-F release safety and synthetic guards
+        run: |
+          node --test p37-lab/p37-19i/release-gate.test.cjs
+          node --test p37-lab/p37-19h/verified-sessions.test.mjs
+          node --test p37-lab/p37-19g/dual-client-rpc.test.mjs
+          node --test p37-lab/p37-19f/release-gate.test.cjs
+          node --test p37-lab/p37-19d-precommit-review.test.cjs
+          node --test p37-lab/p37-19-isolated-transaction.test.cjs
+      - name: Live finance and Cloud Sync syntax remain unmodified
+        run: |
+          node --check assets/js/erp-store.js
+          node --check assets/js/dashboard.js
+          node --check assets/js/reports.js
+          node --check assets/js/cloud-sync.js
