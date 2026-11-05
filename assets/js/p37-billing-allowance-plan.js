@@ -131,6 +131,13 @@
         if(!live||live.issues?.length||live.snapshot!==plan.source.snapshot)stop('ERP 帳務快照已變動，請重新開啟議價草稿');
         const bridgeReport=bridge.simulate(erp,plan,live.snapshot,erp?.meta?.businessSnapshotRevision?.id===undefined?undefined:String(erp.meta.businessSnapshotRevision.id));
         if(!bridgeReport.ok||bridgeReport.postingEnabled!==false||bridgeReport.cloudWrites!==0||bridgeReport.formalReceiptReaderConnected!==false)stop('P37-12 核對門禁異常');
+        const downstream=window.KusheP3713EffectiveConsumers;
+        if(!downstream?.checkConsistency)stop('P37-13 有效餘額共用計算尚未載入');
+        const p3713=downstream.checkConsistency(bridgeReport,bridge);
+        if(!p3713.ok||p3713.postingEnabled!==false||p3713.cloudWrites!==0||
+           p3713.formalReceiptWriterConnected!==false||p3713.formalRetentionWriterConnected!==false||
+           p3713.formalReportReaderConnected!==false||!p3713.downstreamChecksPassed)
+          stop('P37-13 收款、保留款與報表門禁不一致');
         let blocked=false;
         try{simulate(plan,first.ledger,1)}catch(e){blocked=String(e?.message||'').includes('禁止重複')}
         if(!blocked)stop('同張折讓防重複檢查未通過');
@@ -148,7 +155,13 @@
           '<p><strong>正式入帳仍禁止：</strong>須完成真實折讓憑證核對、ERP 安全交易與跨裝置同步驗收。</p>';
         out.innerHTML+='<p><strong>P37-12 帳務連動：</strong>隔離折讓帳本及有效本期應收 '+money(bridgeReport.limit.effectiveReceivable)+'、有效保留款 '+money(bridgeReport.limit.effectiveRetention)+' 均已核對。原請款、應收及發票保持原值。</p>'+
           '<p><strong>尚未正式入帳：</strong>原 ERP 收款及保留款模組仍須整合有效餘額規則，正式交易與合法折讓憑證尚未驗收。</p>';
-        out.hidden=false;status.textContent='P37-12 折讓帳本與有效收款上限隔離驗算通過；正式 ERP 未修改。';
+        out.innerHTML+='<p><strong>P37-13 收款／保留款／報表一致性：</strong>模擬可收上限 '+
+           money(p3713.receiptInputMax)+'、模擬保留款可收 '+money(p3713.retentionInputMax)+
+           '；應收 KPI 減少 '+money(-p3713.kpiDelta.currentOutstanding)+
+           '、保留款 KPI 減少 '+money(-p3713.kpiDelta.retentionOutstanding)+
+           '。全額、分次、超收、編輯金額已用同一計算核心核對。</p>'+
+           '<p><strong>正式寫入仍關閉：</strong>上述是隔離讀取及金額規則，正式 ERP 收款／保留款寫入與報表尚未切換。</p>';
+        out.hidden=false;status.textContent='P37-13 隔離的應收、收款、保留款與 KPI 一致性核對通過；正式 ERP 未修改。';
         status.classList.remove('is-error');
       }catch(error){
         out.hidden=false;out.textContent=error?.message||String(error);
