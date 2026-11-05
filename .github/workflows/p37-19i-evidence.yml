@@ -1,0 +1,32 @@
+name: P37-19I isolated real committed lifecycle evidence
+on:
+  push:
+    branches:
+      - p37-19i-committed-lifecycle-review-20261106
+    paths:
+      - 'p37-lab/p37-19i/**'
+      - '.github/workflows/p37-19i-evidence.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Offline evidence no-post gate
+        run: |
+          node --check p37-lab/p37-19i/release-gate.cjs
+          node --test p37-lab/p37-19i/release-gate.test.cjs
+      - name: Regression existing P37-19F-G-H safety
+        run: |
+          node --test p37-lab/p37-19f/release-gate.test.cjs
+          node --test p37-lab/p37-19g/dual-client-rpc.test.mjs
+          node --test p37-lab/p37-19h/verified-sessions.test.mjs
+      - name: Original ERP syntax gates
+        run: |
+          node --check assets/js/erp-store.js
+          node --check assets/js/cloud-sync.js
