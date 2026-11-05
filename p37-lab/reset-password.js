@@ -51,7 +51,11 @@
    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254)throw Error("請填寫有效的 P37 測試 Email");
    const path="/auth/v1/recover?redirect_to="+encodeURIComponent(CALLBACK);
    const response=await call(path,"POST",{email});
-   if(!response.ok)throw Error("寄送未完成；請確認 Redirect URLs 已加入密碼重設頁，並注意郵件發送限制");
+   if(!response.ok){
+    if(response.status===429)throw Error("寄送太頻繁（HTTP 429）。Auth Lab 已達寄信限制；請先查看先前成功寄出的郵件，不要連續重試。等寄信配額恢復後再試一次。");
+    if(response.status===400||response.status===422)throw Error("測試帳號寄信遭拒（HTTP "+response.status+"）。請核對收件帳號是否獲准收信及 Auth Lab 郵件服務設定。");
+    throw Error("寄送未完成（HTTP "+response.status+"）。請核對 Auth Lab 郵件發送設定及限制。");
+   }
    show("send-result","若測試帳號符合寄信條件，請到信箱開啟最新一封密碼設定信；不要轉傳連結或驗證碼。");
    return {ok:true};
   }catch(e){show("send-result",e?.message||"寄送失敗",true);return {ok:false}}
@@ -63,7 +67,8 @@
   // Consume the one-time fragment before any awaited request, never put tokens in persistent storage.
   if(fragment||query)try{window.history.replaceState(null,"",l.pathname)}catch(_){}
   if(!fragment){
-   show("verify-result",query?"此驗證連結的格式不適用，請重新寄送密碼設定信。":"尚未由有效的密碼設定信開啟。",Boolean(query));
+   const cacheOnly=/^\?(?:v|cache)=[A-Za-z0-9_-]{1,80}$/.test(query);
+   show("verify-result",query&&!cacheOnly?"此驗證連結的格式不適用，請重新寄送密碼設定信。":"尚未由有效的密碼設定信開啟。",Boolean(query&&!cacheOnly));
    return {ok:false};
   }
   const params=new URLSearchParams(fragment.slice(1));
