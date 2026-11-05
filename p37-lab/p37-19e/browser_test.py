@@ -54,7 +54,7 @@ async def run():
             for fault in ("AFTER_APPEND", "AFTER_REVISION"):
                 response = await a.evaluate(
                     "([key,fault]) => KusheP3719ELab.submit(key,fault)",
-                    ["P37-19-SYN-ACTION-FAIL-" + fault, fault])
+                    ["P37-19-SYN-ACTION-FAIL-" + fault.replace("_", "-"), fault])
                 assert response["http"] == 503, response
                 s = remote.snapshot()
                 assert s["version"] == 1 and not s["allowances"], s
