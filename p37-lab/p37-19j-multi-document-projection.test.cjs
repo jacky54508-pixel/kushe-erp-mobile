@@ -89,7 +89,7 @@ test('one altered amount, wrong invoice, or fake allowance status cannot change 
 });
 test('duplicated billed number, AR, invoice or counterfeit non-synthetic document is blocked',()=>{
  const s=fixture(),original=clone(s.billings[1]);
- s.billings[1].number=s.billings[0].number;assert.throws(()=>run(s),/重複/);
+ s.billings[1].number=s.billings[0].number;assert.throws(()=>run(s),/重複|不唯一/);
  s.billings[1]=original;s.receivables[1].id=s.receivables[0].id;assert.throws(()=>run(s));
  s.receivables[1].id='P37-19-SYN-AR-2';s.invoices.push(clone(s.invoices[0]));assert.throws(()=>run(s));
  s.invoices.pop();s.billings[0].id='REAL-CUSTOMER-ID';assert.throws(()=>run(s),/正式ERP/);
