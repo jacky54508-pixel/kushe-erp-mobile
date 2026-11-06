@@ -19,6 +19,7 @@ jobs:
           persist-credentials: false
       - name: Ensure Windows preflight has no finance RPC and credentials are process-only
         run: |
+          node --check p37-lab/p37-19x/source-guard.cjs
           node --check p37-lab/p37-19x/windows-launcher.test.cjs
           node --test p37-lab/p37-19x/windows-launcher.test.cjs
       - name: Regress P37-19W signed Auth and RPC mock gates; formal release remains NO_GO

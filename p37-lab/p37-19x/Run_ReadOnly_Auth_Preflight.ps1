@@ -12,6 +12,7 @@ $TestCase = '00000000-0000-4000-8000-000000019019'
 $Root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $Operator = Join-Path $Root 'p37-lab\p37-19w\operator-cli.mjs'
 $Readiness = Join-Path $Root 'p37-lab\p37-19w\readiness-gate.cjs'
+$GateFile = Join-Path $PSScriptRoot 'source-guard.cjs'
 $Managed = @(
   'P37_19W_PHASE',
   'P37_19W_PROJECT_CONFIRM',
@@ -28,7 +29,8 @@ $SecurePassword = $null
 
 try {
     if (-not (Test-Path -LiteralPath $Operator -PathType Leaf) -or
-        -not (Test-Path -LiteralPath $Readiness -PathType Leaf)) {
+        -not (Test-Path -LiteralPath $Readiness -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $GateFile -PathType Leaf)) {
         throw 'Missing reviewed P37-19W sources. Use the entire project folder; do not copy the script alone.'
     }
 
@@ -50,8 +52,7 @@ try {
 
     # Independent source integrity check: W SHA-pins the previously reviewed
     # H/G/V Auth, RPC, stage and exact cleanup code. Fails on source changes.
-    $Check = 'const gate=require(process.argv[1]);const proof=gate.inspect(process.argv[2]);if(proof.releaseState!=="NO_GO_REAL_HTTP_AND_POSTCLEANUP_PENDING"||proof.canPost!==false||proof.canDeploy!==false||proof.allowStageWithoutCompletedAuthPreflight!==false){process.exit(41);}process.stdout.write("P37-19X SOURCE_GUARD_AND_NO_GO_PASS\n");'
-    & $NodeCommand.Source '-e' $Check $Readiness $Root
+    & $NodeCommand.Source $GateFile $Readiness $Root
     if ($LASTEXITCODE -ne 0) {
         throw 'Source integrity gate rejected this checkout.'
     }

@@ -28,7 +28,11 @@ test('preflight routes only to previously reviewed W Auth-only module, never RPC
  assert.match(local,/& \$NodeCommand.Source \$Operator/);
  assert.match(local,/P37_19W_PHASE','AUTH_ONLY'/);
  assert.match(local,/p37-19w\\operator-cli\.mjs/i);
- assert.match(local,/gate\.inspect/);
+ assert.match(local,/source-guard\.cjs/);
+ const guard=fs.readFileSync(path.join(__dirname,'source-guard.cjs'),'utf8');
+ assert.match(guard,/gate\.inspect/);
+ assert.match(guard,/NO_GO_REAL_HTTP_AND_POSTCLEANUP_PENDING/);
+ assert.doesNotMatch(guard,/\b(?:fetch|XMLHttpRequest|WebSocket|indexedDB)\s*(?:\(|\.|\[)/);
  assert.match(local,/NO_GO_REAL_HTTP_AND_POSTCLEANUP_PENDING/);
  assert.match(local,/if \(\$SelfTest\)/);
  assert.match(local,/SELFTEST_PASS - no network/);
