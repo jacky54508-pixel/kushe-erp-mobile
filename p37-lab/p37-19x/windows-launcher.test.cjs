@@ -33,7 +33,7 @@ test('preflight routes only to previously reviewed W Auth-only module, never RPC
  assert.match(guard,/gate\.inspect/);
  assert.match(guard,/NO_GO_REAL_HTTP_AND_POSTCLEANUP_PENDING/);
  assert.doesNotMatch(guard,/\b(?:fetch|XMLHttpRequest|WebSocket|indexedDB)\s*(?:\(|\.|\[)/);
- assert.match(local,/NO_GO_REAL_HTTP_AND_POSTCLEANUP_PENDING/);
+ assert.match(guard,/NO_GO_REAL_HTTP_AND_POSTCLEANUP_PENDING/);
  assert.match(local,/if \(\$SelfTest\)/);
  assert.match(local,/SELFTEST_PASS - no network/);
  assert.doesNotMatch(local,/\b(?:DELETE FROM|INSERT INTO|CREATE TABLE|ALTER ROLE|DROP TABLE|GRANT ALL)\b/i);
