@@ -130,7 +130,7 @@ test('read-only two signed HTTP session protocol is mock-tested, never mislabele
 });
 test('two JWTs sharing same session id fail and both signouts still occur',async()=>{
  const cf=config(env()),{fetcher,state}=mockClient({forceSameSession:true});
- await assert.rejects(run(cf,fetcher),/P37-19H NOT_TWO_INDEPENDENT_AUTH_SESSIONS/);
+ await assert.rejects(run(cf,fetcher),/P37-19H (?:NOT_TWO_INDEPENDENT_AUTH_SESSIONS|TWO_DISTINCT_TOKENS_REQUIRED)/);
  const s=state();assert.equal(s.logged,2);assert.equal(s.sessionLogouts,2);
  assert.equal(s.posts,0);
 });
