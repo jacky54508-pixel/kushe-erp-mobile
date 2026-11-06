@@ -2,7 +2,7 @@
 // Uses the already verified P37-19V guarded real request runner.
 // CI injects mocked fetch and cannot establish real signed HTTP evidence.
 import {pathToFileURL} from 'node:url';
-import {config as vConfig,run as vRun,MODE as V_MODE,TARGET} from '../p37-19v/signed-http-gate.mjs';
+import {config as vConfig,run as vRun,MODE as V_MODE} from '../p37-19v/signed-http-gate.mjs';
 const LAB='https://ldktrfgzzzmklhsnfrol.supabase.co';
 const ID='00000000-0000-4000-8000-000000019019';
 const APPROVE='KUSHE_AUTH_LAB_ONLY';
