@@ -1,0 +1,37 @@
+name: P37-19T standalone read-only candidate gate
+on:
+  push:
+    branches:
+      - p37-19t-formal-readonly-candidate-20261106
+    paths:
+      - 'assets/js/p37-19t-readonly-integration-candidate.js'
+      - 'p37-lab/p37-19t/**'
+      - '.github/workflows/p37-19t-readonly-candidate.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify candidate and original money-reader contracts
+        run: |
+          node --check assets/js/p37-19t-readonly-integration-candidate.js
+          node --check p37-lab/p37-19t/candidate.test.cjs
+          node --test p37-lab/p37-19t/candidate.test.cjs
+      - name: Regression formal release NO-GO and synthetic finance tests
+        run: |
+          node --test p37-lab/p37-19q/release-readiness.test.cjs
+          node --test p37-lab/p37-19j-financial-integration-gaps.test.cjs
+          node --test p37-lab/p37-19k-atomic-settlement.test.cjs
+          node --test p37-lab/p37-19h/verified-sessions.test.mjs
+      - name: Verify original Store and reporting files remain valid
+        run: |
+          node --check assets/js/erp-store.js
+          node --check assets/js/cloud-sync.js
+          node --check assets/js/dashboard.js
+          node --check assets/js/reports.js
