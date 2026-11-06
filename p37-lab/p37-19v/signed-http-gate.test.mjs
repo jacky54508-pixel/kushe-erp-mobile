@@ -39,7 +39,7 @@ function mockClient({race=false,forceSameSession=false}={}){
  let logged=0,posts=0,sessionLogouts=0,revision=0;
  const state=()=>({events:clone(events),logged,posts,sessionLogouts,revision});
  const fetcher=async (url,options={})=>{
-  const target=new URL(url);
+  const target=new globalThis.URL(url);
   assert.equal(target.origin,URL);
   events.push({method:options.method||'GET',pathname:target.pathname,query:target.search});
   const method=options.method||'GET',pathname=target.pathname;
