@@ -1,0 +1,50 @@
+name: P37-19X trusted Windows auth-only preflight offline acceptance
+on:
+  push:
+    branches:
+      - p37-19x-trusted-windows-auth-preflight-20261107
+    paths:
+      - 'p37-lab/p37-19x/**'
+      - '.github/workflows/p37-19x-windows-auth-only.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux-source-safety:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Ensure Windows preflight has no finance RPC and credentials are process-only
+        run: |
+          node --check p37-lab/p37-19x/windows-launcher.test.cjs
+          node --test p37-lab/p37-19x/windows-launcher.test.cjs
+      - name: Regress P37-19W signed Auth and RPC mock gates; formal release remains NO_GO
+        run: |
+          node --test p37-lab/p37-19w/readiness-gate.test.cjs
+          node --test p37-lab/p37-19w/operator-cli.test.mjs
+          node --test p37-lab/p37-19v/signed-http-gate.test.mjs
+          node --test p37-lab/p37-19q/release-readiness.test.cjs
+      - name: Original ERP Store and Cloud Sync safety
+        run: |
+          node --check assets/js/erp-store.js
+          node --check assets/js/cloud-sync.js
+  real-windows-powershell-offline-selftest:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Execute Windows PowerShell safe offline preflight (NO Auth HTTP)
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -File .\p37-lab\p37-19x\Run_ReadOnly_Auth_Preflight.ps1 -SelfTest
+          if ($LASTEXITCODE -ne 0) { throw "P37-19X OFFLINE WINDOWS SELFTEST_FAILED" }
+      - name: Confirm no new financial or cloud deploy artifacts
+        shell: pwsh
+        run: |
+          if ((Get-Content .\index.html -Raw) -match 'p37-19x|p3719x') { throw "P37-19X FORMAL_MOUNT_FORBIDDEN" }
+          Write-Output "P37-19X NO_DEPLOY_AND_NO_REAL_AUTH_IN_CI"
