@@ -1,0 +1,43 @@
+name: P37-19V isolated lab signed-session and RPC readiness
+on:
+  push:
+    branches:
+      - p37-19v-signed-auth-rpc-gate-20261106
+    paths:
+      - 'p37-lab/p37-19v/**'
+      - '.github/workflows/p37-19v-signed-http-gate.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-safety:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      P37_19V_REAL_AUTH_ENABLED: NEVER
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Parse isolated offline test scripts, no real HTTP credentials
+        run: |
+          node --check p37-lab/p37-19v/signed-http-gate.mjs
+          node --check p37-lab/p37-19v/signed-http-gate.test.mjs
+      - name: Auth JWT and PostgREST conflict simulation with explicit MOCK labeling
+        run: node --test p37-lab/p37-19v/signed-http-gate.test.mjs
+      - name: Regress earlier mock signed session verification and lab CAS
+        run: |
+          node --test p37-lab/p37-19h/verified-sessions.test.mjs
+          node --test p37-lab/p37-19g/dual-client-rpc.test.mjs
+          node --test p37-lab/p37-19i/release-gate.test.cjs
+      - name: Formal NO-GO financial and read-only candidate safety gates
+        run: |
+          node --test p37-lab/p37-19q/release-readiness.test.cjs
+          node --test p37-lab/p37-19t/candidate.test.cjs
+          node --test p37-lab/p37-19j-financial-integration-gaps.test.cjs
+      - name: Verify unchanged official finance modules parse
+        run: |
+          node --check assets/js/erp-store.js
+          node --check assets/js/cloud-sync.js
+          node --check assets/js/dashboard.js
+          node --check assets/js/reports.js

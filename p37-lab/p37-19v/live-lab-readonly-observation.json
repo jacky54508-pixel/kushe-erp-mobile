@@ -1,0 +1,37 @@
+{
+  "schema": "kushe-p37-19v-live-lab-inspection-20261106-v1",
+  "date": "2026-11-06",
+  "isolatedSupabaseProject": "ldktrfgzzzmklhsnfrol",
+  "project": "kushe-auth-lab",
+  "inspection": "LIVE_ADMIN_READ_ONLY_SQL_NOT_AUTHENTICATED_HTTP_RACE",
+  "tablesRlsEnabled": {
+    "p37_lab_members": true,
+    "p37_lab_cases": true,
+    "p37_lab_allowances": true
+  },
+  "remainingSyntheticCases": 0,
+  "remainingSyntheticAllowances": 0,
+  "enabledTestMembers": 1,
+  "existingAuthSessionRows": 2,
+  "distinctAuthSessionRowIds": 2,
+  "jwtTokensObtained": false,
+  "sessionIdClaimsCompared": false,
+  "distinctSignedUsersVerifiedByAuthApi": false,
+  "actualSignedHttpRpcRacesExecuted": false,
+  "endpointRPC": "p37_lab_apply_synthetic_allowance",
+  "rpcSecurityDefiner": false,
+  "rpcIsSecurityInvoker": true,
+  "authenticatedMayExecuteRPC": true,
+  "anonMayExecuteRPC": false,
+  "authenticatedCaseTableUpdateColumns": [
+    "revision"
+  ],
+  "authenticatedCaseTableFullUpdateGranted": false,
+  "memberTableWriteGrantedToAnon": false,
+  "memberTableWriteGrantedToAuthenticated": false,
+  "adminCleanupAfterRealSignedHttpRaceVerified": false,
+  "formalSupabaseCloudAccessed": false,
+  "productionFinancialRecordsModified": false,
+  "formalERPPostingEnabled": false,
+  "productionReleaseAllowed": false
+}
