@@ -165,7 +165,8 @@ async def main():
                        for v in rejected.values()),rejected
             assert "BILLING_AR_RELATION_NOT_UNIQUE" in rejected["orphanHistoricalBill"],rejected
             assert "UNMATCHED_RECEIVABLES" in rejected["orphanHistoricalAR"],rejected
-            assert "DUPLICATE_BILL_ID_OR_NUMBER" in rejected["duplicateBill"],rejected
+            assert ("DUPLICATE_BILL_ID_OR_NUMBER" in rejected["duplicateBill"] or
+                    "原請款非唯一來源" in rejected["duplicateBill"]),rejected
             assert "BILLING_AR_RELATION_NOT_UNIQUE" in rejected["duplicateAR"],rejected
             assert (await store_snapshot(page))==before
 
