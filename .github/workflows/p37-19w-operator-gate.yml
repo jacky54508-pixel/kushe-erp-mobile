@@ -1,0 +1,44 @@
+name: P37-19W signed lab operator preflight and cleanup safety gate
+on:
+  push:
+    branches:
+      - p37-19w-live-operator-checkpoint-review-20261106
+    paths:
+      - 'p37-lab/p37-19w/**'
+      - '.github/workflows/p37-19w-operator-gate.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  operator-readiness-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      P37_19W_REAL_NETWORK_ACCESS: DISABLED_IN_CI
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Audit exact signed runner, test stage and admin cleanup source fingerprints
+        run: |
+          node --check p37-lab/p37-19w/readiness-gate.cjs
+          node --check p37-lab/p37-19w/operator-cli.mjs
+          node --check p37-lab/p37-19w/readiness-gate.test.cjs
+          node --check p37-lab/p37-19w/operator-cli.test.mjs
+          node --test p37-lab/p37-19w/readiness-gate.test.cjs
+      - name: Simulate Auth and RPC over a mocked HTTPS transport ONLY
+        run: node --test p37-lab/p37-19w/operator-cli.test.mjs
+      - name: Regress P37-19V Auth/RPC, RLS, and previous release safeguards
+        run: |
+          node --test p37-lab/p37-19v/signed-http-gate.test.mjs
+          node --test p37-lab/p37-19h/verified-sessions.test.mjs
+          node --test p37-lab/p37-19g/dual-client-rpc.test.mjs
+          node --test p37-lab/p37-19q/release-readiness.test.cjs
+          node --test p37-lab/p37-19t/candidate.test.cjs
+          node --test p37-lab/p37-19i/release-gate.test.cjs
+      - name: Confirm actual ERP Store and Cloud Sync remain parseable, unmounted W
+        run: |
+          node --check assets/js/erp-store.js
+          node --check assets/js/cloud-sync.js
+          node --check assets/js/dashboard.js
+          node --check assets/js/reports.js

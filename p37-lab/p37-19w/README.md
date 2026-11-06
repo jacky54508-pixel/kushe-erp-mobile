@@ -1,0 +1,29 @@
+# P37-19W — real signed Supabase lab race operator gate, no production posting
+
+**Current acceptance: LIVE LAB POSTURE READ-ONLY VERIFIED; real signed dual-client HTTP RPC PENDING.** This phase only adds an isolated GitHub review branch. It does not modify `main`, `beta`, the formal Supabase cloud, the company account, or any financial data. No Auth password or publishable key is committed.
+
+## 1. What was independently observed in the dedicated TEST project
+
+Project `kushe-auth-lab` / `ldktrfgzzzmklhsnfrol` was read through the connected Supabase management service. It was ACTIVE_HEALTHY; cases=0, allowances=0, enabled members=1, and 2 database Auth session rows existed. Three public test tables had RLS enabled; `authenticated` can execute the existing `SECURITY INVOKER` test RPC, `anon` cannot, and the authenticated table UPDATE grant applies only to the case revision column. No stage or cleanup operation was needed or performed.
+
+**Two Auth session database rows are not JWTs and prove neither independently signed clients nor PostgREST concurrency.** A missing test-only password prevents a real signed HTTP attempt from this conversation. Existing P37-19G/H/V remain the same proven read-only/mock + SQL simulation code; the formal ERP is not a party to this experiment.
+
+## 2. Safety rules
+
+Run the SQL and signed commands **only** against the lab URL `https://ldktrfgzzzmklhsnfrol.supabase.co`, using a dedicated test-only account and an ordinary `sb_publishable_` API key in a trusted operator environment. Never paste password, bearer token, session ID or any secret in ChatGPT/GitHub Actions, and never put them in a repo file. Do not supply a `service_role` key. This operator script does not stage or delete rows.
+
+The code and required exact SQL are pinned against their reviewed Git blobs. The original G stage and exact cleanup scripts require a trusted administrator, refuse unknown cases, and have been independently verified in earlier stages. A case must never be staged simply to test whether credentials work.
+
+## 3. Actual operator sequence (manual approval; no network is triggered by CI)
+
+**Phase A — read-only clean lab and real signed logins.** Run `phase0-readonly.sql` from the **lab** SQL editor. Expect 0 cases, 0 allowances, 1 member, 3 RLS tables, and the permitted RPC security flags. On a trusted workstation, supply W's environment variables using secure local process environment handling: `P37_19W_PROJECT_CONFIRM=KUSHE_AUTH_LAB_ONLY`, `P37_19W_TEST_URL=https://ldktrfgzzzmklhsnfrol.supabase.co`, `P37_19W_CASE_ID=00000000-0000-4000-8000-000000019019`, `P37_19W_TEST_PUBLISHABLE_KEY`, `P37_19W_TEST_EMAIL`, `P37_19W_TEST_PASSWORD`, `P37_19W_PHASE=AUTH_ONLY`. Execute `node p37-lab/p37-19w/operator-cli.mjs`. This delegates to H and V to verify two truly independent signed Auth tokens against the live Auth API, RLS and empty lab data, then signs out both sessions. Without working credentials this must FAIL closed, not PASS.
+
+**Phase B — staged real HTTP CAS race (administrator must be ready).** Only after Phase A has passed, an authorized lab operator confirms 0/0 and commits EXACTLY `p37-lab/p37-19g/stage-fixture.sql` in the test lab. Before executing the next phase the operator independently verifies exactly one case at revision 0 and no allowances. Set `P37_19W_PHASE=RPC_RACE_STAGED_MANUAL_ONLY`, `P37_19W_SIGNED_PREFLIGHT_ALREADY_SUCCEEDED=YES_ON_DEDICATED_TEST_ACCOUNT`, `P37_19W_STAGED_CASE_CONFIRMED=YES_ADMIN_COMMITTED_EXACT_CASE`, `P37_19W_CLEANUP_OPERATOR_READY=YES_OPERATOR_WILL_CLEAN`, `P37_19W_PRESTAGE_ZERO_CONFIRMED=YES_ZERO_CASES_AND_ALLOWANCES` plus the already established test-only environment. Execute `node p37-lab/p37-19w/operator-cli.mjs`. The runner signs in twice, verifies distinct live Auth sessions and lab-only RLS, races two signed HTTP RPC requests at the exact committed synthetic row and expects exactly one version-1 allowance and one duplicate/version conflict. It then signs out sessions. **Even on success, the command exits 2, meaning mandatory cleanup is still pending.**
+
+**Phase C — independent exact cleanup and postcheck.** In all cases after staging (including failures and timeouts), run the pinned `p37-lab/p37-19g/cleanup-fixture.sql` as the authorized administrator **only in the test project**, and then execute `p37-lab/p37-19w/postclean-readonly.sql` from a separate admin SQL execution. Require 0 cases, 0 allowances, 1 enabled member, 3 RLS tables, and 1 protected invoker RPC. Use `P37_19W_PHASE=POSTCLEANUP_AUTH_ONLY` and `P37_19W_ADMIN_CLEANUP_COMMITTED=YES_EXACT_ADMIN_SQL_ALREADY_DONE` for a second test-only authenticated read verifying empty RLS-visible lab state; this is NOT a substitute for the administrator's independent 0/0 SQL check. Share only sanitized result statuses and numeric counts, never tokens.
+
+## 4. Tests and exact remaining blocker
+
+`readiness-gate.cjs` uses SHA-pinned source/evidence to flag previous lab results as metadata-only, requires no secrets and never asserts live signed HTTP from `auth.sessions` row counts or supplied JSON. `operator-cli.mjs` wraps V's previously tested H/G protocol with explicit phase transition gates; it has no stage/delete implementation. The CI workflow calls only fake JWT/mock request tests and source/read-only release guards. **CI green is not a real signed RPC win or post-cleanup proof.**
+
+The phase remains `NO_GO_REAL_HTTP_AND_POSTCLEANUP_PENDING` until Phase A, B and C are genuinely performed under an authorized test account with independent clean verification. Even after this particular lab experiment succeeds, real ERP allowance voucher authority and the 17 P37-19Q formal finance release gates remain open. Production `main` is not to be pushed without owner authorization.
