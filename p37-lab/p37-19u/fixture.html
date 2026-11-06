@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head><meta charset="utf-8"><title>P37-19U ACTUAL ERP READ ONLY CANDIDATE ISOLATED CHROMIUM</title></head>
+<body data-route="dashboard">
+<h1>P37-19U 合成 ERP 唯讀候選模組；並非正式 ERP 網頁</h1>
+<label>測試月份<input id="dashboardMonth" type="month" value="2026-11"></label>
+<section aria-label="合成首頁">
+<div id="kpiGrid"></div>
+<div id="collectionDonut"></div>
+<span id="structureTotal"></span><span id="structurePaid"></span><span id="structureOpen"></span>
+<span id="collectionRate"></span><div id="collectionBar"></div>
+<span id="recoveryRate"></span><div id="recoveryBar"></div>
+<table><tbody id="projectRows"></tbody></table>
+<div id="attentionList"></div><div id="notificationItems"></div>
+<span id="notificationCount"></span><span id="noticeTotal"></span>
+<div id="payrollSummary"></div>
+<span id="trendCurrent"></span><span id="trendDelta"></span>
+<span id="dataSourceLabel"></span>
+<div id="trendRange">
+<button type="button" data-range="12">12月</button>
+<button type="button" data-range="4">季度</button>
+<button type="button" data-range="3">年度</button>
+</div>
+<div style="display:block;width:900px;height:260px;position:relative">
+<canvas id="trendChart"></canvas><div id="chartTooltip" hidden></div>
+</div>
+</section>
+<div id="reportsApp"></div>
+<script src="/n-synthetic-fixture.js"></script>
+<script src="/o-augmentation.js"></script>
+<script src="/p-augmentation.js"></script>
+<script src="/r-augmentation.js"></script>
+<script src="/u-augmentation.js"></script>
+<script src="/original-erp-store.js"></script>
+<script src="/effective-ledger.js"></script>
+<script src="/formal-readonly-ledger.js"></script>
+<script src="/original-kpi-navigation.js"></script>
+<script src="/lab-dashboard.js"></script>
+<script src="/candidate-t.js"></script>
+<script src="/u-controller.js"></script>
+<script src="/lab-reports.js"></script>
+</body>
+</html>
