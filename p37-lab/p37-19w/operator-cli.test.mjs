@@ -125,6 +125,7 @@ test('mock signed preflight protocol: 2 token logins, real Auth handlers mocked,
  assert.equal(result.productionReleaseAllowed,false);
  assert.equal(result.canPost,false);
  assert.equal(result.adminCleanupIndependentlyVerified,false);
+ assert.equal(result.adminCleanupRequired,false);
  assert.equal(transport.get().logins,2);
  assert.equal(transport.get().logouts,2);
  assert.equal(transport.get().rpc,0);

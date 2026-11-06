@@ -88,7 +88,7 @@ export async function execute(cfg,fetcher=globalThis.fetch){
       'REAL_LAB_TWO_AUTH_SESSIONS_READONLY_PRECHECK',
   liveAuthProven:!simulated,liveRpcProvenBeforeAdminCleanup:false,
   verifiedFinalAcceptance:false,
-  adminCleanupRequired:cfg.phase!==OP_MODE.CLEAN,
+  adminCleanupRequired:false, // auth-only and postclean checks create no rows
   mustVerifyAdminSql:cfg.phase===OP_MODE.CLEAN});
 }
 export const MODE=OP_MODE;
