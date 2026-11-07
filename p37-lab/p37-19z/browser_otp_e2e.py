@@ -119,7 +119,7 @@ async def main():
         page=await context.new_page()
         page.on("pageerror",lambda e: errors.append(str(e)))
         await page.goto(PAGE)
-        assert "六位驗證碼" in await page.title()
+        assert "6 位驗證碼" in await page.title()
         assert await page.locator("#save-password").is_disabled()
         assert await page.locator("#verify-otp").is_disabled()
         assert not calls
