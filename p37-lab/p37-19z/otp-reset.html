@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src https://ldktrfgzzzmklhsnfrol.supabase.co; img-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'">
+<title>酷舍 ERP｜P37 測試密碼 6 位驗證碼（審查候選）</title>
+<link rel="stylesheet" href="../p37-lab.css">
+<script defer src="./otp-reset.js"></script>
+</head>
+<body>
+<div class="shell">
+<header class="topbar">
+<div class="brand"><span class="brand-mark">K</span><div><strong>酷舍 ERP</strong><small>獨立測試空間</small></div></div>
+<span class="test-pill">P37-19Z · AUTH LAB REVIEW</span>
+</header>
+<main>
+<section class="intro">
+<p class="eyebrow">只限獨立測試帳號</p>
+<h1>Email 六位驗證碼設定測試密碼</h1>
+<p>本頁只連接 <b>kushe-auth-lab</b>，不讀寫正式 ERP、正式銀行或薪資資料。此候選頁尚未發布至 beta，必須先完成安全驗收和郵件範本確認。</p>
+</section>
+<section class="panel">
+<div class="panel-head"><div><h2>一、寄送六位驗證碼</h2><p>只使用已建立的測試 Email。本頁最多送出一次寄信請求，請勿重複寄送。</p></div><span class="phase">Auth Lab Email</span></div>
+<p class="notice">啟用前必須由管理者另外審查並設定「Reset Password」郵件範本使用 {{ .Token }}。尚未設定時請勿寄信。</p>
+<div class="form-grid"><label>測試帳號 Email
+<input id="otp-email" type="email" maxlength="254" autocomplete="email" placeholder="已建立的測試 Email"></label></div>
+<div class="actions"><button class="btn primary" id="send-otp" type="button">寄送一次六位驗證碼</button></div>
+<p class="message" id="send-result" role="status" aria-live="polite">尚未寄送，不使用正式 ERP 登入資訊。</p>
+</section>
+<section class="panel">
+<div class="panel-head"><div><h2>二、輸入郵件中六位驗證碼</h2><p>不需要點擊信件中的登入連結。驗證碼會由 Supabase 判定有效性。</p></div><span class="phase">Recovery OTP</span></div>
+<div class="form-grid"><label>六位驗證碼
+<input id="otp-code" type="text" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="one-time-code" placeholder="輸入 6 位數字" disabled></label></div>
+<div class="actions"><button class="btn primary" id="verify-otp" type="button" disabled>驗證測試碼及白名單</button></div>
+<p class="message" id="verify-result" role="status" aria-live="polite">尚未完成測試身分驗證；密碼設定功能維持鎖定。</p>
+</section>
+<section class="panel">
+<div class="panel-head"><div><h2>三、確認新測試密碼</h2><p>通過有效驗證碼、Auth User 及 P37 白名單後才能解鎖此處。</p></div><span class="phase">安全設定</span></div>
+<div class="form-grid">
+<label>新密碼（至少 12 字元）<input type="password" id="password-new" autocomplete="new-password" minlength="12" maxlength="128" disabled></label>
+<label>再次輸入新密碼<input type="password" id="password-confirm" autocomplete="new-password" minlength="12" maxlength="128" disabled></label>
+</div>
+<div class="actions"><button type="button" id="save-password" class="btn primary" disabled>確認設定測試密碼</button></div>
+<p id="change-result" class="message" role="status" aria-live="polite">驗證碼、密碼及暫時性登入權杖不會寫入瀏覽器儲存區。</p>
+<p><a href="../index.html">返回 P37 測試登入頁</a></p>
+</section>
+<section class="disclaimer">
+<h2>不影響正式 ERP</h2>
+<p>此頁只允許單次測試寄信、Recovery OTP、Auth 身分／白名單查詢與測試帳號密碼更新。不可建立使用者、變更權限、執行任何正式財務交易或 Cloud Sync。</p>
+</section>
+</main><footer>酷舍企業有限公司 · P37-19Z 獨立審查候選</footer>
+</div>
+<noscript>本頁需要 JavaScript 才能進行 Auth Lab 安全驗證。</noscript>
+</body>
+</html>
