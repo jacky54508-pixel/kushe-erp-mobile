@@ -1059,7 +1059,7 @@
       if(mode!=='none')selected.forEach(input=>{const rate=$$('input[name="dailyWorkRate"]',form).find(node=>String(node.dataset.employeeId)===String(input.value)),employee=employeeOptions.find(item=>String(item.id)===String(input.value));if(!rate||number(rate.value)<=0){const error=new Error(`員工 ${employee?.name||input.value} 尚未設定有效${mode==='hourly'?'時薪':'日薪'}，請先至員工主檔設定`);error.dailyField='workRate';error.employeeId=input.value;throw error}});
       if(isWorkOnly)return;
       if(form.elements.commissionEnabled.checked){
-        const inputs=$('input[name="dailyCommissionRate"]',form);
+        const inputs=$$('input[name="dailyCommissionRate"]',form);
         const bps=inputs.map(input=>{const raw=input.value.trim(),v=Number(raw);return raw!==''&&Number.isFinite(v)&&Math.abs(v*100-Math.round(v*100))<0.000001?Math.round(v*100):NaN});
         if(!inputs.length||bps.some((x)=>!Number.isFinite(x)||x<0||x>5000)||bps.reduce((sum,x)=>sum+x,0)!==5000){
           const error=new Error('所有抽成員工比例必須合計 50%，每人 0～50%，最多兩位小數；本筆尚未儲存。');
