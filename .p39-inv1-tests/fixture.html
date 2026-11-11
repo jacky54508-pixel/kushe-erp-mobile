@@ -1,0 +1,111 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
+<title>P39-INV-1 SYNTHETIC ONLY</title>
+<link rel="stylesheet" href="/assets/css/billing-groups.css">
+<style>body{font-family:system-ui,sans-serif;background:#e8edf4;padding:20px}
+.erp-detail-overlay{position:fixed;inset:0;background:rgba(7,27,48,.68);display:flex;
+align-items:center;justify-content:center;z-index:1000}
+.erp-detail-card{width:min(1100px,96vw);background:white;max-height:95vh;
+display:flex;flex-direction:column;border-radius:13px;overflow:hidden}
+.erp-detail-card>header,.erp-detail-card>footer{padding:14px;border-bottom:1px solid #dee6f0}
+.bg-footer{flex:none;padding:12px 18px;border-top:1px solid #dce4ec}
+.erp-detail-body{padding:20px;overflow:auto}
+.receipt-form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.receipt-form-grid label{display:grid;gap:6px}.receipt-form-grid input,.receipt-form-grid select{padding:9px}
+</style></head><body><div id="synthetic"></div>
+<script>
+'use strict';
+const date='2026-11-11';
+const source=(id,name,amount,month,invoiceNo)=>{
+  const tax=amount/20,gross=amount+tax,invoiceDate=month+'-20';
+  return {
+    document:{billingId:id,receivableId:id+'-AR',number:'SYN-NO-'+id,
+      date:month+'-05',customerId:'SYN-CUST',customerName:'虛構建商',
+      projectId:id+'-P',projectName:name,taxMode:'未稅',
+      invoiceId:id+'-INV',invoiceNo,invoiceDate,invoiceStatus:'invoiced',
+      anchors:{untaxed:amount,tax,grossTotal:gross,retention:0,receivable:gross},
+      originalLines:[{sourceLineIndex:0,house:'A1',item:'虛構施工',unit:'式',qty:1,
+       price:amount,subtotal:amount}]},
+    settlement:{billingId:id,received:0,outstanding:gross,retentionReceived:0,
+      retentionOutstanding:0,pendingCheque:0,availableToCollect:gross},
+    snapshot:'SYN-SNAPSHOT-'+id
+  };
+};
+window.__p39synthetic={};
+const test=window.__p39synthetic;
+test.sources=[source('SYN-B-A','虛構 A 區',100000,'2026-08','SYN-AA000001'),
+              source('SYN-B-B','虛構 B 區',200000,'2026-10','SYN-BB000002')];
+test.billings=test.sources.map(s=>({
+ id:s.document.billingId,invoiceStatus:'invoiced',number:s.document.number,
+ invoiceNo:s.document.invoiceNo,invoiceDate:s.document.invoiceDate,
+ customer:'SYN-CUST',project:s.document.projectId,
+ grossTotal:s.document.anchors.grossTotal,
+ taxAmount:s.document.anchors.tax,preTaxAmount:s.document.anchors.untaxed,
+ total:s.document.anchors.receivable
+}));
+test.receivables=test.sources.map(s=>({
+ id:s.document.receivableId,billingId:s.document.billingId,
+ invoiceNo:s.document.invoiceNo,amount:s.document.anchors.receivable,received:0
+}));
+test.invoices=test.sources.map(s=>({
+ id:s.document.invoiceId,invoiceType:'output',sourceType:'billing',
+ sourceId:s.document.billingId,billingId:s.document.billingId,
+ invoiceNumber:s.document.invoiceNo,invoiceDate:s.document.invoiceDate,
+ status:'issued',netAmount:s.document.anchors.untaxed,
+ taxAmount:s.document.anchors.tax,grossAmount:s.document.anchors.grossTotal,
+ party:'虛構建商',projectName:s.document.projectName,sourceNo:s.document.number,
+ note:''
+}));
+test.bankTransactions=[];test.payroll=[];test.receipts=[];test.persistCalls=[];
+const getTotals=()=>{
+ const out={untaxed:0,tax:0,grossTotal:0,retention:0,receivable:0,
+ received:0,outstanding:0,retentionReceived:0,retentionOutstanding:0,
+ pendingCheque:0,availableToCollect:0};
+ test.sources.forEach(s=>Object.keys(out).forEach(k=>out[k]+=
+   s.document.anchors[k]??s.settlement[k]??0));
+ return out;
+};
+test.snapshot=()=>JSON.stringify({billings:test.billings,receivables:test.receivables,
+ invoices:test.invoices,bank:test.bankTransactions,payroll:test.payroll,
+ receipts:test.receipts});
+window.KusheERPStore={
+ getState:()=>test,
+ num:x=>Number(x)||0,
+ invoiceRows:()=>test.invoices.map(x=>({...x})),
+ externalBillingContext:(ids)=>{
+   if(JSON.stringify(ids)!==JSON.stringify(test.sources.map(s=>s.document.billingId)))
+     throw Error('SYNTHETIC source mismatch');
+   return {sources:test.sources,totals:getTotals(),snapshot:'SYN-BASE-CAS',
+     previous:null};
+ },
+ externalBillingDocumentIndex:()=>({documents:[],issues:[]}),
+ saveExternalBillingDocument:async v=>{
+   test.persistCalls.push({type:'unexpected_group_write',data:v});
+   throw Error('group writes forbidden in this fixture');
+ },
+ saveInvoice:async v=>{
+   test.persistCalls.push({type:'existing_source_invoice',sourceId:v.sourceId,
+     status:v.status,number:v.invoiceNumber,date:v.invoiceDate});
+   const invoice=test.invoices.find(x=>x.sourceId===v.sourceId);
+   if(!invoice)throw Error('original invoice does not exist');
+   invoice.invoiceNumber=v.invoiceNumber;
+   invoice.invoiceDate=v.invoiceDate;
+   invoice.status=v.status;
+   const s=test.sources.find(x=>x.document.billingId===v.sourceId);
+   s.document.invoiceNo=v.invoiceNumber;
+   s.document.invoiceDate=v.invoiceDate;
+   s.document.invoiceStatus=v.status==='issued'?'invoiced':'invoice_pending';
+   const bill=test.billings.find(x=>x.id===v.sourceId),ar=test.receivables.find(x=>x.billingId===v.sourceId);
+   bill.invoiceNo=v.invoiceNumber;bill.invoiceDate=v.invoiceDate;
+   ar.invoiceNo=v.invoiceNumber;
+   return invoice;
+ }
+};
+window.KushePhase1={toast:m=>{test.lastToast=m}};
+window.KusheKpi={register(){}};
+window.KusheIcons={render(){}};
+</script>
+<script src="/assets/js/external-billing-invoice.js"></script>
+<script src="/assets/js/external-billing-invoice-ui.js"></script>
+<script src="/assets/js/invoices.js"></script>
+<script src="/assets/js/billing-groups.js"></script>
+</body></html>
