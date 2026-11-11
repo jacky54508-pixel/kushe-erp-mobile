@@ -24,6 +24,8 @@
     // P39-3B: for genuine legacy AR no allowance means exact historical behavior.
     const source=number(row.amount ?? row.totalAmount ?? row.receivableAmount);
     if(!row?.id)return source;
+    const ledger=window.KuSheERPStore?.getState?.()?.billingAllowances;
+    if(!Array.isArray(ledger)||!ledger.some(x=>String(x?.receivableId||'')===String(row.id)))return source;
     const adjusted=window.KuSheERPStore?.p39ReceivableEffectiveAmounts?.(row.id);
     return adjusted?.hasAllowance?adjusted.receivable:source;
   };
@@ -31,6 +33,8 @@
   const billingAmount = (row) => {
     const source=number(row.amount ?? row.untaxedAmount ?? row.total);
     if(!row?.id)return source;
+    const ledger=window.KuSheERPStore?.getState?.()?.billingAllowances;
+    if(!Array.isArray(ledger)||!ledger.some(x=>String(x?.billingId||'')===String(row.id)))return source;
     const adjusted=window.KuSheERPStore?.p39BillingEffectiveAmounts?.(row.id);
     return adjusted?.hasAllowance?adjusted.effective.untaxed:source;
   };
