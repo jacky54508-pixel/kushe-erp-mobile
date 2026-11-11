@@ -1,0 +1,94 @@
+name: P39-3F isolated LOCAL Supabase Auth RLS and CAS (no hosted projects)
+
+on:
+  push:
+    branches:
+      - p39-3-allowance-candidate-20261111
+    paths:
+      - 'p39-candidate/local-supabase/**'
+      - '.github/workflows/p39-3f-local-supabase.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-supabase:
+    name: One-time Docker GoTrue PostgREST RLS cross-tenant and rollback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      SUPABASE_API_MAX_RETRIES: "0"
+    steps:
+      - name: Checkout exact candidate without Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Confirm branch and forbid hosted credential environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "p39-3-allowance-candidate-20261111"
+          test -z "$(printenv SUPABASE_ACCESS_TOKEN || true)"
+          test -z "$(printenv SUPABASE_DB_PASSWORD || true)"
+          test -z "$(printenv DATABASE_URL || true)"
+          test -f p39-candidate/local-supabase/schema.sql
+          test -f p39-candidate/local-supabase/local-rls.test.py
+          # No "supabase link", "db push", or deployment to hosted projects.
+      - name: Set up pinned Supabase CLI
+        uses: supabase/setup-cli@4039acb5bd3fd80a957577564c31f900da6f063a
+        with:
+          version: 3.1.0
+      - name: Check CLI help and create new isolated local project
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase --version
+          supabase --help >/dev/null
+          supabase init --help >/dev/null
+          supabase start --help >/dev/null
+          supabase migration --help >/dev/null
+          supabase db reset --help >/dev/null
+          cd p39-candidate/local-supabase
+          supabase init --yes
+          supabase migration new p39f_only_local_auth_rls
+          migration="$(find supabase/migrations -maxdepth 1 -name '*_p39f_only_local_auth_rls.sql' -print -quit)"
+          test -n "$migration"
+          cp schema.sql "$migration"
+      - name: Start disposable local Supabase stack
+        shell: bash
+        working-directory: p39-candidate/local-supabase
+        run: |
+          set -euo pipefail
+          supabase start
+          supabase db reset --local --yes
+      - name: Install pinned local DB test dependency
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install test adapter and validate syntax
+        run: |
+          set -euo pipefail
+          python -m pip install psycopg2-binary==2.9.10
+          python -m py_compile p39-candidate/local-supabase/local-rls.test.py
+          node --check p39-candidate/isolated-postgres-domain.js
+      - name: Capture ONLY local CLI status without echoing tokens
+        shell: bash
+        working-directory: p39-candidate/local-supabase
+        run: |
+          set -euo pipefail
+          umask 077
+          supabase status -o env > /tmp/p39f-local-supabase-status.env
+          test -s /tmp/p39f-local-supabase-status.env
+      - name: Run real local GoTrue sign-in, PostgREST RLS and two-client CAS regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python p39-candidate/local-supabase/local-rls.test.py /tmp/p39f-local-supabase-status.env
+      - name: Stop and destroy disposable local containers
+        if: always()
+        shell: bash
+        working-directory: p39-candidate/local-supabase
+        run: |
+          supabase stop --no-backup || true
+          rm -f /tmp/p39f-local-supabase-status.env
