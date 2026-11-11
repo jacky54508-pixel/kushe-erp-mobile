@@ -10,6 +10,7 @@ on:
       - 'assets/js/dashboard.js'
       - 'index.html'
       - '.github/workflows/p39-3-candidate.yml'
+      - '.github/workflows/p39-3f-local-supabase.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -27,7 +28,7 @@ jobs:
           set -euo pipefail
           git fetch origin main --depth=5
           git diff --name-only origin/main...HEAD | tee /tmp/p39-files.txt
-          if grep -Ev '^(p39-candidate/|\.github/workflows/p39-3-candidate\.yml$|assets/js/erp-store\.js$|assets/js/billing\.js$|assets/js/dashboard\.js$|index\.html$)' /tmp/p39-files.txt; then
+          if grep -Ev '^(p39-candidate/|\.github/workflows/p39-3-candidate\.yml$|\.github/workflows/p39-3f-local-supabase\.yml$|assets/js/erp-store\.js$|assets/js/billing\.js$|assets/js/dashboard\.js$|index\.html$)' /tmp/p39-files.txt; then
             echo 'Unexpected formal ERP file changed'; exit 1
           fi
           test -f p39-candidate/core.js
