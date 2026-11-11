@@ -59,7 +59,22 @@ def run_one(browser,mode):
     page.on("request",lambda r:requests.append(r.url) if not r.url.startswith("http://127.0.0.1:8796/") else None)
     values=params(mode)
     original=read(page)
+    if mode=="invoiced":
+        # P39-3D tightened safety: even a fully fabricated voucher is not official evidence.
+        evidence_block=page.evaluate("""v => {
+          try {
+            window.KuSheERPStore.p39SyntheticAllowancePreflight('syn-b',v);
+            return {code:"DID_NOT_BLOCK"};
+          }catch(e){return {code:e.code||"",message:e.message||String(e)}}
+        }""",values)
+        assert evidence_block["code"]=="P39_SCENARIO_BLOCKED",evidence_block
+        assert original==read(page),"issued invoice blocker must not mutate any state"
+        assert not requests,requests
+        ctx.close()
+        return {"case":mode,"officialVoucherRequired":True,"simulatedPostingDenied":True,
+                "originalsUntouched":True}
     pre=preview(page,values)
+    assert pre["scenarioStatus"]=="SYNTHETIC_PREVIEW_ELIGIBLE"
     assert pre["syntheticOnly"] is True and pre["productionPostingAllowed"] is False
     assert pre["evidence"]["productionPostingAllowed"] is False
     assert original==read(page),"preview must be truly read-only"
