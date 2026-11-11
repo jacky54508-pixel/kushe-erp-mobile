@@ -307,3 +307,23 @@
  .bg-dialog .bg-history-entry button{min-height:44px}
 }
 @media(pointer:coarse){:is(#billingsApp,#receivablesApp) .bg-audit-row :is(.bg-arrow-toggle,.bg-history-link,.bg-inline-actions button){min-height:44px}}
+
+/* P39-INV-1: cross-reference only; original invoice and accounting remain unchanged. */
+.bg-invoice-crosscheck{margin:16px 0;padding:14px 16px;border:1px solid #c6d8e7;border-radius:11px;background:#f9fcff;min-width:0}
+.bg-invoice-crosscheck>header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.bg-invoice-crosscheck>header b{font-size:16px;color:#183d62}
+.bg-invoice-crosscheck>header p,.bg-inv-hint{font-size:12px;line-height:1.6;color:#5d7287;margin:5px 0 0}
+.bg-invoice-crosscheck>header>span{font-size:12px;color:#245573;background:#e6f2fa;padding:5px 10px;border-radius:99px}
+.bg-invoice-scroll{overflow-x:auto;overscroll-behavior:contain}
+.bg-invoice-crosscheck table{width:100%;min-width:850px;border-collapse:collapse;table-layout:auto}
+.bg-invoice-crosscheck th,.bg-invoice-crosscheck td{padding:9px 7px;border-bottom:1px solid #e1eaf2;font-size:12px;text-align:left;vertical-align:middle;white-space:normal}
+.bg-invoice-crosscheck thead th{background:#eff5fa;color:#365a78;font-weight:700}
+.bg-invoice-crosscheck th.num,.bg-invoice-crosscheck td.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.bg-invoice-crosscheck td:first-child{min-width:150px}
+.bg-invoice-crosscheck td strong,.bg-invoice-crosscheck td small{display:block;overflow-wrap:anywhere}
+.bg-invoice-crosscheck td small{color:#72849a;margin-top:3px}
+.bg-invoice-crosscheck td button{min-height:38px;padding:7px 10px;white-space:nowrap}
+.bg-invoice-crosscheck tfoot th{background:#edf4f9;color:#153e65}
+.bg-inv-disabled{color:#718398;font-size:12px}
+.bg-inv-warning{background:#fff7eb;color:#8a5221;border-radius:7px;padding:10px;font-size:12px;line-height:1.65;margin:12px 0 6px}
+@media(max-width:700px){.bg-invoice-crosscheck{padding:12px}.bg-invoice-crosscheck>header b{font-size:15px}}
