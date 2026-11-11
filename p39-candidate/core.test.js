@@ -82,12 +82,14 @@ test('未填原因拒絕',()=>{
   rejects(()=>core.allowancePlan(fixture(),{...request(),reason:''}),'INVALID_TEXT');
 });
 test('不能填無效或增加的核定金額',()=>{
-  for(const approvedGross of [0,105000,105001,-1,0.5,'90000',Number.MAX_SAFE_INTEGER+1])
+  for(const approvedGross of [0,105000,105001])
+    rejects(()=>core.allowancePlan(fixture(),{...request(),approvedGross}),'AMOUNT_RANGE');
+  for(const approvedGross of [-1,0.5,'90000',Number.MAX_SAFE_INTEGER+1])
     rejects(()=>core.allowancePlan(fixture(),{...request(),approvedGross}),'INVALID_AMOUNT');
 });
 test('請款與應收識別不一致停止',()=>{
   const s=fixture();s.receivables[0].billingId='SYN-WRONG';
-  rejects(()=>core.allowancePlan(s,request()),'IDENTITY_NOT_UNIQUE');
+  rejects(()=>core.allowancePlan(s,request()),'SOURCE_LINK_INVALID');
 });
 test('發票金額被改動不得執行',()=>{
   const s=fixture('invoiced');s.invoices[0].grossAmount+=1;
