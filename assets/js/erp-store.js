@@ -7200,10 +7200,79 @@
         oldPayrollTotal:x.oldPayrollTotal,newPayrollTotal:x.expectedPayrollTotal}))};
   }
 
+  // P39-3 candidate: document-only revision. Always use the existing Store CAS,
+  // transaction journal, emergency mirror and recovery mechanism. No finance recalculation.
+  function p39BillingNoteRevisionContext(id) {
+    const context=billingDocumentContext(id),billing=context.billing;
+    if(context.issues.length)throw storeError('原始請款帳務尚有待核對項目，停止備註修訂：'+context.issues.join('；'),'P39_NOTE_SOURCE_UNSAFE');
+    const history=billing.noteRevisionHistory;
+    if(history!==undefined && (!Array.isArray(history) || history.length>100 ||
+        history.some(row=>row?.schema!=='kushe-p39-note-history-v1' ||
+          !Number.isSafeInteger(row.revision) || row.revision<=0 ||
+          typeof row.before!=='string'||typeof row.after!=='string')))
+      throw storeError('備註修訂歷程無法辨識，為避免覆蓋已停止','P39_NOTE_HISTORY_INVALID');
+    return {billingId:String(billing.id),billingNo:String(billing.number||''),
+      snapshot:context.snapshot,note:String(billing.note||''),
+      revisionCount:Array.isArray(history)?history.length:0,
+      financialAmounts:{untaxed:context.amounts.untaxed,tax:context.amounts.tax,
+        gross:context.amounts.grossTotal,receivable:context.amounts.receivable,
+        retention:context.amounts.retention}};
+  }
+  function saveP39BillingNoteRevision(id,values={}) {
+    requireStoreTransactionDraft();
+    const auth=window.KusheAuthGate,user=auth?.user?.(),company=auth?.companyContext?.();
+    if(!user?.id||String(company?.userId||'')!==String(user.id)||
+       String(company?.legacySourceUserId||'')!==String(user.id)||
+       !auth?.canWrite?.('billings'))
+      throw storeError('沒有請款備註修訂權限','P39_NOTE_PERMISSION_DENIED');
+    const ctx=p39BillingNoteRevisionContext(id);
+    if(!values.expectedSnapshot || String(values.expectedSnapshot)!==ctx.snapshot)
+      throw storeError('原始請款單已更新，請重新開啟後核對再儲存','P39_NOTE_STALE_SOURCE');
+    const note=String(values.note??'').trim(),reason=String(values.reason??'').trim();
+    const safeText=(x,max)=>x.length<=max&&!/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(x);
+    if(!safeText(note,2000)||!reason||!safeText(reason,300))
+      throw storeError('備註或修訂原因格式不正確','P39_NOTE_INPUT_INVALID');
+    if(note===ctx.note)return {unchanged:true,billingId:ctx.billingId,revision:ctx.revisionCount};
+    if(ctx.revisionCount>=100)
+      throw storeError('備註修訂已達安全歷程上限，請先匯出留存','P39_NOTE_HISTORY_FULL');
+    const row=state.billings.find(x=>String(x.id)===ctx.billingId);
+    const financialBefore=storeStateFingerprint({
+      original:ctx.financialAmounts,
+      billings:state.billings.map(x=>x.id===row.id?{
+        id:x.id,amount:x.amount,preTaxAmount:x.preTaxAmount,tax:x.tax,
+        taxAmount:x.taxAmount,grossTotal:x.grossTotal,retention:x.retention,
+        retentionAmount:x.retentionAmount,total:x.total,lines:x.lines}:x),
+      receivables:state.receivables,invoices:state.invoices,receipts:state.receipts,
+      retentionReceipts:state.retentionReceipts,bankTransactions:state.bankTransactions,
+      commissions:state.commissions,payroll:state.payroll,salaryPayments:state.salaryPayments
+    });
+    const now=new Date().toISOString(),history=Array.isArray(row.noteRevisionHistory)?row.noteRevisionHistory:[];
+    row.noteRevisionHistory=[...history,{schema:'kushe-p39-note-history-v1',
+      id:uid(),revision:history.length+1,sourceSnapshot:ctx.snapshot,
+      before:ctx.note,after:note,reason,actorUserId:String(user.id),createdAt:now}];
+    row.note=note;row.updatedAt=now;
+    const financialAfter=storeStateFingerprint({
+      original:ctx.financialAmounts,
+      billings:state.billings.map(x=>x.id===row.id?{
+        id:x.id,amount:x.amount,preTaxAmount:x.preTaxAmount,tax:x.tax,
+        taxAmount:x.taxAmount,grossTotal:x.grossTotal,retention:x.retention,
+        retentionAmount:x.retentionAmount,total:x.total,lines:x.lines}:x),
+      receivables:state.receivables,invoices:state.invoices,receipts:state.receipts,
+      retentionReceipts:state.retentionReceipts,bankTransactions:state.bankTransactions,
+      commissions:state.commissions,payroll:state.payroll,salaryPayments:state.salaryPayments
+    });
+    if(financialBefore!==financialAfter)throw storeError('非備註資料遭意外修改，已停止提交','P39_NOTE_PROTECTED_FINANCE_CHANGED');
+    persist('P39-3 修訂請款備註 '+ctx.billingNo,{scope:'P39-3',kind:'DOCUMENT_NOTE_ONLY',
+      billingId:ctx.billingId,revision:history.length+1});
+    return {billingId:ctx.billingId,revision:history.length+1,documentOnly:true,
+      financialUnchanged:true};
+  }
+
   const STORE_WRITER_NAMES=new Set([
     'p33Oct07CommissionRepair',
     'saveExternalBillingDocument','archiveExternalBillingDocument',
     'saveHistoricalBillingDetails',
+     'saveP39BillingNoteRevision',
     'saveReceivableCheque','cancelReceivableCheque','clearReceivableCheque',
     'repairDailyBillingLinks','saveSystemSettings',
     'saveQuotationUnitPreset','saveQuotationPublicNotePreset','deleteQuotationPublicNotePreset',
@@ -7223,7 +7292,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ p33Oct07CommissionRepairPreview, p33Oct07CommissionRepair, externalBillingContext, externalBillingDocumentIndex, saveExternalBillingDocument, archiveExternalBillingDocument, historicalQuotationChoices, billingDocumentState, billingDocumentLines, saveHistoricalBillingDetails, dailyDraftSnapshot, dailyDraftReview, receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ p33Oct07CommissionRepairPreview, p33Oct07CommissionRepair, externalBillingContext, externalBillingDocumentIndex, saveExternalBillingDocument, archiveExternalBillingDocument, historicalQuotationChoices, billingDocumentState, billingDocumentLines, saveHistoricalBillingDetails, p39BillingNoteRevisionContext, saveP39BillingNoteRevision, dailyDraftSnapshot, dailyDraftReview, receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
