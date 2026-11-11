@@ -1,0 +1,73 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
+<title>P39-3 synthetic Store note test</title></head><body>
+<script>
+window.KUSHE_PHASE1_CONFIG={};
+window.KusheAuthGate={
+ session:()=>({access_token:'p39-synthetic-test'}),
+ user:()=>({id:'p39-test-owner',email:'synthetic@example.invalid'}),
+ companyContext:()=>({userId:'p39-test-owner',legacySourceUserId:'p39-test-owner',companyId:'p39-test-company'}),
+ canWrite:()=>true,requireAuth:async()=>true,requireMfa:async()=>true
+};
+window.KusheLegacyData={refresh(){}};
+window.KusheRecovery={showResult(){}};
+const seed={
+ __p39Synthetic:'kushe-p39-3-synthetic-fixture-v1',
+ meta:{version:'5.0.0',updatedAt:'2026-11-11T00:00:00Z',revision:1,p39SyntheticSchema:'kushe-p39-3-synthetic-fixture-v1'},
+ settings:{defaultTax:5,quotationUnitPresets:['式']},
+ customers:[{id:'syn-c',name:'虛構建設'}],projects:[{id:'syn-p',name:'虛構案場',customer:'syn-c'}],
+ employees:[],dailyLogs:[],commissions:[],attendance:[],payroll:[],
+ billings:[{
+  id:'syn-b',number:'SYN-B20261111-001',date:'2026-11-11',customer:'syn-c',
+  customerName:'虛構建設',project:'syn-p',projectName:'虛構案場',
+  receivableId:'syn-ar',note:'原始合成備註',sourceType:'synthetic-test',
+  taxMode:'未稅',invoiceStatus:'invoice_pending',invoiceNo:'',
+  amount:100000,preTaxAmount:100000,tax:5000,taxAmount:5000,
+  taxIncludedAmount:105000,grossTotal:105000,
+  retention:5000,retentionAmount:5000,total:100000,
+  retentionMode:'5',retentionRate:5,retentionBase:'preTax',
+  lines:[{id:'syn-line',item:'虛構施工',house:'A1',unit:'式',qty:1,price:100000,
+    subtotal:100000,sourceRefs:[],sourceContractRefs:[]}]
+ }],
+ receivables:[{
+  id:'syn-ar',billingId:'syn-b',sourceNo:'SYN-B20261111-001',
+  customer:'syn-c',project:'syn-p',invoiceNo:'',
+  amount:100000,untaxedAmount:100000,preTaxAmount:100000,
+  tax:5000,taxAmount:5000,grossTotal:105000,taxIncludedAmount:105000,
+  retention:5000,retentionAmount:5000,received:0,retentionReceived:0
+ }],
+ invoices:[{
+  id:'syn-i',invoiceType:'output',type:'銷項',sourceType:'billing',sourceId:'syn-b',
+  billingId:'syn-b',sourceNo:'SYN-B20261111-001',status:'pending',
+  invoiceNumber:'',number:'',netAmount:100000,amount:100000,
+  tax:5000,taxAmount:5000,grossAmount:105000,total:105000
+ }],
+ billingNoteRevisions:[],billingAllowances:[],
+ receipts:[],retentionReceipts:[],salaryPayments:[],commissionSettlements:[],
+ bankTransactions:[],banks:[{id:'syn-bank',name:'虛構銀行',openingBalance:0,income:0,expense:0,balance:0}],
+ payables:[],payments:[],vendors:[],materials:[],materialUsages:[],inventoryReceipts:[],
+ projectCosts:[],dailyItemPresets:[],quotations:[],quotationPrices:[],quotationTemplates:[],audit:[]
+};
+// All IDs, dates and amounts below are synthetic-only. Never import genuine ERP records.
+const mode=new URL(location.href).searchParams.get('invoiceMode');
+if(mode==='invoiced'){
+ const bill=seed.billings[0],ar=seed.receivables[0],inv=seed.invoices[0];
+ bill.invoiceStatus='invoiced';bill.invoiceNo='SYN-INV-0001';bill.hasInvoice=true;
+ ar.invoiceNo='SYN-INV-0001';ar.invoiceStatus='invoiced';
+ inv.status='issued';inv.number='SYN-INV-0001';inv.invoiceNumber='SYN-INV-0001';
+}else if(mode==='no_invoice'){
+ const bill=seed.billings[0],ar=seed.receivables[0];
+ bill.invoiceStatus='no_invoice';bill.invoiceNo='';bill.hasInvoice=false;
+ ar.invoiceNo='';ar.invoiceStatus='no_invoice';
+ bill.tax=0;bill.taxAmount=0;bill.taxIncludedAmount=100000;bill.grossTotal=100000;
+ bill.total=95000;
+ ar.tax=0;ar.taxAmount=0;ar.taxIncludedAmount=100000;ar.grossTotal=100000;
+ ar.amount=95000;seed.invoices=[];
+}
+if(!localStorage.getItem('KuSheERP25_EMERGENCY'))
+ localStorage.setItem('KuSheERP25_EMERGENCY',JSON.stringify(seed));
+</script>
+<script src="/p39-candidate/core.js"></script>
+<script src="/p39-candidate/voucher-review.js"></script>
+<script src="/p39-candidate/effective-accounting.js"></script>
+<script src="/assets/js/erp-store.js"></script>
+</body></html>
