@@ -180,6 +180,10 @@ begin
   end if;
   v_bill:=v_state->'billings'->0;
   v_ar:=v_state->'receivables'->0;
+  if jsonb_typeof(v_ar->'receivableCheques') <> 'array'
+     or jsonb_array_length(v_ar->'receivableCheques') > 0 then
+    raise exception 'P39F_CHEQUE_LOCKED' using errcode='22023';
+  end if;
   if v_bill->>'id'<>'SYN-B' or v_ar->>'id'<>'SYN-AR'
      or v_bill->>'receivableId'<>'SYN-AR' or v_ar->>'billingId'<>'SYN-B'
      or v_bill->>'invoiceStatus' not in ('invoice_pending','no_invoice')
