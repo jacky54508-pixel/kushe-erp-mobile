@@ -5,6 +5,9 @@ on:
       - p39-3-allowance-candidate-20261111
     paths:
       - 'p39-candidate/**'
+      - 'assets/js/erp-store.js'
+      - 'assets/js/billing.js'
+      - 'index.html'
       - '.github/workflows/p39-3-candidate.yml'
   workflow_dispatch:
 permissions:
@@ -23,7 +26,7 @@ jobs:
           set -euo pipefail
           git fetch origin main --depth=5
           git diff --name-only origin/main...HEAD | tee /tmp/p39-files.txt
-          if grep -Ev '^(p39-candidate/|\.github/workflows/p39-3-candidate\.yml$)' /tmp/p39-files.txt; then
+          if grep -Ev '^(p39-candidate/|\.github/workflows/p39-3-candidate\.yml$|assets/js/erp-store\.js$|assets/js/billing\.js$|index\.html$)' /tmp/p39-files.txt; then
             echo 'Unexpected formal ERP file changed'; exit 1
           fi
           test -f p39-candidate/core.js
@@ -34,6 +37,7 @@ jobs:
           node --check p39-candidate/core.js
           node --check p39-candidate/core.test.js
           node --check p39-candidate/sandbox.js
+          node --check p39-candidate/note-ui.js
           for f in assets/js/*.js; do node --check "$f"; done
       - name: Run isolated synthetic accounting regression
         run: node --test p39-candidate/core.test.js
@@ -67,3 +71,5 @@ jobs:
         run: python .p36-tests/test_permissions.py
       - name: Synthetic billing UI isolation and duplicate guard
         run: python p39-candidate/sandbox-ui.test.py
+      - name: Guarded Store note revision, accounting integrity and duplicate protection
+        run: python p39-candidate/note-store.test.py
