@@ -7333,12 +7333,15 @@
       throw storeError('無折讓測試核准權限','P39_SYNTHETIC_PERMISSION_DENIED');
     if(typeof window.KusheP393CandidateCore?.allowancePlan!=='function'||
        typeof window.KusheP393VoucherReview?.inspect!=='function'||
-       typeof window.KusheP393EffectiveAccounting?.inspect!=='function')
+       typeof window.KusheP393EffectiveAccounting?.inspect!=='function'||
+       typeof window.KusheP393ScenarioGate?.inspect!=='function')
       throw storeError('獨立折讓、稅務審查與有效帳款模組必須完整載入','P39_SYNTHETIC_MODULE_UNAVAILABLE');
   }
   function p39SyntheticAllowancePreflight(billingId,values={}) {
     p39SyntheticPostingEnvironment();
     const core=window.KusheP393CandidateCore;
+    const scenario=window.KusheP393ScenarioGate.inspect(state,billingId);
+    if(!scenario.candidateEligible)throw storeError('P39-3D 折讓申請遭安全閘門封鎖：'+scenario.blockers.map(x=>x.message).join('；'),'P39_SCENARIO_BLOCKED',{scenarioBlockers:scenario.blockers});
     const ctx=billingDocumentContext(billingId);
     if(ctx.issues.length)
       throw storeError('原請款或應收存在不一致：'+ctx.issues.join('；'),'P39_ALLOWANCE_ORIGINAL_UNSAFE');
@@ -7348,6 +7351,7 @@
     const revision=storeRevisionOf(state);
     return {
       syntheticOnly:true,productionPostingAllowed:false,
+      scenarioStatus:scenario.status,
       billingId:String(billingId),documentSnapshot:ctx.snapshot,
       planSnapshot:plan.expectedSnapshot,storeRevisionId:revision.id,
       preview:{original:storeStateClone(plan.original),
