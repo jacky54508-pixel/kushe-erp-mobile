@@ -112,5 +112,32 @@
       throw new Error('PDF 發票對照合計與原單不一致');
     return model;
   }
-  return Object.freeze({SCHEMA,STATUS,project,validateProjection});
+  const escapeHtml=v=>String(v??'').replace(/[&<>"']/g,c=>({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  })[c]);
+  const money=v=>'
+});
++Number(v).toLocaleString('zh-TW',{maximumFractionDigits:0});
+  function printHtml(model){
+    validateProjection(model);
+    const lines=model.rows.map(row=>
+      '<tr><td>'+escapeHtml(row.projectName||'原案場')+'<small>'+escapeHtml(row.billingNo||'—')+'</small></td>'+
+      '<td>'+escapeHtml(row.invoiceNo||row.invoiceLabel)+(row.warnings.length?'<small>資料待核對</small>':'')+'</td>'+
+      '<td>'+escapeHtml(row.invoiceDate||'—')+'</td><td>'+escapeHtml(row.invoiceLabel)+'</td>'+
+      '<td class="inv-num">'+money(row.originalUntaxed)+'</td>'+
+      '<td class="inv-num">'+money(row.originalTax)+'</td>'+
+      '<td class="inv-num">'+money(row.originalGross)+'</td></tr>'
+    ).join('');
+    return '<section class="section invoice-ref-section">'+
+      '<div class="section-title">原請款／發票對照（各原單開票月份獨立）</div>'+
+      '<table class="invoice-ref-table">'+
+      '<colgroup><col style="width:22%"><col style="width:18%"><col style="width:12%">'+
+      '<col style="width:15%"><col style="width:11%"><col style="width:11%"><col style="width:11%"></colgroup>'+
+      '<thead><tr><th>案場／原單</th><th>發票號碼</th><th>發票日期</th><th>狀態</th>'+
+      '<th>原單未稅</th><th>原單稅額</th><th>原單含稅</th></tr></thead>'+
+      '<tbody>'+lines+'</tbody></table>'+
+      '<div class="invoice-ref-footer">各原單發票依實際開立日期歸屬，不因合併文件日期改變。'+
+      '表列為原請款金額，非新增發票或應收；請以原始發票為準。</div></section>';
+  }
+  return Object.freeze({SCHEMA,STATUS,project,validateProjection,printHtml});
 });
