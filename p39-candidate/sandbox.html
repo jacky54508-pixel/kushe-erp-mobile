@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>P39-3｜酷舍 ERP 議價折讓獨立候選實驗室</title>
+  <style>
+    :root{color-scheme:light;font-family:system-ui,"Noto Sans TC",sans-serif;background:#f5f8fc;color:#182b43}
+    *{box-sizing:border-box}body{margin:0;padding:24px}main{max-width:1000px;margin:0 auto}
+    header{background:#112e55;color:#fff;padding:24px;border-radius:14px}
+    header small{color:#b9d8ff}h1{margin:8px 0;font-size:26px}p{line-height:1.65}
+    .notice{margin:16px 0;padding:14px;border:1px solid #f5c37d;background:#fff8e9;border-radius:10px}
+    .columns{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    section{background:#fff;padding:20px;margin:14px 0;border:1px solid #e0e8f4;border-radius:12px}
+    section h2{font-size:19px;margin:0 0 12px}
+    label{display:block;font-weight:600;font-size:13px;margin-bottom:12px}
+    input,select,textarea{display:block;width:100%;padding:10px 12px;margin-top:6px;border:1px solid #bccce1;border-radius:8px;font:inherit}
+    textarea{resize:vertical;min-height:70px}
+    button{padding:10px 16px;border:0;border-radius:8px;background:#1f5baf;color:#fff;cursor:pointer;font-weight:700}
+    button.secondary{background:#e7effa;color:#174273}
+    button:disabled{opacity:.4;cursor:not-allowed}
+    .actions{display:flex;flex-wrap:wrap;gap:8px}
+    dl{display:grid;grid-template-columns:1fr auto;gap:8px;font-size:14px}
+    dt{color:#637289}dd{font-weight:700;margin:0;text-align:right}
+    .status{padding:12px;border-radius:8px;background:#edf5ff;white-space:pre-wrap;word-break:break-word}
+    .status.error{background:#fff1ef;color:#a13025}
+    code{font-size:12px}footer{font-size:13px;color:#52647b;text-align:center;padding:14px}
+    @media(max-width:690px){body{padding:10px}.columns{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<main>
+<header><small>酷舍 ERP・隔離測試候選版 P39-3</small><h1>請款備註修訂／議價折讓</h1>
+<p>本頁僅展示虛構資料的過帳模型與操作介面，不連結正式 ERP 或任何雲端資料庫。</p></header>
+<p class="notice" role="note"><strong>非正式系統，嚴禁填入實際建商、請款單、發票或個人資料。</strong> 所有紀錄只在本頁記憶體存在；重新整理即消失。正式交易、跨裝置同步、稅務憑證簽發均尚未接入。</p>
+<div class="columns">
+<section>
+<h2>虛構資料設定</h2>
+<label>發票狀態<select id="invoiceStatus"><option value="invoice_pending">待開發票</option><option value="invoiced">已開發票（虛構憑證）</option><option value="no_invoice">免開發票</option></select></label>
+<div class="actions"><button type="button" id="reset">重設虛構測試資料</button></div>
+<dl id="original"></dl>
+</section>
+<section>
+<h2>核定後帳務預覽</h2>
+<dl id="effective"></dl>
+<p class="status" id="message" role="status">等待測試操作；尚未建立任何紀錄。</p>
+</section>
+<section>
+<h2>備註修訂</h2>
+<form id="noteForm">
+<label>新的對外備註<textarea name="note" maxlength="2000" required>依建商議價結果另行核定</textarea></label>
+<label>修改原因<input name="reason" maxlength="300" required value="虛構案件備註修正"></label>
+<div class="actions"><button type="submit">建立備註修訂（僅虛構）</button></div>
+</form>
+</section>
+<section>
+<h2>議價折讓</h2>
+<form id="allowanceForm">
+<label>核定後含稅總額（元）<input name="gross" type="number" min="1" step="1" required value="94500"></label>
+<label>議價原因<input name="reason" maxlength="500" required value="虛構建商議價折讓"></label>
+<label id="voucherRow" hidden>虛構折讓單號<input name="voucher" value="SYN-ALLOWANCE-001"></label>
+<div class="actions"><button type="button" id="preview">只預覽</button><button type="submit">執行隔離過帳（虛構）</button></div>
+</form>
+</section>
+</div>
+<section><h2>隔離測試結果</h2><p id="audit">尚無測試交易。</p>
+<p>實際正式版必須另行驗收稅務單據、原子寫入、收款/銀行串聯、跨裝置同步，並取得負責人發布同意。</p></section>
+<footer>P39-3 Synthetic Candidate・不可作為真實會計或申報憑證</footer>
+</main>
+<script src="./core.js"></script>
+<script src="./sandbox.js"></script>
+</body>
+</html>
