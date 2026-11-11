@@ -75,3 +75,5 @@ jobs:
         run: python p39-candidate/sandbox-ui.test.py
       - name: Guarded Store note revision, accounting integrity and duplicate protection
         run: python p39-candidate/note-store.test.py
+      - name: Synthetic effective receivable, cheque and retention Store integration
+        run: python p39-candidate/effective-store.test.py
