@@ -5,7 +5,7 @@ URL="http://127.0.0.1:8797/.p39-inv1-tests/real-store.html"
 
 def main():
     with sync_playwright() as pw:
-        browser=pw.chromium.launch(headless=True)
+        browser=pw.chromium.launch(headless=True,channel='chrome') if __import__('os').environ.get('P39_INV_USE_SYSTEM_CHROME')=='1' else pw.chromium.launch(headless=True)
         ctx=browser.new_context()
         page=ctx.new_page()
         page.goto(URL)
