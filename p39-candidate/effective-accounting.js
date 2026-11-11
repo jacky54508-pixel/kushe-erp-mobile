@@ -34,15 +34,19 @@
       fail('EFFECTIVE_LEDGER_INVALID','折讓帳務資料集格式不正確');
   }
   function ledgerRows(state){arrays(state);return state.billingAllowances||[]}
-  function originalReceivable(row){
-    const amount=optional(row,'amount');
-    const retention=optional(row,'retentionAmount',optional(row,'retention',0));
-    const received=optional(row,'received');
-    const retentionReceived=optional(row,'retentionReceived');
-    if(received>amount||retentionReceived>retention)
+  function originalReceivable(row,strict=false){
+    // Legacy records without any allowance must keep their historical display semantics;
+    // special historical/decimal/null values are not silently rewritten or rejected.
+    const legacyNum=(value)=>{const n=Number(value);return Number.isFinite(n)?n:0};
+    const amount=strict?optional(row,'amount'):legacyNum(row.amount);
+    const retention=strict?optional(row,'retentionAmount',optional(row,'retention',0)):
+      legacyNum(row.retentionAmount??row.retention);
+    const received=strict?optional(row,'received'):legacyNum(row.received);
+    const retentionReceived=strict?optional(row,'retentionReceived'):legacyNum(row.retentionReceived);
+    if(strict&&(received>amount||retentionReceived>retention))
       fail('EFFECTIVE_OVER_SETTLED','原應收已收金額超過原始上限');
     return {receivable:amount,retention,received,retentionReceived,
-      outstanding:amount-received,retentionOutstanding:retention-retentionReceived,
+      outstanding:Math.max(0,amount-received),retentionOutstanding:Math.max(0,retention-retentionReceived),
       discountReceivable:0,discountRetention:0,hasAllowance:false,
       synthetic:false,source:'UNCHANGED_ORIGINAL_AR'};
   }
@@ -61,7 +65,7 @@
       (clean(r?.id)===clean(billing.receivableId)&&clean(billing.receivableId)!==''),'應收帳款');
     if(clean(receivable.billingId)!==id||clean(billing.receivableId)!==clean(receivable.id))
       fail('EFFECTIVE_SOURCE_LINK_INVALID','請款、應收雙向關聯不一致');
-    const base=originalReceivable(receivable);
+    const base=originalReceivable(receivable,true);
     const expected={
       untaxed:int(billing.preTaxAmount,'原始未稅'),tax:int(billing.taxAmount,'原始稅額'),
       gross:int(billing.grossTotal,'原含稅'),retention:int(billing.retentionAmount,'原保留款'),
