@@ -42,6 +42,29 @@
     .invoice-ref-table td small{display:block;color:#60758b;font-size:6.5pt}
     .invoice-ref-footer{padding:1.6mm 2mm;color:#596e81;font-size:7.1pt;line-height:1.45}
     @media print{.invoice-ref-section{break-inside:avoid;page-break-inside:avoid}}
+
+    /* Compact only MERGED invoices for A4. Existing single billings/quotes unchanged. */
+    @media print {
+      .paper.invoice-group-document{padding-top:5mm;padding-bottom:5mm}
+      .paper.invoice-group-document .head{padding-bottom:1.5mm}
+      .paper.invoice-group-document .info{margin:2mm 0 2mm;padding:1.5mm;gap:1mm 2mm}
+      .paper.invoice-group-document .info div{min-height:9mm;padding:1.3mm 2mm;font-size:9pt}
+      .paper.invoice-group-document .section{margin-top:2mm}
+      .paper.invoice-group-document .matrix th,.paper.invoice-group-document .matrix td,
+      .paper.invoice-group-document .detail th,.paper.invoice-group-document .detail td{padding-top:1.05mm;padding-bottom:1.05mm}
+      .paper.invoice-group-document .detail td.item{font-size:9pt}
+      .paper.invoice-group-document .invoice-ref-table th,
+      .paper.invoice-group-document .invoice-ref-table td{padding-top:1mm;padding-bottom:1mm}
+      .paper.invoice-group-document .invoice-ref-footer{padding:1mm 1.5mm;font-size:6.8pt}
+      .paper.invoice-group-document .summary{margin-top:2mm}
+      .paper.invoice-group-document .summary-row{min-height:7.5mm;padding-top:1mm;padding-bottom:1mm;font-size:9pt}
+      .paper.invoice-group-document .summary-row strong{font-size:10.2pt}
+      .paper.invoice-group-document .note{margin-top:2mm;padding:1.5mm 2.5mm;font-size:8.5pt;line-height:1.3}
+      .paper.invoice-group-document .sign{margin-top:1.5mm}
+      .paper.invoice-group-document .seal-wrap{height:19mm}
+      .paper.invoice-group-document .seal{max-height:18mm}
+      .paper.invoice-group-document .client-sign{padding-top:5mm}
+    }
   </style>
 </head>
 <body>
@@ -80,7 +103,7 @@
       throw new Error('合併發票對照與原請款總額不同，停止匯出');
     const invoiceSection=invoiceRefs?
       window.KusheExternalBillingInvoice.printHtml(invoiceRefs):'';
-    document.title=d.fileName||d.title||'酷舍對外文件';const paper=document.getElementById('paper');paper.classList.toggle('billing-document',!isQuote);paper.classList.toggle('quotation-document',isQuote);paper.innerHTML=`<header class="head"><div class="company-block"><span class="company-logo-frame"><img class="company-logo" id="formalCompanyLogo" alt="酷舍企業" onerror="this.hidden=true"></span><div class="company"><h1>${esc(c.name||'酷舍企業有限公司')}</h1><div class="en">${esc(c.englishName||'Cool Sir Limited Company')}</div><div class="sub">${companyInfo.map(value=>`<span>${esc(value)}</span>`).join('')}</div></div></div><div class="doc-title"><h2>${esc(d.title||'請款單')}</h2></div></header><section class="info"><div><span class="label">客戶</span>${esc(d.customer||'—')}</div><div><span class="label">案場</span>${esc(d.project||'—')}</div><div><span class="label">日期</span>${esc(d.date||'—')}</div>${isActual?`<div><span class="label">稅別</span>${esc(d.taxMode==='含稅'?'含稅':'未稅')}</div>`:`<div><span class="label">稅額方式</span>${esc(d.taxMode||'—')}</div>`}</section>${matrix}${detail}${invoiceSection}${summary}${d.publicNote?`<section class="note"><b>備註：</b><br>${esc(d.publicNote)}</section>`:''}<section class="sign"><div class="client-sign">客戶簽章</div><div class="company-seals"><div>公司大小章</div><div class="seal-wrap"><img class="seal" id="formalCompanySeal" alt="公司大小章" onerror="this.hidden=true"></div></div></section>`;if(isQuote)paper.innerHTML=`<div class="quotation-content" id="quotationContent">${paper.innerHTML}</div>`;
+    document.title=d.fileName||d.title||'酷舍對外文件';const paper=document.getElementById('paper');paper.classList.toggle('billing-document',!isQuote);paper.classList.toggle('quotation-document',isQuote);paper.classList.toggle('invoice-group-document',Boolean(invoiceRefs));paper.innerHTML=`<header class="head"><div class="company-block"><span class="company-logo-frame"><img class="company-logo" id="formalCompanyLogo" alt="酷舍企業" onerror="this.hidden=true"></span><div class="company"><h1>${esc(c.name||'酷舍企業有限公司')}</h1><div class="en">${esc(c.englishName||'Cool Sir Limited Company')}</div><div class="sub">${companyInfo.map(value=>`<span>${esc(value)}</span>`).join('')}</div></div></div><div class="doc-title"><h2>${esc(d.title||'請款單')}</h2></div></header><section class="info"><div><span class="label">客戶</span>${esc(d.customer||'—')}</div><div><span class="label">案場</span>${esc(d.project||'—')}</div><div><span class="label">日期</span>${esc(d.date||'—')}</div>${isActual?`<div><span class="label">稅別</span>${esc(d.taxMode==='含稅'?'含稅':'未稅')}</div>`:`<div><span class="label">稅額方式</span>${esc(d.taxMode||'—')}</div>`}</section>${matrix}${detail}${invoiceSection}${summary}${d.publicNote?`<section class="note"><b>備註：</b><br>${esc(d.publicNote)}</section>`:''}<section class="sign"><div class="client-sign">客戶簽章</div><div class="company-seals"><div>公司大小章</div><div class="seal-wrap"><img class="seal" id="formalCompanySeal" alt="公司大小章" onerror="this.hidden=true"></div></div></section>`;if(isQuote)paper.innerHTML=`<div class="quotation-content" id="quotationContent">${paper.innerHTML}</div>`;
     function centerPaperInViewport(){const zoom=Number.parseFloat(getComputedStyle(paper).zoom)||1,viewportWidth=document.documentElement.clientWidth;paper.style.setProperty('--preview-center-left',`${viewportWidth/(2*zoom)}px`)}
     if(window.matchMedia('screen').matches){centerPaperInViewport();window.addEventListener('resize',()=>requestAnimationFrame(centerPaperInViewport),{passive:true})}
     async function loadAssets(){const enterpriseUrl=/\/beta(?:\/|$)/.test(window.location.pathname)?'../enterprise/index.html':'./enterprise/index.html';try{const source=await fetch(enterpriseUrl).then(r=>r.text());for(const [name,id] of [['companyLogoAsset','formalCompanyLogo'],['companySealAsset','formalCompanySeal']]){const start=source.indexOf('const '+name+'=');if(start<0)continue;let end=source.indexOf(';\n',start);if(end<0)end=source.indexOf(';\r',start);const parts=[...source.slice(start,end).matchAll(/'([^']*)'/g)].map(x=>x[1]);if(parts.length){const image=document.getElementById(id);if(id==='formalCompanySeal')image.onload=()=>{image.onload=null;removeSealBackground(image)};image.src=parts.join('');if(id==='formalCompanyLogo')image.style.display='block'}}}catch(e){}}
