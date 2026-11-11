@@ -57,9 +57,9 @@ jobs:
         run: node --test .p39-inv1-tests/projection.test.js
 
   browser-regression:
-    name: Original invoice editor, grouped PDF, existing ERP regression
+    name: Existing ERP commission payroll and Auth regression (system Chrome)
     runs-on: ubuntu-24.04
-    timeout-minutes: 27
+    timeout-minutes: 22
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -67,28 +67,27 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
-      - name: Install isolated Chromium
-        run: |
-          python -m pip install playwright==1.57.0
-          python -m playwright install --with-deps chromium
-      - name: Start four loopback-only synthetic fixtures
+      - name: Use GitHub preinstalled Chrome and unchanged original regression tests
         shell: bash
         run: |
           set -euo pipefail
-          for port in 8784 8795 8796 8797; do
-            python -m http.server "$port" --bind 127.0.0.1 >"/tmp/p39-inv1-$port.log" 2>&1 &
-          done
-      - name: Per-source invoice editor and real Chromium printable PDF
-        run: python .p39-inv1-tests/test_ui.py
-      - name: Original real ERP Store invoice mutation against synthetic A/B only
-        run: python .p39-inv1-tests/test_store.py
-      - name: Historical finance read-only and targeted correction regression
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+      - name: Start loopback-only ERP legacy synthetic fixtures
+        shell: bash
         run: |
-          python .p33-4-tests/regression.py
-          python .p34-tests/test.py
-          python .p35-tests/test_ui.py
-      - name: Existing authorization and session recovery regression
-        run: python .p36-tests/test_permissions.py
+          set -euo pipefail
+          for port in 8774 8784 8795 8796; do
+            python -m http.server "$port" --bind 127.0.0.1 >"/tmp/p39-inv1-legacy-$port.log" 2>&1 &
+          done
+      - name: P33 commission previous validation and conflict safety
+        run: python .p39-inv1-tests/chrome_legacy.py .p33-4-tests/regression.py
+      - name: P34 commission pool, historical preservation, and rollback
+        run: python .p39-inv1-tests/chrome_legacy.py .p34-tests/test.py
+      - name: P35 targeted compensation corrections and PDF backup
+        run: python .p39-inv1-tests/chrome_legacy.py .p35-tests/test_ui.py
+      - name: P36 owner, employee and permission recovery
+        run: python .p39-inv1-tests/chrome_legacy.py .p36-tests/test_permissions.py
 
   fast-chrome:
     name: Preinstalled Chrome synthetic UI, actual invoice Store and printable PDF
