@@ -80,6 +80,8 @@ jobs:
           done
       - name: Per-source invoice editor and real Chromium printable PDF
         run: python .p39-inv1-tests/test_ui.py
+      - name: Original real ERP Store invoice mutation against synthetic A/B only
+        run: python .p39-inv1-tests/test_store.py
       - name: Historical finance read-only and targeted correction regression
         run: |
           python .p33-4-tests/regression.py
