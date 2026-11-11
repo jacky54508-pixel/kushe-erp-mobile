@@ -218,7 +218,7 @@ class PostgresDeviceTests(unittest.TestCase):
     def commit(self,cmd,device="SYN-DEVICE-A",base=None):
         return request((base or self.root)+"/commit",device,"POST",cmd)
     def test_two_devices_concurrent_same_operation_single_post(self):
-        a=self.snapshot("SYN-DEVICE-A"),b=self.snapshot("SYN-DEVICE-B")
+        a=self.snapshot("SYN-DEVICE-A");b=self.snapshot("SYN-DEVICE-B")
         self.assertEqual(a["revision"],b["revision"])
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             calls=[pool.submit(self.commit,command(a["revision"]),d) for d in VALID_DEVICES]
