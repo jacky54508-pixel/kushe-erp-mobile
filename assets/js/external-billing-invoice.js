@@ -115,9 +115,7 @@
   const escapeHtml=v=>String(v??'').replace(/[&<>"']/g,c=>({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   })[c]);
-  const money=v=>'
-});
-+Number(v).toLocaleString('zh-TW',{maximumFractionDigits:0});
+  const money=v=>String.fromCharCode(36)+Number(v).toLocaleString('zh-TW',{maximumFractionDigits:0});
   function printHtml(model){
     validateProjection(model);
     const lines=model.rows.map(row=>
