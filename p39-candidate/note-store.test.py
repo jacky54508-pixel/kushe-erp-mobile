@@ -76,6 +76,38 @@ def main():
         assert result["noChangeDeduplicated"],result
         assert not errors,errors
         print("PASS: Store CAS note revision, protected accounting, stale/role/duplicate guards")
+        # End-to-end candidate button and modal, still only synthetic fixture data.
+        ui_ctx=browser.new_context()
+        ui_page=ui_ctx.new_page()
+        ui_page.goto(URL)
+        ui_page.wait_for_function("() => !!window.KuSheERPStore")
+        ui_page.evaluate("async()=>{await window.KuSheERPStore.load()}")
+        ui_page.add_script_tag(url="/p39-candidate/note-ui.js")
+        mounted=ui_page.evaluate("""()=>{
+          const overlay=document.createElement('div');
+          overlay.className='erp-detail-overlay';
+          overlay.innerHTML='<section class="erp-detail-card"><div class="erp-detail-body"></div></section>';
+          document.body.append(overlay);
+          const store=window.KuSheERPStore;
+          const billing=store.getState().billings[0],info=store.billingDocumentState(billing.id);
+          return window.KusheP39BillingNote.mount(overlay,billing,info,()=>{});
+        }""")
+        assert mounted is True,"note UI did not mount"
+        ui_page.locator('[data-p393-open]').click()
+        ui_page.locator('.p393-note-form [name="note"]').fill('由候選操作頁儲存的虛構備註')
+        ui_page.locator('.p393-note-form [name="reason"]').fill('候選 UI 實機回歸')
+        ui_page.locator('.p393-note-form button[type="submit"]').click()
+        ui_page.wait_for_function(
+          "() => window.KuSheERPStore.getState().billings[0].note === '由候選操作頁儲存的虛構備註'"
+        )
+        committed=ui_page.evaluate("""()=>{
+          const state=window.KuSheERPStore.getState();
+          return {count:state.billings[0].noteRevisionHistory.length,
+                  receivable:state.receivables[0].amount,
+                  bankCount:state.bankTransactions.length};
+        }""")
+        assert committed == {"count":1,"receivable":100000,"bankCount":0},committed
+        ui_ctx.close()
         ctx.close()
         browser.close()
 
