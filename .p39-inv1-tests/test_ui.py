@@ -132,7 +132,7 @@ def test_pdf(browser):
 
 def main():
     with sync_playwright() as pw:
-        browser=pw.chromium.launch(headless=True)
+        browser=pw.chromium.launch(headless=True,channel='chrome') if __import__('os').environ.get('P39_INV_USE_SYSTEM_CHROME')=='1' else pw.chromium.launch(headless=True)
         test_group(browser)
         test_cancel_and_exempt(browser)
         test_pdf(browser)
