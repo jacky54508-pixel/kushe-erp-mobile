@@ -67,7 +67,7 @@ const getTotals=()=>{
 test.snapshot=()=>JSON.stringify({billings:test.billings,receivables:test.receivables,
  invoices:test.invoices,bank:test.bankTransactions,payroll:test.payroll,
  receipts:test.receipts});
-window.KusheERPStore={
+window.KuSheERPStore={
  getState:()=>test,
  num:x=>Number(x)||0,
  invoiceRows:()=>test.invoices.map(x=>({...x})),
