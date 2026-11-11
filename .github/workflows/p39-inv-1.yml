@@ -1,0 +1,89 @@
+name: P39-INV-1 per-original invoice and grouped PDF synthetic acceptance
+
+on:
+  push:
+    branches:
+      - p39-inv-1-multi-invoice-candidate-20261111
+    paths:
+      - '.p39-inv1-tests/**'
+      - '.github/workflows/p39-inv-1.yml'
+      - 'assets/js/external-billing-invoice.js'
+      - 'assets/js/external-billing-invoice-ui.js'
+      - 'assets/js/billing-groups.js'
+      - 'assets/js/invoices.js'
+      - 'assets/js/external-billing-print.js'
+      - 'assets/css/billing-groups.css'
+      - 'external-billing-print.html'
+      - 'billing-print.html'
+      - 'index.html'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-safety:
+    name: Branch restriction, exact source diff, no financial writer changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Assert new branch forks original main, not beta/P39 allowances
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "p39-inv-1-multi-invoice-candidate-20261111"
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = "39b8d543d785f0e0e2c468bed16d8f2e2efaa0fb"
+          test "$(git merge-base origin/main HEAD)" = "39b8d543d785f0e0e2c468bed16d8f2e2efaa0fb"
+          git diff --name-only origin/main...HEAD > /tmp/p39-inv1-files.txt
+          cat /tmp/p39-inv1-files.txt
+          if grep -Ev '^(\.p39-inv1-tests/|\.github/workflows/p39-inv-1\.yml$|assets/js/external-billing-invoice\.js$|assets/js/external-billing-invoice-ui\.js$|assets/js/billing-groups\.js$|assets/js/invoices\.js$|assets/js/external-billing-print\.js$|assets/css/billing-groups\.css$|external-billing-print\.html$|billing-print\.html$|index\.html$)' /tmp/p39-inv1-files.txt; then
+            echo "UNAUTHORIZED CANDIDATE DIFF"; exit 1
+          fi
+          ! grep -q '^assets/js/erp-store.js$' /tmp/p39-inv1-files.txt
+          ! grep -q '^assets/js/commissions.js$' /tmp/p39-inv1-files.txt
+          ! grep -q '^assets/js/receipts.js$' /tmp/p39-inv1-files.txt
+      - name: All ERP JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          for js in assets/js/*.js; do node --check "$js"; done
+          node --check .p39-inv1-tests/projection.test.js
+      - name: Pure immutable cross-reference, multi-month and PDF model
+        run: node --test .p39-inv1-tests/projection.test.js
+
+  browser-regression:
+    name: Original invoice editor, grouped PDF, existing ERP regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 27
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install isolated Chromium
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Start four loopback-only synthetic fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          for port in 8784 8795 8796 8797; do
+            python -m http.server "$port" --bind 127.0.0.1 >"/tmp/p39-inv1-$port.log" 2>&1 &
+          done
+      - name: Per-source invoice editor and real Chromium printable PDF
+        run: python .p39-inv1-tests/test_ui.py
+      - name: Historical finance read-only and targeted correction regression
+        run: |
+          python .p33-4-tests/regression.py
+          python .p34-tests/test.py
+          python .p35-tests/test_ui.py
+      - name: Existing authorization and session recovery regression
+        run: python .p36-tests/test_permissions.py
