@@ -25,9 +25,10 @@ def main():
           const after=structuredClone(store.getState());
           if(saved.revision!==1 || saved.financialUnchanged!==true)
             throw Error('unexpected writer result');
-          if(after.billings[0].note!=='新的虛構對外備註')
-            throw Error('note not updated');
-          if(after.billings[0].noteRevisionHistory[0].before!=='原始合成備註')
+          if(after.billings[0].note!=='新的虛構對外備註'||after.billings[0].publicNote!=='新的虛構對外備註')
+            throw Error('note or PDF publicNote not updated');
+          if(after.billings[0].noteRevisionHistory[0].before!=='原始合成備註'||
+             after.billings[0].noteRevisionHistory[0].originalPublicNote!=='')
             throw Error('previous note missing');
           const protectedKeys=Object.keys(before).filter(k=>
             !['billings','meta','audit'].includes(k));
@@ -36,7 +37,7 @@ def main():
           if(changed.length)throw Error('protected ERP data changed: '+changed.join(','));
           const billBefore={...before.billings[0]},billAfter={...after.billings[0]};
           for(const row of [billBefore,billAfter]){
-            delete row.note;delete row.updatedAt;delete row.noteRevisionHistory;
+            delete row.note;delete row.publicNote;delete row.updatedAt;delete row.noteRevisionHistory;
           }
           if(JSON.stringify(billBefore)!==JSON.stringify(billAfter))
             throw Error('billing financial fields were changed');
@@ -74,6 +75,15 @@ def main():
         assert result["changedProtectedCollections"] == [],result
         assert result["staleBlocked"] and result["permissionBlocked"],result
         assert result["noChangeDeduplicated"],result
+        # Confirm the original billing PDF renderer consumes the saved public note.
+        page.add_script_tag(url="/assets/js/billing-print.js")
+        pdf_model=page.evaluate("""()=>{
+          const store=window.KuSheERPStore;
+          return window.KusheBillingPrint.buildExternalView(store.getState().billings[0]);
+        }""")
+        assert pdf_model["publicNote"]=="新的虛構對外備註",pdf_model
+        assert pdf_model["totalAmount"]==105000,pdf_model
+        assert pdf_model["receivableAmount"]==100000,pdf_model
         assert not errors,errors
         print("PASS: Store CAS note revision, protected accounting, stale/role/duplicate guards")
         # End-to-end candidate button and modal, still only synthetic fixture data.
