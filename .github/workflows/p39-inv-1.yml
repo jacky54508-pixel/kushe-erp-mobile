@@ -105,7 +105,7 @@ jobs:
         run: |
           set -euo pipefail
           command -v google-chrome || command -v google-chrome-stable
-          python -m pip install playwright==1.57.0
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
           python -m http.server 8797 --bind 127.0.0.1 > /tmp/p39-inv1-fast.log 2>&1 &
       - name: Real Chrome group editor and generated PDF from synthetic data
         env:
@@ -115,3 +115,7 @@ jobs:
         env:
           P39_INV_USE_SYSTEM_CHROME: "1"
         run: python .p39-inv1-tests/test_store.py
+      - name: A4 single-page actual PDF and mobile 390px interactive invoice check
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: python .p39-inv1-tests/layout_preflight.test.py
