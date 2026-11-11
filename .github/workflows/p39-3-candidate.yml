@@ -37,10 +37,12 @@ jobs:
           node --check p39-candidate/core.js
           node --check p39-candidate/core.test.js
           node --check p39-candidate/sandbox.js
+          node --check p39-candidate/effective-accounting.js
+          node --check p39-candidate/effective-accounting.test.js
           node --check p39-candidate/note-ui.js
           for f in assets/js/*.js; do node --check "$f"; done
       - name: Run isolated synthetic accounting regression
-        run: node --test p39-candidate/core.test.js
+        run: node --test p39-candidate/core.test.js p39-candidate/effective-accounting.test.js
   existing-erp:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
