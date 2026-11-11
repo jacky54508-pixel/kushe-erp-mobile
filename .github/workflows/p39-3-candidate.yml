@@ -40,10 +40,12 @@ jobs:
           node --check p39-candidate/sandbox.js
           node --check p39-candidate/effective-accounting.js
           node --check p39-candidate/effective-accounting.test.js
+          node --check p39-candidate/voucher-review.js
+          node --check p39-candidate/voucher-review.test.js
           node --check p39-candidate/note-ui.js
           for f in assets/js/*.js; do node --check "$f"; done
       - name: Run isolated synthetic accounting regression
-        run: node --test p39-candidate/core.test.js p39-candidate/effective-accounting.test.js
+        run: node --test p39-candidate/core.test.js p39-candidate/effective-accounting.test.js p39-candidate/voucher-review.test.js
   existing-erp:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -78,3 +80,5 @@ jobs:
         run: python p39-candidate/note-store.test.py
       - name: Synthetic effective receivable, cheque and retention Store integration
         run: python p39-candidate/effective-store.test.py
+      - name: Synthetic Store posting, rollback, voucher and concurrent tab safety
+        run: python p39-candidate/posting-store.test.py
