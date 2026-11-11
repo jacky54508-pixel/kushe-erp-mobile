@@ -33,6 +33,7 @@ jobs:
           set -euo pipefail
           node --check p39-candidate/core.js
           node --check p39-candidate/core.test.js
+          node --check p39-candidate/sandbox.js
           for f in assets/js/*.js; do node --check "$f"; done
       - name: Run isolated synthetic accounting regression
         run: node --test p39-candidate/core.test.js
@@ -64,3 +65,5 @@ jobs:
         run: python .p35-tests/test_ui.py
       - name: Authentication and permissions regression
         run: python .p36-tests/test_permissions.py
+      - name: Synthetic billing UI isolation and duplicate guard
+        run: python p39-candidate/sandbox-ui.test.py
