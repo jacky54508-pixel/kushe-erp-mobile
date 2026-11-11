@@ -62,6 +62,9 @@ def test_pdf_pages(browser):
                       prefer_css_page_size=True)
     reader=PdfReader(BytesIO(pdf),strict=False)
     pages=len(reader.pages)
+    print("P39 INV1 A4 page-count diagnostic:",pages,
+          "page-bytes:",len(pdf),
+          "sections:",result,flush=True)
     assert pages==1,(
         f"A4 single-page gate blocked: Chromium printed {pages} pages for "
         "a standard two-invoice merged document; no main release"
@@ -130,8 +133,8 @@ def main():
         browser=pw.chromium.launch(headless=True,channel="chrome") \
             if os.environ.get("P39_INV_USE_SYSTEM_CHROME")=="1" \
             else pw.chromium.launch(headless=True)
-        test_pdf_pages(browser)
         test_mobile(browser)
+        test_pdf_pages(browser)
         browser.close()
     print("P39_INV1_A4_MOBILE_PREFLIGHT_PASS")
 
