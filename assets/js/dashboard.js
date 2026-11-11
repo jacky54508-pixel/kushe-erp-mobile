@@ -20,9 +20,20 @@
   const validDate = (value) => { const d = value ? new Date(value) : null; return d && !Number.isNaN(d.getTime()) ? d : null; };
   const paidAR = (row) => number(row.received ?? row.receivedAmount ?? row.paidAmount);
   const paidAP = (row) => number(row.paid ?? row.paidAmount);
-  const arAmount = (row) => number(row.amount ?? row.totalAmount ?? row.receivableAmount);
+  const arAmount = (row) => {
+    // P39-3B: for genuine legacy AR no allowance means exact historical behavior.
+    const source=number(row.amount ?? row.totalAmount ?? row.receivableAmount);
+    if(!row?.id)return source;
+    const adjusted=window.KuSheERPStore?.p39ReceivableEffectiveAmounts?.(row.id);
+    return adjusted?.hasAllowance?adjusted.receivable:source;
+  };
   const apAmount = (row) => number(row.amount ?? row.totalAmount ?? row.payableAmount);
-  const billingAmount = (row) => number(row.amount ?? row.untaxedAmount ?? row.total);
+  const billingAmount = (row) => {
+    const source=number(row.amount ?? row.untaxedAmount ?? row.total);
+    if(!row?.id)return source;
+    const adjusted=window.KuSheERPStore?.p39BillingEffectiveAmounts?.(row.id);
+    return adjusted?.hasAllowance?adjusted.effective.untaxed:source;
+  };
   const invoiceState = (row) => ['no_invoice','invoice_pending','invoiced'].includes(row?.invoiceStatus) ? row.invoiceStatus : text(row?.invoiceNo) ? 'invoiced' : row?.sourceType === 'daily-work' && row?.hasInvoice === false ? 'no_invoice' : 'invoice_pending';
   const projectId = (row) => text(row.project ?? row.projectId);
   const isPayrollPaid = (row) => /已付款|已付|paid/i.test(text(row.status)) || Boolean(row.payDate && row.paymentTransactionId);
