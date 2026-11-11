@@ -3304,7 +3304,7 @@
     if(status==='issued'&&!number)throw new Error('已開票狀態必須輸入發票號碼');
     if(type==='output'){
       const billing=state.billings.find((row)=>String(row.id)===String(values.sourceId||values.billingId));if(!billing)throw new Error('找不到來源請款單');
-      billing.invoiceStatus=status==='issued'?'invoiced':'invoice_pending';billing.hasInvoice=true;billing.invoiceNo=status==='issued'?number:'';billing.invoiceDate=values.invoiceDate||billing.date;billing.updatedAt=now;
+      p39AssertInvoiceUnchanged(billing.id);billing.invoiceStatus=status==='issued'?'invoiced':'invoice_pending';billing.hasInvoice=true;billing.invoiceNo=status==='issued'?number:'';billing.invoiceDate=values.invoiceDate||billing.date;billing.updatedAt=now;
       const receivable=state.receivables.find((row)=>row.id===billing.receivableId||row.billingId===billing.id);if(receivable){receivable.invoiceNo=billing.invoiceNo;receivable.invoiceStatus=billing.invoiceStatus;receivable.updatedAt=now}
       const invoice=syncBillingInvoiceRecord(billing,now,{invoiceNumber:number,invoiceDate:values.invoiceDate||billing.date,status,note:values.note});if(status==='void')invoice.status='void';persist(`更新銷項發票 ${billing.number}`);return invoice;
     }
@@ -3375,7 +3375,8 @@
     const bankLinked=state.bankTransactions.some((row)=>String(row.billingId||'')===String(billing.id)||String(row.receivableId||'')===String(receivable.id)||[String(billing.id),String(receivable.id)].includes(String(row.sourceId||''))||receiptIds.has(String(row.sourceId||''))||receiptIds.has(String(row.receiptId||''))||receiptIds.has(String(row.retentionReceiptId||''))||(String(row.sourceNo||'')===String(billing.number||'')&&/receipt|receivable|retention|收款|應收|保留/i.test(`${row.sourceType||''} ${row.category||''}`)));
     const issuedInvoice=billingInvoiceStatus(billing)==='invoiced'||Boolean(String(billing.invoiceNo||'').trim())||billingInvoiceRecords(billing).some((row)=>invoiceStatus(row.status,row.invoiceNumber||row.number)==='issued'||Boolean(String(row.invoiceNumber||row.number||'').trim()));
     let reason='';
-    if(externalBillingMembership(billing.id).length)reason='已納入對外合併請款，原單編刪暫鎖定；請先核對並解除分組';
+    if(Array.isArray(state.billingAllowances)&&state.billingAllowances.some(row=>String(row?.billingId||'')===String(billing.id)))reason='此請款已有獨立折讓紀錄，原單編刪鎖定';
+    else if(externalBillingMembership(billing.id).length)reason='已納入對外合併請款，原單編刪暫鎖定；請先核對並解除分組';
     else if(receivable.receivableCheques!==undefined&&(!Array.isArray(receivable.receivableCheques)||receivable.receivableCheques.length))reason='已有支票登記／歷程，為保留票據關聯不可改刪請款';
     else if(receipts.length)reason='已有一般收款紀錄';
     else if(retentionReceipts.length)reason='已有保留款收回紀錄';
@@ -3487,9 +3488,50 @@
     affected.forEach(({log,item,index})=>{const replacement=otherFor({log,item,index});if(replacement){item.billingStatus='已請款';item.billingId=replacement.id;item.billingNo=replacement.number||''}else if(String(item.billingId||'')===String(billing.id)){item.billingStatus='未請款';item.billingId='';item.billingNo=''}syncLogBillingState(log)});
     if(token!==accountingDeleteToken)persist(`刪除請款單 ${billing.number}`);return true;
   }
+  // P39-3B: one read-only effective ledger projection shared by all payment limits.
+  // Without a ledger it mirrors existing AR values. Synthetic ledger entries cannot
+  // be recognized as real postings. Do not mutate base invoice/AR/retention amounts.
+  function p39ReceivableEffectiveAmounts(id) {
+    const engine=window.KusheP393EffectiveAccounting;
+    if(!engine?.forReceivable){
+      if(Array.isArray(state?.billingAllowances)&&state.billingAllowances.length)
+        throw storeError('折讓讀取模組未載入，停止收款操作','P39_EFFECTIVE_MODULE_MISSING');
+      const ar=(state.receivables||[]).find(row=>String(row.id)===String(id));
+      if(!ar)throw storeError('找不到應收來源','P39_EFFECTIVE_AR_MISSING');
+      const amount=num(ar.amount),retention=num(ar.retentionAmount??ar.retention),
+        received=num(ar.received),retentionReceived=num(ar.retentionReceived);
+      return {receivable:amount,retention,received,retentionReceived,
+        outstanding:Math.max(0,amount-received),
+        retentionOutstanding:Math.max(0,retention-retentionReceived),
+        hasAllowance:false,synthetic:false};
+    }
+    return engine.forReceivable(state,id);
+  }
+  function p39BillingEffectiveAmounts(id) {
+    const matches=(state.billings||[]).filter(row=>String(row.id)===String(id||''));
+    if(matches.length!==1)throw storeError('找不到唯一請款單','P39_EFFECTIVE_BILLING_MISSING');
+    const ar=billingReceivable(matches[0]);
+    if(!ar)throw storeError('請款與應收關聯不唯一','P39_EFFECTIVE_AR_MISSING');
+    return p39ReceivableEffectiveAmounts(ar.id);
+  }
+  function p39BillingAllowanceSummary() {
+    const engine=window.KusheP393EffectiveAccounting;
+    if(!engine?.summarize){
+      if(Array.isArray(state?.billingAllowances)&&state.billingAllowances.length)
+        throw storeError('折讓彙總模組未載入','P39_EFFECTIVE_MODULE_MISSING');
+      return {count:0,gross:0,untaxed:0,tax:0,receivable:0,retention:0};
+    }
+    return engine.summarize(state);
+  }
+  function p39AssertInvoiceUnchanged(billingId) {
+    if(Array.isArray(state.billingAllowances)&&state.billingAllowances.some(row=>
+      String(row?.billingId||'')===String(billingId)))
+      throw storeError('此請款已有折讓紀錄，原發票不得直接重新開立或改價','P39_ALLOWANCE_INVOICE_LOCKED');
+  }
   function billingReceiptState(billing) {
     const ar = state.receivables.find((row) => row.id === billing.receivableId || row.billingId === billing.id || String(row.sourceNo||'') === String(billing.number||''));
-    const received = num(ar?.received), amount = num(ar?.amount ?? billing.total);
+    const projected=ar?p39ReceivableEffectiveAmounts(ar.id):null;
+    const received=num(ar?.received),amount=projected?projected.receivable:num(billing.total);
     return {receivable:ar,received,unreceived:Math.max(0,amount-received),status:amount>0&&received>=amount?'已收':received>0?'部分收款':'未收'};
   }
   function linkedBankTransactionCandidates(record, sourceTypes) {
@@ -3858,7 +3900,7 @@
     return safeReceiptMoneySum([strictReceiptMoney(ar.legacyReceived??0,'既有歷史沖銷'),...state.receipts.filter((row)=>row!==excludedReceipt&&String(row.receivableId||'')===String(ar.id||'')).map((row)=>strictStoredReceiptPlan(row).settlementAmount)],'應收沖銷合計');
   }
   function assertReceivableSettlementBaseline(ar) {
-    const amount=strictReceiptMoney(ar.amount,'應收金額'),received=strictReceiptMoney(ar.received??0,'已沖銷應收'),truth=receivableSettlementTruth(ar);
+    const effective=p39ReceivableEffectiveAmounts(ar.id),amount=strictReceiptMoney(effective.receivable,'折讓後應收金額'),received=strictReceiptMoney(ar.received??0,'已沖銷應收'),truth=receivableSettlementTruth(ar);
     if(truth>amount)throw new Error('既有收款沖銷合計已超過應收金額，已停止操作');
     if(received!==truth)throw new Error('應收已沖銷金額與收款明細不一致，已停止操作');
     return {amount,received,truth,outstanding:amount-truth};
@@ -3881,7 +3923,7 @@
     if(plan.bank&&num(plan.bank.balance)!==num(plan.bank.openingBalance)+num(plan.bank.income)-num(plan.bank.expense))throw new Error('刪除收款 post-condition：銀行餘額不一致');
   }
   function syncReceivableSummary(ar, now) {
-    const history=state.receipts.filter((row)=>String(row.receivableId||'')===String(ar.id||'')),received=receivableSettlementTruth(ar),amount=strictReceiptMoney(ar.amount,'應收金額'),latest=[...history].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];
+    const history=state.receipts.filter((row)=>String(row.receivableId||'')===String(ar.id||'')),received=receivableSettlementTruth(ar),amount=strictReceiptMoney(p39ReceivableEffectiveAmounts(ar.id).receivable,'折讓後應收金額'),latest=[...history].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))[0];
     if(received>amount)throw new Error('收款沖銷合計超過應收金額，已停止更新');
     ar.received=received;ar.bankId=latest?.bankAccountId||latest?.bankId||'';ar.receiptDate=latest?.date||'';ar.status=ar.received>=amount&&amount>0?'已收':ar.received>0?'部分收款':'未收';ar.updatedAt=now;
     const billing=state.billings.find((row)=>row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||''));
@@ -3918,9 +3960,9 @@
     return linkedBankTransaction(receipt,['retention_receipt'],'保留款收回');
   }
   function syncRetentionSummary(ar, billing, now) {
-    const retentionAmount=Math.max(0,num(ar.retentionAmount??ar.retention??billing?.retentionAmount??billing?.retention)),recorded=state.retentionReceipts.filter((row)=>row.receivableId===ar.id||row.billingId&&row.billingId===ar.billingId).reduce((sum,row)=>sum+num(row.amount),0),received=Math.min(retentionAmount,num(ar.legacyRetentionReceived)+recorded),remaining=Math.max(0,retentionAmount-received),nextState=retentionState(retentionAmount,received,ar.retentionStatus);
+    const effective=p39ReceivableEffectiveAmounts(ar.id),retentionAmount=num(ar.retentionAmount??ar.retention??billing?.retentionAmount??billing?.retention),effectiveRetention=effective.retention,recorded=state.retentionReceipts.filter((row)=>row.receivableId===ar.id||row.billingId&&row.billingId===ar.billingId).reduce((sum,row)=>sum+num(row.amount),0),received=Math.min(effectiveRetention,num(ar.legacyRetentionReceived)+recorded),remaining=Math.max(0,effectiveRetention-received),nextState=retentionState(effectiveRetention,received,ar.retentionStatus);
     Object.assign(ar,{retentionAmount,retention:retentionAmount,retentionReceived:received,remainingRetention:remaining,retentionStatus:nextState,updatedAt:now});
-    if(billing){Object.assign(billing,{retentionAmount,retention:retentionAmount,retentionReceived:received,remainingRetention:remaining,retentionStatus:nextState,updatedAt:now});billing.status=num(ar.received)>=num(ar.amount)&&remaining===0?'全部收清':num(ar.received)>=num(ar.amount)?'已收款':num(ar.received)>0?'部分收款':'未收款'}
+    if(billing){Object.assign(billing,{retentionAmount,retention:retentionAmount,retentionReceived:received,remainingRetention:remaining,retentionStatus:nextState,updatedAt:now});billing.status=num(ar.received)>=effective.receivable&&remaining===0?'全部收清':num(ar.received)>=effective.receivable?'已收款':num(ar.received)>0?'部分收款':'未收款'}
   }
   function syncRetentionBankTransaction(receipt, ar, billing, now, existingTransaction) {
     const bankId=String(receipt.bankAccountId||receipt.bankId||''),bank=state.banks.find((row)=>row.id===bankId);
@@ -4200,7 +4242,7 @@
     const replay=paymentReplay('retention',state.retentionReceipts,values);if(replay.existing)return replay.existing;
     const ar=state.receivables.find((row)=>row.id===values.receivableId);if(!ar)throw new Error('找不到對應應收帳款');
     const billing=state.billings.find((row)=>row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||''));
-    const retentionAmount=Math.max(0,num(ar.retentionAmount ?? ar.retention ?? billing?.retentionAmount ?? billing?.retention));
+    const retentionAmount=p39ReceivableEffectiveAmounts(ar.id).retention;
     const retentionReceived=Math.max(0,num(ar.retentionReceived ?? billing?.retentionReceived));
     const remaining=Math.max(0,retentionAmount-retentionReceived),settlement=incomeSettlement(values.amount,values.fee,values.feePayer),{amount,fee,feePayer,netAmount}=settlement;
     if(amount<=0)throw new Error('本次收回保留款必須大於 0');
@@ -4217,7 +4259,7 @@
     const receiptMatches=state.retentionReceipts.filter((row)=>String(row.id||'')===String(id||'')||String(row.retentionReceiptId||'')===String(id||''));if(receiptMatches.length!==1)throw new Error(receiptMatches.length?'保留款收回紀錄編號不唯一，已停止修改':'找不到保留款收回紀錄');const receipt=receiptMatches[0];
     const arMatches=state.receivables.filter((row)=>String(row.id||'')===String(receipt.receivableId||''));if(arMatches.length!==1)throw new Error(arMatches.length?'對應應收帳款不唯一，已停止修改':'找不到對應應收帳款');const ar=arMatches[0];
     const billing=state.billings.find((row)=>row.id===receipt.billingId||row.id===ar.billingId||String(row.number||'')===String(ar.sourceNo||''));
-    const retentionAmount=Math.max(0,num(ar.retentionAmount??ar.retention??billing?.retentionAmount??billing?.retention));
+    const retentionAmount=p39ReceivableEffectiveAmounts(ar.id).retention;
     const settlement=incomeSettlement(values.amount,values.fee===undefined?receipt.fee:values.fee,values.feePayer===undefined?receipt.feePayer:values.feePayer),{amount,fee,feePayer,netAmount}=settlement;
     if(amount<=0)throw new Error('本次收回保留款必須大於 0');
     const otherReceived=num(ar.legacyRetentionReceived)+state.retentionReceipts.filter((row)=>row!==receipt&&(row.receivableId===ar.id||row.billingId&&row.billingId===ar.billingId)).reduce((sum,row)=>sum+num(row.amount),0);
@@ -5544,7 +5586,7 @@
   }
 
   async function updateBillingInvoice(id, values = {}) {
-    requireStoreTransactionDraft(); const billing=state.billings.find((row)=>row.id===id);if(!billing)throw new Error('找不到請款單');
+    requireStoreTransactionDraft(); const billing=state.billings.find((row)=>row.id===id);if(!billing)throw new Error('找不到請款單');p39AssertInvoiceUnchanged(billing.id);
     if(billingNeedsRecordedTotals(billing))return updateProtectedBillingInvoice(id,values);
     if(values.expectedSnapshot!==undefined&&values.expectedSnapshot!==billingDocumentContext(id).snapshot)throw new Error('請款資料已變更，請重新開啟核對');
     const now=new Date().toISOString(),choice=values.invoiceChoice==='invoice_required'?'invoice_required':'no_invoice',number=choice==='no_invoice'?'':String(values.invoiceNo||'').trim(),date=choice==='no_invoice'?'':values.invoiceDate||billing.date||businessDate(new Date(now));
@@ -7292,7 +7334,7 @@
       try{return reader(...args)}finally{state=draft}
     };
   }
-  const rawStore={ p33Oct07CommissionRepairPreview, p33Oct07CommissionRepair, externalBillingContext, externalBillingDocumentIndex, saveExternalBillingDocument, archiveExternalBillingDocument, historicalQuotationChoices, billingDocumentState, billingDocumentLines, saveHistoricalBillingDetails, p39BillingNoteRevisionContext, saveP39BillingNoteRevision, dailyDraftSnapshot, dailyDraftReview, receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  const rawStore={ p33Oct07CommissionRepairPreview, p33Oct07CommissionRepair, externalBillingContext, externalBillingDocumentIndex, saveExternalBillingDocument, archiveExternalBillingDocument, historicalQuotationChoices, billingDocumentState, billingDocumentLines, p39ReceivableEffectiveAmounts, p39BillingEffectiveAmounts, p39BillingAllowanceSummary, saveHistoricalBillingDetails, p39BillingNoteRevisionContext, saveP39BillingNoteRevision, dailyDraftSnapshot, dailyDraftReview, receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
