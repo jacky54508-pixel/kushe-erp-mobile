@@ -89,3 +89,30 @@ jobs:
           python .p35-tests/test_ui.py
       - name: Existing authorization and session recovery regression
         run: python .p36-tests/test_permissions.py
+
+  fast-chrome:
+    name: Preinstalled Chrome synthetic UI, actual invoice Store and printable PDF
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Use preinstalled runner Chrome, never visit hosted ERP
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+          python -m http.server 8797 --bind 127.0.0.1 > /tmp/p39-inv1-fast.log 2>&1 &
+      - name: Real Chrome group editor and generated PDF from synthetic data
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: python .p39-inv1-tests/test_ui.py
+      - name: Real ERP Store invoice A/B isolation with synthetic data
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: python .p39-inv1-tests/test_store.py
