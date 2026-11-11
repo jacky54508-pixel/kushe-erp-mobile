@@ -92,9 +92,11 @@
     for(const row of model.rows){
       if(!row.billingId||ids.has(row.billingId))throw new Error('PDF 發票來源重複');
       ids.add(row.billingId);
-      if(!Object.hasOwn(STATUS,row.invoiceStatus))throw new Error('PDF 發票狀態待核對');
-      if(row.invoiceStatus==='invoiced'&&(!row.invoiceNo||!date(row.invoiceDate)))
-        throw new Error('原單已開票，但發票號碼或日期尚未核對');
+      // Existing historical records may lack a date or even a status; show a
+      // clearly flagged incomplete reference instead of fabricating or hiding it.
+      if(row.invoiceStatus==='invoiced'&&(!row.invoiceNo||!date(row.invoiceDate))&&
+         row.hasRecordedInvoice===true)
+        throw new Error('PDF 已開票日期／號碼標記與原資料不一致');
       for(const [dest,src] of Object.entries({
         untaxed:'originalUntaxed',tax:'originalTax',grossTotal:'originalGross',
         retention:'originalRetention',receivable:'originalReceivable'
