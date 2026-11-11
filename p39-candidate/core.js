@@ -172,7 +172,7 @@
     return {kind:'allowance',billingId:c.billing.id,receivableId:c.ar.id,
       invoiceNo:c.invoice ? str(c.invoice.number) : '',invoiceStatus:c.invoiceStatus,
       expectedRevision:c.revision,expectedSnapshot:c.fingerprint,
-      idempotencyKey:'p39::'+c.billing.id+'::'+(c.invoice ? str(c.invoice.number) : 'unissued'),
+      idempotencyKey:'p39::'+c.billing.id+'::'+(str(c.invoice?.number)||'unissued'),
       reason,voucher,original:c.original,effective,discount,
       debit:discount.untaxed+discount.tax,credit:discount.receivable+discount.retention};
   }
