@@ -245,18 +245,21 @@ class LocalSupabaseSafety(unittest.TestCase):
         self.assertEqual(status,200,invisible)
         self.assertEqual(invisible,[])
 
-    def test_stale_version_with_different_key_rejected(self):
-        status,created=self.rpc()
-        self.assertEqual(status,200,created)
-        status,rejected=self.rpc("approver-a",key="p39::SYN-B::different")
+    def test_stale_version_after_other_client_revision_advance(self):
+        # Simulate another authorized client advancing a different local snapshot
+        # operation. The pending discount must use a fresh expectedRevision.
+        status,data=request("PATCH",
+            f"/rest/v1/p39f_snapshots?tenant_id=eq.{TENANT_A}",
+            TOKENS["owner-a"],data={"revision":2})
+        self.assertIn(status,(200,204),data)
+        status,rejected=self.rpc("approver-a",version=1)
         self.assertGreaterEqual(status,400,rejected)
-        self.assertIn("P39F_COMMAND_INVALID",json.dumps(rejected))
-        # The same-key replay remains idempotent despite stale expected revision.
-        status,replayed=self.rpc("approver-a")
-        self.assertEqual(status,200,replayed)
-        self.assertEqual(replayed["status"],"REPLAYED_IDEMPOTENT")
+        self.assertIn("P39F_STALE_VERSION",json.dumps(rejected))
         status,ledger=self.select("p39f_allowances")
-        self.assertEqual(len(ledger),1)
+        self.assertEqual(status,200,ledger)
+        self.assertEqual(ledger,[])
+        status,snapshot=self.select("p39f_snapshots")
+        self.assertEqual(snapshot[0]["revision"],2)
 
     def test_idempotency_key_same_key_changed_gross_rejected(self):
         status,created=self.rpc()
@@ -305,7 +308,6 @@ class LocalSupabaseSafety(unittest.TestCase):
         self.assertEqual(len(ledger),1)
         status,snapshot=self.select("p39f_snapshots")
         self.assertEqual(snapshot[0]["revision"],2)
-        self.assert_empty if False else None
 
     def test_no_origin_or_hosted_project_connections(self):
         self.assertEqual(parsed_api.hostname in ("localhost","127.0.0.1"),True)
