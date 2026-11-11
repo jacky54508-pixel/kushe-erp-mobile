@@ -34,7 +34,11 @@ def test_group(browser):
     form.locator('[name="invoiceNumber"]').fill("SYN-AA000009")
     form.locator('[name="invoiceDate"]').fill("2026-08-25")
     form.locator('button[type="submit"]').click()
-    page.wait_for_function("""() => window.__p39synthetic.invoices[0].invoiceNumber === 'SYN-AA000009'""")
+    page.wait_for_timeout(1200)
+    print('DBG_WRITES',page.evaluate("window.__p39synthetic.persistCalls"),flush=True)
+    print('DBG_TOAST',page.evaluate("window.__p39synthetic.lastToast"),flush=True)
+    print('DBG_ERRORS',errors,flush=True)
+    assert page.evaluate("window.__p39synthetic.invoices[0].invoiceNumber")=='SYN-AA000009'
     assert page.locator("#outputInvoiceForm").count()==0,"child dialog should close, not group"
     assert page.locator(".bg-overlay").count()==1,"group dialog should survive child submit"
     after=page.evaluate("""() => {
