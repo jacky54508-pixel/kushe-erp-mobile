@@ -7254,7 +7254,7 @@
           typeof row.before!=='string'||typeof row.after!=='string')))
       throw storeError('備註修訂歷程無法辨識，為避免覆蓋已停止','P39_NOTE_HISTORY_INVALID');
     return {billingId:String(billing.id),billingNo:String(billing.number||''),
-      snapshot:context.snapshot,note:String(billing.note||''),
+      snapshot:context.snapshot,note:String(billing.publicNote||billing.note||''),
       revisionCount:Array.isArray(history)?history.length:0,
       financialAmounts:{untaxed:context.amounts.untaxed,tax:context.amounts.tax,
         gross:context.amounts.grossTotal,receivable:context.amounts.receivable,
@@ -7291,8 +7291,9 @@
     const now=new Date().toISOString(),history=Array.isArray(row.noteRevisionHistory)?row.noteRevisionHistory:[];
     row.noteRevisionHistory=[...history,{schema:'kushe-p39-note-history-v1',
       id:uid(),revision:history.length+1,sourceSnapshot:ctx.snapshot,
-      before:ctx.note,after:note,reason,actorUserId:String(user.id),createdAt:now}];
-    row.note=note;row.updatedAt=now;
+      before:ctx.note,after:note,originalInternalNote:String(row.note||''),
+      originalPublicNote:String(row.publicNote||''),reason,actorUserId:String(user.id),createdAt:now}];
+    row.note=note;row.publicNote=note;row.updatedAt=now;
     const financialAfter=storeStateFingerprint({
       original:ctx.financialAmounts,
       billings:state.billings.map(x=>x.id===row.id?{
