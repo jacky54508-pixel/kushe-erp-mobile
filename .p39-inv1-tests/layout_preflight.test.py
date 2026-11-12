@@ -136,7 +136,7 @@ def test_multi_item_pdf_pages(browser):
     printable.emulate_media(media="print")
     pt=printable.locator(".dense-line-table tbody tr:first-child td.item").evaluate(
       "(td)=>parseFloat(getComputedStyle(td).fontSize)*72/96")
-    invoice_pt=printable.locator(".invoice-ref-table tbody tr:first-child td").evaluate(
+    invoice_pt=printable.locator(".invoice-ref-table tbody tr:first-child td").first.evaluate(
       "(td)=>parseFloat(getComputedStyle(td).fontSize)*72/96")
     assert pt>=8.4 and invoice_pt>=7.8,(pt,invoice_pt)
     assert printable.locator(".invoice-ref-table tbody tr").count()==2
