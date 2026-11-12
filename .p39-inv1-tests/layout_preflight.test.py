@@ -78,6 +78,59 @@ def test_pdf_pages(browser):
           f"8月+10月 synthetic invoice comparison ({len(pdf)} bytes)",flush=True)
     ctx.close()
 
+def test_multi_item_pdf_pages(browser):
+    """Stress the PDF with 18 generic items, matching a real-world line count,
+    WITHOUT uploading or embedding any customer data from the user's backup.
+    """
+    ctx=browser.new_context(viewport={"width":1250,"height":900})
+    seed=ctx.new_page()
+    seed.goto(URL)
+    data=prepare_document(seed)
+    # Status split (one pending, one issued) is not a bill or invoice write.
+    refs=seed.evaluate("""()=>{
+      const ss=JSON.parse(JSON.stringify(window.__p39synthetic.sources));
+      ss[0].document.invoiceStatus='invoice_pending';
+      ss[0].document.invoiceNo='';
+      ss[0].document.invoiceDate='';
+      return window.KusheExternalBillingInvoice.project(ss);
+    }""")
+    assert [refs["pending"],refs["issued"]]==[1,1]
+    data["sourceInvoiceReferences"]=refs
+    amount=300000
+    data["lines"]=[]
+    for i in range(18):
+        unit_price=16000 if i < 17 else amount-16000*17
+        data["lines"].append({
+            "house":f"SYN-{i+1:02d}",
+            "item": "虛構施工明細－階段測試、表面處理與完工檢測" if i%4==0
+                    else f"虛構工程項目 {i+1}",
+            "unit":"式","qty":1,"price":unit_price,"amount":unit_price,
+            "sourcePricingType":"external-document"
+        })
+    assert sum(x["amount"] for x in data["lines"])==data["salesAmount"]
+    encoded=urllib.parse.quote(base64.b64encode(
+      json.dumps(data,ensure_ascii=False,separators=(",",":")).encode("utf-8")
+    ).decode("utf-8"))
+    printable=ctx.new_page()
+    printable.goto(ORIGIN+"/billing-print.html?print=0#"+encoded)
+    printable.wait_for_function("window.__billingPrintReady===true",timeout=15000)
+    row_count=printable.locator(".detail tbody tr").count()
+    assert row_count>=18,row_count
+    assert printable.locator(".invoice-ref-table tbody tr").count()==2
+    paper=printable.locator("#paper").inner_text()
+    assert "待開票" in paper and "2026-10-20" in paper,paper
+    pdf=printable.pdf(format="A4",print_background=True,prefer_css_page_size=True)
+    pages=len(PdfReader(BytesIO(pdf),strict=False).pages)
+    print("P39 INV1 representative 18-line A4 stress page count:",pages,flush=True)
+    assert pages==1,(
+      "A4 release blocker: a synthetic 18-item merged invoice renders "
+      f"{pages} pages, so the present grouped document format is not safe "
+      "to promise one-page A4"
+    )
+    print("PASS: 18-line synthetic mixed-status group remains one A4 page",flush=True)
+    ctx.close()
+
+
 def test_mobile(browser):
     ctx=browser.new_context(viewport={"width":390,"height":844},
                             device_scale_factor=2,is_mobile=True,has_touch=True)
@@ -135,6 +188,7 @@ def main():
             else pw.chromium.launch(headless=True)
         test_mobile(browser)
         test_pdf_pages(browser)
+        test_multi_item_pdf_pages(browser)
         browser.close()
     print("P39_INV1_A4_MOBILE_PREFLIGHT_PASS")
 
