@@ -114,14 +114,31 @@ def test_multi_item_pdf_pages(browser):
     printable=ctx.new_page()
     printable.goto(ORIGIN+"/billing-print.html?print=0#"+encoded)
     printable.wait_for_function("window.__billingPrintReady===true",timeout=15000)
-    row_count=printable.locator(".detail tbody tr").count()
-    # This original print template groups repeated construction items by name;
-    # 18 input entries intentionally become fewer item rows, without losing totals.
-    expected_items=len({line['item'] for line in data['lines']})
-    # Printed table has one subtotal/grand-total row beyond unique items.
-    assert row_count==expected_items+1,(row_count,expected_items)
+    # The dense merged template replaces a quadratic house-by-item matrix
+    # and grouped lines with every original row, showing all locations.
+    assert printable.locator(".matrix").count()==0
+    assert printable.locator(".dense-original-details").count()==1
+    row_count=printable.locator(".dense-line-table tbody tr").count()
+    assert row_count==19,row_count # 18 original entries + one total
+    printed=printable.locator(".dense-line-table tbody tr").all()
+    for i,line in enumerate(data["lines"]):
+        cells=printed[i].locator("td").all_inner_texts()
+        assert len(cells)==6,cells
+        assert cells[0]==line["house"],(i,cells)
+        assert cells[1]==line["item"],(i,cells)
+        assert cells[2]==line["unit"],(i,cells)
+        assert cells[3]==str(line["qty"]),(i,cells)
+        assert cells[4]=="$"+f'{line["price"]:,}',(i,cells)
+        assert cells[5]=="$"+f'{line["amount"]:,}',(i,cells)
+    assert "$300,000" in printed[-1].inner_text()
     assert '$315,000' in printable.locator('.summary').inner_text()
     assert '虛構施工明細' in printable.locator('.detail').inner_text()
+    printable.emulate_media(media="print")
+    pt=printable.locator(".dense-line-table tbody tr:first-child td.item").evaluate(
+      "(td)=>parseFloat(getComputedStyle(td).fontSize)*72/96")
+    invoice_pt=printable.locator(".invoice-ref-table tbody tr:first-child td").evaluate(
+      "(td)=>parseFloat(getComputedStyle(td).fontSize)*72/96")
+    assert pt>=8.4 and invoice_pt>=7.8,(pt,invoice_pt)
     assert printable.locator(".invoice-ref-table tbody tr").count()==2
     paper=printable.locator("#paper").inner_text()
     assert "待開票" in paper and "2026-10-20" in paper,paper
