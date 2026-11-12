@@ -137,7 +137,7 @@ def test_multi_item_pdf_pages(browser):
     assert "$28,000" in group_rows.nth(2).inner_text()
     assert "$300,000" in group_rows.last.inner_text()
     assert '$315,000' in printable.locator('.summary').inner_text()
-    assert '虛構施工明細' in printable.locator('.detail').inner_text()
+    assert '虛構施工明細' in printable.locator('.dense-original-details .detail').inner_text()
     printable.emulate_media(media="print")
     pt=printable.locator(".dense-line-table tbody tr:first-child td.item").evaluate(
       "(td)=>parseFloat(getComputedStyle(td).fontSize)*72/96")
