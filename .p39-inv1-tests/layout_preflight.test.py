@@ -118,7 +118,8 @@ def test_multi_item_pdf_pages(browser):
     # This original print template groups repeated construction items by name;
     # 18 input entries intentionally become fewer item rows, without losing totals.
     expected_items=len({line['item'] for line in data['lines']})
-    assert row_count==expected_items,(row_count,expected_items)
+    # Printed table has one subtotal/grand-total row beyond unique items.
+    assert row_count==expected_items+1,(row_count,expected_items)
     assert '$315,000' in printable.locator('.summary').inner_text()
     assert '虛構施工明細' in printable.locator('.detail').inner_text()
     assert printable.locator(".invoice-ref-table tbody tr").count()==2
