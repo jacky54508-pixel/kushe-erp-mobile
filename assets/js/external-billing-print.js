@@ -71,10 +71,18 @@
     // Explicit historical-version viewing preserves its prior, reference-only output.
 
     const refs=window.KusheExternalBillingInvoice.project(d.sourceSnapshots,d.totals);
-    const invoices=refs.rows.map(row=>'<tr><td>'+esc(row.projectName)+'<small>'+esc(row.billingNo)+'</small></td>'+
-      '<td>'+esc(row.invoiceNo||row.invoiceLabel)+'</td><td>'+esc(row.invoiceDate||'—')+'</td>'+
-      '<td>'+money(row.originalUntaxed)+'</td><td>'+money(row.originalTax)+'</td>'+
-      '<td>'+money(row.originalGross)+'</td></tr>').join('');
+    // P39-INV-1A archived copy: print-only presentation; never expose
+    // internal LEGACY-/B... identifiers as original invoice numbers.
+    const invoices=refs.rows.map(row=>{
+      const issued=row.invoiceStatus==='invoiced',pending=row.invoiceStatus==='invoice_pending';
+      const number=issued?(row.invoiceNo||'票號待核對'):pending?'待開票':row.invoiceStatus==='no_invoice'?'免開發票':'狀態待核對';
+      const day=issued?(row.invoiceDate||'日期待核對'):pending?'尚未開立':row.invoiceStatus==='no_invoice'?'不適用':'狀態待核對';
+      return '<tr><td>'+esc(row.projectName||'原案場')+
+        (row.sourceBillingDate?'<small>原請款日期：'+esc(row.sourceBillingDate)+'</small>':'')+'</td>'+
+        '<td>'+esc(number)+'</td><td>'+esc(day)+'</td>'+
+        '<td>'+money(row.originalUntaxed)+'</td><td>'+money(row.originalTax)+'</td>'+
+        '<td>'+money(row.originalGross)+'</td></tr>';
+    }).join('');
     const lines=d.schema==='kushe-external-billing-group-v2'?d.unified.lines.map(l=>({...l,taxMode:d.unified.taxMode})):d.sections.flatMap(section=>section.lines.map(l=>({...l,taxMode:section.taxMode})));
     const totals=[['未稅合計',t.untaxed],['原發票稅額合計',t.tax],['請款總額（含稅）',t.grossTotal,'primary'],['原保留款合計',t.retention],['本期應收',t.receivable],['已沖銷（含客戶扣款）',t.received],['本期未沖銷',t.outstanding,'primary'],...(t.pendingCheque?[['其中：待兌現預留（含扣款）',t.pendingCheque,'secondary'],['尚待安排收款',t.availableToCollect]]:[])];
     paper.innerHTML='<header class="masthead"><div class="company"><h1>酷舍企業有限公司</h1><p>Cool Sir Limited Company</p><p>統編 82980636<br>台中市豐原區瑞興路 62 號 · LINE：eing0519</p></div><div class="doc-title"><img src="assets/img/kushe-logo.png" alt="酷舍企業"><h2>請款單</h2><p class="note">合併請款明細</p></div></header>'+(payload.historical?'<div class="historic">保存版本・僅供查閱，非本次付款通知</div>':'')+'<section class="meta"><div class="wide"><span>工程案場</span><strong>'+esc(d.displayProjectName)+'</strong></div><div><span>請款對象</span>'+esc(d.customerName)+'</div><div><span>文件日期</span>'+esc(d.documentDate)+'</div></section><table class="detail"><colgroup><col style="width:13%"><col style="width:34%"><col style="width:7%"><col style="width:10%"><col style="width:13%"><col style="width:8%"><col style="width:15%"></colgroup><thead><tr><th>戶別／位置</th><th>施工品項</th><th>單位</th><th>數量</th><th>單價</th><th>單價方式</th><th>小計</th></tr></thead><tbody>'+lines.map(l=>'<tr><td>'+esc(l.house||'—')+'</td><td>'+esc(l.item)+'</td><td class="center">'+esc(l.unit)+'</td><td class="num">'+decimal(l.qty)+'</td><td class="num">$'+decimal(l.price)+'</td><td class="center">'+esc(l.taxMode)+'</td><td class="num">'+money(l.amount)+'</td></tr>').join('')+'</tbody></table><section class="bottom"><div class="invoices"><h3>原請款／發票對照（原帳款不變）</h3><table class="invoice-table"><thead><tr><th>案場／原單</th><th>原票號／狀態</th><th>開立日期</th><th>未稅</th><th>稅額</th><th>含稅</th></tr></thead><tbody>'+invoices+'</tbody></table>'+(d.note?'<p class="note"><b>備註</b><br>'+esc(d.note)+'</p>':'')+'</div><div class="summary">'+totals.map(([label,value,cls])=>'<div class="'+(cls||'')+'"><span>'+label+'</span><strong>'+money(value)+'</strong></div>').join('')+'</div></section><p class="footer-note">本文件彙整原請款資料，不另增加一筆應收；發票仍以各原票號及金額為準。<br>金額核對時間：'+esc(d.updatedAt)+'｜保存版本：'+d.revision+'。已沖銷不等於銀行實收；待兌現預留（含待確認客戶扣款）包含在本期未沖銷中，不另加計。'+(t.retentionOutstanding>0?'<br>另有保留款待收 '+money(t.retentionOutstanding)+'，依原約定另行處理。':'')+'</p><div class="signature"><span>承辦人簽章</span><span>核對／收件簽章</span></div>';
