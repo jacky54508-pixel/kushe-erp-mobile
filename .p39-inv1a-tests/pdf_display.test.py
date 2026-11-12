@@ -38,7 +38,7 @@ def make_document(seed):
         price=16000 if i<17 else amount-17*16000
         lines.append({
             "house":f"SYN-{i+1:02d}",
-            "item":"虛構施工清潔與表面處理、完工檢驗" if i%3==0 else f"虛構工程項目 {i+1}",
+            "item":"虛構表面修繕與研磨" if i<7 else "虛構鋁窗美容" if i<17 else "虛構門片修繕",
             "unit":"式","qty":1,"price":price,"amount":price,
             "sourcePricingType":"external-document"
         })
@@ -89,12 +89,26 @@ def test_grouped_pdf(browser):
     assert "2026-06-26" not in full
     assert "表列為原請款金額，非新增發票或應收" not in full
     assert page.locator(".dense-line-table tbody tr").count()==19
+    grouped=page.locator(".grouped-item-summary")
+    assert grouped.count()==1
+    assert "施工項目彙總" in grouped.inner_text()
+    grouped_rows=grouped.locator("tbody tr")
+    assert grouped_rows.count()==4 # three items plus combined subtotal
+    expected=[("虛構表面修繕與研磨","7","$112,000"),
+              ("虛構鋁窗美容","10","$160,000"),
+              ("虛構門片修繕","1","$28,000")]
+    for i,(item,qty,amount) in enumerate(expected):
+        cells=grouped_rows.nth(i).locator("td").all_inner_texts()
+        assert cells[0]==item and cells[2]==qty and cells[4]==amount,cells
+    assert "$300,000" in grouped_rows.last.inner_text()
     assert page.locator(".invoice-ref-table tbody tr").count()==0
     assert "$300,000" in full and "$15,000" in full and "$315,000" in full
     page.emulate_media(media="print")
     font_a=page.locator(".dense-line-table tbody tr:first-child td.item").evaluate(
         "(el)=>parseFloat(getComputedStyle(el).fontSize)*72/96")
-    assert font_a>=8.4,font_a
+    font_b=page.locator(".grouped-item-summary-table tbody tr:first-child td.item").evaluate(
+        "(el)=>parseFloat(getComputedStyle(el).fontSize)*72/96")
+    assert font_a>=8.4 and font_b>=8.2,(font_a,font_b)
     pdf=page.pdf(format="A4",print_background=True,prefer_css_page_size=True)
     reader=PdfReader(BytesIO(pdf))
     assert len(reader.pages)==1,(
@@ -103,6 +117,7 @@ def test_grouped_pdf(browser):
         reader.pages[0].mediabox.height))
     assert 594<=width<=596 and 841<=height<=843,(width,height)
     pdf_text=reader.pages[0].extract_text() or ""
+    assert "施工項目彙總" in pdf_text and "$300,000" in pdf_text
     for forbidden in ["SYN-ZX12345678","原請款／發票對照","尚未開立","原請款日期"]:
         assert forbidden not in pdf_text,forbidden
     assert source.evaluate("JSON.stringify(window.__p39synthetic)")==original

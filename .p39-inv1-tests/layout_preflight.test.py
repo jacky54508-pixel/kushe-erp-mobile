@@ -101,8 +101,8 @@ def test_multi_item_pdf_pages(browser):
         unit_price=16000 if i < 17 else amount-16000*17
         data["lines"].append({
             "house":f"SYN-{i+1:02d}",
-            "item": "虛構施工明細－階段測試、表面處理與完工檢測" if i%4==0
-                    else f"虛構工程項目 {i+1}",
+            "item": "虛構施工明細－階段測試、表面處理與完工檢測" if i<7
+                    else "虛構鋁窗美容" if i<17 else "虛構門片修繕",
             "unit":"式","qty":1,"price":unit_price,"amount":unit_price,
             "sourcePricingType":"external-document"
         })
@@ -130,6 +130,12 @@ def test_multi_item_pdf_pages(browser):
         assert cells[4]=="$"+f'{line["price"]:,}',(i,cells)
         assert cells[5]=="$"+f'{line["amount"]:,}',(i,cells)
     assert "$300,000" in printed[-1].inner_text()
+    group_rows=printable.locator(".grouped-item-summary tbody tr")
+    assert group_rows.count()==4,group_rows.count()
+    assert "$112,000" in group_rows.nth(0).inner_text()
+    assert "$160,000" in group_rows.nth(1).inner_text()
+    assert "$28,000" in group_rows.nth(2).inner_text()
+    assert "$300,000" in group_rows.last.inner_text()
     assert '$315,000' in printable.locator('.summary').inner_text()
     assert '虛構施工明細' in printable.locator('.detail').inner_text()
     printable.emulate_media(media="print")
