@@ -6,6 +6,8 @@ on:
       - p39-inv-1b-public-facing-pdf-candidate-20261112
     paths:
       - '.p39-inv1a-tests/**'
+      - '.p39-inv1-tests/test_ui.py'
+      - '.p39-inv1-tests/layout_preflight.test.py'
       - '.github/workflows/p39-inv-1b-public-pdf.yml'
       - 'assets/js/external-billing-invoice.js'
       - 'assets/js/external-billing-print.js'
