@@ -59,6 +59,7 @@
       return Object.freeze({
         billingId:string(s.billingId,150),receivableId:string(s.receivableId,150),
         billingNo:string(s.number,100),projectName:string(s.projectName,150),
+        sourceBillingDate:date(s.date),
         invoiceStatus:status,invoiceLabel:label,invoiceNo:number,
         invoiceDate:issuedAt,invoiceMonth:issuedAt?issuedAt.slice(0,7):'',
         invoiceId:string(s.invoiceId,150),hasRecordedInvoice:isRecorded,
@@ -118,24 +119,33 @@
   const money=v=>String.fromCharCode(36)+Number(v).toLocaleString('zh-TW',{maximumFractionDigits:0});
   function printHtml(model){
     validateProjection(model);
+    // Document-only presentation: never infer an invoice issuance date from a
+    // source billing date or a stale pending-invoice date. No source mutation.
+    const invoiceNumber=row=>row.invoiceStatus==='invoiced'?
+      (row.invoiceNo||'票號待核對'):row.invoiceStatus==='no_invoice'?
+      '免開發票':row.invoiceStatus==='invoice_pending'?'待開票':'狀態待核對';
+    const invoiceDate=row=>row.invoiceStatus==='invoiced'?
+      (date(row.invoiceDate)||'日期待核對'):row.invoiceStatus==='invoice_pending'?
+      '尚未開立':row.invoiceStatus==='no_invoice'?'不適用':'狀態待核對';
     const lines=model.rows.map(row=>
-      '<tr><td>'+escapeHtml(row.projectName||'原案場')+'<small>'+escapeHtml(row.billingNo||'—')+'</small></td>'+
-      '<td>'+escapeHtml(row.invoiceNo||row.invoiceLabel)+(row.warnings.length?'<small>資料待核對</small>':'')+'</td>'+
-      '<td>'+escapeHtml(row.invoiceDate||'—')+'</td><td>'+escapeHtml(row.invoiceLabel)+'</td>'+
+      '<tr><td>'+escapeHtml(row.projectName||'原案場')+
+      (row.sourceBillingDate?'<small>原請款日期：'+escapeHtml(row.sourceBillingDate)+'</small>':'')+'</td>'+
+      '<td>'+escapeHtml(invoiceNumber(row))+
+      (row.warnings.length?'<small>資料待核對</small>':'')+'</td>'+
+      '<td>'+escapeHtml(invoiceDate(row))+'</td><td>'+escapeHtml(row.invoiceLabel)+'</td>'+
       '<td class="inv-num">'+money(row.originalUntaxed)+'</td>'+
       '<td class="inv-num">'+money(row.originalTax)+'</td>'+
       '<td class="inv-num">'+money(row.originalGross)+'</td></tr>'
     ).join('');
     return '<section class="section invoice-ref-section">'+
-      '<div class="section-title">原請款／發票對照（各原單開票月份獨立）</div>'+
+      '<div class="section-title">原請款／發票對照</div>'+
       '<table class="invoice-ref-table">'+
       '<colgroup><col style="width:22%"><col style="width:18%"><col style="width:12%">'+
       '<col style="width:15%"><col style="width:11%"><col style="width:11%"><col style="width:11%"></colgroup>'+
-      '<thead><tr><th>案場／原單</th><th>發票號碼</th><th>發票日期</th><th>狀態</th>'+
+      '<thead><tr><th>原請款案場</th><th>發票號碼</th><th>發票日期</th><th>狀態</th>'+
       '<th>原單未稅</th><th>原單稅額</th><th>原單含稅</th></tr></thead>'+
       '<tbody>'+lines+'</tbody></table>'+
-      '<div class="invoice-ref-footer">各原單發票依實際開立日期歸屬，不因合併文件日期改變。'+
-      '表列為原請款金額，非新增發票或應收；請以原始發票為準。</div></section>';
+      '<div class="invoice-ref-footer">發票依原單實際開立資料列示；未開票者不列開立日期。</div></section>';
   }
   return Object.freeze({SCHEMA,STATUS,project,validateProjection,printHtml});
 });
