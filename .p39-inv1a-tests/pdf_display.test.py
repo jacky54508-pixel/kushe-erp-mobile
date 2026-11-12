@@ -50,7 +50,8 @@ def make_document(seed):
         "date":"2026-10-30","taxMode":"未稅","invoiceStatus":"invoice_pending",
         "publicNote":"","lines":lines,"salesAmount":300000,"taxAmount":15000,
         "totalAmount":315000,"retentionAmount":0,"receivableAmount":315000,
-        "sourceInvoiceReferences":projected,
+        "isMergedExternalBilling":True,
+        "mergedBillingProjects":[row["projectName"] for row in projected["rows"]],
         "company":{"name":"虛構測試企業","taxId":"SYNTHETIC","englishName":"Synthetic Company"}
     }
 
@@ -70,16 +71,11 @@ def test_grouped_pdf(browser):
     original=source.evaluate("JSON.stringify(window.__p39synthetic)")
     document=make_document(source)
     page=open_print(ctx,document)
-    table=page.locator(".invoice-ref-table tbody tr")
-    assert table.count()==2
-    pending=table.nth(0).locator("td")
-    issued=table.nth(1).locator("td")
-    assert pending.nth(0).inner_text().startswith("虛構甲區")
-    assert "原請款日期：2026-10-04" in pending.nth(0).inner_text()
-    assert pending.nth(1).inner_text().startswith("待開票")
-    assert pending.nth(2).inner_text()=="尚未開立",pending.nth(2).inner_text()
-    assert issued.nth(1).inner_text()=="SYN-ZX12345678"
-    assert issued.nth(2).inner_text()=="2026-06-26"
+    assert document["isMergedExternalBilling"] is True
+    assert "sourceInvoiceReferences" not in document
+    assert "invoiceNo" not in json.dumps(document)
+    assert page.locator(".invoice-ref-section").count()==0
+    assert page.locator(".invoice-ref-table").count()==0
     assert "虛構甲區、虛構乙區" in page.locator(".merged-scope").inner_text()
     full=page.locator("#paper").inner_text()
     assert "合併請款範圍" in full
@@ -87,17 +83,18 @@ def test_grouped_pdf(browser):
     assert "各戶施工明細（每筆原始項目保留）" not in full
     assert "施工明細" in full
     assert "原施工明細合計" in full
-    assert "未開票者不列開立日期" in full
+    assert "未開票者不列開立日期" not in full
+    assert "原請款／發票對照" not in full
+    assert "SYN-ZX12345678" not in full
+    assert "2026-06-26" not in full
     assert "表列為原請款金額，非新增發票或應收" not in full
     assert page.locator(".dense-line-table tbody tr").count()==19
-    assert page.locator(".invoice-ref-table tbody tr").count()==2
+    assert page.locator(".invoice-ref-table tbody tr").count()==0
     assert "$300,000" in full and "$15,000" in full and "$315,000" in full
     page.emulate_media(media="print")
     font_a=page.locator(".dense-line-table tbody tr:first-child td.item").evaluate(
         "(el)=>parseFloat(getComputedStyle(el).fontSize)*72/96")
-    font_b=page.locator(".invoice-ref-table tbody tr:first-child td").first.evaluate(
-        "(el)=>parseFloat(getComputedStyle(el).fontSize)*72/96")
-    assert font_a>=8.4 and font_b>=7.8,(font_a,font_b)
+    assert font_a>=8.4,font_a
     pdf=page.pdf(format="A4",print_background=True,prefer_css_page_size=True)
     reader=PdfReader(BytesIO(pdf))
     assert len(reader.pages)==1,(
@@ -105,9 +102,12 @@ def test_grouped_pdf(browser):
     width,height=map(float,(reader.pages[0].mediabox.width,
         reader.pages[0].mediabox.height))
     assert 594<=width<=596 and 841<=height<=843,(width,height)
+    pdf_text=reader.pages[0].extract_text() or ""
+    for forbidden in ["SYN-ZX12345678","原請款／發票對照","尚未開立","原請款日期"]:
+        assert forbidden not in pdf_text,forbidden
     assert source.evaluate("JSON.stringify(window.__p39synthetic)")==original
-    print("PASS: P39-INV-1A two-month pending/issued PDF, 18 rows, A4 one page,"
-          " no LEGACY IDs, unchanged all source data",flush=True)
+    print("PASS: P39-INV-1B public PDF, 18 rows, A4 one page,"
+          " no invoice references, all original source data unchanged",flush=True)
     ctx.close()
 
 def test_original_single_invoice_unaffected(browser):
@@ -115,7 +115,8 @@ def test_original_single_invoice_unaffected(browser):
     source=ctx.new_page()
     source.goto(FIXTURE)
     document=make_document(source)
-    del document["sourceInvoiceReferences"]
+    del document["isMergedExternalBilling"]
+    del document["mergedBillingProjects"]
     document["lines"]=document["lines"][:2]
     document["salesAmount"]=32000
     document["taxAmount"]=1600
@@ -139,7 +140,7 @@ def main():
         test_grouped_pdf(browser)
         test_original_single_invoice_unaffected(browser)
         browser.close()
-    print("P39_INV1A_PDF_DISPLAY_ACCEPTANCE_PASS",flush=True)
+    print("P39_INV1B_PUBLIC_PDF_ACCEPTANCE_PASS",flush=True)
 
 if __name__=="__main__":
     main()

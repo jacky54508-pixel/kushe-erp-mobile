@@ -43,6 +43,10 @@
   // No independent public layout, no tax recomputation, no Store/database access.
   function originalTemplateView(payload,d){
     const sourceInvoiceReferences=window.KusheExternalBillingInvoice.project(d.sourceSnapshots,d.totals);
+    // Do not send per-original invoice numbers, dates, or amounts to a customer PDF URL.
+    // Keep only the public merged-project scope. All internal snapshots stay unchanged.
+    const mergedBillingProjects=[...new Set(sourceInvoiceReferences.rows.map(
+      row=>String(row.projectName||'').trim()).filter(Boolean))];
     const template=payload.template;
     if(template&&(template.schema!=='kushe-original-billing-template-v1'||template.billingId!==d.targetBillingId))throw new Error('所選案場與原請款模板不一致，請重新開啟 PDF');
     const unified=d.schema==='kushe-external-billing-group-v2',modes=unified?[d.unified.taxMode]:[...new Set(d.sections.map(section=>section.taxMode))];
@@ -57,7 +61,7 @@
     // Individual invoice numbers/statuses/amounts stay exclusively in the originals.
     const invoiceStatus=t.tax===0&&d.sourceSnapshots.every(s=>s.invoiceStatus==='no_invoice')?'no_invoice':'invoice_pending';
     const fileName=('酷舍_請款單_'+d.displayProjectName+'_'+String(d.documentDate).slice(0,7)).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_')+'.pdf';
-    return {schema:'kushe-external-document-v1',documentType:'billing',title:'請款單',number:'',customer:d.customerName,project:d.displayProjectName,date:d.documentDate,taxMode,pricingMode:'',invoiceStatus,lines,salesAmount:t.untaxed,taxAmount:t.tax,totalAmount:t.grossTotal,retentionAmount:t.retention,receivableAmount:t.receivable,publicNote,company,fileName,sourceInvoiceReferences};
+    return {schema:'kushe-external-document-v1',documentType:'billing',title:'請款單',number:'',customer:d.customerName,project:d.displayProjectName,date:d.documentDate,taxMode,pricingMode:'',invoiceStatus,lines,salesAmount:t.untaxed,taxAmount:t.tax,totalAmount:t.grossTotal,retentionAmount:t.retention,receivableAmount:t.receivable,publicNote,company,fileName,mergedBillingProjects,isMergedExternalBilling:true};
   }
   document.getElementById('close').onclick=()=>window.close();
   try{
