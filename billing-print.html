@@ -43,6 +43,19 @@
     .invoice-ref-footer{padding:1.6mm 2mm;color:#596e81;font-size:7.1pt;line-height:1.45}
     @media print{.invoice-ref-section{break-inside:avoid;page-break-inside:avoid}}
 
+    /* Dense merged invoice only: every original line remains in one compact table. */
+    @media print {
+      .paper.invoice-group-document .dense-original-details .dense-line-table th,
+      .paper.invoice-group-document .dense-original-details .dense-line-table td{
+        padding:.8mm 1.05mm;font-size:8.5pt;line-height:1.19
+      }
+      .paper.invoice-group-document .dense-original-details .dense-line-table td.item{
+        padding-left:1.4mm;padding-right:1.1mm;font-size:8.6pt;line-height:1.19
+      }
+      .paper.invoice-group-document .dense-original-details .dense-line-table td.num{
+        white-space:nowrap
+      }
+    }
     /* Compact only MERGED invoices for A4. Existing single billings/quotes unchanged. */
     @media print {
       .paper.invoice-group-document{padding-top:5mm;padding-bottom:5mm}
@@ -103,7 +116,41 @@
       throw new Error('合併發票對照與原請款總額不同，停止匯出');
     const invoiceSection=invoiceRefs?
       window.KusheExternalBillingInvoice.printHtml(invoiceRefs):'';
-    document.title=d.fileName||d.title||'酷舍對外文件';const paper=document.getElementById('paper');paper.classList.toggle('billing-document',!isQuote);paper.classList.toggle('quotation-document',isQuote);paper.classList.toggle('invoice-group-document',Boolean(invoiceRefs));paper.innerHTML=`<header class="head"><div class="company-block"><span class="company-logo-frame"><img class="company-logo" id="formalCompanyLogo" alt="酷舍企業" onerror="this.hidden=true"></span><div class="company"><h1>${esc(c.name||'酷舍企業有限公司')}</h1><div class="en">${esc(c.englishName||'Cool Sir Limited Company')}</div><div class="sub">${companyInfo.map(value=>`<span>${esc(value)}</span>`).join('')}</div></div></div><div class="doc-title"><h2>${esc(d.title||'請款單')}</h2></div></header><section class="info"><div><span class="label">客戶</span>${esc(d.customer||'—')}</div><div><span class="label">案場</span>${esc(d.project||'—')}</div><div><span class="label">日期</span>${esc(d.date||'—')}</div>${isActual?`<div><span class="label">稅別</span>${esc(d.taxMode==='含稅'?'含稅':'未稅')}</div>`:`<div><span class="label">稅額方式</span>${esc(d.taxMode||'—')}</div>`}</section>${matrix}${detail}${invoiceSection}${summary}${d.publicNote?`<section class="note"><b>備註：</b><br>${esc(d.publicNote)}</section>`:''}<section class="sign"><div class="client-sign">客戶簽章</div><div class="company-seals"><div>公司大小章</div><div class="seal-wrap"><img class="seal" id="formalCompanySeal" alt="公司大小章" onerror="this.hidden=true"></div></div></section>`;if(isQuote)paper.innerHTML=`<div class="quotation-content" id="quotationContent">${paper.innerHTML}</div>`;
+
+    // P39-INV-1: the original house x item matrix grows quadratically.
+    // For dense merged documents, use ONE exact per-line ledger-visible print
+    // table instead of a many-column matrix PLUS a second grouped summary.
+    // This preserves every house, original line, quantity, price, amount,
+    // separate invoice and all original financial anchors; strictly print-only.
+    const denseInvoiceGroup=Boolean(invoiceRefs)&&
+      (houses.length>9||items.length>5||lines.length>12);
+    if(denseInvoiceGroup&&(lines.length>50||
+        !lines.every(line=>Number.isFinite(Number(line.qty))&&
+          Number.isFinite(Number(line.price))&&
+          Number.isFinite(Number(line.amount)))||
+        Math.abs(sum(lines,'amount')-billingDetailTotal)>.01))
+      throw new Error('施工明細筆數或合計超出 A4 安全列印範圍，請保留原始請款資料並核對');
+    const denseDetails=denseInvoiceGroup?
+      '<section class="section dense-original-details">'+
+      '<div class="section-title">各戶施工明細（每筆原始項目保留）</div>'+
+      '<table class="detail dense-line-table"><colgroup>'+
+      '<col style="width:13%"><col style="width:36%"><col style="width:9%">'+
+      '<col style="width:11%"><col style="width:15%"><col style="width:16%">'+
+      '</colgroup><thead><tr><th>戶別</th><th>施工項目</th><th>單位</th>'+
+      '<th>數量</th><th>單價</th><th>小計</th></tr></thead><tbody>'+
+      lines.map(line=>'<tr><td class="center">'+esc(line.house||'—')+'</td>'+
+        '<td class="item">'+esc(line.item||'—')+'</td>'+
+        '<td class="center">'+esc(line.unit||'—')+'</td>'+
+        '<td class="num">'+q(line.qty)+'</td>'+
+        '<td class="num">'+m(line.price)+'</td>'+
+        '<td class="num">'+m(line.amount)+'</td></tr>').join('')+
+      '<tr class="line-total"><td colspan="5">原施工明細合計</td>'+
+      '<td class="num">'+m(billingDetailTotal)+'</td></tr>'+
+      '</tbody></table></section>':'';
+    const documentMatrix=denseInvoiceGroup?'':matrix;
+    const documentDetail=denseInvoiceGroup?denseDetails:detail;
+
+    document.title=d.fileName||d.title||'酷舍對外文件';const paper=document.getElementById('paper');paper.classList.toggle('billing-document',!isQuote);paper.classList.toggle('quotation-document',isQuote);paper.classList.toggle('invoice-group-document',Boolean(invoiceRefs));paper.innerHTML=`<header class="head"><div class="company-block"><span class="company-logo-frame"><img class="company-logo" id="formalCompanyLogo" alt="酷舍企業" onerror="this.hidden=true"></span><div class="company"><h1>${esc(c.name||'酷舍企業有限公司')}</h1><div class="en">${esc(c.englishName||'Cool Sir Limited Company')}</div><div class="sub">${companyInfo.map(value=>`<span>${esc(value)}</span>`).join('')}</div></div></div><div class="doc-title"><h2>${esc(d.title||'請款單')}</h2></div></header><section class="info"><div><span class="label">客戶</span>${esc(d.customer||'—')}</div><div><span class="label">案場</span>${esc(d.project||'—')}</div><div><span class="label">日期</span>${esc(d.date||'—')}</div>${isActual?`<div><span class="label">稅別</span>${esc(d.taxMode==='含稅'?'含稅':'未稅')}</div>`:`<div><span class="label">稅額方式</span>${esc(d.taxMode||'—')}</div>`}</section>${documentMatrix}${documentDetail}${invoiceSection}${summary}${d.publicNote?`<section class="note"><b>備註：</b><br>${esc(d.publicNote)}</section>`:''}<section class="sign"><div class="client-sign">客戶簽章</div><div class="company-seals"><div>公司大小章</div><div class="seal-wrap"><img class="seal" id="formalCompanySeal" alt="公司大小章" onerror="this.hidden=true"></div></div></section>`;if(isQuote)paper.innerHTML=`<div class="quotation-content" id="quotationContent">${paper.innerHTML}</div>`;
     function centerPaperInViewport(){const zoom=Number.parseFloat(getComputedStyle(paper).zoom)||1,viewportWidth=document.documentElement.clientWidth;paper.style.setProperty('--preview-center-left',`${viewportWidth/(2*zoom)}px`)}
     if(window.matchMedia('screen').matches){centerPaperInViewport();window.addEventListener('resize',()=>requestAnimationFrame(centerPaperInViewport),{passive:true})}
     async function loadAssets(){const enterpriseUrl=/\/beta(?:\/|$)/.test(window.location.pathname)?'../enterprise/index.html':'./enterprise/index.html';try{const source=await fetch(enterpriseUrl).then(r=>r.text());for(const [name,id] of [['companyLogoAsset','formalCompanyLogo'],['companySealAsset','formalCompanySeal']]){const start=source.indexOf('const '+name+'=');if(start<0)continue;let end=source.indexOf(';\n',start);if(end<0)end=source.indexOf(';\r',start);const parts=[...source.slice(start,end).matchAll(/'([^']*)'/g)].map(x=>x[1]);if(parts.length){const image=document.getElementById(id);if(id==='formalCompanySeal')image.onload=()=>{image.onload=null;removeSealBackground(image)};image.src=parts.join('');if(id==='formalCompanyLogo')image.style.display='block'}}}catch(e){}}
