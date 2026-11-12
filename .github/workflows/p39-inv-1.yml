@@ -1,0 +1,121 @@
+name: P39-INV-1 per-original invoice and grouped PDF synthetic acceptance
+
+on:
+  push:
+    branches:
+      - p39-inv-1-multi-invoice-candidate-20261111
+    paths:
+      - '.p39-inv1-tests/**'
+      - '.github/workflows/p39-inv-1.yml'
+      - 'assets/js/external-billing-invoice.js'
+      - 'assets/js/external-billing-invoice-ui.js'
+      - 'assets/js/billing-groups.js'
+      - 'assets/js/invoices.js'
+      - 'assets/js/external-billing-print.js'
+      - 'assets/css/billing-groups.css'
+      - 'external-billing-print.html'
+      - 'billing-print.html'
+      - 'index.html'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-safety:
+    name: Branch restriction, exact source diff, no financial writer changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Assert new branch forks original main, not beta/P39 allowances
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "p39-inv-1-multi-invoice-candidate-20261111"
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = "39b8d543d785f0e0e2c468bed16d8f2e2efaa0fb"
+          test "$(git merge-base origin/main HEAD)" = "39b8d543d785f0e0e2c468bed16d8f2e2efaa0fb"
+          git diff --name-only origin/main...HEAD > /tmp/p39-inv1-files.txt
+          cat /tmp/p39-inv1-files.txt
+          if grep -Ev '^(\.p39-inv1-tests/|\.github/workflows/p39-inv-1\.yml$|assets/js/external-billing-invoice\.js$|assets/js/external-billing-invoice-ui\.js$|assets/js/billing-groups\.js$|assets/js/invoices\.js$|assets/js/external-billing-print\.js$|assets/css/billing-groups\.css$|external-billing-print\.html$|billing-print\.html$|index\.html$)' /tmp/p39-inv1-files.txt; then
+            echo "UNAUTHORIZED CANDIDATE DIFF"; exit 1
+          fi
+          ! grep -q '^assets/js/erp-store.js$' /tmp/p39-inv1-files.txt
+          ! grep -q '^assets/js/commissions.js$' /tmp/p39-inv1-files.txt
+          ! grep -q '^assets/js/receipts.js$' /tmp/p39-inv1-files.txt
+      - name: All ERP JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          for js in assets/js/*.js; do node --check "$js"; done
+          node --check .p39-inv1-tests/projection.test.js
+      - name: Pure immutable cross-reference, multi-month and PDF model
+        run: node --test .p39-inv1-tests/projection.test.js
+
+  browser-regression:
+    name: Existing ERP commission payroll and Auth regression (system Chrome)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Use GitHub preinstalled Chrome and unchanged original regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+      - name: Start loopback-only ERP legacy synthetic fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          for port in 8774 8784 8795 8796; do
+            python -m http.server "$port" --bind 127.0.0.1 >"/tmp/p39-inv1-legacy-$port.log" 2>&1 &
+          done
+      - name: P33 commission previous validation and conflict safety
+        run: python .p39-inv1-tests/chrome_legacy.py .p33-4-tests/regression.py
+      - name: P34 commission pool, historical preservation, and rollback
+        run: python .p39-inv1-tests/chrome_legacy.py .p34-tests/test.py
+      - name: P35 targeted compensation corrections and PDF backup
+        run: python .p39-inv1-tests/chrome_legacy.py .p35-tests/test_ui.py
+      - name: P36 owner, employee and permission recovery
+        run: python .p39-inv1-tests/chrome_legacy.py .p36-tests/test_permissions.py
+
+  fast-chrome:
+    name: Preinstalled Chrome synthetic UI, actual invoice Store and printable PDF
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Use preinstalled runner Chrome, never visit hosted ERP
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
+          python -m http.server 8797 --bind 127.0.0.1 > /tmp/p39-inv1-fast.log 2>&1 &
+      - name: Real Chrome group editor and generated PDF from synthetic data
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: python .p39-inv1-tests/test_ui.py
+      - name: Real ERP Store invoice A/B isolation with synthetic data
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: python .p39-inv1-tests/test_store.py
+      - name: A4 single-page actual PDF and mobile 390px interactive invoice check
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: python .p39-inv1-tests/layout_preflight.test.py

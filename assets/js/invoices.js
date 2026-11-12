@@ -16,11 +16,13 @@
     const statusText=statusLabel(row.status),typeText=typeLabel(row.invoiceType);
     return {...row,statusText,typeText,invoiceNumberText:row.invoiceNumber||statusText,partyText:row.party||'',projectPurpose:row.projectName||'',sourceText:row.sourceNo||'',canEdit:true};
   }
-  function openOutput(row){
+  function openOutput(row,options={}){
     const overlay=document.createElement('div');overlay.className='erp-detail-overlay';
+    if(options.fromGroup===true)overlay.style.zIndex='2450';
+    const closeCurrent=()=>{overlay.remove();try{options.onClosed?.()}catch(error){window.KushePhase1?.toast(error.message||'請重新開啟發票對照')}};
     overlay.innerHTML=`<section class="erp-detail-card receipt-card invoice-editor-card" role="dialog" aria-modal="true"><header><div><span>銷項發票</span><h2>${esc(row.sourceNo||'請款單')}</h2><p>${esc(row.party||'—')}｜${esc(row.projectName||'—')}</p></div><button type="button" data-close-detail aria-label="關閉">×</button></header><form id="outputInvoiceForm"><div class="erp-detail-body"><div class="billing-detail-summary"><span>未稅金額<b>${money(row.netAmount)}</b></span><span>稅額<b>${money(row.taxAmount)}</b></span><span>含稅金額<b>${money(row.grossAmount)}</b></span></div><div class="receipt-form-grid"><label><span>發票狀態</span><select name="status"><option value="pending" ${row.status==='pending'?'selected':''}>待開票</option><option value="issued" ${row.status==='issued'?'selected':''}>已開票</option><option value="void" ${row.status==='void'?'selected':''}>作廢</option></select></label><label><span>發票號碼</span><input name="invoiceNumber" value="${esc(row.invoiceNumber)}"></label><label><span>發票日期</span><input name="invoiceDate" type="date" value="${esc(row.invoiceDate||today())}"></label><label class="payable-note-field"><span>備註</span><input name="note" value="${esc(row.note||'')}"></label></div></div><footer><button type="button" class="commission-secondary" data-close-detail>取消</button><button type="submit" class="commission-primary">儲存發票</button></footer></form></section>`;
-    document.body.appendChild(overlay);$$('[data-close-detail]',overlay).forEach((button)=>button.onclick=closeModal);
-    $('#outputInvoiceForm',overlay).onsubmit=async(event)=>{event.preventDefault();const button=$('button[type="submit"]',event.currentTarget);button.disabled=true;try{const values=Object.fromEntries(new FormData(event.currentTarget).entries());await store.saveInvoice({...values,invoiceType:'output',sourceId:row.sourceId,billingId:row.sourceId},row.virtual?'':row.id);closeModal();render();window.KushePhase1.toast('銷項發票已更新')}catch(error){window.KushePhase1.toast(error.message||String(error));button.disabled=false}};
+    document.body.appendChild(overlay);overlay.querySelectorAll('[data-close-detail]').forEach((button)=>button.onclick=closeCurrent);
+    $('#outputInvoiceForm',overlay).onsubmit=async(event)=>{event.preventDefault();const button=$('button[type="submit"]',event.currentTarget);button.disabled=true;try{const values=Object.fromEntries(new FormData(event.currentTarget).entries());await store.saveInvoice({...values,invoiceType:'output',sourceId:row.sourceId,billingId:row.sourceId},row.virtual?'':row.id);closeCurrent();render();window.KushePhase1.toast('銷項發票已更新');try{options.onSaved?.(row.sourceId)}catch(error){window.KushePhase1?.toast('已儲存原發票，合併視窗請重新開啟核對')}}catch(error){window.KushePhase1.toast(error.message||String(error));button.disabled=false}};
   }
   function openInput(row=null){
     const state=store.getState(),payables=state.payables.filter((item)=>!/salary|payroll/i.test(String(item.sourceType||''))),selected=row?row.sourceId||'':payables[0]?.id||'';
@@ -42,7 +44,21 @@
   }
   async function activate(){active=true;if(!ready){await store.load();ready=true}render()}
   function deactivate(){active=false;closeModal()}
-  window.KusheInvoices={activate,deactivate,render};
+  // P39-INV-1: a group only opens the existing one-source sales invoice editor.
+  // Never creates an invoice on a group ID and never distributes grouped amounts.
+  function openOriginalBillingInvoice(billingId,options={}) {
+    const id=String(billingId||'');
+    const billings=store.getState().billings.filter(b=>String(b.id)===id);
+    if(billings.length!==1)throw new Error('找不到唯一原請款單，停止編輯發票');
+    const rows=store.invoiceRows().filter(row=>row.invoiceType==='output'&&
+      row.sourceType==='billing'&&String(row.sourceId)===id);
+    if(rows.length!==1)throw new Error('找不到唯一原請款發票。請由發票管理核對；不可直接改合併金額');
+    if(billings[0].invoiceStatus==='no_invoice')
+      throw new Error('原請款設定為免開發票，請先核對原單的發票設定');
+    openOutput(rows[0],{...options,fromGroup:true});
+    return {billingId:id,invoiceId:String(rows[0].id),readOnlyOpening:true};
+  }
+  window.KusheInvoices={activate,deactivate,render,openOriginalBillingInvoice};
 
   // P21: read-only KPI destinations; original calculations and save paths are unchanged.
 

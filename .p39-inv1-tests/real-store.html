@@ -1,0 +1,56 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
+<title>P39-INV-1 real Store, all synthetic</title></head><body>
+<script>
+window.KUSHE_PHASE1_CONFIG={};
+window.KusheAuthGate={
+ session:()=>({access_token:'p39-inv1-synthetic-only'}),
+ user:()=>({id:'SYN-OWNER-1',email:'inv1-test@example.invalid'}),
+ companyContext:()=>({userId:'SYN-OWNER-1',legacySourceUserId:'SYN-OWNER-1',
+   companyId:'SYN-COMPANY-1',role:'owner',status:'active'}),
+ canWrite:()=>true,requireAuth:async()=>true,requireMfa:async()=>true
+};
+window.KusheLegacyData={refresh(){}};
+window.KusheRecovery={showResult(){}};
+const make=(id,project,amount,month,invoiceNumber)=>{
+ const tax=Math.round(amount*.05),gross=amount+tax;
+ const date=month+'-20',docno='SYN-BILL-'+id;
+ const billing={id,number:docno,date:month+'-02',sourceType:'synthetic-only',
+  customer:'SYN-CUST',customerName:'虛構建設',project,projectName:project==='SYN-P-A'?'虛構 A 區':'虛構 B 區',
+  invoiceStatus:'invoiced',invoiceNo:invoiceNumber,invoiceDate:date,hasInvoice:true,
+  amount,preTaxAmount:amount,tax,taxAmount:tax,taxIncludedAmount:gross,grossTotal:gross,
+  retention:0,retentionAmount:0,total:gross,taxMode:'未稅',
+  retentionMode:'none',retentionBase:'preTax',retentionRate:0,
+  receivableId:id+'-AR',lines:[{id:id+'-L',house:'A1',item:'虛構施工',unit:'式',
+    qty:1,price:amount,amount,subtotal:amount}]};
+ const ar={id:id+'-AR',billingId:id,sourceNo:docno,date:billing.date,
+   customer:'SYN-CUST',project,amount:gross,untaxedAmount:amount,
+   preTaxAmount:amount,tax,taxAmount:tax,taxIncludedAmount:gross,grossTotal:gross,
+   retention:0,retentionAmount:0,received:0,retentionReceived:0,
+   invoiceNo:invoiceNumber,invoiceStatus:'invoiced',receivableCheques:[]};
+ const invoice={id:id+'-I',invoiceId:id+'-I',invoiceType:'output',type:'銷項',
+   sourceType:'billing',sourceId:id,billingId:id,sourceNo:docno,status:'issued',
+   invoiceNumber,number:invoiceNumber,invoiceDate:date,date,
+   customer:'SYN-CUST',project,netAmount:amount,amount,taxAmount:tax,tax,
+   grossAmount:gross,total:gross};
+ return {billing,ar,invoice};
+};
+const a=make('SYN-B-A','SYN-P-A',100000,'2026-08','SYN-AA000001');
+const b=make('SYN-B-B','SYN-P-B',200000,'2026-10','SYN-BB000002');
+const seed={
+ meta:{version:'5.0.0',updatedAt:'2026-11-11T00:00:00.000Z',
+   p39SyntheticSchema:'kushe-p39-inv1-test-fixture-v1'},
+ settings:{defaultTax:5,quotationUnitPresets:['式']},
+ customers:[{id:'SYN-CUST',name:'虛構建設'}],
+ projects:[{id:'SYN-P-A',customer:'SYN-CUST',name:'虛構 A 區'},
+  {id:'SYN-P-B',customer:'SYN-CUST',name:'虛構 B 區'}],
+ employees:[],dailyLogs:[],commissions:[],attendance:[],payroll:[],
+ billings:[a.billing,b.billing],receivables:[a.ar,b.ar],invoices:[a.invoice,b.invoice],
+ receipts:[],retentionReceipts:[],salaryPayments:[],commissionSettlements:[],
+ bankTransactions:[],banks:[],payables:[],payments:[],vendors:[],materials:[],
+ materialUsages:[],inventoryReceipts:[],projectCosts:[],dailyItemPresets:[],
+ quotations:[],quotationPrices:[],quotationTemplates:[],audit:[]
+};
+localStorage.setItem('KuSheERP25_EMERGENCY',JSON.stringify(seed));
+</script>
+<script src="/assets/js/erp-store.js"></script>
+</body></html>
