@@ -145,7 +145,7 @@
       '<thead><tr><th>原請款案場</th><th>發票號碼</th><th>發票日期</th><th>狀態</th>'+
       '<th>原單未稅</th><th>原單稅額</th><th>原單含稅</th></tr></thead>'+
       '<tbody>'+lines+'</tbody></table>'+
-      '<div class="invoice-ref-footer">發票依原單實際開立資料列示；未開票者不列開立日期。</div></section>';
+      '<div class="invoice-ref-footer">發票依原單實際開立資料列示；未開票者不列開立日期；本表非新增發票或應收。</div></section>';
   }
   return Object.freeze({SCHEMA,STATUS,project,validateProjection,printHtml});
 });
