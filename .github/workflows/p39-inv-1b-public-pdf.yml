@@ -34,7 +34,7 @@ jobs:
           test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
           git diff --name-only origin/main...HEAD > /tmp/p39-inv1a-files.txt
           cat /tmp/p39-inv1a-files.txt
-          if grep -Ev '^(\.p39-inv1a-tests/|\.github/workflows/p39-inv-1a-pdf\.yml$|assets/js/external-billing-invoice\.js$|assets/js/external-billing-print\.js$|billing-print\.html$)' /tmp/p39-inv1a-files.txt; then
+          if grep -Ev '^(\.p39-inv1a-tests/|\.p39-inv1-tests/test_ui\.py$|\.github/workflows/p39-inv-1b-public-pdf\.yml$|assets/js/external-billing-print\.js$|billing-print\.html$)' /tmp/p39-inv1a-files.txt; then
             echo "BLOCK: unsupported file changed"; exit 1
           fi
           ! grep -q '^assets/js/erp-store.js$' /tmp/p39-inv1a-files.txt
@@ -70,7 +70,7 @@ jobs:
         env:
           P39_INV_USE_SYSTEM_CHROME: "1"
         run: python .p39-inv1a-tests/pdf_display.test.py
-      - name: Repeat P39-INV-1 existing browser editor/PDF and original Store tests
+      - name: P39-INV-1 internal editor, private external print, original Store tests
         env:
           P39_INV_USE_SYSTEM_CHROME: "1"
         run: |

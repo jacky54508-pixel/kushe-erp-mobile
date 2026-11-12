@@ -120,18 +120,20 @@ def test_pdf(browser):
     pdfpage=ctx.new_page()
     pdfpage.goto(ORIGIN+"/billing-print.html?print=0#"+payload)
     pdfpage.wait_for_function("window.__billingPrintReady===true",timeout=12000)
-    assert pdfpage.locator(".invoice-ref-table tbody tr").count()==2
-    txt=pdfpage.locator(".invoice-ref-section").inner_text()
-    assert "SYN-AA000001" in txt and "SYN-BB000002" in txt,txt
-    assert "2026-08-20" in txt and "2026-10-20" in txt,txt
-    assert "$100,000" in txt and "$200,000" in txt,txt
-    assert "原請款" in txt and "發票對照" in txt,txt
+    assert pdfpage.locator(".invoice-ref-table tbody tr").count()==0
+    assert pdfpage.locator(".invoice-ref-section").count()==0
+    txt=pdfpage.locator("#paper").inner_text()
+    assert "合併請款範圍" in txt
+    for private in ["SYN-AA000001","SYN-BB000002","2026-08-20",
+                    "2026-10-20","原請款／發票對照","發票對照"]:
+        assert private not in txt,private
+    assert "$100,000" in txt and "$200,000" in txt and "$315,000" in txt
     assert pdfpage.locator(".detail tbody tr").count()>2
     assert "$315,000" in pdfpage.locator(".summary").inner_text()
     # Test Chrome's real print engine, not just DOM string assembly.
     binary=pdfpage.pdf(format="A4",print_background=True)
     assert binary[:4]==b"%PDF" and len(binary)>5000,len(binary)
-    print(f"PASS: merged billing PDF print rendered with two different invoice months ({len(binary)} bytes)")
+    print(f"PASS: historic merged payload prints public billing without invoice metadata ({len(binary)} bytes)")
     ctx.close()
 
 def main():
