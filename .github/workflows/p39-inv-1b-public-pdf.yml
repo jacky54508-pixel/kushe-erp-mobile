@@ -34,7 +34,7 @@ jobs:
           test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
           git diff --name-only origin/main...HEAD > /tmp/p39-inv1a-files.txt
           cat /tmp/p39-inv1a-files.txt
-          if grep -Ev '^(\.p39-inv1a-tests/|\.p39-inv1-tests/test_ui\.py$|\.github/workflows/p39-inv-1b-public-pdf\.yml$|assets/js/external-billing-print\.js$|billing-print\.html$)' /tmp/p39-inv1a-files.txt; then
+          if grep -Ev '^(\.p39-inv1a-tests/|\.p39-inv1-tests/(test_ui|layout_preflight\.test)\.py$|\.github/workflows/p39-inv-1b-public-pdf\.yml$|assets/js/external-billing-print\.js$|billing-print\.html$)' /tmp/p39-inv1a-files.txt; then
             echo "BLOCK: unsupported file changed"; exit 1
           fi
           ! grep -q '^assets/js/erp-store.js$' /tmp/p39-inv1a-files.txt

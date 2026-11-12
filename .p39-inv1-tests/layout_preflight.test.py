@@ -22,7 +22,7 @@ def prepare_document(page):
         "schema":"kushe-external-document-v1","documentType":"billing",
         "title":"請款單","customer":"虛構建商","project":"虛構 A 區 + B 區",
         "date":"2026-11-11","taxMode":"未稅","invoiceStatus":"invoice_pending",
-        "publicNote":"虛構文件：僅驗證 A4 列印與發票月份",
+        "publicNote":"虛構文件：僅驗證 A4 列印與明細完整性",
         "lines":[{"house":"A1","item":"虛構 A 區施工","unit":"式","qty":1,
                   "price":100000,"amount":100000,"sourcePricingType":"external-document"},
                  {"house":"B1","item":"虛構 B 區施工","unit":"式","qty":1,
@@ -45,19 +45,18 @@ def test_pdf_pages(browser):
     printable=ctx.new_page()
     printable.goto(ORIGIN+"/billing-print.html?print=0#"+encoded)
     printable.wait_for_function("window.__billingPrintReady===true")
-    assert printable.locator(".invoice-ref-table tbody tr").count()==2
+    assert printable.locator(".invoice-ref-table tbody tr").count()==0
     result=printable.evaluate("""()=>{
-      const section=document.querySelector('.invoice-ref-section');
-      const root=document.querySelector('#paper');
-      const rect=section.getBoundingClientRect();
-      const style=getComputedStyle(section);
-      return {sectionVisible:rect.width>0&&rect.height>0,sections:
-        document.querySelectorAll('.invoice-ref-section').length,
-        sectionBreak:style.breakInside,sourceCount:
-        document.querySelectorAll('.invoice-ref-table tbody tr').length,
+      const root=document.querySelector("#paper");
+      return {invoiceSections:document.querySelectorAll(".invoice-ref-section").length,
+        invoiceRows:document.querySelectorAll(".invoice-ref-table tbody tr").length,
         paperWidth:root.getBoundingClientRect().width}
     }""")
-    assert result["sectionVisible"] and result["sections"]==1,result
+    assert result["invoiceSections"]==0 and result["invoiceRows"]==0,result
+    visible=printable.locator("#paper").inner_text()
+    assert "合併請款範圍" in visible and "$315,000" in visible
+    for private in ["SYN-AA000001","SYN-BB000002","2026-08-20","2026-10-20","原請款／發票對照"]:
+        assert private not in visible,private
     pdf=printable.pdf(format="A4",print_background=True,
                       prefer_css_page_size=True)
     reader=PdfReader(BytesIO(pdf),strict=False)
@@ -136,12 +135,12 @@ def test_multi_item_pdf_pages(browser):
     printable.emulate_media(media="print")
     pt=printable.locator(".dense-line-table tbody tr:first-child td.item").evaluate(
       "(td)=>parseFloat(getComputedStyle(td).fontSize)*72/96")
-    invoice_pt=printable.locator(".invoice-ref-table tbody tr:first-child td").first.evaluate(
-      "(td)=>parseFloat(getComputedStyle(td).fontSize)*72/96")
-    assert pt>=8.4 and invoice_pt>=7.8,(pt,invoice_pt)
-    assert printable.locator(".invoice-ref-table tbody tr").count()==2
+    assert pt>=8.4,pt
+    assert printable.locator(".invoice-ref-table tbody tr").count()==0
     paper=printable.locator("#paper").inner_text()
-    assert "待開票" in paper and "2026-10-20" in paper,paper
+    for private in ["待開票","2026-10-20","SYN-AA000001","原請款／發票對照"]:
+        assert private not in paper,private
+    assert "合併請款範圍" in paper
     pdf=printable.pdf(format="A4",print_background=True,prefer_css_page_size=True)
     pages=len(PdfReader(BytesIO(pdf),strict=False).pages)
     print("P39 INV1 representative 18-line A4 stress page count:",pages,flush=True)
