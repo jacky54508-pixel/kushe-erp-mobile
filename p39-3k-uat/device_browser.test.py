@@ -35,6 +35,11 @@ def check_pdf(page,mode):
     assert "無法讀取" not in body and "無法匯出" not in body,(mode,body[:1200])
     assert NOTE in body,(mode,body[:1100])
     assert INTERNAL not in body,(mode,body[:1200])
+    # P39-3K-1 deployed artifact is synthetic even though the ERP core is unchanged.
+    banner=page.evaluate('getComputedStyle(document.body,"::after").content')
+    assert "虛構測試" in banner and "禁止對外請款" in banner,(mode,banner)
+    for field in ("82980636","瑞興路","eing0519"):
+        assert field not in body,(mode,field)
     for private in PRIVATE:
         assert private not in body,(mode,private)
     if mode=="merged":
