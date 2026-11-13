@@ -202,6 +202,8 @@
       try{closeOverlay();renderBillingList();openBillingDetail(id);window.KushePhase1.toast(protectedAmounts?'發票資料已儲存，原帳款金額未變':'發票狀態已同步至請款與應收')}catch(error){committedPresentationWarning(error)}
     };
     window.KusheHistoricalBilling?.mount(overlay,sourceRow,documentInfo,()=>{closeOverlay();renderBillingList();openBillingDetail(id)});
+    // P39-3I: independent public note panel, never changes the invoice editor.
+    window.KusheP39BillingNote?.mount(overlay,sourceRow,documentInfo,()=>{closeOverlay();renderBillingList();openBillingDetail(id)});
 
   }
   async function activateBilling(){billingActive=true;draftActive=false;if(!ready){await store.load();ready=true}renderBillingList()}
