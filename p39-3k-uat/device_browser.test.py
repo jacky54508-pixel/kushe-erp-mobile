@@ -5,7 +5,8 @@ import os
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlsplit
-import re
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+import threading
 from playwright.sync_api import sync_playwright, expect
 from pypdf import PdfReader
 
@@ -15,6 +16,38 @@ PRIVATE=["SYN-AA000001","SYN-BB000002","2026-08-20","2026-10-20",
          "原請款／發票對照","稅務／發票","已開發票","待開發票","免開發票"]
 NOTE="P39-3K 虛構驗收－對外備註確認"
 INTERNAL="原始合成備註"
+
+# Real HTTP 308 server, not Playwright route interception: browser redirects
+# bypass route handlers after the first request. This reproduces Pages' URL
+# behavior with the package's *actual* _headers Content-Security-Policy.
+SITE_DIR=Path(os.environ.get("P39_3K_SITE_DIR","/tmp/p39-3k-site"))
+class CloudflareCleanURLHandler(SimpleHTTPRequestHandler):
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,directory=str(SITE_DIR),**kwargs)
+    def do_GET(self):
+        parts=urlsplit(self.path)
+        path=parts.path
+        suffix=("?"+parts.query) if parts.query else ""
+        if path.endswith(".html") and path!="/index.html":
+            self.send_response(308)
+            self.send_header("Location",path[:-5]+suffix)
+            self.end_headers()
+            return
+        if path in ("/note-fixture","/group-fixture","/billing-print",
+                    "/external-billing-print","/billing-bundle-print"):
+            self.path=path+".html"+suffix
+        return super().do_GET()
+    def end_headers(self):
+        settings=SITE_DIR/"_headers"
+        if settings.is_file():
+            for line in settings.read_text(encoding="utf-8").splitlines():
+                key,sep,value=line.strip().partition(": ")
+                if sep and key in ("Content-Security-Policy","Cache-Control",
+                                   "X-Content-Type-Options","Referrer-Policy"):
+                    self.send_header(key,value)
+        return super().end_headers()
+    def log_message(self,*args):
+        pass
 
 def check_pdf(page,mode):
     try:
@@ -72,42 +105,8 @@ def exercise(browser,label,width,height,scale,mobile,touch):
         viewport={"width":width,"height":height},device_scale_factor=scale,
         is_mobile=mobile,has_touch=touch
     )
-    # Cloudflare Pages redirects /fixture.html to /fixture. Previous ZIP tests
-    # used a plain Python HTTP server, so that real deployment behavior was missed.
-    # Mobile run simulates Pages' redirect AND its restrictive CSP, using only
-    # responses from the synthetic 127.0.0.1 test package.
-    if mobile:
-        csp=("default-src 'self' data: blob:; connect-src 'none'; "
-             "img-src 'self' data: blob:; frame-src 'self'; "
-             "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-             "font-src 'self' data:; base-uri 'none'; "
-             "form-action 'none'; object-src 'none'")
-        pages={"note-fixture","group-fixture","billing-print",
-               "external-billing-print","billing-bundle-print"}
-        def clean_url_route(route):
-            parts=urlsplit(route.request.url)
-            clean=parts.path.lstrip("/")
-            if clean.endswith(".html"):
-                target="/"+clean[:-5]+(("?"+parts.query) if parts.query else "")
-                route.fulfill(status=308,headers={"Location":target})
-                return
-            assert clean in pages,clean
-            response=context.request.get(ORIGIN+"/"+clean+".html")
-            assert response.ok,("missing fixture",clean,response.status)
-            route.fulfill(status=200,body=response.body(),headers={
-                "Content-Type":"text/html; charset=utf-8",
-                "Content-Security-Policy":csp})
-        def main_page_route(route):
-            response=context.request.get(ORIGIN+"/")
-            assert response.ok,("missing root",response.status)
-            route.fulfill(status=200,body=response.body(),headers={
-                "Content-Type":"text/html; charset=utf-8",
-                "Content-Security-Policy":csp})
-        context.route(re.compile("^"+re.escape(ORIGIN)+
-            r"/(?:note-fixture|group-fixture|billing-print|"
-            r"external-billing-print|billing-bundle-print)(?:\.html)?(?:\?.*)?$"),
-            clean_url_route)
-        context.route(ORIGIN+"/",main_page_route)
+    # Desktop uses the original local server. Mobile uses the separate
+    # real-HTTP Cloudflare route and CSP simulator (started by main()).
     external=[]
     def monitor(request):
         if not request.url.startswith(ORIGIN) and not request.url.startswith("data:"):
@@ -193,14 +192,23 @@ def exercise(browser,label,width,height,scale,mobile,touch):
           f" PDFs={page_totals}, zero external requests",flush=True)
 
 def main():
+    global ORIGIN
+    assert (SITE_DIR/"index.html").is_file() and (SITE_DIR/"_headers").is_file()
     with sync_playwright() as p:
         browser=p.chromium.launch(headless=True,channel="chrome") if (
             os.environ.get("P39_INV_USE_SYSTEM_CHROME")=="1"
         ) else p.chromium.launch(headless=True)
         exercise(browser,"desktop",1280,900,1,False,False)
-        exercise(browser,"mobile",390,844,2,True,True)
-        browser.close()
-    print("P39_3K_DEVICE_EMULATION_AND_NO_CLOUD_UAT_PASS",flush=True)
+        server=ThreadingHTTPServer(("127.0.0.1",8799),CloudflareCleanURLHandler)
+        threading.Thread(target=server.serve_forever,daemon=True).start()
+        try:
+            ORIGIN="http://127.0.0.1:8799"
+            exercise(browser,"mobile",390,844,2,True,True)
+        finally:
+            server.shutdown()
+            server.server_close()
+            browser.close()
+    print("P39_3K_DEVICE_EMULATION_AND_REAL_CLOUDFLARE_REDIRECT_CSP_PASS",flush=True)
 
 if __name__=="__main__":
     main()
