@@ -4,7 +4,7 @@ No live credentials, no real ERP business data, no external HTTP traffic.
 import os
 from io import BytesIO
 from pathlib import Path
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 from pypdf import PdfReader
 
 ORIGIN=os.environ.get("P39_3K_ORIGIN","http://127.0.0.1:8798")
@@ -64,7 +64,7 @@ def exercise(browser,label,width,height,scale,mobile,touch):
     errors=[]
     page.on("pageerror",lambda e:errors.append(str(e)))
     page.goto(ORIGIN+"/",wait_until="domcontentloaded")
-    page.wait_for_function("window.__p393kReady===true",timeout=30000)
+    page.locator("#status.ready").wait_for(timeout=30000)
     assert "沒有連雲端" in page.locator("#status").inner_text()
     assert not page.locator("button[data-pdf=merged]").is_disabled()
     body=page.locator("body").inner_text()
@@ -78,12 +78,7 @@ def exercise(browser,label,width,height,scale,mobile,touch):
     frame.locator('.p393-note-form input[name="reason"]').fill("P39-3K 合成虛構實機驗收")
     page.screenshot(path=str(SCREENSHOTS/(label+"_note_editor.png")),full_page=True)
     frame.locator(".p393-note-form button[type=submit]").click()
-    page.wait_for_function("""(expected)=>{
-      const child=document.querySelector('#note-frame').contentWindow;
-      return child?.KuSheERPStore?.getState()?.billings?.[0]?.publicNote===expected
-    }""",arg=NOTE,timeout=26000)
-    page.evaluate("window.__p393kRefresh()")
-    assert NOTE in page.locator("#current-note").inner_text()
+    expect(page.locator("#current-note")).to_contain_text(NOTE,timeout=26000)
     store=page.evaluate("""()=>{
       const s=document.querySelector('#note-frame').contentWindow.KuSheERPStore.getState();
       return {internal:s.billings[0].note,public:s.billings[0].publicNote,
