@@ -243,7 +243,8 @@ footer{margin-top:20px;font-size:12px;color:#687f92;text-align:center}
     doc.head.append(skin);
     const overlay=doc.createElement('div');overlay.className='erp-detail-overlay';
     overlay.innerHTML='<section class="erp-detail-card"><div class="erp-detail-body"></div></section>';
-    doc.getElementById('synthetic').append(overlay);
+    // P39-3I fixture has a bare body; mount into body, never assume group fixture markup.
+    doc.body.append(overlay);
     const row=noteWin.KuSheERPStore.getState().billings[0];
     const ok=noteWin.KusheP39BillingNote.mount(overlay,row,noteWin.KuSheERPStore.billingDocumentState(row.id),refresh);
     if(!ok)throw new Error('對外備註實際 UI 未掛載');
