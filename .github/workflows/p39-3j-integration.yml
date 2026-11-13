@@ -1,0 +1,155 @@
+name: P39-3J H+I isolated integration and cross-regression (synthetic)
+
+on:
+  push:
+    branches:
+      - p39-3j-integration-candidate-20261113
+    paths:
+      - '.github/workflows/p39-3j-integration.yml'
+      - '.p39-3h-tests/**'
+      - '.p39-3i-tests/**'
+      - '.p39-3j-tests/**'
+      - 'assets/js/external-billing-print.js'
+      - 'external-billing-print.html'
+      - 'assets/js/billing-bundle-print.js'
+      - 'billing-bundle-print.html'
+      - 'assets/js/erp-store.js'
+      - 'assets/js/billing.js'
+      - 'assets/js/billing-print.js'
+      - 'assets/js/p39-note-revision.js'
+      - 'assets/css/p39-note-revision.css'
+      - 'index.html'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-safety:
+    name: Branch + exact H and I blobs + 15-file no-cloud-write gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Ensure independent main base, exact source provenance, no other files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "p39-3j-integration-candidate-20261113"
+          git fetch --no-tags origin main
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p39-3j-changed.txt
+          cat /tmp/p39-3j-changed.txt
+          test "$(wc -l < /tmp/p39-3j-changed.txt)" -eq 15
+          if grep -Ev '^(\.github/workflows/p39-3j-integration\.yml$|\.p39-3h-tests/privacy_print\.test\.py$|\.p39-3i-tests/(fixture\.html|note_store\.test\.py)$|\.p39-3j-tests/cross_integration\.test\.py$|assets/js/(external-billing-print|billing-bundle-print|erp-store|billing|billing-print|p39-note-revision)\.js$|assets/css/p39-note-revision\.css$|external-billing-print\.html$|billing-bundle-print\.html$|index\.html$)' /tmp/p39-3j-changed.txt; then
+            echo "HOLD: unsupported file changed"; exit 1
+          fi
+          while read -r path expected; do
+            actual="$(git rev-parse "HEAD:$path")"
+            if [ "$actual" != "$expected" ]; then
+              echo "HOLD: H/I candidate file differs: $path"
+              exit 1
+            fi
+          done <<'EXPECTED_BLOBS'
+          assets/js/external-billing-print.js 9edc96b1bbcc84794b4b9169cdbaf647c5709681
+          external-billing-print.html e54062abbe83b319c9c787851ec270f4c35118ae
+          billing-bundle-print.html 1e4f4b62a7a26949cbeb985b1aa20a2205d1e830
+          assets/js/billing-bundle-print.js e9ed7876fd8eaccf1003fe00460b0da3e4983446
+          .p39-3h-tests/privacy_print.test.py 9e3f67d5eb760126267a562c6353b35b9e8903ad
+          assets/js/erp-store.js 2a1624d91c07017eecb502d967e37684b729666f
+          assets/js/billing-print.js 9b139fcb54b1c6618353b8d39116ee12ed984107
+          assets/js/billing.js 9b8af2bad30aeb84b4e7b10113f95da2185f5d2f
+          index.html c65c198457ab7605f3773ec42ded32d4475586e8
+          assets/js/p39-note-revision.js c27c778162ea48891505b703a2e6d9162eb1ef25
+          assets/css/p39-note-revision.css e13753ebd33b419c531506a46b9d9afeae189e8
+          .p39-3i-tests/fixture.html 6316aef57897624efc56f69e5e874143bba7abca
+          .p39-3i-tests/note_store.test.py c87ddedd4d7defe363cde3e14e7b6e752ed07bc0
+          EXPECTED_BLOBS
+          for forbidden in assets/js/invoices.js assets/js/billing-groups.js assets/js/banks.js assets/js/payroll.js assets/js/commissions.js assets/js/dashboard.js assets/js/reports.js assets/js/cloud-sync.js; do
+            ! grep -Fxq "$forbidden" /tmp/p39-3j-changed.txt
+          done
+          ! grep -q '^supabase/' /tmp/p39-3j-changed.txt
+          ! grep -q '^p39-candidate/' /tmp/p39-3j-changed.txt
+          echo "PASS: exactly the 13 accepted H/I source blobs plus one cross-test and one workflow"
+      - name: JavaScript syntax and original print projection regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          for js in assets/js/*.js; do node --check "$js"; done
+          node --test .p39-inv1a-tests/print_model.test.js
+          node --test .p39-inv1-tests/projection.test.js
+          python -m py_compile .p39-3h-tests/privacy_print.test.py .p39-3i-tests/note_store.test.py .p39-3j-tests/cross_integration.test.py
+
+  integrated-pdf-and-note:
+    name: Chrome A4 + note CAS + historic/group privacy + cross-module acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 24
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Start only 127.0.0.1 synthetic fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
+          for port in 8796 8797; do
+            python -m http.server "$port" --bind 127.0.0.1 > "/tmp/p39-3j-$port.log" 2>&1 &
+          done
+      - name: Original P39-INV-1B A4 18 rows and grouped summary
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: python .p39-inv1a-tests/pdf_display.test.py
+      - name: H privacy and I isolated Store-note acceptance
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: |
+          python .p39-3h-tests/privacy_print.test.py
+          python .p39-3i-tests/note_store.test.py
+      - name: J full synthetic cross-module note to 4 PDF outlets
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: python .p39-3j-tests/cross_integration.test.py
+      - name: Original invoice editor, billing group, Store and A4 layout
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: |
+          python .p39-inv1-tests/test_ui.py
+          python .p39-inv1-tests/test_store.py
+          python .p39-inv1-tests/layout_preflight.test.py
+
+  existing-finance:
+    name: P33/P34/P35/P36 receivables, commission, payroll, auth unchanged
+    runs-on: ubuntu-24.04
+    timeout-minutes: 26
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Start legacy synthetic regression tests on loopback
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+          for port in 8774 8784 8795 8796; do
+            python -m http.server "$port" --bind 127.0.0.1 > "/tmp/p39-3j-legacy-$port.log" 2>&1 &
+          done
+      - name: P33 original commission and conflict safety
+        run: python .p39-inv1-tests/chrome_legacy.py .p33-4-tests/regression.py
+      - name: P34 original payroll and historical finance
+        run: python .p39-inv1-tests/chrome_legacy.py .p34-tests/test.py
+      - name: P35 targeted historical correction and PDF
+        run: python .p39-inv1-tests/chrome_legacy.py .p35-tests/test_ui.py
+      - name: P36 owner and employee permission and recovery
+        run: python .p39-inv1-tests/chrome_legacy.py .p36-tests/test_permissions.py

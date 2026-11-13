@@ -5,7 +5,6 @@
   const normalizeName=(value)=>text(value).replace(/\s+/g,' ').toLocaleLowerCase('zh-Hant');
   const safeFile=(value)=>text(value).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/[. ]+$/g,'');
   const monthOf=(value)=>text(value).slice(0,7);
-  const invoiceLabel=(value)=>value==='no_invoice'?'免開發票':value==='invoiced'?'已開發票':value==='invoice_pending'?'待開發票':text(value);
 
   function customerIdentity(row){
     const customerId=text(row?.customer);
@@ -40,7 +39,6 @@
         projectName:text(view.project||row.projectName),
         date:text(view.date||row.date),
         taxMode:text(view.taxMode),
-        invoiceStatus:text(view.invoiceStatus),
         lines:Array.isArray(view.lines)?view.lines.map((line)=>({...line})):[],
         salesAmount:num(view.salesAmount),
         taxAmount:num(view.taxAmount),
@@ -66,8 +64,6 @@
       dateStart:dates[0]||'',
       dateEnd:dates.at(-1)||'',
       taxMode:commonLabel(billings.map((row)=>row.taxMode)),
-      invoiceStatus:commonLabel(billings.map((row)=>row.invoiceStatus)),
-      invoiceDisplay:commonLabel(billings.map((row)=>invoiceLabel(row.invoiceStatus))),
       billings,
       projects,
       totals,
@@ -78,7 +74,7 @@
 
   function openView(view,autoPrint){
     const payload=encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(view)))));
-    const url=new URL(`billing-bundle-print.html?v=p30-history-1&print=${autoPrint?'1':'0'}`,location.href);
+    const url=new URL(`billing-bundle-print.html?v=p39-3h-privacy1&print=${autoPrint?'1':'0'}`,location.href);
     url.hash=payload;
     location.assign(url.href);
   }
