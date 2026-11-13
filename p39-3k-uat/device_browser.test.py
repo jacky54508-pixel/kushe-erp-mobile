@@ -102,6 +102,16 @@ def check_pdf(page,mode):
     # Customer observed the small original-bundle PDF spilling into 2 pages.
     # For this 2-row synthetic fixture enforce one complete, readable A4 sheet.
     assert len(pages)>0 and (len(pages)==1 if mode in ("merged","bundle") else True),(mode,len(pages))
+    if mode=="bundle":
+        # Human Chrome print preview can show timestamp/URL headers and footers.
+        # Enforce the observed two-source fixture still fits on one A4 with those enabled.
+        print_with_headers=page.pdf(
+            format="A4",print_background=True,prefer_css_page_size=True,
+            display_header_footer=True,
+            header_template='<div style="font-size:8px;width:100%;margin-left:10mm">P39 synthetic</div>',
+            footer_template='<div style="font-size:8px;width:100%;margin-left:10mm">P39 test - <span class="pageNumber"></span>/<span class="totalPages"></span></div>')
+        assert len(PdfReader(BytesIO(print_with_headers)).pages)==1,(
+            "bundle must remain 1 A4 even with browser print headers/footers")
     for p in pages:
         w,h=map(float,(p.mediabox.width,p.mediabox.height))
         assert 594<=w<=596 and 841<=h<=843,(mode,w,h)
