@@ -4,6 +4,8 @@ No live credentials, no real ERP business data, no external HTTP traffic.
 import os
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import urlsplit
+import re
 from playwright.sync_api import sync_playwright, expect
 from pypdf import PdfReader
 
@@ -70,6 +72,42 @@ def exercise(browser,label,width,height,scale,mobile,touch):
         viewport={"width":width,"height":height},device_scale_factor=scale,
         is_mobile=mobile,has_touch=touch
     )
+    # Cloudflare Pages redirects /fixture.html to /fixture. Previous ZIP tests
+    # used a plain Python HTTP server, so that real deployment behavior was missed.
+    # Mobile run simulates Pages' redirect AND its restrictive CSP, using only
+    # responses from the synthetic 127.0.0.1 test package.
+    if mobile:
+        csp=("default-src 'self' data: blob:; connect-src 'none'; "
+             "img-src 'self' data: blob:; frame-src 'self'; "
+             "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+             "font-src 'self' data:; base-uri 'none'; "
+             "form-action 'none'; object-src 'none'")
+        pages={"note-fixture","group-fixture","billing-print",
+               "external-billing-print","billing-bundle-print"}
+        def clean_url_route(route):
+            parts=urlsplit(route.request.url)
+            clean=parts.path.lstrip("/")
+            if clean.endswith(".html"):
+                target="/"+clean[:-5]+(("?"+parts.query) if parts.query else "")
+                route.fulfill(status=308,headers={"Location":target})
+                return
+            assert clean in pages,clean
+            response=context.request.get(ORIGIN+"/"+clean+".html")
+            assert response.ok,("missing fixture",clean,response.status)
+            route.fulfill(status=200,body=response.body(),headers={
+                "Content-Type":"text/html; charset=utf-8",
+                "Content-Security-Policy":csp})
+        def main_page_route(route):
+            response=context.request.get(ORIGIN+"/")
+            assert response.ok,("missing root",response.status)
+            route.fulfill(status=200,body=response.body(),headers={
+                "Content-Type":"text/html; charset=utf-8",
+                "Content-Security-Policy":csp})
+        context.route(re.compile("^"+re.escape(ORIGIN)+
+            r"/(?:note-fixture|group-fixture|billing-print|"
+            r"external-billing-print|billing-bundle-print)(?:\.html)?(?:\?.*)?$"),
+            clean_url_route)
+        context.route(ORIGIN+"/",main_page_route)
     external=[]
     def monitor(request):
         if not request.url.startswith(ORIGIN) and not request.url.startswith("data:"):
@@ -89,6 +127,10 @@ def exercise(browser,label,width,height,scale,mobile,touch):
         SCREENSHOTS.mkdir(parents=True,exist_ok=True)
         page.screenshot(path=str(SCREENSHOTS/(label+"_boot_failure.png")),full_page=True)
         raise
+    if mobile:
+        # Confirm the browser really ended up on the Cloudflare canonical paths.
+        seen={urlsplit(frame.url).path for frame in page.frames}
+        assert "/note-fixture" in seen and "/group-fixture" in seen,seen
     assert "沒有連雲端" in page.locator("#status").inner_text()
     assert not page.locator("button[data-pdf=merged]").is_disabled()
     body=page.locator("body").inner_text()
