@@ -15,12 +15,22 @@ NOTE="P39-3K 虛構驗收－對外備註確認"
 INTERNAL="原始合成備註"
 
 def check_pdf(page,mode):
-    if mode in ("single","merged"):
-        page.wait_for_function("window.__billingPrintReady===true",timeout=30000)
-    elif mode=="bundle":
-        page.wait_for_function("window.__billingBundlePrintReady===true",timeout=30000)
-    else:
-        page.wait_for_function("document.querySelector('#print').disabled===false",timeout=30000)
+    try:
+        if mode in ("single","merged"):
+            page.wait_for_function("window.__billingPrintReady===true",timeout=14000)
+        elif mode=="bundle":
+            page.wait_for_function("window.__billingBundlePrintReady===true",timeout=14000)
+        else:
+            page.wait_for_function("document.querySelector('#print').disabled===false",timeout=14000)
+    except Exception:
+        print("PDF_BOOT_FAIL",mode,"url=",page.url,flush=True)
+        try:
+            print("PDF_TITLE",page.title(),flush=True)
+            print("PDF_BODY",page.locator("body").inner_text(timeout=2000)[:1400],flush=True)
+            print("PDF_LOCATION",page.evaluate("location.href"),flush=True)
+        except Exception as inner:
+            print("PDF_DIAGNOSTIC_FAILURE",str(inner)[:600],flush=True)
+        raise
     body=page.locator("#paper").inner_text()
     assert "無法讀取" not in body and "無法匯出" not in body,(mode,body[:1200])
     assert NOTE in body,(mode,body[:1100])
