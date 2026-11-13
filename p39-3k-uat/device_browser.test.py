@@ -116,6 +116,12 @@ def exercise(browser,label,width,height,scale,mobile,touch):
     page=context.new_page()
     errors=[]
     page.on("pageerror",lambda e:errors.append(str(e)))
+    if mobile:
+        page.on("console",lambda msg: print("CLOUDFLARE_CONSOLE",msg.type,msg.text[:280],flush=True)
+            if msg.type in ("error","warning") else None)
+        page.on("requestfailed",lambda req: print("CLOUDFLARE_REQUEST_FAILED",req.url,req.failure,flush=True))
+        page.on("response",lambda resp: print("CLOUDFLARE_4XX",resp.status,resp.url,flush=True)
+            if resp.status>=400 else None)
     page.goto(ORIGIN+"/",wait_until="domcontentloaded")
     try:
         page.locator("#status.ready").wait_for(timeout=30000)
@@ -124,6 +130,17 @@ def exercise(browser,label,width,height,scale,mobile,touch):
         print("UAT_FEEDBACK:",page.locator("#feedback").inner_text(),flush=True)
         print("UAT_PAGE_ERRORS:",errors,flush=True)
         print("UAT_FRAME_URLS:",[frame.url for frame in page.frames],flush=True)
+        if mobile:
+            for frame in page.frames:
+                try:
+                    print("UAT_FRAME_ENV",frame.url,frame.evaluate("""()=>({
+                        ready:document.readyState,
+                        hasERP:!!window.KuSheERPStore,
+                        hasSources:!!window.__p39synthetic,
+                        scripts:[...document.scripts].map(x=>x.src||"<inline>")
+                    })"""),flush=True)
+                except Exception as err:
+                    print("UAT_FRAME_ENV_ERROR",str(err)[:250],flush=True)
         SCREENSHOTS.mkdir(parents=True,exist_ok=True)
         page.screenshot(path=str(SCREENSHOTS/(label+"_boot_failure.png")),full_page=True)
         raise
