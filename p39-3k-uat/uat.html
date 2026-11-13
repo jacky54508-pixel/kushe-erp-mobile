@@ -253,9 +253,19 @@ footer{margin-top:20px;font-size:12px;color:#687f92;text-align:center}
     overlay.innerHTML='<section class="erp-detail-card"><div class="erp-detail-body"></div></section>';
     // P39-3I fixture has a bare body; mount into body, never assume group fixture markup.
     doc.body.append(overlay);
-    const row=noteWin.KuSheERPStore.getState().billings[0];
-    const ok=noteWin.KusheP39BillingNote.mount(overlay,row,noteWin.KuSheERPStore.billingDocumentState(row.id),refresh);
-    if(!ok)throw new Error('對外備註實際 UI 未掛載');
+    // UAT shell only: refresh the left-side note card after commit.
+    // The real P39-3I Store writer, internal note, and financial ledgers are untouched.
+    const renderCurrentNotePanel=()=>{
+      overlay.querySelector('.p393-note-panel')?.remove();
+      const fresh=noteWin.KuSheERPStore.getState().billings[0];
+      const ok=noteWin.KusheP39BillingNote.mount(
+        overlay,fresh,noteWin.KuSheERPStore.billingDocumentState(fresh.id),()=>{
+          refresh();
+          renderCurrentNotePanel();
+        });
+      if(!ok)throw new Error('對外備註卡片重新載入失敗');
+    };
+    renderCurrentNotePanel();
     refresh();
     status.textContent='本機虛構測試已就緒（沒有連雲端）';
     status.classList.add('ready');
