@@ -64,7 +64,7 @@ jobs:
           assets/js/billing.js 9b8af2bad30aeb84b4e7b10113f95da2185f5d2f
           index.html c65c198457ab7605f3773ec42ded32d4475586e8
           assets/js/p39-note-revision.js c27c778162ea48891505b703a2e6d9162eb1ef25
-          assets/css/p39-note-revision.css e13753ebd33b419c531506a46b9d9afeae189e8
+          assets/css/p39-note-revision.css e13753ebd33b419c531506a46b9d9afeae189e8e
           .p39-3i-tests/fixture.html 6316aef57897624efc56f69e5e874143bba7abca
           .p39-3i-tests/note_store.test.py c87ddedd4d7defe363cde3e14e7b6e752ed07bc0
           EXPECTED_BLOBS

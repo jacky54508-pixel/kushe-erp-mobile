@@ -130,7 +130,10 @@ def verify_external_group(ctx,doc,historical):
     else:
         page.wait_for_url("**/billing-print.html?*",timeout=22000)
         page.wait_for_function("window.__billingPrintReady===true",timeout=22000)
-        assert page.locator(".grouped-item-summary").count()==1
+        # This 2-line synthetic group uses the compact source template.
+        # The grouped-item summary is verified separately with the 18-line A4 test.
+        assert page.locator(".merged-scope").count()==1
+        assert page.locator(".grouped-item-summary").count()==0
         assert page.locator(".invoice-ref-section").count()==0
         public_payload=page.evaluate("""()=>{
           return JSON.parse(decodeURIComponent(escape(atob(
