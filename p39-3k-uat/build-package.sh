@@ -13,7 +13,7 @@ for p in billing-print.html billing-bundle-print.html external-billing-print.htm
   cp "$p" "$output/$p"
 done
 for p in \
-  erp-store.js billing-print.js billing-bundle-print.js p39-note-revision.js \
+  erp-store.js billing-print.js billing-bundle-print.js display-sort.js p39-note-revision.js \
   external-billing-print.js external-billing-invoice.js external-billing-invoice-ui.js \
   invoices.js billing-groups.js; do
   cp "assets/js/$p" "$output/assets/js/$p"
@@ -74,7 +74,24 @@ if grep -R -n -i -E 'https?://[^[:space:]"<>]+\.supabase\.co|service_role|SUPABA
 fi
 for p in note-fixture.html group-fixture.html billing-print.html billing-bundle-print.html \
  external-billing-print.html assets/js/erp-store.js assets/js/p39-note-revision.js \
- assets/js/billing-bundle-print.js assets/js/external-billing-print.js assets/css/p39-note-revision.css; do
+ assets/js/display-sort.js assets/js/billing-bundle-print.js assets/js/external-billing-print.js assets/css/p39-note-revision.css; do
   test -s "$output/$p" || { echo "HOLD: missing artifact $p";exit 1; }
 done
+# Static HTML script/stylesheet/iframe refs must all resolve inside the synthetic package.
+python - "$output" <<'PY'
+from pathlib import Path
+from urllib.parse import urlsplit
+import re,sys
+root=Path(sys.argv[1])
+for html in root.glob("*.html"):
+    source=html.read_text(encoding="utf-8")
+    for raw in re.findall(r'<(?:script|link|iframe)\b[^>]*?(?:src|href)\s*=\s*"([^"]+)"',source,re.I):
+        local=urlsplit(raw).path
+        if not local or raw.startswith(("https:","http:","//","data:")):
+            continue
+        file=root/local.lstrip("/") if local.startswith("/") else html.parent/local
+        if not file.is_file():
+            raise SystemExit("HOLD: missing referenced static asset: %s in %s"%(local,html.name))
+print("PASS: every HTML script/link/iframe reference is bundled locally")
+PY
 echo "PASS: P39-3K synthetic-only static UAT package at $output"
