@@ -1,0 +1,139 @@
+name: P39-3K independent synthetic mobile-desktop UAT (never deploy)
+
+on:
+  push:
+    branches:
+      - p39-3k-device-uat-candidate-20261113
+    paths:
+      - 'p39-3k-uat/**'
+      - '.github/workflows/p39-3k-device-uat.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  safety-and-package:
+    name: P39-3J pinned base / no production code changes / synthetic package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Confirm only 3K UAT artifacts changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "p39-3k-device-uat-candidate-20261113"
+          git fetch --no-tags origin p39-3j-integration-candidate-20261113
+          test "$(git merge-base origin/p39-3j-integration-candidate-20261113 HEAD)" = "c5aa1c388c2db64568086629ef3dc5629cc6b70c"
+          test "$(git rev-parse HEAD:assets/js/erp-store.js)" = "2a1624d91c07017eecb502d967e37684b729666f"
+          test "$(git rev-parse HEAD:assets/js/external-billing-print.js)" = "9edc96b1bbcc84794b4b9169cdbaf647c5709681"
+          git diff --name-only origin/p39-3j-integration-candidate-20261113...HEAD > /tmp/p39-3k-whitelist.txt
+          test "$(wc -l < /tmp/p39-3k-whitelist.txt)" -eq 4
+          cat /tmp/p39-3k-whitelist.txt
+          for required in \
+            p39-3k-uat/uat.html p39-3k-uat/build-package.sh \
+            p39-3k-uat/device_browser.test.py .github/workflows/p39-3k-device-uat.yml; do
+            grep -Fxq "$required" /tmp/p39-3k-whitelist.txt
+          done
+          test -z "$(grep -Ev '^(p39-3k-uat/(uat\.html|build-package\.sh|device_browser\.test\.py)|\.github/workflows/p39-3k-device-uat\.yml)$' /tmp/p39-3k-whitelist.txt || true)"
+          test ! -e p39-3k-uat/config.js
+          test ! -e p39-3k-uat/cloud-sync.js
+          python -m py_compile p39-3k-uat/device_browser.test.py
+          echo "PASS: synthetic UAT artifacts only; production and candidate core unchanged"
+      - name: Build strict no-cloud static preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash p39-3k-uat/build-package.sh /tmp/p39-3k-dist
+          find /tmp/p39-3k-dist -type f | sort
+      - name: Upload read-only UAT package
+        uses: actions/upload-artifact@v4
+        with:
+          name: P39-3K-ISOLATED-SYNTHETIC-UAT
+          path: /tmp/p39-3k-dist/
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: error
+
+  browser-uat:
+    name: Real Chrome desktop + 390px phone emulation + four PDF outlets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 24
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Prepare isolated static package and loopback-only servers
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
+          bash p39-3k-uat/build-package.sh /tmp/p39-3k-site
+          python -m http.server 8798 --bind 127.0.0.1 --directory /tmp/p39-3k-site > /tmp/p39-3k-uat-server.log 2>&1 &
+          python -m http.server 8797 --bind 127.0.0.1 > /tmp/p39-3k-source-server.log 2>&1 &
+          python -m http.server 8796 --bind 127.0.0.1 > /tmp/p39-3k-note-server.log 2>&1 &
+      - name: Run desktop/mobile note editor and four PDF previews; deny all external connections
+        shell: bash
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+          P39_3K_ORIGIN: "http://127.0.0.1:8798"
+          P39_3K_SCREENSHOTS: /tmp/p39-3k-screenshots
+        run: python p39-3k-uat/device_browser.test.py
+      - name: Recheck P39-3H/I/J integrated acceptance on original synthetic source
+        shell: bash
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: |
+          set -euo pipefail
+          python .p39-3h-tests/privacy_print.test.py
+          python .p39-3i-tests/note_store.test.py
+          python .p39-3j-tests/cross_integration.test.py
+          python .p39-inv1a-tests/pdf_display.test.py
+          python .p39-inv1-tests/test_ui.py
+          python .p39-inv1-tests/test_store.py
+          python .p39-inv1-tests/layout_preflight.test.py
+      - name: Upload non-production desktop/mobile UAT screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: P39-3K-DESKTOP-MOBILE-CHROME-SCREENSHOTS
+          path: /tmp/p39-3k-screenshots/
+          retention-days: 30
+          if-no-files-found: warn
+
+  existing-erp:
+    name: Original P33-P36 finance, payroll, auth and recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 26
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Run original synthetic protections on loopback
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+          for port in 8774 8784 8795 8796; do
+            python -m http.server "$port" --bind 127.0.0.1 > "/tmp/p39-3k-$port.log" 2>&1 &
+          done
+      - name: P33 original commission and conflict safety
+        run: python .p39-inv1-tests/chrome_legacy.py .p33-4-tests/regression.py
+      - name: P34 original payroll and historical finance
+        run: python .p39-inv1-tests/chrome_legacy.py .p34-tests/test.py
+      - name: P35 targeted historical correction and PDF
+        run: python .p39-inv1-tests/chrome_legacy.py .p35-tests/test_ui.py
+      - name: P36 owner and employee permission and recovery
+        run: python .p39-inv1-tests/chrome_legacy.py .p36-tests/test_permissions.py

@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; connect-src 'none'; img-src 'self' data: blob:; frame-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; base-uri 'none'; form-action 'none'; object-src 'none'">
+<title>酷舍 ERP｜P39-3K 安全實機驗收（虛構資料）</title>
+<style>
+:root{color-scheme:light;--ink:#19324e;--ink2:#41566d;--muted:#6b7d8e;--border:#dce5ed;--bg:#f3f6f9;--primary:#087b72;--accent:#e5f5f1;--warning:#8c5418}
+*{box-sizing:border-box}html,body{margin:0;width:100%;max-width:100%;min-width:0;overflow-x:hidden}body{font-family:"Microsoft JhengHei","Noto Sans TC",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.55}
+header{background:#17334e;color:#fff;padding:22px max(18px,calc((100% - 1110px)/2)) 20px}
+header h1{font-size:clamp(23px,3vw,30px);font-weight:800;margin:0 0 4px}
+header p{margin:0;font-size:13px;color:#c9dce9}
+main{margin:auto;max-width:1110px;padding:24px 18px 58px}
+.warning{background:#fff8e8;border:1px solid #ead4aa;color:var(--warning);padding:15px 17px;border-radius:12px;font-size:14px;margin-bottom:20px}
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.status{border-radius:20px;padding:6px 12px;background:#e8eef4;color:#395267;font-size:12px;font-weight:750}
+.status.ready{background:#e3f6f0;color:#087a56}
+.chip{font-size:12px;padding:6px 9px;color:#64788b;border:1px solid #cfdbe6;border-radius:20px}
+.layout{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:18px;align-items:start}
+.card{background:#fff;border:1px solid var(--border);border-radius:15px;box-shadow:0 3px 15px #16374b0b;min-width:0;overflow:hidden}
+.card h2{font-size:17px;margin:0 0 7px}.card p{font-size:13px;color:var(--ink2);margin:0 0 10px}
+.inner{padding:21px}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--primary);font-weight:800}
+.note-area{border-top:1px solid var(--border);padding:0 12px 10px;background:#f8fbfd}
+#note-frame{display:block;width:100%;height:445px;border:0;background:#f8fbfd;border-radius:10px}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:17px 0 13px}
+button{min-height:52px;border:1px solid #c8dadf;border-radius:9px;background:#f9fcfc;color:#16445a;padding:11px;font-family:inherit;font-weight:760;font-size:13px;cursor:pointer;text-align:left}
+button:hover{border-color:#138e80;background:#edf8f5}button:focus-visible{outline:3px solid #76c8bd;outline-offset:2px}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+button small{font-weight:500;display:block;opacity:.78;font-size:11px;margin-top:4px}
+#current-note{border:1px solid #cae5df;background:#f0faf7;border-radius:10px;padding:12px 14px;min-height:52px;color:#1d625c;overflow-wrap:anywhere}
+.numbers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0}
+.numbers>div{border:1px solid #e2eaf0;background:#fbfcfd;border-radius:9px;padding:10px}
+.numbers b{display:block;font-size:17px;color:#1a4356}.numbers small{display:block;color:#6e8294;font-size:11px}
+.guide{display:grid;gap:8px}.guide article{border-top:1px solid #e4edf2;padding:10px 0;font-size:13px}
+.guide b{color:#173d52}.guide span{color:var(--ink2)}
+.message{font-size:12px;color:#526b7d;min-height:21px;margin-top:6px}
+footer{margin-top:20px;font-size:12px;color:#687f92;text-align:center}
+[hidden]{display:none!important}
+@media(max-width:750px){header{padding:20px 16px}main{padding:16px 12px 46px}.layout{grid-template-columns:1fr}.inner{padding:17px}.note-area{padding:0 8px 10px}#note-frame{height:480px}.actions{grid-template-columns:1fr 1fr}button{min-height:57px;font-size:12px;padding:9px}}
+@media(max-width:360px){.actions{grid-template-columns:1fr}#note-frame{height:510px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>酷舍 ERP｜P39-3K 實機驗收</h1>
+  <p>僅供手機／電腦檢查版面和流程 · 獨立測試 · 不涉及正式帳務</p>
+</header>
+<main>
+  <div class="warning" role="note">
+    <b>僅使用虛構資料。</b>本測試包未載入正式登入、Supabase 設定或雲端同步程式。下方所有編輯只作用於此測試網站的本機虛構紀錄。<b>不可拿本頁向建商請款。</b>
+  </div>
+  <div class="bar">
+    <span class="status" id="status" role="status">正在載入本機虛構測試...</span>
+    <span class="chip">P39-3J 驗收版本</span>
+    <span class="chip">不連正式資料庫</span>
+    <span class="chip">僅本機測試</span>
+  </div>
+  <div class="layout">
+    <section class="card" aria-labelledby="note-title">
+      <div class="inner">
+        <div class="eyebrow">測試 01 · 備註修訂</div>
+        <h2 id="note-title">已送出請款單－修改對外備註</h2>
+        <p>先在下方選擇「修訂備註」，填寫新的對外備註與修改原因；儲存後確認原本的內部備註和應收金額不變。</p>
+      </div>
+      <div class="note-area">
+        <iframe id="note-frame" src="/note-fixture.html" title="虛構請款單與對外備註修訂區" loading="eager"></iframe>
+      </div>
+    </section>
+    <div style="display:grid;gap:18px;min-width:0">
+      <section class="card">
+        <div class="inner">
+          <div class="eyebrow">測試 02 · PDF 預覽</div>
+          <h2>開啟四種請款 PDF</h2>
+          <p>可用手機或電腦點開。確認沒有原發票號碼、日期及對照表，且施工明細、彙總、稅額和總額正確。</p>
+          <div class="actions">
+            <button type="button" data-pdf="single" disabled>單一請款單<small>確認新對外備註</small></button>
+            <button type="button" data-pdf="merged" class="primary" disabled>18 筆合併請款<small>A4 單頁＋施工項目彙總</small></button>
+            <button type="button" data-pdf="historical" disabled>歷史保存版本<small>無原發票對照</small></button>
+            <button type="button" data-pdf="bundle" disabled>原單合併 PDF<small>不顯示發票狀態</small></button>
+          </div>
+          <div class="message" id="feedback" role="status">請先確認本機虛構資料載入完成。</div>
+        </div>
+      </section>
+      <section class="card">
+        <div class="inner">
+          <div class="eyebrow">測試 03 · 金額與資料保護</div>
+          <h2>虛構帳務核對</h2>
+          <div class="numbers">
+            <div><small>單一請款原應收</small><b>NT$100,000</b></div>
+            <div><small>單一請款含稅</small><b>NT$105,000</b></div>
+            <div><small>合併請款未稅合計</small><b>NT$300,000</b></div>
+            <div><small>合併請款含稅合計</small><b>NT$315,000</b></div>
+          </div>
+          <p>目前對外備註：</p>
+          <div id="current-note">尚未載入</div>
+          <div class="message" id="protected-status">原內部備註：載入中</div>
+        </div>
+      </section>
+      <section class="card">
+        <div class="inner">
+          <div class="eyebrow">驗收檢查</div>
+          <h2>手機與電腦皆應通過</h2>
+          <div class="guide">
+            <article><b>備註：</b> <span>可編輯、可取消、需輸入修訂原因，內部備註不改。</span></article>
+            <article><b>PDF：</b> <span>四種預覽皆能打開；客戶版不顯示原發票資訊。</span></article>
+            <article><b>版面：</b> <span>手機文字清楚可讀、不會橫向跑版；桌面顯示整齊。</span></article>
+            <article><b>安全：</b> <span>不會登入正式 ERP、不會新增真實收款或修改銀行流水。</span></article>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+  <iframe id="group-frame" src="/group-fixture.html" title="虛構合併請款資料" hidden></iframe>
+  <footer>KuShe ERP P39-3K · Synthetic UAT only · No production credentials or cloud data</footer>
+</main>
+<script>
+(function(){
+  'use strict';
+  const $=s=>document.querySelector(s);
+  const noteFrame=$('#note-frame'),groupFrame=$('#group-frame'),status=$('#status');
+  let noteWin=null,groupWin=null;
+  const encode=data=>encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(data)))));
+  const insertScript=(win,path)=>new Promise((resolve,reject)=>{
+    const s=win.document.createElement('script');
+    s.src=path;s.onload=resolve;s.onerror=()=>reject(new Error('載入檔案失敗：'+path));
+    win.document.body.appendChild(s);
+  });
+  const whenLoaded=frame=>new Promise(resolve=>{
+    if(frame.contentDocument?.readyState==='complete')return resolve();
+    frame.addEventListener('load',resolve,{once:true});
+  });
+  function noteValue(){
+    const b=noteWin?.KuSheERPStore?.getState()?.billings?.[0];
+    return b?String(b.publicNote??''):'';
+  }
+  function refresh(){
+    const b=noteWin?.KuSheERPStore?.getState()?.billings?.[0];
+    if(!b)return;
+    $('#current-note').textContent=b.publicNote===undefined?'（未指定對外備註）':b.publicNote||'（對外備註已清空）';
+    $('#protected-status').textContent='原內部備註：'+b.note+'｜原應收金額：NT$'+
+      Number(noteWin.KuSheERPStore.getState().receivables[0].amount).toLocaleString('zh-TW');
+  }
+  function noteDocument(){
+    return noteWin.KusheBillingPrint.buildExternalView(noteWin.KuSheERPStore.getState().billings[0]);
+  }
+  function merged18(){
+    const src=noteDocument(),lines=Array.from({length:18},(_,i)=>{
+      const value=i===17?28000:16000;
+      return {house:'SYN-'+String(i+1).padStart(2,'0'),
+        item:i<7?'虛構地坪美容':i<17?'虛構鋁窗美容':'虛構門扇修繕',
+        unit:'式',qty:1,price:value,amount:value,sourcePricingType:'external-document'};
+    });
+    return {schema:'kushe-external-document-v1',documentType:'billing',title:'請款單',
+      customer:'虛構建商',project:'虛構甲區',date:'2026-11-13',taxMode:'未稅',
+      invoiceStatus:'invoice_pending',lines,
+      salesAmount:300000,taxAmount:15000,totalAmount:315000,retentionAmount:0,
+      receivableAmount:315000,publicNote:src.publicNote,
+      isMergedExternalBilling:true,mergedBillingProjects:['虛構甲區','虛構乙區'],
+      company:src.company,fileName:'P39-3K_虛構合併請款單.pdf'};
+  }
+  function groupDoc(statusValue){
+    const sources=groupWin.__p39synthetic.sources.map(s=>JSON.parse(JSON.stringify(s)));
+    const totals=groupWin.KuSheERPStore.externalBillingContext(sources.map(s=>s.document.billingId)).totals;
+    const lines=sources.flatMap(s=>s.document.originalLines.map(l=>({
+      house:l.house,item:l.item,unit:l.unit,qty:l.qty,price:l.price,amount:l.subtotal
+    })));
+    return {schema:'kushe-external-billing-group-v2',status:statusValue,
+      detailMode:'unified',revision:2,updatedAt:'2026-11-13T00:00:00.000Z',
+      documentDate:'2026-11-13',note:noteValue(),customerName:'虛構建商',
+      sourceSnapshots:sources.map(s=>s.document),
+      settlementSnapshots:sources.map(s=>s.settlement),
+      sourceIds:sources.map(s=>s.document.billingId),
+      targetBillingId:sources[0].document.billingId,
+      displayProjectName:sources[0].document.projectName,totals,
+      unified:{taxMode:'未稅',lines,total:300000,target:300000,reason:''}};
+  }
+  function originalBundle(){
+    const rows=groupWin.__p39synthetic.sources.map(s=>{
+      const d=s.document,a=d.anchors;
+      return {id:d.billingId,customer:d.customerId,customerName:d.customerName,
+        project:d.projectId,projectName:d.projectName,number:d.number,date:d.date,
+        invoiceStatus:d.invoiceStatus,invoiceNo:d.invoiceNo,
+        _publicView:{number:d.number,customer:d.customerName,project:d.projectName,
+          date:d.date,taxMode:d.taxMode,invoiceStatus:d.invoiceStatus,
+          lines:d.originalLines.map(l=>({house:l.house,item:l.item,unit:l.unit,qty:l.qty,
+            price:l.price,amount:l.subtotal})),
+          salesAmount:a.untaxed,taxAmount:a.tax,totalAmount:a.grossTotal,
+          retentionAmount:a.retention,receivableAmount:a.receivable,
+          publicNote:noteValue(),
+          company:{name:'酷舍企業有限公司',englishName:'Cool Sir Limited Company',
+            taxId:'82980636',address:'台中市豐原區瑞興路 62 號'}}};
+    });
+    return groupWin.KusheBillingBundlePrint.buildCombinedView(rows);
+  }
+  function preview(which){
+    if(!noteWin||!groupWin)throw new Error('測試資料尚未載入');
+    const payload=which==='single'?noteDocument():which==='merged'?merged18():
+      which==='bundle'?originalBundle():{
+        schema:'kushe-external-billing-print-v1',historical:true,document:groupDoc('archived')
+      };
+    const path=which==='bundle'?'/billing-bundle-print.html':
+      which==='historical'?'/external-billing-print.html':'/billing-print.html';
+    const url=new URL(path+'?print=0',location.href);
+    url.hash=encode(payload);
+    const tab=window.open(url.href,'_blank','noopener,noreferrer');
+    $('#feedback').textContent='已開啟 '+({single:'單一請款',merged:'18 筆合併請款',historical:'歷史保存版本',bundle:'原單合併'}[which])+' 的虛構 PDF 預覽；可在新分頁列印。';
+    return Boolean(tab);
+  }
+  async function boot(){
+    await Promise.all([whenLoaded(noteFrame),whenLoaded(groupFrame)]);
+    noteWin=noteFrame.contentWindow;
+    groupWin=groupFrame.contentWindow;
+    if(!noteWin?.KuSheERPStore||!groupWin?.__p39synthetic)
+      throw new Error('虛構資料初始化失敗，已阻止操作');
+    await noteWin.KuSheERPStore.load();
+    await Promise.all([
+      insertScript(noteWin,'/assets/js/p39-note-revision.js'),
+      insertScript(noteWin,'/assets/js/billing-print.js'),
+      insertScript(groupWin,'/assets/js/billing-bundle-print.js')
+    ]);
+    groupWin.KusheBillingPrint={buildExternalView:row=>row._publicView};
+    const doc=noteWin.document;
+    const css=doc.createElement('link');css.rel='stylesheet';css.href='/assets/css/p39-note-revision.css';doc.head.append(css);
+    const skin=doc.createElement('style');
+    skin.textContent='html,body{margin:0!important;background:#f8fbfd!important;font-family:"Microsoft JhengHei",system-ui,sans-serif;overflow-x:hidden}.erp-detail-overlay{position:relative;inset:auto;padding:0;display:block}.erp-detail-card{width:100%;border:0;box-shadow:none;background:transparent}.erp-detail-body{padding:0}.p393-note-panel{margin:0;border:0;box-shadow:none;background:transparent}.p393-note-heading{align-items:flex-start}.p393-note-heading h3{font-size:15px}.p393-note-current{margin:12px 0}';
+    doc.head.append(skin);
+    const overlay=doc.createElement('div');overlay.className='erp-detail-overlay';
+    overlay.innerHTML='<section class="erp-detail-card"><div class="erp-detail-body"></div></section>';
+    doc.getElementById('synthetic').append(overlay);
+    const row=noteWin.KuSheERPStore.getState().billings[0];
+    const ok=noteWin.KusheP39BillingNote.mount(overlay,row,noteWin.KuSheERPStore.billingDocumentState(row.id),refresh);
+    if(!ok)throw new Error('對外備註實際 UI 未掛載');
+    refresh();
+    status.textContent='本機虛構測試已就緒（沒有連雲端）';
+    status.classList.add('ready');
+    document.querySelectorAll('[data-pdf]').forEach(b=>b.disabled=false);
+    $('#feedback').textContent='請先在左側修改備註，接著開啟四種虛構 PDF。';
+    window.__p393kReady=true;
+    window.__p393kPreview=preview;
+    window.__p393kRefresh=refresh;
+  }
+  document.querySelectorAll('[data-pdf]').forEach(button=>button.addEventListener('click',()=>{
+    try{preview(button.dataset.pdf)}catch(e){$('#feedback').textContent='無法開啟：'+e.message;}
+  }));
+  boot().catch(error=>{
+    status.textContent='安全停止：'+(error.message||String(error));
+    status.classList.remove('ready');
+    $('#feedback').textContent='未進行任何資料操作。請檢查是否使用獨立的本機測試網站。';
+    console.error('P39-3K UAT blocked:',error);
+  });
+})();
+</script>
+</body>
+</html>
