@@ -1,0 +1,16 @@
+/* P39-3I candidate: scoped note editor. Does not affect existing ERP layout outside this panel. */
+.p393-note-panel{margin:18px 0 0;padding:16px;border:1px solid #d6e3f3;border-radius:12px;background:#f8fbff}
+.p393-note-heading{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center}
+.p393-note-heading h3{margin:0;font-size:17px;color:#17395b}
+.p393-note-heading p{margin:6px 0;color:#5a6f85;font-size:13px;line-height:1.6;max-width:580px}
+.p393-note-current{font-size:14px;line-height:1.6;overflow-wrap:anywhere}
+.p393-note-history{font-size:12px;color:#63758a;margin:6px 0}
+.p393-note-error,.p393-note-locked,.p393-note-feedback{font-size:13px;line-height:1.6;color:#9b3f24}
+.p393-note-form{display:grid;gap:12px;margin-top:14px;padding:14px;border:1px solid #dce5f0;border-radius:10px;background:#fff}
+.p393-note-form[hidden]{display:none}
+.p393-note-form label{display:grid;gap:6px;font-size:13px;font-weight:600;color:#243b55}
+.p393-note-form textarea,.p393-note-form input{width:100%;min-width:0;padding:10px 12px;border:1px solid #b9c9dd;border-radius:8px;font:inherit}
+.p393-note-form textarea{min-height:88px;resize:vertical}
+.p393-note-form p{font-size:12px;color:#63758a;margin:0}
+.p393-note-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+@media(max-width:640px){.p393-note-heading>button{width:100%}.p393-note-actions button{flex:1}}
