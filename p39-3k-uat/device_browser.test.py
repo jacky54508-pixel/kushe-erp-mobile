@@ -86,12 +86,22 @@ def check_pdf(page,mode):
         assert page.locator(".invoice-table").count()==0
     if mode=="bundle":
         assert page.locator(".project-section").count()==2
+        assert page.locator("#paper.uat-compact-bundle").count()==1
+        assert page.locator(".project-section .detail tbody tr").count()==2
+        assert page.locator(".grand-summary").count()==1
+        assert "$315,000" in page.locator(".grand-summary").inner_text()
+    if mode in ("single","merged","bundle"):
+        assert page.locator("#formalCompanySeal").count()==0,(mode,"seal image leaked")
+        assert page.locator(".synthetic-seal-placeholder").count()==1,(mode,"seal placeholder absent")
+        assert "虛構測試｜未提供公司大小章" in page.locator(".synthetic-seal-placeholder").inner_text()
     if mode in ("merged","historical","bundle"):
         assert "$315,000" in body,(mode,body[:900])
     page.emulate_media(media="print")
     pdf=page.pdf(format="A4",print_background=True,prefer_css_page_size=True)
     pages=PdfReader(BytesIO(pdf)).pages
-    assert len(pages)>0 and (len(pages)==1 if mode=="merged" else True),(mode,len(pages))
+    # Customer observed the small original-bundle PDF spilling into 2 pages.
+    # For this 2-row synthetic fixture enforce one complete, readable A4 sheet.
+    assert len(pages)>0 and (len(pages)==1 if mode in ("merged","bundle") else True),(mode,len(pages))
     for p in pages:
         w,h=map(float,(p.mediabox.width,p.mediabox.height))
         assert 594<=w<=596 and 841<=h<=843,(mode,w,h)
@@ -161,6 +171,10 @@ def exercise(browser,label,width,height,scale,mobile,touch):
     page.screenshot(path=str(SCREENSHOTS/(label+"_note_editor.png")),full_page=True)
     frame.locator(".p393-note-form button[type=submit]").click()
     expect(page.locator("#current-note")).to_contain_text(NOTE,timeout=26000)
+    expect(frame.locator(".p393-note-current")).to_contain_text(NOTE,timeout=15000)
+    expect(frame.locator(".p393-note-history")).to_contain_text("1 筆",timeout=15000)
+    assert frame.locator("[data-p393-open]").is_enabled()
+    assert frame.locator(".p393-note-form").is_hidden()
     store=page.evaluate("""()=>{
       const s=document.querySelector('#note-frame').contentWindow.KuSheERPStore.getState();
       return {internal:s.billings[0].note,public:s.billings[0].publicNote,
