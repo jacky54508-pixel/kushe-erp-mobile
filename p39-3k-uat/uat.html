@@ -128,23 +128,31 @@ footer{margin-top:20px;font-size:12px;color:#687f92;text-align:center}
     s.src=path;s.onload=resolve;s.onerror=()=>reject(new Error('載入檔案失敗：'+path));
     win.document.body.appendChild(s);
   });
-  const whenLoaded=frame=>new Promise(resolve=>{
+  // Cloudflare Pages redirects .html URLs to extensionless routes. The
+  // actual fixture must still have the expected same-origin canonical path.
+  const canonicalPagePath=path=>path.replace(/\.html$/i,'').replace(/\/+$/,'')||'/';
+  const whenLoaded=frame=>new Promise((resolve,reject)=>{
     const expected=new URL(frame.getAttribute('src'),location.href);
+    let settled=false;
     const hasRealDocument=()=>{
       try{
-        return frame.contentWindow.location.pathname===expected.pathname&&
+        const actual=new URL(frame.contentWindow.location.href);
+        return actual.origin===expected.origin&&
+          canonicalPagePath(actual.pathname)===canonicalPagePath(expected.pathname)&&
           frame.contentDocument?.readyState==='complete';
       }catch(_){return false;}
     };
-    if(hasRealDocument())return resolve();
-    const onLoad=()=>{
-      // Browser iframes start at about:blank before their requested URL is ready.
-      // Never expose a test action until the *actual* synthetic fixture loaded.
-      if(!hasRealDocument())return;
+    const onLoad=()=>{if(hasRealDocument())finish();};
+    const timer=setTimeout(()=>finish(new Error('虛構測試頁面載入逾時：'+expected.pathname)),15000);
+    function finish(error){
+      if(settled)return;
+      settled=true;
+      clearTimeout(timer);
       frame.removeEventListener('load',onLoad);
-      resolve();
-    };
+      if(error)reject(error);else resolve();
+    }
     frame.addEventListener('load',onLoad);
+    if(hasRealDocument())finish();
   });
   function noteValue(){
     const b=noteWin?.KuSheERPStore?.getState()?.billings?.[0];
