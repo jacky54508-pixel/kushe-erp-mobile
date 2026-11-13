@@ -50,7 +50,7 @@ cat > "$output/驗收須知.txt" <<'EOF'
 再開啟 http://127.0.0.1:8797/
 
 二、手機實機
-此包尚未部署。要手機跨裝置開啟，請先經安全審核後放在「全新獨立」的測試站，
+此包包含虛構公司聯絡資訊及三種 PDF 測試浮水印，尚未部署。要手機跨裝置開啟，請先經安全審核後放在「全新獨立」的測試站，
 例如 Cloudflare Pages Direct Upload；絕對不要覆蓋正式 GitHub Pages 或 P37 測試站。
 發佈前須再次核對 _headers CSP 及完整的檔案白名單。
 
@@ -63,6 +63,46 @@ cat > "$output/驗收須知.txt" <<'EOF'
 
 重要：此為離線虛構 UAT 包，不是正式 ERP 網址，不進行任何正式發布。
 EOF
+# P39-3K-1: sanitize the ZIP output only; never modify the source ERP.
+# The source CI-tested logic and data/financial modules stay untouched.
+python - "$output" <<'PY'
+from pathlib import Path
+import sys
+root=Path(sys.argv[1])
+changes={
+  "82980636":"00000000",
+  "台中市豐原區瑞興路 62 號":"虛構測試地址",
+  "eing0519":"TEST-ONLY"
+}
+watermark="""
+/* P39-3K-1 synthetic-only print watermark, does not affect A4 layout. */
+body::after{content:"虛構測試 · 禁止對外請款";position:fixed;left:50%;top:52%;transform:translate(-50%,-50%) rotate(-24deg);font-family:"Microsoft JhengHei",system-ui,sans-serif;font-size:30px;font-weight:900;letter-spacing:.18em;white-space:nowrap;color:rgba(133,75,75,.16);pointer-events:none;z-index:9999}
+@media print{body::after{font-size:31px;color:rgba(122,69,69,.13);-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+"""
+printed={"billing-print.html","billing-bundle-print.html","external-billing-print.html"}
+for path in root.rglob("*"):
+  if not path.is_file() or path.suffix not in (".html",".js",".css",".txt"):
+    continue
+  contents=path.read_text(encoding="utf-8")
+  for old,new in changes.items():
+    contents=contents.replace(old,new)
+  if path.name in printed:
+    if contents.count("</style>")!=1:
+      raise SystemExit("HOLD: unexpected print layout source: "+path.name)
+    contents=contents.replace("</style>",watermark+"</style>")
+  path.write_text(contents,encoding="utf-8")
+for path in root.rglob("*"):
+  if path.is_file() and path.suffix in (".html",".js",".css",".txt"):
+    contents=path.read_text(encoding="utf-8")
+    if any(real in contents for real in changes):
+      raise SystemExit("HOLD: live company contact field leaked in synthetic package: "+path.name)
+for name in printed:
+  contents=(root/name).read_text(encoding="utf-8")
+  if contents.count("虛構測試 · 禁止對外請款")!=1:
+    raise SystemExit("HOLD: test watermark missing in "+name)
+print("PASS: public test ZIP sanitizes business contact fields and watermarks every PDF",flush=True)
+PY
+
 for bad in config.js cloud-sync.js auth-gate.js app.js settings.js; do
   if test -e "$output/assets/js/$bad"; then
     echo "HOLD: forbidden business/config module in synthetic bundle $bad" >&2;exit 1
