@@ -90,6 +90,64 @@ for path in root.rglob("*"):
     if contents.count("</style>")!=1:
       raise SystemExit("HOLD: unexpected print layout source: "+path.name)
     contents=contents.replace("</style>",watermark+"</style>")
+
+  if path.name in {"billing-print.html","billing-bundle-print.html"}:
+    # Public UAT only: never ship the true seal or a broken img element.
+    # The original ERP HTML and asset loading code remain unmodified.
+    oldseal='<img class="seal" id="formalCompanySeal" alt="公司大小章" onerror="this.hidden=true">'
+    if contents.count(oldseal)!=1:
+      raise SystemExit("HOLD: expected exactly one synthetic seal image source in "+path.name)
+    placeholder='<span class="synthetic-seal-placeholder" role="note">虛構測試｜未提供公司大小章</span>'
+    contents=contents.replace(oldseal,placeholder)
+    sealcss="""
+.synthetic-seal-placeholder{display:inline-flex;align-items:center;justify-content:center;max-width:100%;padding:1.2mm 2.5mm;border:.2mm dashed #a6b8c9;border-radius:1.5mm;color:#667e91;font-size:8pt;line-height:1.35;font-weight:700;text-align:center;overflow-wrap:anywhere}
+"""
+    contents=contents.replace("</style>",sealcss+"</style>")
+  if path.name=="billing-bundle-print.html":
+    # Synthetic two-source, two-line UAT only. Preserve all source rows,
+    # each per-source total, the final total, and signatures.
+    # For longer real-style documents there is deliberately NO forced scaling.
+    compactcss="""
+@page{size:A4 portrait;margin:6mm 10mm 7mm}
+@media print{
+ .paper.uat-compact-bundle .head{padding-bottom:2mm}
+ .paper.uat-compact-bundle .company h1{font-size:18pt}
+ .paper.uat-compact-bundle .doc-title h2{font-size:19pt}
+ .paper.uat-compact-bundle .info{margin:2.2mm 0 2.4mm;padding:1.6mm;gap:1mm 2mm}
+ .paper.uat-compact-bundle .info>div{min-height:7.5mm;padding:1mm 1.8mm;font-size:8.5pt;line-height:1.18}
+ .paper.uat-compact-bundle .info .label{font-size:7.2pt;width:18mm;margin-right:1.8mm}
+ .paper.uat-compact-bundle .project-section{margin-top:2.6mm}
+ .paper.uat-compact-bundle .project-heading{padding:1.6mm 2.5mm}
+ .paper.uat-compact-bundle .project-heading h2{font-size:10.5pt}
+ .paper.uat-compact-bundle .project-heading p{margin:.5mm 0 0;font-size:7.3pt}
+ .paper.uat-compact-bundle .detail th,
+ .paper.uat-compact-bundle .detail td{padding:1.1mm 1.2mm;font-size:8pt;line-height:1.25}
+ .paper.uat-compact-bundle .project-footer{padding:1.7mm 2.3mm;gap:2mm}
+ .paper.uat-compact-bundle .project-note{font-size:7.8pt;line-height:1.25}
+ .paper.uat-compact-bundle .project-summary>div{padding:.7mm 0;font-size:7.9pt;line-height:1.2}
+ .paper.uat-compact-bundle .grand-summary{margin:3mm 0 0 auto;width:min(100%,100mm)}
+ .paper.uat-compact-bundle .grand-summary h2{font-size:9.3pt;padding:1.6mm 2.8mm}
+ .paper.uat-compact-bundle .grand-summary>div{min-height:6.2mm;padding:.8mm 2.8mm;font-size:8.2pt;line-height:1.15}
+ .paper.uat-compact-bundle .grand-summary strong{font-size:9.3pt}
+ .paper.uat-compact-bundle .grand-summary .total strong,
+ .paper.uat-compact-bundle .grand-summary .receivable strong{font-size:10.5pt}
+ .paper.uat-compact-bundle .sign{margin-top:3mm;gap:10mm}
+ .paper.uat-compact-bundle .client-sign{padding-top:5mm;font-size:8pt}
+ .paper.uat-compact-bundle .seal-wrap{height:17mm}
+}
+"""
+    contents=contents.replace("</style>",compactcss+"</style>")
+    marker="    const autoPrint=new URLSearchParams(location.search).get('print')==='1';"
+    if contents.count(marker)!=1:
+      raise SystemExit("HOLD: legacy bundle print code changed, no safe compact hook")
+    compactjs="""
+    // P39-3K-7: only two tiny synthetic source bills may use single-page compact CSS.
+    const uatCompact=(data.schema==='kushe-combined-billing-v1'&&billings.length===2&&
+      billings.every(row=>Array.isArray(row.lines)&&row.lines.length>0&&row.lines.length<=2&&
+        String(row.publicNote||'').length<=240));
+    if(uatCompact)paper.classList.add('uat-compact-bundle');
+"""
+    contents=contents.replace(marker,compactjs+marker)
   path.write_text(contents,encoding="utf-8")
 for path in root.rglob("*"):
   if path.is_file() and path.suffix in (".html",".js",".css",".txt"):
@@ -100,6 +158,15 @@ for name in printed:
   contents=(root/name).read_text(encoding="utf-8")
   if contents.count("虛構測試 · 禁止對外請款")!=1:
     raise SystemExit("HOLD: test watermark missing in "+name)
+for name in ("billing-print.html","billing-bundle-print.html"):
+  contents=(root/name).read_text(encoding="utf-8")
+  if contents.count("虛構測試｜未提供公司大小章")!=1 or '<img class="seal" id="formalCompanySeal"' in contents:
+    raise SystemExit("HOLD: leaked or broken test seal in "+name)
+contents=(root/"billing-bundle-print.html").read_text(encoding="utf-8")
+if "uat-compact-bundle" not in contents:
+  raise SystemExit("HOLD: synthetic two-source print fitting CSS missing")
+print("PASS: no real stamp, no broken images, two-source print compact mode gated")
+
 print("PASS: public test ZIP sanitizes business contact fields and watermarks every PDF",flush=True)
 PY
 
