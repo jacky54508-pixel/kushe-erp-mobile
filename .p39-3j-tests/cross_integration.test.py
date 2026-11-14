@@ -132,13 +132,17 @@ def verify_external_group(ctx,doc,historical):
         page.wait_for_function("window.__billingPrintReady===true",timeout=22000)
         # This 2-line synthetic group uses the compact source template.
         # The grouped-item summary is verified separately with the 18-line A4 test.
-        assert page.locator(".merged-scope").count()==1
+        # P39-3K-10: source zone names are internal only; public scope is target.
+        assert page.locator(".merged-scope").count()==0
         assert page.locator(".grouped-item-summary").count()==0
         assert page.locator(".invoice-ref-section").count()==0
         public_payload=page.evaluate("""()=>{
           return JSON.parse(decodeURIComponent(escape(atob(
             decodeURIComponent(location.hash.slice(1))))));
         }""")
+        assert public_payload["mergedBillingProjects"]==[doc["displayProjectName"]]
+        assert public_payload["project"]==doc["displayProjectName"]
+        assert doc["sourceSnapshots"][1]["projectName"] not in str(public_payload)
         assert "sourceInvoiceReferences" not in public_payload
         assert "invoiceNo" not in public_payload
         assert public_payload["publicNote"]==PUBLIC_NOTE
