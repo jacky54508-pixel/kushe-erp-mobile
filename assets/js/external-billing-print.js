@@ -45,8 +45,9 @@
     const sourceInvoiceReferences=window.KusheExternalBillingInvoice.project(d.sourceSnapshots,d.totals);
     // Do not send per-original invoice numbers, dates, or amounts to a customer PDF URL.
     // Keep only the public merged-project scope. All internal snapshots stay unchanged.
-    const mergedBillingProjects=[...new Set(sourceInvoiceReferences.rows.map(
-      row=>String(row.projectName||'').trim()).filter(Boolean))];
+    // P39-3K-11: disclose only the verified target project in customer PDF.
+    // Keep original source snapshots and invoice reconciliation internal.
+    const mergedBillingProjects=[String(d.displayProjectName||'').trim()];
     const template=payload.template;
     if(template&&(template.schema!=='kushe-original-billing-template-v1'||template.billingId!==d.targetBillingId))throw new Error('所選案場與原請款模板不一致，請重新開啟 PDF');
     const unified=d.schema==='kushe-external-billing-group-v2',modes=unified?[d.unified.taxMode]:[...new Set(d.sections.map(section=>section.taxMode))];
