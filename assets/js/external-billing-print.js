@@ -64,7 +64,7 @@
       foreign.forEach(source=>{
         const name=String(source.projectName||'').trim();
         if(name)blockedTokens.add(name);
-        const area=name.match(/([A-Za-z]\\s*區)$/);
+        const area=name.match(/([A-Za-z]\s*區)$/);
         if(area)blockedTokens.add(area[1]);
         (source.originalLines||[]).forEach(line=>{
           const house=String(line.house||'').trim();
