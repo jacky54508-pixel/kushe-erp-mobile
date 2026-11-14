@@ -79,7 +79,7 @@ footer{margin-top:20px;font-size:12px;color:#687f92;text-align:center}
             <button type="button" data-pdf="single" disabled>單一請款單<small>確認新對外備註</small></button>
             <button type="button" data-pdf="merged" class="primary" disabled>18 筆合併請款<small>A4 單頁＋施工項目彙總</small></button>
             <button type="button" data-pdf="historical" disabled>歷史保存版本<small>無原發票對照</small></button>
-            <button type="button" data-pdf="bundle" disabled>原單合併 PDF<small>不顯示發票狀態</small></button>
+            <button type="button" data-pdf="bundle" disabled>合併至 A 區（對外）<small>只顯示目標區；其他區金額完整納入</small></button>
           </div>
           <div class="message" id="feedback" role="status">請先確認本機虛構資料載入完成。</div>
         </div>
@@ -180,7 +180,7 @@ footer{margin-top:20px;font-size:12px;color:#687f92;text-align:center}
       invoiceStatus:'invoice_pending',lines,
       salesAmount:300000,taxAmount:15000,totalAmount:315000,retentionAmount:0,
       receivableAmount:315000,publicNote:src.publicNote,
-      isMergedExternalBilling:true,mergedBillingProjects:['虛構甲區','虛構乙區'],
+      isMergedExternalBilling:true,mergedBillingProjects:['虛構甲區'],
       company:src.company,fileName:'P39-3K_虛構合併請款單.pdf'};
   }
   function groupDoc(statusValue){
@@ -219,16 +219,19 @@ footer{margin-top:20px;font-size:12px;color:#687f92;text-align:center}
   }
   function preview(which){
     if(!noteWin||!groupWin)throw new Error('測試資料尚未載入');
+    // Customer PDF always uses the selected targetBillingId one-zone external
+    // projection. The legacy per-original bundle remains internal-only.
     const payload=which==='single'?noteDocument():which==='merged'?merged18():
-      which==='bundle'?originalBundle():{
+      which==='bundle'?{schema:'kushe-external-billing-print-v1',
+        document:groupDoc('active')}:{
         schema:'kushe-external-billing-print-v1',historical:true,document:groupDoc('archived')
       };
-    const path=which==='bundle'?'/billing-bundle-print.html':
-      which==='historical'?'/external-billing-print.html':'/billing-print.html';
+    const path=(which==='bundle'||which==='historical')?
+      '/external-billing-print.html':'/billing-print.html';
     const url=new URL(path+'?print=0',location.href);
     url.hash=encode(payload);
     const tab=window.open(url.href,'_blank','noopener,noreferrer');
-    $('#feedback').textContent='已開啟 '+({single:'單一請款',merged:'18 筆合併請款',historical:'歷史保存版本',bundle:'原單合併'}[which])+' 的虛構 PDF 預覽；可在新分頁列印。';
+    $('#feedback').textContent='已開啟 '+({single:'單一請款',merged:'18 筆合併請款',historical:'歷史保存版本',bundle:'合併至 A 區（對外）'}[which])+' 的虛構 PDF 預覽；可在新分頁列印。';
     return Boolean(tab);
   }
   async function boot(){
