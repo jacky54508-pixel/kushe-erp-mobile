@@ -75,6 +75,46 @@ test('Customer PDF target zone projection works but original house identifiers s
  assert.equal(view.project,'虛構 L 區');
  assert.deepEqual(view.mergedBillingProjects,['虛構 L 區']);
  assert.equal(view.totalAmount,52500);
- assert.deepEqual(view.lines.map(l=>l.house),['L1','M5']);
- console.log('KNOWN PRIVACY GAP: source-area house marker M5 is still present in customer PDF print model');
+ assert.deepEqual(view.lines.map(l=>l.house),['','']);
+ assert.equal(view.customerZoneOnly,true);
+ assert.equal(view.lines.reduce((sum,l)=>sum+l.amount,0),50000);
+ assert.ok(!JSON.stringify(view).includes('M5'));
+ assert.ok(!JSON.stringify(view).includes('虛構 M 區'));
+ console.log('PASS: cross-zone customer print model omits original source houses without changing amounts');
+});
+
+test('Customer PDF rejects foreign source zone disclosures in public note or item',()=>{
+ const source=functionText(ext,'function originalTemplateView(payload,d){',"  document.getElementById('close').onclick=");
+ const window={KusheExternalBillingInvoice:{project(sources){return{rows:sources.map(s=>({projectName:s.projectName}))};}}};
+ const build=new Function('window',source+';return originalTemplateView;')(window);
+ const original={schema:'kushe-external-billing-group-v2',targetBillingId:'target',displayProjectName:'耀時代L區',documentDate:'2026-11-14',customerName:'虛構客戶',note:'',
+   sourceSnapshots:[{billingId:'target',projectName:'耀時代L區',invoiceStatus:'no_invoice',originalLines:[{house:'L1'}]},{billingId:'other',projectName:'耀時代M區',invoiceStatus:'no_invoice',originalLines:[{house:'M5'}]}],
+   unified:{taxMode:'未稅',lines:[{house:'M5',item:'牆面修補',unit:'式',qty:1,price:500,amount:500}]},
+   totals:{untaxed:500,tax:0,grossTotal:500,retention:0,receivable:500}};
+ const before=JSON.stringify(original);
+ assert.equal(build({},original).lines[0].house,'');
+ for(const text of ['耀時代M區','M區','M5'])assert.throws(()=>build({},{...original,note:text}),/來源區域資訊/);
+ assert.throws(()=>build({},{...original,unified:{...original.unified,lines:[{house:'M5',item:'M區施工',unit:'式',qty:1,price:500,amount:500}]}}),/來源區域資訊/);
+ assert.equal(JSON.stringify(original),before);
+});
+test('Quotation revision review rejects note-only negotiation and shows actual price delta',()=>{
+ const quotes=fs.readFileSync('assets/js/quotations.js','utf8');
+ const start=quotes.indexOf('function quotationNegotiationReview('),end=quotes.indexOf('  function openEditor(',start);
+ assert.ok(start>=0&&end>start);
+ const store={quotationTotals(lines,tax,mode,lump){const amount=mode==='lump_sum'?Number(lump||0):lines.reduce((sum,line)=>sum+Number(line.qty||0)*Number(line.price||0),0);return {amount,tax:Math.round(amount*.05),total:Math.round(amount*1.05)};}};
+ const review=new Function('store',quotes.slice(start,end)+';return quotationNegotiationReview;')(store);
+ const original={amount:1248000,taxMode:'未稅',pricingMode:'actual',lines:[{item:'鋁窗美容',qty:52,price:24000}]};
+ const noteOnly=review(original,{...original,internalNote:'議價降為每戶23500'});
+ assert.equal(noteOnly.noteOnly,true);assert.equal(noteOnly.delta,0);
+ const adjusted=review(original,{...original,internalNote:'議價降為每戶23500',lines:[{item:'鋁窗美容',qty:52,price:23500}]});
+ assert.equal(adjusted.noteOnly,false);assert.equal(adjusted.priceChanged,true);assert.equal(adjusted.delta,-26000);
+ assert.ok(quotes.includes('if(row?.revisionOf&&[\'已送出\',\'已確認\'].includes(values.status))'));
+ assert.ok(quotes.includes('if(source.revisionOf&&[\'已送出\',\'已確認\'].includes(nextStatus))'));
+});
+test('Cross-zone customer render excludes matrix and original-house detail when flag set',()=>{
+ const html=fs.readFileSync('billing-print.html','utf8');
+ assert.ok(html.includes("customerZoneOnly=d.documentType==='billing'&&d.customerZoneOnly===true"));
+ assert.ok(html.includes('const matrix=!isQuote&&!customerZoneOnly&&houses.length?'));
+ assert.ok(html.includes('const denseInvoiceGroup=isMergedExternalBilling&&!customerZoneOnly&&'));
+ assert.ok(html.includes("!customerZoneOnly&&x.sourcePricingType==='historical-supplement'"));
 });
