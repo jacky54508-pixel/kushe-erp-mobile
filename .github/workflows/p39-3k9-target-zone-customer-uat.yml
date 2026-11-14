@@ -39,7 +39,7 @@ jobs:
             p39-3k-uat/device_browser.test.py .github/workflows/p39-3k9-target-zone-customer-uat.yml; do
             grep -Fxq "$required" /tmp/p39-3k-whitelist.txt
           done
-          test -z "$(grep -Ev '^(p39-3k-uat/(uat\.html|build-package\.sh|device_browser\.test\.py)|\.github/workflows/p39-3k7-visual-pdf-note\.yml)$' /tmp/p39-3k-whitelist.txt || true)"
+          test -z "$(grep -Ev '^(p39-3k-uat/(uat\.html|build-package\.sh|device_browser\.test\.py)|\.github/workflows/p39-3k9-target-zone-customer-uat\.yml)$' /tmp/p39-3k-whitelist.txt || true)"
           test ! -e p39-3k-uat/config.js
           test ! -e p39-3k-uat/cloud-sync.js
           python -m py_compile p39-3k-uat/device_browser.test.py
