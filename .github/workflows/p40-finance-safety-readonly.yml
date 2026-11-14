@@ -1,0 +1,120 @@
+name: P40 independent finance and PDF safety diagnostics (synthetic only, never deploy)
+
+on:
+  push:
+    branches:
+      - p40-finance-audit-commission-discount-pdf-candidate-20261114
+    paths:
+      - '.p39-inv1a-tests/**'
+      - '.p39-inv1-tests/test_ui.py'
+      - '.p39-inv1-tests/layout_preflight.test.py'
+      - '.github/workflows/p40-finance-safety-readonly.yml'
+      - 'assets/js/external-billing-invoice.js'
+      - 'assets/js/external-billing-print.js'
+      - 'billing-print.html'
+      - '.p40-audit-tests/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-safety:
+    name: Commit, only print code, no Store or production changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Exact main SHA, no production-code changes, candidate-only tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "p40-finance-audit-commission-discount-pdf-candidate-20261114"
+          git fetch --no-tags origin main
+          base_sha="af086215cc783b279cd7e629f0466b9c70d4b1de"
+          test "$(git rev-parse FETCH_HEAD)" = "$base_sha" || { echo "HOLD: main moved"; exit 1; }
+          test "$(git merge-base "$base_sha" HEAD)" = "$base_sha" || { echo "HOLD: not based on approved main"; exit 1; }
+          git diff --name-only "$base_sha"...HEAD > /tmp/p40-files.txt
+          cat /tmp/p40-files.txt
+          python - <<'PY'
+          from pathlib import Path
+          actual=set(Path("/tmp/p40-files.txt").read_text().splitlines())
+          allowed={".p40-audit-tests/financial_safety.test.cjs",".github/workflows/p40-finance-safety-readonly.yml"}
+          assert actual==allowed,(actual,allowed)
+          print("PASS: all production-code and business-data files remain untouched")
+          PY
+          for frozen in assets/js/erp-store.js assets/js/commissions.js assets/js/billing.js assets/js/quotations.js assets/js/external-billing-print.js billing-print.html; do
+            if git cat-file -e "$base_sha:$frozen" 2>/dev/null; then
+              test "$(git rev-parse HEAD:"$frozen")" = "$(git rev-parse "$base_sha":"$frozen")"
+            fi
+          done
+      - name: Validate all JavaScript and candidate print-only logic
+        run: |
+          set -euo pipefail
+          for file in assets/js/*.js; do node --check "$file"; done
+          node --check .p39-inv1a-tests/print_model.test.js
+          node --test .p39-inv1a-tests/print_model.test.js
+          node --test .p39-inv1-tests/projection.test.js
+          node --test .p40-audit-tests/financial_safety.test.cjs
+
+  chrome-pdf:
+    name: Actual Chrome A4 PDF, 18 rows, dates, scope, and phone
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Use preinstalled Chrome and loopback-only synthetic fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
+          python -m http.server 8797 --bind 127.0.0.1 > /tmp/p39-inv1a-8797.log 2>&1 &
+      - name: P39-INV-1B print-only A4 and internal-ID masking
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: python .p39-inv1a-tests/pdf_display.test.py
+      - name: P39-INV-1 internal editor, private external print, original Store tests
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: |
+          python .p39-inv1-tests/test_ui.py
+          python .p39-inv1-tests/test_store.py
+          python .p39-inv1-tests/layout_preflight.test.py
+
+  existing-erp:
+    name: Original P33 P34 P35 P36 accounting, payroll, auth unchanged
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Use existing tests with preinstalled Chrome
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+          for port in 8774 8784 8795 8796; do
+            python -m http.server "$port" --bind 127.0.0.1 > "/tmp/p39-inv1a-$port.log" 2>&1 &
+          done
+      - name: P33 original commission and conflict safety
+        run: python .p39-inv1-tests/chrome_legacy.py .p33-4-tests/regression.py
+      - name: P34 original payroll / historical finance
+        run: python .p39-inv1-tests/chrome_legacy.py .p34-tests/test.py
+      - name: P35 targeted historical correction and PDF
+        run: python .p39-inv1-tests/chrome_legacy.py .p35-tests/test_ui.py
+      - name: P36 original owner / employee permission recovery
+        run: python .p39-inv1-tests/chrome_legacy.py .p36-tests/test_permissions.py
