@@ -1,4 +1,4 @@
-name: P40 independent finance and PDF safety diagnostics (synthetic only, never deploy)
+name: P40 discount revision and customer-zone PDF isolated candidate (never deploy)
 
 on:
   push:
@@ -12,6 +12,7 @@ on:
       - 'assets/js/external-billing-invoice.js'
       - 'assets/js/external-billing-print.js'
       - 'billing-print.html'
+      - 'assets/js/quotations.js'
       - '.p40-audit-tests/**'
   workflow_dispatch:
 
@@ -20,7 +21,7 @@ permissions:
 
 jobs:
   source-safety:
-    name: Commit, only print code, no Store or production changes
+    name: Main-pinned isolated candidate whitelist, no Store changes
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
@@ -28,7 +29,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Exact main SHA, no production-code changes, candidate-only tests
+      - name: Exact main SHA and strict P40 print/quotation UI whitelist
         shell: bash
         run: |
           set -euo pipefail
@@ -42,11 +43,11 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           actual=set(Path("/tmp/p40-files.txt").read_text().splitlines())
-          allowed={".p40-audit-tests/financial_safety.test.cjs",".github/workflows/p40-finance-safety-readonly.yml"}
+          allowed={".p40-audit-tests/financial_safety.test.cjs",".p40-audit-tests/customer_zone_pdf.test.py",".github/workflows/p40-finance-safety-readonly.yml","assets/js/external-billing-print.js","billing-print.html","assets/js/quotations.js"}
           assert actual==allowed,(actual,allowed)
-          print("PASS: all production-code and business-data files remain untouched")
+          print("PASS: only P40 customer print, quotation UI, and synthetic tests changed")
           PY
-          for frozen in assets/js/erp-store.js assets/js/commissions.js assets/js/billing.js assets/js/quotations.js assets/js/external-billing-print.js billing-print.html; do
+          for frozen in assets/js/erp-store.js assets/js/commissions.js assets/js/billing.js assets/js/payroll.js assets/js/cloud-sync.js assets/js/invoices.js; do
             if git cat-file -e "$base_sha:$frozen" 2>/dev/null; then
               test "$(git rev-parse HEAD:"$frozen")" = "$(git rev-parse "$base_sha":"$frozen")"
             fi
@@ -82,6 +83,10 @@ jobs:
         env:
           P39_INV_USE_SYSTEM_CHROME: "1"
         run: python .p39-inv1a-tests/pdf_display.test.py
+      - name: P40 cross-zone customer A4 privacy with only grouped items
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: python .p40-audit-tests/customer_zone_pdf.test.py
       - name: P39-INV-1 internal editor, private external print, original Store tests
         env:
           P39_INV_USE_SYSTEM_CHROME: "1"
