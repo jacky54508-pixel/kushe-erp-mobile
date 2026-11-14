@@ -39,6 +39,7 @@ def main():
         # Non-cross-zone view retains historical house display behavior.
         d['customerZoneOnly']=False
         page.goto(encode(d),wait_until='load')
+        page.reload(wait_until='load')  # hash-only navigation is same-document, force renderer reload
         assert 'M2' in page.locator('#paper').inner_text()
         browser.close()
     print('PASS P40: customer PDF A4 one page, only target zone + grouped items, original values unchanged')
