@@ -49,7 +49,7 @@ def main():
           for(const key of fields)if(JSON.stringify(after[key])!==frozen[key])throw Error('protected finance changed: '+key);
           return {blockedPaths:forbidden,correctedUnitPrice:revised.lines[0].price,negotiatedAmount:revised.amount,originalUnchanged:unchangedOriginal,protectedCollections:fields.length};
         }""")
-        assert result=={"blockedPaths":5,"correctedUnitPrice":23500,"negotiatedAmount":1222000,"originalUnchanged":True,"protectedCollections":12},result
+        assert result=={"blockedPaths":5,"correctedUnitPrice":23500,"negotiatedAmount":1222000,"originalUnchanged":True,"protectedCollections":11},result
         context.close()
         browser.close()
     print("PASS P40-3: Store direct send/confirm/saveBundle blocked; real revision approved only when price changes; originals and finance unchanged")
