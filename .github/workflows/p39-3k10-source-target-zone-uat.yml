@@ -36,13 +36,13 @@ jobs:
           test "$(git rev-parse HEAD:assets/js/erp-store.js)" = "$(git rev-parse "$base_sha":assets/js/erp-store.js)"
           git diff --name-only "$base_sha"...HEAD > /tmp/p39-3k10-whitelist.txt
           cat /tmp/p39-3k10-whitelist.txt
-          test "$(wc -l < /tmp/p39-3k10-whitelist.txt)" -eq 4
-          for required in assets/js/external-billing-print.js p39-3k-uat/build-package.sh .p39-3j-tests/cross_integration.test.py .github/workflows/p39-3k10-source-target-zone-uat.yml; do
+          test "$(wc -l < /tmp/p39-3k10-whitelist.txt)" -eq 5
+          for required in assets/js/external-billing-print.js p39-3k-uat/build-package.sh .p39-3j-tests/cross_integration.test.py .p39-3k10-tests/reload_isolation.test.py .github/workflows/p39-3k10-source-target-zone-uat.yml; do
             grep -Fxq "$required" /tmp/p39-3k10-whitelist.txt
           done
           python - <<'PY'
           from pathlib import Path
-          allowed={"assets/js/external-billing-print.js","p39-3k-uat/build-package.sh",".p39-3j-tests/cross_integration.test.py",".github/workflows/p39-3k10-source-target-zone-uat.yml"}
+          allowed={"assets/js/external-billing-print.js","p39-3k-uat/build-package.sh",".p39-3j-tests/cross_integration.test.py",".p39-3k10-tests/reload_isolation.test.py",".github/workflows/p39-3k10-source-target-zone-uat.yml"}
           changed=set(Path("/tmp/p39-3k10-whitelist.txt").read_text().splitlines())
           assert changed==allowed,(changed-allowed,allowed-changed)
           source=Path("assets/js/external-billing-print.js").read_text()
@@ -109,6 +109,13 @@ jobs:
           python .p39-inv1-tests/test_ui.py
           python .p39-inv1-tests/test_store.py
           python .p39-inv1-tests/layout_preflight.test.py
+      - name: Test two-tab stale conflict and browser reload using synthetic store
+        shell: bash
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: |
+          set -euo pipefail
+          python .p39-3k10-tests/reload_isolation.test.py
       - name: Upload non-production desktop/mobile UAT screenshots
         if: always()
         uses: actions/upload-artifact@v4
