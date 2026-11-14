@@ -1,0 +1,133 @@
+name: P40-5B main-pinned quotation approval only (never deploy)
+
+on:
+  push:
+    branches:
+      - p40-5b-quote-approval-only-main-base-20261114
+    paths:
+      - '.github/workflows/p40-5b-quote-release-gate.yml'
+      - 'assets/js/erp-store.js'
+      - 'assets/js/quotations.js'
+      - '.p40-5b-tests/quotation_approval.test.cjs'
+      - '.p40-5b-tests/revision_store.test.py'
+      - '.p40-5b-tests/revision_store.html'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-safety:
+    name: P40-5B minimal scope and source tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify pinned main ancestry, exact file whitelist and protected code
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "p40-5b-quote-approval-only-main-base-20261114"
+          git fetch --no-tags origin main
+          base_sha="af086215cc783b279cd7e629f0466b9c70d4b1de"
+          test "$(git rev-parse FETCH_HEAD)" = "$base_sha" || { echo "HOLD: official main has moved"; exit 1; }
+          test "$(git merge-base "$base_sha" HEAD)" = "$base_sha" || { echo "HOLD: candidate not based on official main"; exit 1; }
+          git diff --name-only "$base_sha"...HEAD > /tmp/p40-5-files.txt
+          cat /tmp/p40-5-files.txt
+          python - <<'PY'
+          from pathlib import Path
+          actual=set(Path('/tmp/p40-5-files.txt').read_text().splitlines())
+          expected={"assets/js/erp-store.js","assets/js/quotations.js",".p40-5b-tests/quotation_approval.test.cjs",".p40-5b-tests/revision_store.test.py",".p40-5b-tests/revision_store.html",".github/workflows/p40-5b-quote-release-gate.yml"}
+          assert actual==expected,(actual,expected)
+          print('PASS: exact P40-5B minimal release scope')
+          PY
+          for frozen in assets/js/external-billing-print.js billing-print.html assets/js/billing.js assets/js/commissions.js assets/js/cloud-sync.js; do
+            test "$(git rev-parse HEAD:"$frozen")" = "$(git rev-parse "$base_sha":"$frozen")" || { echo "HOLD: protected file: $frozen"; exit 1; }
+          done
+          python - <<'PY'
+          import subprocess
+          base='af086215cc783b279cd7e629f0466b9c70d4b1de'
+          patch=subprocess.check_output(['git','diff','--unified=0',base,'HEAD','--','assets/js/erp-store.js'],text=True)
+          additions=[line[1:] for line in patch.splitlines() if line.startswith('+') and not line.startswith('+++')]
+          deletions=[line[1:] for line in patch.splitlines() if line.startswith('-') and not line.startswith('---')]
+          assert not deletions, 'Store existing logic must not be removed'
+          assert len(additions)<45, 'Store approval check only'
+          assert any('function assertQuotationRevisionApproval(' in line for line in additions)
+          assert sum('assertQuotationRevisionApproval(row,' in line for line in additions)==2
+          assert not any('state.payroll' in line or 'state.receivables' in line or 'state.bankTransactions' in line or 'state.commissions' in line for line in additions)
+          print('PASS: Store changes only quotation revision approval')
+          PY
+      - name: Validate all JavaScript and candidate print-only logic
+        run: |
+          set -euo pipefail
+          for file in assets/js/*.js; do node --check "$file"; done
+          node --check .p39-inv1a-tests/print_model.test.js
+          node --test .p39-inv1a-tests/print_model.test.js
+          node --test .p39-inv1-tests/projection.test.js
+          node --test .p40-5b-tests/quotation_approval.test.cjs
+
+  chrome-pdf:
+    name: P40-5B Chrome A4 and financial-safety acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Use preinstalled Chrome and loopback-only synthetic fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
+          python -m http.server 8797 --bind 127.0.0.1 > /tmp/p39-inv1a-8797.log 2>&1 &
+      - name: P39-INV-1B print-only A4 and internal-ID masking
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: python .p39-inv1a-tests/pdf_display.test.py
+      - name: P40-5B synthetic browser end-to-end acceptance
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: python .p40-5b-tests/revision_store.test.py
+      - name: P39-INV-1 internal editor, private external print, original Store tests
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: |
+          python .p39-inv1-tests/test_ui.py
+          python .p39-inv1-tests/test_store.py
+          python .p39-inv1-tests/layout_preflight.test.py
+
+  existing-erp:
+    name: Original P33 P34 P35 P36 accounting, payroll, auth unchanged
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Use existing tests with preinstalled Chrome
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+          for port in 8774 8784 8795 8796; do
+            python -m http.server "$port" --bind 127.0.0.1 > "/tmp/p39-inv1a-$port.log" 2>&1 &
+          done
+      - name: P33 original commission and conflict safety
+        run: python .p39-inv1-tests/chrome_legacy.py .p33-4-tests/regression.py
+      - name: P34 original payroll / historical finance
+        run: python .p39-inv1-tests/chrome_legacy.py .p34-tests/test.py
+      - name: P35 targeted historical correction and PDF
+        run: python .p39-inv1-tests/chrome_legacy.py .p35-tests/test_ui.py
+      - name: P36 original owner / employee permission recovery
+        run: python .p39-inv1-tests/chrome_legacy.py .p36-tests/test_permissions.py
