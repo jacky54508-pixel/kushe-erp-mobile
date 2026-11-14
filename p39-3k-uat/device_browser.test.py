@@ -51,10 +51,8 @@ class CloudflareCleanURLHandler(SimpleHTTPRequestHandler):
 
 def check_pdf(page,mode):
     try:
-        if mode in ("single","merged"):
+        if mode in ("single","merged","bundle"):
             page.wait_for_function("window.__billingPrintReady===true",timeout=14000)
-        elif mode=="bundle":
-            page.wait_for_function("window.__billingBundlePrintReady===true",timeout=14000)
         else:
             page.wait_for_function("document.querySelector('#print').disabled===false",timeout=14000)
     except Exception:
@@ -85,11 +83,27 @@ def check_pdf(page,mode):
         assert page.locator(".historic").count()==1
         assert page.locator(".invoice-table").count()==0
     if mode=="bundle":
-        assert page.locator(".project-section").count()==2
-        assert page.locator("#paper.uat-compact-bundle").count()==1
-        assert page.locator(".project-section .detail tbody tr").count()==2
-        assert page.locator(".grand-summary").count()==1
-        assert "$315,000" in page.locator(".grand-summary").inner_text()
+        # Source A+B is merged into the explicitly selected target A.
+        # Public PDF must not print any B-zone heading/source invoice number.
+        assert page.locator(".project-section").count()==0
+        assert page.locator(".merged-scope").count()==0
+        assert page.locator(".summary").count()==1
+        assert "虛構 A 區" in body,(mode,body[:1200])
+        for forbidden in ("虛構 B 區","來源請款單","來源單號","SYN-NO-SYN-B-B"):
+            assert forbidden not in body,(mode,forbidden)
+        public=page.evaluate("""()=>JSON.parse(decodeURIComponent(escape(
+          atob(decodeURIComponent(location.hash.slice(1))))))""")
+        assert public["project"]=="虛構 A 區",public.get("project")
+        assert public["salesAmount"]==300000
+        assert public["taxAmount"]==15000
+        assert public["totalAmount"]==315000
+        assert public["receivableAmount"]==315000
+        assert public.get("mergedBillingProjects")==["虛構 A 區"]
+        assert "billings" not in public and "sourceSnapshots" not in public
+        assert "虛構 B 區" not in str(public)
+    if mode=="merged":
+        assert page.locator(".merged-scope").count()==0
+        assert "虛構乙區" not in body
     if mode in ("single","merged","bundle"):
         assert page.locator("#formalCompanySeal").count()==0,(mode,"seal image leaked")
         assert page.locator(".synthetic-seal-placeholder").count()==1,(mode,"seal placeholder absent")
@@ -99,12 +113,11 @@ def check_pdf(page,mode):
     page.emulate_media(media="print")
     pdf=page.pdf(format="A4",print_background=True,prefer_css_page_size=True)
     pages=PdfReader(BytesIO(pdf)).pages
-    # Customer observed the small original-bundle PDF spilling into 2 pages.
-    # For this 2-row synthetic fixture enforce one complete, readable A4 sheet.
+    # All customer-visible A4 PDFs must preserve total and have no source-zone leakage.
     assert len(pages)>0 and (len(pages)==1 if mode in ("merged","bundle") else True),(mode,len(pages))
     if mode=="bundle":
-        # Human Chrome print preview can show timestamp/URL headers and footers.
-        # Enforce the observed two-source fixture still fits on one A4 with those enabled.
+        # Chrome header/footer on or off must not create a second page for
+        # the 2-source target-only synthetic customer document.
         print_with_headers=page.pdf(
             format="A4",print_background=True,prefer_css_page_size=True,
             display_header_footer=True,
