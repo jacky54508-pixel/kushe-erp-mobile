@@ -86,6 +86,15 @@ for path in root.rglob("*"):
   contents=path.read_text(encoding="utf-8")
   for old,new in changes.items():
     contents=contents.replace(old,new)
+  if path.name=="external-billing-print.js":
+    # Synthetic UAT customer PDF: never enumerate source zones on final print.
+    # The target project has already been validated by the P39-3J adapter.
+    before="""    const mergedBillingProjects=[...new Set(sourceInvoiceReferences.rows.map(
+       row=>String(row.projectName||'').trim()).filter(Boolean))];"""
+    after="""    const mergedBillingProjects=[String(d.displayProjectName||'').trim()];"""
+    if contents.count(before)!=1:
+      raise SystemExit("HOLD: target-only customer print projection changed")
+    contents=contents.replace(before,after)
   if path.name in printed:
     if contents.count("</style>")!=1:
       raise SystemExit("HOLD: unexpected print layout source: "+path.name)
@@ -154,6 +163,10 @@ for path in root.rglob("*"):
     contents=path.read_text(encoding="utf-8")
     if any(real in contents for real in changes):
       raise SystemExit("HOLD: live company contact field leaked in synthetic package: "+path.name)
+# Final public PDF must contain the chosen target-zone scope only.
+external=(root/"assets/js/external-billing-print.js").read_text(encoding="utf-8")
+if "const mergedBillingProjects=[String(d.displayProjectName||'').trim()]" not in external:
+  raise SystemExit("HOLD: customer PDF source-zone list not suppressed")
 for name in printed:
   contents=(root/name).read_text(encoding="utf-8")
   if contents.count("虛構測試 · 禁止對外請款")!=1:
