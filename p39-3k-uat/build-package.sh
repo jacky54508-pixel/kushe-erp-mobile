@@ -89,12 +89,11 @@ for path in root.rglob("*"):
   if path.name=="external-billing-print.js":
     # Synthetic UAT customer PDF: never enumerate source zones on final print.
     # The target project has already been validated by the P39-3J adapter.
-    before="""    const mergedBillingProjects=[...new Set(sourceInvoiceReferences.rows.map(
-      row=>String(row.projectName||'').trim()).filter(Boolean))];"""
-    after="""    const mergedBillingProjects=[String(d.displayProjectName||'').trim()];"""
-    if contents.count(before)!=1:
-      raise SystemExit("HOLD: target-only customer print projection changed")
-    contents=contents.replace(before,after)
+    # P39-3K-10: the source candidate itself must already enforce target-only
+    # customer print projection; packaging must not conceal a source regression.
+    required="const mergedBillingProjects=[String(d.displayProjectName||'').trim()]"
+    if contents.count(required)!=1:
+      raise SystemExit("HOLD: source customer PDF still exposes original zone list")
   if path.name in printed:
     if contents.count("</style>")!=1:
       raise SystemExit("HOLD: unexpected print layout source: "+path.name)
