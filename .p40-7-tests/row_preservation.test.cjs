@@ -48,7 +48,7 @@ test('Same-zone merged billing remains unmasked and keeps every house',()=>{
 });
 test('Cross-zone unsafe public labels block export rather than silently changing accounting text',()=>{
  const d=make(),old=JSON.stringify(d);
- for(const note of ['虛構耀時代O3-1','M區','M2']){
+ for(const note of ['虛構耀時代O3-1','O3-1','M區','M2']){
    assert.throws(()=>build({},{...d,note}),/來源區域/,'note '+note);
  }
  assert.throws(()=>build({},{...d,unified:{...d.unified,lines:d.unified.lines.map((x,i)=>i===0?{...x,item:'M區施工'}:x)}}),/來源區域/);
