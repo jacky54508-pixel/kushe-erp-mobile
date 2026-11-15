@@ -87,7 +87,7 @@
   try{
     const payload=JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(location.hash.slice(1)))))),d=validate(payload),t=d.totals;
     if(!payload.historical){
-      const view=originalTemplateView(payload,d),url=new URL('billing-print.html?v=p39-inv1-pdf1&print=0',location.href);
+      const view=originalTemplateView(payload,d),url=new URL('billing-print.html?v=p40-5a-customer-pdf-20261115-1&print=0',location.href);
       url.hash=encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(view)))));
       if(url.href.length>1500000)throw new Error('對外文件內容過大，請核對明細後再匯出');
       location.replace(url.href);return;
