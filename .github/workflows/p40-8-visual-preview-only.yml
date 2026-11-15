@@ -1,0 +1,73 @@
+name: P40-8 synthetic-only browser visual preview (no deploy)
+
+on:
+  push:
+    branches:
+      - p40-8-visual-preview-only-20261115
+    paths:
+      - '.p40-8-tests/export_visual_preview.py'
+      - '.github/workflows/p40-8-visual-preview-only.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Pin parent and prevent candidate or production-code drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "p40-8-visual-preview-only-20261115"
+          git fetch --no-tags origin main
+          test "$(git rev-parse FETCH_HEAD)" = "767cdc3b1303fa603c10a576505aee3f6eb03264" || { echo "STOP: production main moved"; exit 1; }
+          base="abc56d1139ba7e034974ee0220a2231016349fc8"
+          test "$(git merge-base "$base" HEAD)" = "$base" || { echo "STOP: wrong candidate parent"; exit 1; }
+          python - <<'PY'
+          import subprocess
+          base="abc56d1139ba7e034974ee0220a2231016349fc8"
+          changed=set(subprocess.check_output(["git","diff","--name-only",base,"HEAD"],text=True).splitlines())
+          permitted={".p40-8-tests/export_visual_preview.py",".github/workflows/p40-8-visual-preview-only.yml"}
+          assert changed==permitted,(changed,permitted)
+          for path in ["assets/js/external-billing-print.js","billing-print.html","assets/js/erp-store.js","assets/js/quotations.js","assets/js/commissions.js","assets/js/cloud-sync.js","assets/js/payroll.js"]:
+              before=subprocess.check_output(["git","show",base+":"+path])
+              after=subprocess.check_output(["git","show","HEAD:"+path])
+              assert after==before,("preview touched source code",path)
+          print("PASS: preview-only files, candidate byte-exact and main unmodified")
+          PY
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Browser and synthetic localhost
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
+          python -m http.server 8797 --bind 127.0.0.1 > /tmp/p40-8-preview-8797.log 2>&1 &
+      - name: Recheck P40-7 all-line PDF + browser screenshots
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: |
+          set -euo pipefail
+          node --test .p40-7-tests/row_preservation.test.cjs
+          python .p40-7-tests/end_to_end_pdf.test.py
+          python .p40-8-tests/export_visual_preview.py
+          test -s p40-8-preview-artifacts/P40-8_虛構資料_18筆_畫面預覽.png
+          test -s p40-8-preview-artifacts/P40-8_虛構資料_18筆_A4正式候選排版.pdf
+      - name: Downloadable visual proof — synthetic only
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: P40-8-synthetic-18-rows-visual-approval
+          path: p40-8-preview-artifacts/
+          retention-days: 14
+          if-no-files-found: error
