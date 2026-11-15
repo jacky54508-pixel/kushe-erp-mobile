@@ -5,7 +5,7 @@ import base64
 from io import BytesIO
 import json
 import os
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from playwright.sync_api import sync_playwright
 from pypdf import PdfReader
 
@@ -117,7 +117,7 @@ def verify_regression(browser):
     bad.goto(BASE+"/external-billing-print.html#"+encode(payload),wait_until="load")
     assert bad.locator(".error").count()==1,bad.locator("#paper").inner_text()
     assert "來源區域" in bad.locator(".error").inner_text()
-    assert "billing-print.html" not in bad.url
+    assert urlsplit(bad.url).path.endswith("/external-billing-print.html"),bad.url
     context.close()
     print("PASS: same-zone layout retains real house labels; public-note foreign zone is blocked")
 
