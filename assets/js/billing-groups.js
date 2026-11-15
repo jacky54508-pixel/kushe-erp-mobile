@@ -399,7 +399,7 @@
         const view=window.KusheBillingPrint.buildExternalView(primary);
         payload.template={schema:'kushe-original-billing-template-v1',billingId:d.targetBillingId,company:copy(view.company),publicNote:view.publicNote||'',historicalDetails:view.lines.some(line=>line.sourcePricingType==='historical-supplement')};
       }
-      const url=new URL('external-billing-print.html?v=p40-5a-customer-pdf-20261115-1',location.href);url.hash=encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(payload)))));
+      const url=new URL('external-billing-print.html?v=p39-inv1-invoice-reference',location.href);url.hash=encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(payload)))));
       if(url.href.length>1500000)throw new Error('文件內容過大，請減少對外明細後再匯出');
       const a=document.createElement('a');a.href=url.href;a.target='_blank';a.rel='noopener';document.body.append(a);a.click();a.remove();
     }catch(e){notifyError(e.message)}
