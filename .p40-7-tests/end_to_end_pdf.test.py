@@ -82,7 +82,8 @@ def verify_preserved_customer_rows(browser,amount_count=18):
         assert values==[str(i+1),original["item"],original["unit"],str(original["qty"]),
                         "$1,000","$1,000"],("changed or missing original row",i,values)
     assert "施工項目彙總" in page.locator("#paper").inner_text()
-    assert page.locator(".grouped-item-summary-table tbody tr").count()==4
+    expected_groups=len(set(line["item"] for line in document["unified"]["lines"]))
+    assert page.locator(".grouped-item-summary-table tbody tr").count()==expected_groups+1
     assert page.locator(".matrix").count()==0
     visible=page.locator("#paper").inner_text()
     assert "虛構耀時代L區" in visible
