@@ -54,15 +54,35 @@
     if(modes.length!==1)throw new Error('此舊版文件使用不同單價稅別，請在對外明細修訂為統一單價方式後再匯出；不會自動換算或修改原單');
     const taxMode=modes[0],t=d.totals;
     const raw=unified?d.unified.lines:d.sections.flatMap(section=>section.lines);
-    const lines=raw.map(l=>({house:String(l.house||''),item:l.item,unit:l.unit,qty:l.qty,price:l.price,amount:l.amount,pricingType:'',sourcePricingType:template?.historicalDetails?'historical-supplement':'external-document'}));
+    // P40-7: external PDF-only redaction; preserve all original line positions,
+    // pricing, quantities and sums. Never rewrite Store/sourceSnapshots.
+    const targetName=String(d.displayProjectName||'').trim();
+    const foreignSources=d.sourceSnapshots.filter(source=>String(source.projectName||'').trim()!==targetName);
+    const customerZoneOnly=foreignSources.length>0;
+    const publicNote=String(d.note||template?.publicNote||'');
+    if(customerZoneOnly){
+      const blocked=new Set(foreignSources.map(source=>String(source.projectName||'').trim()).filter(Boolean));
+      const targetZone=targetName.match(/([A-Za-z])\s*區$/)?.[1]?.toUpperCase()||'';
+      raw.forEach(line=>{
+        const house=String(line.house||'').trim(),prefix=house.match(/^([A-Za-z])\d+/)?.[1]?.toUpperCase();
+        if(prefix&&prefix!==targetZone){
+          blocked.add(house);
+          blocked.add(prefix+'區');
+        }
+      });
+      if([...blocked].some(token=>token&&[publicNote,...raw.map(line=>String(line.item||''))].some(value=>value.includes(token))))
+        throw new Error('對外備註或品名包含來源區域，請先核對顯示文字；原始帳務資料未變');
+    }
+    const lines=raw.map(l=>({house:customerZoneOnly?'':String(l.house||''),item:l.item,unit:l.unit,qty:l.qty,price:l.price,amount:l.amount,pricingType:'',sourcePricingType:template?.historicalDetails?'historical-supplement':'external-document'}));
+    if(lines.length!==raw.length||lines.some((line,index)=>line.item!==raw[index].item||line.qty!==raw[index].qty||line.price!==raw[index].price||line.amount!==raw[index].amount))
+      throw new Error('對外明細筆數或金額不一致，停止列印');
     const company={name:'酷舍企業有限公司',englishName:'Cool Sir Limited Company',taxId:'82980636',address:'台中市豐原區瑞興路 62 號',line:'eing0519'};
     if(template?.company){for(const key of ['name','englishName','taxId','address','phone','line'])if(typeof template.company[key]==='string')company[key]=template.company[key];}
-    const publicNote=String(d.note||template?.publicNote||'');
     // invoiceStatus is a print-only switch for the existing template's tax rows.
     // Individual invoice numbers/statuses/amounts stay exclusively in the originals.
     const invoiceStatus=t.tax===0&&d.sourceSnapshots.every(s=>s.invoiceStatus==='no_invoice')?'no_invoice':'invoice_pending';
     const fileName=('酷舍_請款單_'+d.displayProjectName+'_'+String(d.documentDate).slice(0,7)).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_')+'.pdf';
-    return {schema:'kushe-external-document-v1',documentType:'billing',title:'請款單',number:'',customer:d.customerName,project:d.displayProjectName,date:d.documentDate,taxMode,pricingMode:'',invoiceStatus,lines,salesAmount:t.untaxed,taxAmount:t.tax,totalAmount:t.grossTotal,retentionAmount:t.retention,receivableAmount:t.receivable,publicNote,company,fileName,mergedBillingProjects,isMergedExternalBilling:true};
+    return {schema:'kushe-external-document-v1',documentType:'billing',title:'請款單',number:'',customer:d.customerName,project:d.displayProjectName,date:d.documentDate,taxMode,pricingMode:'',invoiceStatus,lines,salesAmount:t.untaxed,taxAmount:t.tax,totalAmount:t.grossTotal,retentionAmount:t.retention,receivableAmount:t.receivable,publicNote,company,fileName,mergedBillingProjects,isMergedExternalBilling:true,customerZoneOnly};
   }
   document.getElementById('close').onclick=()=>window.close();
   try{
