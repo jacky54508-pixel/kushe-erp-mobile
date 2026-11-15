@@ -61,7 +61,13 @@
     const customerZoneOnly=foreignSources.length>0;
     const publicNote=String(d.note||template?.publicNote||'');
     if(customerZoneOnly){
-      const blocked=new Set(foreignSources.map(source=>String(source.projectName||'').trim()).filter(Boolean));
+      const blocked=new Set();
+      foreignSources.forEach(source=>{
+        const name=String(source.projectName||'').trim();
+        if(name)blocked.add(name);
+        const sourceSuffix=name.match(/([A-Za-z]\s*區|[A-Za-z]\d+(?:-\d+)?)$/);
+        if(sourceSuffix)blocked.add(sourceSuffix[1]);
+      });
       const targetZone=targetName.match(/([A-Za-z])\s*區$/)?.[1]?.toUpperCase()||'';
       raw.forEach(line=>{
         const house=String(line.house||'').trim(),prefix=house.match(/^([A-Za-z])\d+/)?.[1]?.toUpperCase();
