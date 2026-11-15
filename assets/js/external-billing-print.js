@@ -54,21 +54,40 @@
     if(modes.length!==1)throw new Error('此舊版文件使用不同單價稅別，請在對外明細修訂為統一單價方式後再匯出；不會自動換算或修改原單');
     const taxMode=modes[0],t=d.totals;
     const raw=unified?d.unified.lines:d.sections.flatMap(section=>section.lines);
-    const lines=raw.map(l=>({house:String(l.house||''),item:l.item,unit:l.unit,qty:l.qty,price:l.price,amount:l.amount,pricingType:'',sourcePricingType:template?.historicalDetails?'historical-supplement':'external-document'}));
+    // P40: Only a cross-zone CUSTOMER PDF masks house/source zone labels.
+    // The saved documents and financial amounts remain untouched.
+    const foreign=d.sourceSnapshots.filter(s=>String(s.projectName||'').trim()!==String(d.displayProjectName||'').trim());
+    const customerZoneOnly=foreign.length>0;
+    const publicNote=String(d.note||template?.publicNote||'');
+    if(customerZoneOnly){
+      const blockedTokens=new Set();
+      foreign.forEach(source=>{
+        const name=String(source.projectName||'').trim();
+        if(name)blockedTokens.add(name);
+        const area=name.match(/([A-Za-z]\s*區)$/);
+        if(area)blockedTokens.add(area[1]);
+        (source.originalLines||[]).forEach(line=>{
+          const house=String(line.house||'').trim();
+          if(/^[A-Za-z][0-9][A-Za-z0-9-]*$/.test(house))blockedTokens.add(house);
+        });
+      });
+      if([...blockedTokens].some(token=>token&&[publicNote,...raw.map(line=>String(line.item||''))].some(value=>value.includes(token))))
+        throw new Error('對外施工品項或備註包含其他來源區域資訊，請先修改對外顯示內容；不會修改原帳');
+    }
+    const lines=raw.map(l=>({house:customerZoneOnly?'':String(l.house||''),item:l.item,unit:l.unit,qty:l.qty,price:l.price,amount:l.amount,pricingType:'',sourcePricingType:template?.historicalDetails?'historical-supplement':'external-document'}));
     const company={name:'酷舍企業有限公司',englishName:'Cool Sir Limited Company',taxId:'82980636',address:'台中市豐原區瑞興路 62 號',line:'eing0519'};
     if(template?.company){for(const key of ['name','englishName','taxId','address','phone','line'])if(typeof template.company[key]==='string')company[key]=template.company[key];}
-    const publicNote=String(d.note||template?.publicNote||'');
     // invoiceStatus is a print-only switch for the existing template's tax rows.
     // Individual invoice numbers/statuses/amounts stay exclusively in the originals.
     const invoiceStatus=t.tax===0&&d.sourceSnapshots.every(s=>s.invoiceStatus==='no_invoice')?'no_invoice':'invoice_pending';
     const fileName=('酷舍_請款單_'+d.displayProjectName+'_'+String(d.documentDate).slice(0,7)).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_')+'.pdf';
-    return {schema:'kushe-external-document-v1',documentType:'billing',title:'請款單',number:'',customer:d.customerName,project:d.displayProjectName,date:d.documentDate,taxMode,pricingMode:'',invoiceStatus,lines,salesAmount:t.untaxed,taxAmount:t.tax,totalAmount:t.grossTotal,retentionAmount:t.retention,receivableAmount:t.receivable,publicNote,company,fileName,mergedBillingProjects,isMergedExternalBilling:true};
+    return {schema:'kushe-external-document-v1',documentType:'billing',title:'請款單',number:'',customer:d.customerName,project:d.displayProjectName,date:d.documentDate,taxMode,pricingMode:'',invoiceStatus,lines,salesAmount:t.untaxed,taxAmount:t.tax,totalAmount:t.grossTotal,retentionAmount:t.retention,receivableAmount:t.receivable,publicNote,company,fileName,mergedBillingProjects,isMergedExternalBilling:true,customerZoneOnly};
   }
   document.getElementById('close').onclick=()=>window.close();
   try{
     const payload=JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(location.hash.slice(1)))))),d=validate(payload),t=d.totals;
     if(!payload.historical){
-      const view=originalTemplateView(payload,d),url=new URL('billing-print.html?v=p39-inv1-pdf1&print=0',location.href);
+      const view=originalTemplateView(payload,d),url=new URL('billing-print.html?v=p40-5a-customer-pdf-20261115-1&print=0',location.href);
       url.hash=encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(view)))));
       if(url.href.length>1500000)throw new Error('對外文件內容過大，請核對明細後再匯出');
       location.replace(url.href);return;
