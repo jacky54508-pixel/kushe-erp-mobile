@@ -1,13 +1,16 @@
-name: P40-5A main-pinned customer PDF only (never deploy)
+name: P40-5A cache-safe PDF release gate (never deploy)
 
 on:
   push:
     branches:
-      - p40-5a-customer-pdf-only-main-base-20261114
+      - p40-5a-cache-final-candidate-20261115
     paths:
       - '.github/workflows/p40-5a-pdf-release-gate.yml'
       - 'assets/js/external-billing-print.js'
       - 'billing-print.html'
+      - 'index.html'
+      - 'assets/js/billing-groups.js'
+      - 'external-billing-print.html'
       - '.p40-5a-tests/customer_projection.test.cjs'
       - '.p40-5a-tests/customer_zone_pdf.test.py'
   workflow_dispatch:
@@ -29,7 +32,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF_NAME" = "p40-5a-customer-pdf-only-main-base-20261114"
+          test "$GITHUB_REF_NAME" = "p40-5a-cache-final-candidate-20261115"
           git fetch --no-tags origin main
           base_sha="af086215cc783b279cd7e629f0466b9c70d4b1de"
           test "$(git rev-parse FETCH_HEAD)" = "$base_sha" || { echo "HOLD: official main has moved"; exit 1; }
@@ -39,9 +42,32 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           actual=set(Path('/tmp/p40-5-files.txt').read_text().splitlines())
-          expected={"assets/js/external-billing-print.js","billing-print.html",".p40-5a-tests/customer_projection.test.cjs",".p40-5a-tests/customer_zone_pdf.test.py",".github/workflows/p40-5a-pdf-release-gate.yml"}
+          expected={"index.html","assets/js/billing-groups.js","external-billing-print.html","assets/js/external-billing-print.js","billing-print.html",".p40-5a-tests/customer_projection.test.cjs",".p40-5a-tests/customer_zone_pdf.test.py",".github/workflows/p40-5a-pdf-release-gate.yml"}
           assert actual==expected,(actual,expected)
           print('PASS: exact P40-5A minimal release scope')
+          PY
+          # Exact, byte-for-byte single-string cache edits against the already PASS P40-5A candidate.
+          python - <<'PY'
+          import subprocess
+          tag='p40-5a-customer-pdf-20261115-1'
+          source='1018243a8a0783452581273b2e035664c3e7fc5f'
+          patches={
+            'index.html':('assets/js/billing-groups.js?v=p39-inv1-group1',f'assets/js/billing-groups.js?v={tag}'),
+            'assets/js/billing-groups.js':('external-billing-print.html?v=p39-inv1-invoice-reference',f'external-billing-print.html?v={tag}'),
+            'external-billing-print.html':('assets/js/external-billing-print.js?v=p39-inv1-pdf1',f'assets/js/external-billing-print.js?v={tag}'),
+            'assets/js/external-billing-print.js':('billing-print.html?v=p39-inv1-pdf1&print=0',f'billing-print.html?v={tag}&print=0')
+          }
+          for path,(old,new) in patches.items():
+            before=subprocess.check_output(['git','show',source+':'+path])
+            after=subprocess.check_output(['git','show','HEAD:'+path])
+            needle=old.encode()
+            assert before.count(needle)==1,('missing prior URL',path)
+            assert after==before.replace(needle,new.encode()),('unexpected code changes',path)
+          for path in ['billing-print.html','.p40-5a-tests/customer_projection.test.cjs','.p40-5a-tests/customer_zone_pdf.test.py']:
+            a=subprocess.check_output(['git','show',source+':'+path])
+            b=subprocess.check_output(['git','show','HEAD:'+path])
+            assert a==b,('source or test changed',path)
+          print('PASS: byte-exact P40-5A print logic, only four cache version URLs changed')
           PY
           for frozen in assets/js/erp-store.js assets/js/quotations.js assets/js/billing.js assets/js/commissions.js assets/js/cloud-sync.js; do
             test "$(git rev-parse HEAD:"$frozen")" = "$(git rev-parse "$base_sha":"$frozen")" || { echo "HOLD: protected file: $frozen"; exit 1; }
@@ -54,6 +80,13 @@ jobs:
           node --test .p39-inv1a-tests/print_model.test.js
           node --test .p39-inv1-tests/projection.test.js
           node --test .p40-5a-tests/customer_projection.test.cjs
+          python - <<'PY'
+          from pathlib import Path
+          tag='p40-5a-customer-pdf-20261115-1'
+          for path in ['index.html','assets/js/billing-groups.js','external-billing-print.html','assets/js/external-billing-print.js']:
+            assert tag in Path(path).read_text(encoding='utf-8'),path
+          print('PASS cache-busting version tag across the four-stage customer PDF flow')
+          PY
 
   chrome-pdf:
     name: P40-5A Chrome A4 and financial-safety acceptance
