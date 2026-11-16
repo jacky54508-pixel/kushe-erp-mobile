@@ -84,7 +84,12 @@ const store={
       receivable:ar};
   },
   billingEditable:()=>false,billingDeletable:()=>false,
-  billingDocumentLines:b=>b.lines||[],billingDocumentState:()=>({protected:false,issues:[]}),
+  billingDocumentLines:b=>b.lines||[],billingDocumentState:(id)=>{
+    const b=billings.find(row=>row.id===id),ar=receivables.find(row=>row.billingId===id);
+    return {protected:true,issues:[],snapshot:'FAKE-READONLY-SNAPSHOT',amounts:{
+      untaxed:b.amount,tax:b.tax,grossTotal:b.grossTotal,retention:b.retention,
+      receivable:b.total,unreceived:b.total-(ar?.received||0)}};
+  },
   externalBillingDocumentIndex:()=>({documents:[group],issues:[]}),
   externalBillingContext:()=>{throw Error('隔離測試不准進入編輯')},
   saveExternalBillingDocument:bad('saveExternalBillingDocument'),
