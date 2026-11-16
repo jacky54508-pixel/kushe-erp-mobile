@@ -82,3 +82,38 @@ jobs:
           name: p40-15a-desktop-mobile-synthetic
           path: .p40-15-tests/screenshots/*.png
           if-no-files-found: ignore
+
+  existing-erp-regressions:
+    name: Existing P33-P36 payroll/finance and P39 A4/18-line PDF regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 28
+    steps:
+      - name: Checkout candidate in regression sandbox
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python for existing isolated browser/PDF suites
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Start localhost-only synthetic servers and system Chrome
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
+          for port in 8774 8784 8795 8796 8797; do
+            python -m http.server "$port" --bind 127.0.0.1 > "/tmp/p40-15b-$port.log" 2>&1 &
+          done
+      - name: Regression P33 employee commission source and safety
+        run: python .p39-inv1-tests/chrome_legacy.py .p33-4-tests/regression.py
+      - name: Regression P34 payroll / historical finance
+        run: python .p39-inv1-tests/chrome_legacy.py .p34-tests/test.py
+      - name: Regression P35 targeted historical correction
+        run: python .p39-inv1-tests/chrome_legacy.py .p35-tests/test_ui.py
+      - name: Regression P36 owner and employee permissions
+        run: python .p39-inv1-tests/chrome_legacy.py .p36-tests/test_permissions.py
+      - name: Regression P39 A4 customer PDF, 18 lines, private IDs and print layout
+        env:
+          P39_INV_USE_SYSTEM_CHROME: "1"
+        run: python .p39-inv1a-tests/pdf_display.test.py
