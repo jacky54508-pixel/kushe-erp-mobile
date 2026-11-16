@@ -2,6 +2,7 @@
 -- PostgREST verifies the JWT signature BEFORE setting request.jwt.claims.
 -- Direct SQL is inaccessible to clients. No financial writes or real data.
 CREATE SCHEMA IF NOT EXISTS auth; -- required by GoTrue automatic migration in disposable CI only
+ALTER ROLE postgres IN DATABASE p40_16h_ci SET search_path TO auth,public; -- GoTrue queries unqualified auth.identities; local test DB only
 CREATE ROLE anon NOLOGIN NOBYPASSRLS;
 CREATE ROLE authenticated NOLOGIN NOBYPASSRLS;
 CREATE ROLE authenticator LOGIN PASSWORD 'ci-only-authenticator' NOINHERIT NOBYPASSRLS;
