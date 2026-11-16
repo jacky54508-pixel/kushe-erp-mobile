@@ -1,0 +1,124 @@
+name: P40-11 standalone concession preview ONLY (never deploy)
+
+on:
+  push:
+    branches:
+      - p40-11-discount-preview-readonly-main-20261116
+    paths:
+      - '.github/workflows/p40-11-discount-preview-readonly.yml'
+      - '.p40-11-lab/**'
+      - '.p40-11-tests/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  immutable-erp-and-math:
+    name: Exact main pin, zero ERP changes, real Store arithmetic parity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Enforce exact candidate whitelist and no official source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          base='767cdc3b1303fa603c10a576505aee3f6eb03264'
+          test "$GITHUB_REF_NAME" = "p40-11-discount-preview-readonly-main-20261116"
+          test "$(git rev-parse FETCH_HEAD)" = "$base" || { echo "HOLD: main moved"; exit 1; }
+          test "$(git merge-base "$base" HEAD)" = "$base" || { echo "HOLD: wrong main base"; exit 1; }
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          base='767cdc3b1303fa603c10a576505aee3f6eb03264'
+          changes=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          allowed={
+              '.github/workflows/p40-11-discount-preview-readonly.yml',
+              '.p40-11-lab/discount_preview.js',
+              '.p40-11-lab/discount_preview.html',
+              '.p40-11-tests/discount_preview.test.cjs',
+              '.p40-11-tests/visual_preview.test.py'
+          }
+          assert changes==allowed,(changes,allowed)
+          for path in ['assets/js/erp-store.js','assets/js/billing.js','assets/js/quotations.js',
+           'assets/js/commissions.js','assets/js/payroll.js','assets/js/cloud-sync.js',
+           'assets/js/external-billing-print.js','billing-print.html','external-billing-print.html',
+           'index.html','assets/js/billing-groups.js']:
+            assert subprocess.check_output(['git','show',base+':'+path])==Path(path).read_bytes(),path
+          print('PASS: exact standalone preview scope, untouched Store, PDF, invoices and payroll')
+          PY
+      - name: Check standalone preview module and compare to ERP tax and retention
+        run: |
+          set -euo pipefail
+          node --check .p40-11-lab/discount_preview.js
+          node --test .p40-11-tests/discount_preview.test.cjs
+          node --test .p40-10-tests/discount_policy.test.cjs
+
+  browser-visual-synthetic-only:
+    name: Synthetic-only Chrome comparison, visual PNG proof, locked source cases
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Localhost-only Chrome, no real data
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
+          python -m http.server 8797 --bind 127.0.0.1 >/tmp/p40-11-localhost.log 2>&1 &
+      - name: Validate readonly discount preview states and take full-page screenshot
+        env:
+          P39_INV_USE_SYSTEM_CHROME: '1'
+        run: python .p40-11-tests/visual_preview.test.py
+      - name: Verify preserved P39 original detailed A4 PDF with original houses
+        env:
+          P39_INV_USE_SYSTEM_CHROME: '1'
+        run: python .p39-inv1a-tests/pdf_display.test.py
+      - name: Export synthetic screenshots for visual review
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: P40-11-synthetic-discount-readonly-preview
+          path: p40-11-preview-artifacts/
+          retention-days: 14
+          if-no-files-found: error
+
+  original-finance-regr:
+    name: Existing P33-P36 financial, commission, payroll and auth regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Existing synthetic test servers
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+          for port in 8774 8784 8795 8796; do
+            python -m http.server "$port" --bind 127.0.0.1 >"/tmp/p40-11-$port.log" 2>&1 &
+          done
+      - name: P33 source and commission regression
+        run: python .p39-inv1-tests/chrome_legacy.py .p33-4-tests/regression.py
+      - name: P34 payroll and commission calculation
+        run: python .p39-inv1-tests/chrome_legacy.py .p34-tests/test.py
+      - name: P35 immutable payment and banking safeguards
+        run: python .p39-inv1-tests/chrome_legacy.py .p35-tests/test_ui.py
+      - name: P36 account role and permissions
+        run: python .p39-inv1-tests/chrome_legacy.py .p36-tests/test_permissions.py
