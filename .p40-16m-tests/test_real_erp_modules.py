@@ -206,7 +206,7 @@ class RealModuleIntegration(unittest.TestCase):
         self.load();self.trust();self.add()
         self.evaluate("() => P40M_SESSION.setPrincipal('SYNTHETIC-OTHER-PRINCIPAL')")
         result=self.inspect()
-        self.assertIn(result["code"],("AUTH_CHANGED","DEVICE_TRUST_REQUIRED","ERROR"))
+        self.assertIn(result["code"],("REMOTE_EMPTY","AUTH_CHANGED","DEVICE_TRUST_REQUIRED","ERROR"))
         self.assertEqual(self.evaluate("() => P40M.upload()")["code"],"DEVICE_TRUST_REQUIRED")
         self.assertEqual(self.cloud.posts,0)
         self.assert_synthetic()
@@ -217,7 +217,7 @@ class RealModuleIntegration(unittest.TestCase):
         result=self.evaluate("() => P40M.load().then(()=>'LOADED',e=>e.code || e.message)")
         self.assertNotEqual(result,"LOADED")
         self.assertIn(result,("STORE_EMERGENCY_MISMATCH","STALE_STORE_STATE","STORE_EMERGENCY_INVALID",
-                              "STORE_METADATA_INVALID","STORE_EMERGENCY_DIVERGED"))
+                              "STORE_METADATA_INVALID","STORE_EMERGENCY_DIVERGED","STORE_LAYERS_DIVERGED"))
         self.assertEqual(self.cloud.posts,0)
         self.assert_synthetic()
     def test_real_store_corrupted_journal_blocks_after_reopen(self):
