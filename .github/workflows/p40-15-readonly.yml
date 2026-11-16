@@ -1,0 +1,51 @@
+name: P40-15 read-only whole-billing concession (synthetic)
+on:
+  push:
+    branches:
+      - p40-15-billing-concession-readonly-main-20261116
+    paths:
+      - 'index.html'
+      - 'assets/js/billing.js'
+      - 'assets/js/billing-groups.js'
+      - 'assets/js/billing-group-discount-preview.js'
+      - '.p40-15-tests/**'
+      - '.github/workflows/p40-15-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out isolated P40-15 candidate only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Pin production main and reject forbidden changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "p40-15-billing-concession-readonly-main-20261116"
+          git fetch --no-tags origin main
+          BASE=866249b37213f4e15b3baeda0a051a727040670b
+          test "$(git rev-parse origin/main)" = "$BASE"
+          test "$(git merge-base origin/main HEAD)" = "$BASE"
+          git diff --name-only "origin/main...HEAD" > /tmp/p40-15-files
+          cat /tmp/p40-15-files
+          if grep -Ev '^(.p40-15-tests/|.github/workflows/p40-15-readonly.yml$|index.html$|assets/js/billing.js$|assets/js/billing-groups.js$|assets/js/billing-group-discount-preview.js$)' /tmp/p40-15-files; then
+            echo "BLOCK: file outside P40-15 explicit allowlist"; exit 1
+          fi
+          ! grep -q '^assets/js/erp-store.js$' /tmp/p40-15-files
+          ! grep -Eq '^(assets/js/(cloud-sync|commissions|payroll|invoices|banks).js|external-billing-print.html|billing-print.html)$' /tmp/p40-15-files
+      - name: JavaScript syntax and isolated synthetic regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in assets/js/*.js; do node --check "$file"; done
+          node --check .p40-15-tests/read_only.test.cjs
+          node --test .p40-15-tests/read_only.test.cjs
+          node --test .p39-inv1-tests/projection.test.js
