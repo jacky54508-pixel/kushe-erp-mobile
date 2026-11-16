@@ -86,14 +86,25 @@ test('P40-11: no actual concession must not be labelled as a completed discount'
  assert.equal(r.negotiatedReduction,0);
  assert.ok(r.locks.some(x=>x.code==='NO_FINANCIAL_DISCOUNT'));
 });
-test('P40-11: preview module does not expose calls to ERP Store or persistence',()=>{
- const js=fs.readFileSync('assets/js/billing-discount-calculator.js','utf8');
- const html=fs.readFileSync('assets/js/billing-discount-preview.js','utf8');
- for(const source of [js,html]){
-  for(const s of ['KuSheERPStore','fetch(', 'XMLHttpRequest','indexedDB','localStorage','sessionStorage',
-    'supabase','saveInvoice(','updateBilling(','createBilling(','persist(','postMessage('])
-   assert.ok(!source.includes(s),'forbidden read/write/browser external integration: '+s);
+test('P40-12: calculator is pure; UI reads Store but cannot write business collections',()=>{
+ const calculator=fs.readFileSync('assets/js/billing-discount-calculator.js','utf8');
+ const ui=fs.readFileSync('assets/js/billing-discount-preview.js','utf8');
+ const entry=fs.readFileSync('assets/js/billing.js','utf8');
+ const index=fs.readFileSync('index.html','utf8');
+ for(const source of [calculator,ui]){
+   for(const forbidden of ['fetch(', 'XMLHttpRequest','indexedDB','localStorage','sessionStorage',
+     'supabase','saveInvoice(','updateBilling(','createBilling(','persist(','postMessage(',
+     'saveQuotation(','saveQuotationBundle(','deleteBilling(','state.billings.push(',
+     'state.receivables.push('])
+     assert.ok(!source.includes(forbidden),'forbidden ERP write: '+forbidden);
  }
- assert.ok(!html.includes('type="submit"'));
- assert.ok(html.includes('虛構資料專用'));
+ assert.ok(ui.includes('store.getState()'));
+ assert.ok(ui.includes('store.billingEditable(id)'));
+ assert.ok(ui.includes("read(ar,keys,label"));
+ assert.ok(ui.includes("input.type='number'"));
+ assert.ok(!ui.includes("type='submit'"));
+ assert.ok(index.includes('billing-discount-calculator.js?v=p40-12-readonly-1'));
+ assert.ok(index.includes('billing-discount-preview.js?v=p40-12-readonly-1'));
+ assert.ok(entry.includes('data-billing-discount-readonly'));
+ assert.ok(entry.includes('KusheBillingDiscountPreview.open(id)'));
 });
