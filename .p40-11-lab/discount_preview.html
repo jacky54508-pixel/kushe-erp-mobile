@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>P40-11｜折讓唯讀草稿｜虛構資料</title>
+<style>
+  :root {font-family:"Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;background:#f1f5f8;color:#102f4b}
+  *{box-sizing:border-box}
+  body{margin:0;padding:34px 16px}
+  main{max-width:1000px;margin:auto;background:#fff;border:1px solid #dae4ec;border-radius:18px;box-shadow:0 10px 36px #244d6b13;overflow:hidden}
+  header{background:linear-gradient(95deg,#10365a,#087e83);padding:25px 32px;color:white}
+  header h1{font-size:25px;margin:0 0 7px}header p{margin:0;font-size:13px;opacity:.92}
+  .content{padding:26px 30px 32px}.warning{padding:12px 15px;background:#fff7eb;border:1px solid #efdcb8;border-radius:9px;font-size:13px;color:#7b4b0c}
+  .controls{display:flex;gap:15px;align-items:end;flex-wrap:wrap;margin-top:22px}
+  label{font-size:13px;font-weight:700;color:#476278;display:grid;gap:7px;flex:1;min-width:215px}
+  select,input{font:inherit;padding:11px 13px;background:#f8fbff;color:#10365a;border:1px solid #cbdae5;border-radius:9px;width:100%}
+  .kpi{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;margin:21px 0}
+  .kpi article{border:1px solid #cbdce8;border-radius:12px;padding:15px;background:#f8fbfd}
+  .kpi small{font-size:12px;color:#547081}.kpi strong{display:block;font-size:23px;margin-top:7px}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  th,td{border-bottom:1px solid #dce6ee;padding:11px 10px;text-align:right}
+  th:first-child,td:first-child{text-align:left}thead{background:#edf4f7}
+  th{font-size:12px;color:#476278}td:last-child{font-weight:750}
+  .panel{border:1px solid #d6e2ea;border-radius:12px;overflow:hidden;margin-top:17px}
+  .panel h2{font-size:16px;margin:0;padding:14px 16px;background:#f4f8fb}
+  .panel ul{margin:13px 20px 17px;padding-left:22px;font-size:13px;line-height:1.9}
+  .safe{color:#126a50}.hold{color:#a2472d}.foot{font-size:12px;color:#5e7485;margin:20px 0 0;line-height:1.65}
+  @media(max-width:600px){header{padding:20px}.content{padding:19px}.kpi{grid-template-columns:1fr}th,td{padding:9px 5px;font-size:11px}}
+</style></head>
+<body><main>
+<header><h1>P40-11｜議價折讓試算草稿</h1><p>虛構資料專用 · 唯讀、不入帳、不修改原請款、不影響抽成及任何正式 PDF</p></header>
+<div class="content">
+ <div class="warning">這是獨立測試畫面，不是正式 ERP。建商核定金額一律以「含稅／總請款金額（未扣保留款）」輸入；已開票或已有付款時，只顯示試算與處理風險，絕不回寫。</div>
+ <div class="controls">
+  <label>虛構情境 <select id="case">
+    <option value="pending">未開票／未收款</option>
+    <option value="paid">已開票、已收款及跨區合併</option>
+    <option value="cheque">已收支票、保留款已收回</option>
+    <option value="noinvoice">免開發票</option>
+  </select></label>
+  <label>建商核定總請款金額（NT$）<input id="approved" type="number" min="1" max="105000" step="1" value="99750"></label>
+ </div>
+ <div id="status" class="foot" aria-live="polite">正在計算</div>
+ <section class="kpi">
+   <article><small>原請款總額</small><strong id="before">$105,000</strong></article>
+   <article><small>建商核定總額</small><strong id="after">$99,750</strong></article>
+   <article><small>試算折讓金額</small><strong id="discount">$5,250</strong></article>
+ </section>
+ <div class="panel"><h2>原帳與試算差異</h2>
+  <table id="comparison"><thead><tr><th>項目</th><th>原始已保存</th><th>議價試算</th><th>試算差額</th></tr></thead><tbody></tbody></table>
+ </div>
+ <div class="panel"><h2>已收款、保留款、支票風險</h2><table id="settlement"><tbody></tbody></table></div>
+ <div class="panel"><h2 id="lockTitle">核對結果</h2><ul id="blockers"></ul></div>
+ <p class="foot">原始施工項目、戶別、18 筆明細、下方施工項目彙總、發票、薪資與銀行交易全部保留原狀。本畫面沒有儲存、送出、確認入帳、列印請款或任何資料同步功能。</p>
+</div></main>
+<script src="discount_preview.js"></script><script>
+'use strict';
+const fixed={
+ recorded:{untaxed:100000,tax:5000,grossTotal:105000,retention:5250,receivable:99750},
+ taxRate:5,invoiceStatus:'invoice_pending',taxMode:'未稅',retentionMode:'5',retentionBase:'taxIncluded',
+ received:0,retentionReceived:0,pendingCheque:0,
+ receiptCount:0,retentionReceiptCount:0,chequeCount:0,issuedInvoice:false,merged:false,bankLinked:false
+};
+const cases={
+ pending:{},
+ paid:{invoiceStatus:'invoiced',issuedInvoice:true,invoiceNo:'SYN-AA000001',received:40000,receiptCount:1,merged:true,bankLinked:true},
+ cheque:{retentionReceived:1500,retentionReceiptCount:1,pendingCheque:15000,chequeCount:1},
+ noinvoice:{invoiceStatus:'no_invoice',recorded:{untaxed:105000,tax:0,grossTotal:105000,retention:5250,receivable:99750}}
+};
+const format=value=>(value<0?'−':'')+'$'+Math.abs(value).toLocaleString('en-US');
+function cell(tr,v){const td=document.createElement('td');td.textContent=v;tr.append(td);}
+function addRow(body,values){const tr=document.createElement('tr');values.forEach(v=>cell(tr,v));body.append(tr);}
+const fields=[['untaxed','未稅金額'],['tax','營業稅'],['grossTotal','含稅／總請款'],['retention','保留款'],['receivable','本期應收']];
+function render(){
+ const scenario=document.getElementById('case').value,number=Number(document.getElementById('approved').value),
+ spec={original:{...fixed,...cases[scenario]},approval:{amountType:'gross',amount:number}},
+ status=document.getElementById('status'),comparison=document.querySelector('#comparison tbody'),settlement=document.querySelector('#settlement tbody'),blockers=document.getElementById('blockers');
+ comparison.replaceChildren();settlement.replaceChildren();blockers.replaceChildren();
+ try{
+ const result=KusheP40DiscountPreview.preview(spec);
+ document.getElementById('before').textContent=format(result.original.grossTotal);
+ document.getElementById('after').textContent=format(result.proposed.grossTotal);
+ document.getElementById('discount').textContent=format(result.negotiatedReduction);
+ for(const [field,label] of fields) addRow(comparison,[label,format(result.original[field]),format(result.proposed[field]),format(result.delta[field])]);
+ const s=result.settlement;
+ for(const [key,label] of [['collected','原已收款'],['retentionReceived','原已收保留款'],['pendingCheque','支票預留'],['originalOutstanding','原未收應收'],['proposedOutstanding','試算剩餘應收'],['proposedRetentionOutstanding','試算待收保留款'],['proposedCollectibleAfterCheque','試算支票後可收']])addRow(settlement,[label,format(s[key])]);
+ status.className='foot '+(result.locks.length?'hold':'safe');
+ status.textContent=result.locks.length?'須人工核對；所有金額僅供預覽，不可入帳':'試算條件可核對，但仍不能直接入帳或修改請款';
+ document.getElementById('lockTitle').textContent=result.locks.length?'安全門禁：'+result.locks.length+' 項待人工核對':'安全門禁：僅提供草稿';
+ (result.locks.length?result.locks.map(x=>x.label):[result.nextStep]).forEach(v=>{
+ const li=document.createElement('li');li.textContent=v;blockers.append(li);
+ });
+ window.__P40PreviewResult=result;
+ }catch(error){
+ status.className='foot hold';status.textContent='已停止試算：'+String(error.message||error);
+ document.getElementById('lockTitle').textContent='資料未通過核對';
+ const li=document.createElement('li');li.textContent=String(error.message||error);blockers.append(li);
+ document.getElementById('before').textContent='—';document.getElementById('after').textContent='—';document.getElementById('discount').textContent='—';
+ window.__P40PreviewResult={error:String(error.message||error)};
+ }
+}
+document.getElementById('case').addEventListener('change',render);
+document.getElementById('approved').addEventListener('input',render);
+render();
+</script></body></html>
