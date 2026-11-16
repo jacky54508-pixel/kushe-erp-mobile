@@ -1,0 +1,98 @@
+name: P40-16J disposable JSONB full-sync and allowance ledger CAS race (NO PRODUCTION)
+on:
+  push:
+    branches: [p40-16j-jsonb-ledger-race-isolated-20261116]
+    paths:
+      - '.p40-16j-tests/**'
+      - '.github/workflows/p40-16j-jsonb-ledger-races.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-financial-ledger-concurrency:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 17
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: p40_16j_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: synthetic-j-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d p40_16j_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      P40J_EPHEMERAL_DSN: postgresql://postgres:synthetic-j-ci-only@127.0.0.1:5432/p40_16j_ci
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: PRE-COMMIT guard, production app and both release branches unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN=2ab9c9d5944b1360ba3eebf49695713168caca8a
+          BETA=62669539053a15174081ba8670b18248195c6f8c
+          BASE=29f9b5e6db5bbef370df103f20373e882a376e7a
+          test "$GITHUB_REF_NAME" = p40-16j-jsonb-ledger-race-isolated-20261116
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = "$MAIN"
+          test "$(git rev-parse origin/beta)" = "$BETA"
+          test "$(git merge-base origin/main HEAD)" = "$MAIN"
+          test "$(git merge-base "$BASE" HEAD)" = "$BASE"
+          git diff --name-only "$BASE"...HEAD >/tmp/p40j-changes
+          cat /tmp/p40j-changes
+          test -s /tmp/p40j-changes
+          if grep -Ev '^(.p40-16j-tests/|.github/workflows/p40-16j-jsonb-ledger-races.yml$)' /tmp/p40j-changes; then
+            echo 'STOP: out-of-scope production source change'; exit 1
+          fi
+          for f in index.html assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/app.js assets/js/billing.js assets/js/invoices.js assets/js/commissions.js assets/js/payroll.js assets/js/banks.js assets/js/billing-groups.js assets/js/external-billing-print.js; do
+            test "$(git rev-parse origin/main:"$f")" = "$(git rev-parse HEAD:"$f")"
+          done
+          echo 'PASS main, beta, ERP and all finance modules unchanged'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned CI PostgreSQL driver and verify local-only DSN
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install 'psycopg[binary]==3.2.9'
+          python - <<'PY'
+          from urllib.parse import urlsplit
+          import os
+          u=urlsplit(os.environ['P40J_EPHEMERAL_DSN'])
+          assert u.hostname=='127.0.0.1' and u.path=='/p40_16j_ci'
+          print('PASS local ephemeral PostgreSQL only')
+          PY
+      - name: Real concurrent PostgreSQL synthetic JSONB sync vs ledger tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .p40-16j-tests/test_snapshot_ledger_races.py
+      - name: Regress P40-16A-D synthetic-only no-posting rules
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test .p40-16a-tests/review.test.cjs .p40-16b-tests/ui.test.cjs .p40-16c-tests/accounting-gate.test.cjs .p40-16d-tests/simulated-ledger.test.cjs
+      - name: Regress P40-16I synthetic source links and paid-payroll blockers
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test .p40-16i-tests/financial_links_readonly.test.cjs
+      - name: Verify no production posting or SQL import path
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -q 'p40j_ci' index.html
+          ! grep -q 'p40j_ci' assets/js/erp-store.js
+          ! grep -q 'p40-16j' assets/js/cloud-sync.js
+          echo 'PASS no real data/migration/ERP integration'
