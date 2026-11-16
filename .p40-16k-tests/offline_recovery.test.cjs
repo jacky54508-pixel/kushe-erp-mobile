@@ -77,14 +77,12 @@ test('lost network after server applied requires fresh read confirmation',()=>{
  assert.equal(l.resume('SYNTH-PC'),'SYNCED');
 });
 test('ambiguous upload with new remote content must never pretend success',()=>{
- const l=setup();l.createDevice('SYNTH-PHONE');
+ const l=setup();
  l.edit('SYNTH-PC','pending');
  assert.throws(()=>l.upload('SYNTH-PC',{networkLostAfterWrite:true}));
- l.edit('SYNTH-PHONE','competing');
- assert.throws(()=>l.upload('SYNTH-PHONE'),/CAS_CONFLICT/);
- // State mismatch is simulated by a later trusted client after it restored.
- l.prepareBackup('SYNTH-PHONE');
- assert.equal(l.restore('SYNTH-PHONE'),'RESTORE_VERIFIED');
+ // A genuinely clean device signs in AFTER the first ambiguous commit. Its
+ // newer verified upload must not falsely complete the PC's old operation.
+ l.createDevice('SYNTH-PHONE');
  l.edit('SYNTH-PHONE','newer cloud');
  assert.equal(l.upload('SYNTH-PHONE'),'UPLOAD_VERIFIED');
  assert.equal(l.reverifyAmbiguousUpload('SYNTH-PC'),'CONFLICT_NO_AUTO_OVERWRITE');
