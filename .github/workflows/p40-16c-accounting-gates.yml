@@ -1,0 +1,65 @@
+name: P40-16C isolated accounting and reversal gates - NO POSTING
+on:
+  push:
+    branches: [p40-16c-posting-gates-ledger-isolated-20261116]
+    paths:
+      - '.p40-16c-tests/**'
+      - 'assets/js/p40-16c-accounting-gate.js'
+      - '.github/workflows/p40-16c-accounting-gates.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-accounting-synthetic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Fail-closed scope, main/beta unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN=2ab9c9d5944b1360ba3eebf49695713168caca8a
+          BASE=d318a7c84a4e928225abf47513f8caf455b85af3
+          test "$GITHUB_REF_NAME" = "p40-16c-posting-gates-ledger-isolated-20261116"
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = "$MAIN"
+          test "$(git merge-base origin/main HEAD)" = "$MAIN"
+          test "$(git merge-base "$BASE" HEAD)" = "$BASE"
+          git diff --name-only "$BASE"...HEAD > /tmp/p40-16c-diff
+          cat /tmp/p40-16c-diff
+          test -s /tmp/p40-16c-diff
+          if grep -Ev '^(.p40-16c-tests/|.github/workflows/p40-16c-accounting-gates.yml$|assets/js/p40-16c-accounting-gate.js$)' /tmp/p40-16c-diff; then
+            echo 'BLOCKED: unexpected application or data change';exit 1
+          fi
+          for f in index.html assets/js/erp-store.js assets/js/billing.js assets/js/invoices.js assets/js/commissions.js assets/js/payroll.js assets/js/banks.js; do
+            test "$(git rev-parse origin/main:"$f")" = "$(git rev-parse HEAD:"$f")"
+          done
+      - name: Node syntax and synthetic A/B/C accounting gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check assets/js/p40-16a-concession-review.js
+          node --check assets/js/p40-16b-concession-allocation-ui.js
+          node --check assets/js/p40-16c-accounting-gate.js
+          node --check .p40-16c-tests/accounting-gate.test.cjs
+          node --test .p40-16a-tests/review.test.cjs .p40-16b-tests/ui.test.cjs .p40-16c-tests/accounting-gate.test.cjs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Recheck B desktop/mobile UI only in synthetic localhost
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+          python -m http.server 8799 --bind 127.0.0.1 >/tmp/p40-16c-8799.log 2>&1 &
+      - name: Chrome isolated B regression
+        env:
+          P40_CHROME_BINARY: /usr/bin/google-chrome
+        run: python .p40-16b-tests/ui_acceptance.py
