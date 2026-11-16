@@ -57,7 +57,7 @@ jobs:
           set -euo pipefail
           node --check .p40-11-lab/discount_preview.js
           node --test .p40-11-tests/discount_preview.test.cjs
-          node --test .p40-10-tests/discount_policy.test.cjs
+          node --test .p39-inv1-tests/projection.test.js
 
   browser-visual-synthetic-only:
     name: Synthetic-only Chrome comparison, visual PNG proof, locked source cases
