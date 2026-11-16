@@ -87,7 +87,7 @@
     // P31-5: one primary amount per view, using the existing validated read model.
     return '<div class="bg-summary bg-summary-single"><div class="bg-identity"><div class="bg-titleline"><h3>'+esc(d.displayProjectName)+'</h3><span class="bg-kind">合併請款</span></div><p class="bg-caption">'+esc(d.customerName)+'</p></div>'+
       '<div class="bg-money-grid"><div class="bg-metric bg-amount"><small>'+(isReceivable?'本期未沖銷':'請款合計')+'</small><strong>'+money(isReceivable?t.outstanding:t.grossTotal)+'</strong><span class="bg-state">'+statusText(g)+'</span></div></div>'+
-      '<div class="bg-actions"><button type="button" class="commission-primary" data-bg-edit>編輯明細</button><button type="button" class="commission-secondary" data-bg-pdf>PDF</button><button type="button" class="bg-original-toggle" data-bg-expand aria-expanded="false">原單 '+d.sourceIds.length+' 張</button></div></div>'+
+      '<div class="bg-actions"><button type="button" class="commission-primary" data-bg-edit>編輯明細</button><button type="button" class="commission-secondary" data-bg-pdf>PDF</button>'+(isReceivable?'':'<button type="button" class="commission-secondary" data-bg-discount>議價／折讓</button>')+'<button type="button" class="bg-original-toggle" data-bg-expand aria-expanded="false">原單 '+d.sourceIds.length+' 張</button></div></div>'+
       '<div class="bg-mobile-audit">'+documentAuditMarkup(d)+'</div>'+
       (t.retentionOutstanding||t.pendingCheque?'<div class="bg-extra-facts">'+(t.retentionOutstanding?'<span>保留款待收 <b>'+money(t.retentionOutstanding)+'</b></span>':'')+(t.pendingCheque?'<span>待兌現預留 <b>'+money(t.pendingCheque)+'</b></span>':'')+'</div>':'')+
       (g.termsChanged?'<p class="bg-warning">原單內容已變動；請核對修訂後再出本次文件。</p>':g.settlementChanged?'<p class="bg-info">收款狀態已更新；列表為即時餘額，重新出單前請修訂確認。</p>':'');
@@ -101,7 +101,7 @@
     const row=document.createElement('tr');row.className='bg-group-row bg-inline-row bg-audit-row';row.dataset.bgGroup=d.id;
     const toggle='<button type="button" class="bg-inline-toggle bg-arrow-toggle" data-bg-expand aria-expanded="false" aria-label="展開原單（'+d.sourceIds.length+' 張）"></button>';
     const identity='<b class="bg-document-title">合併請款</b><small class="bg-document-count">'+d.sourceIds.length+' 張原單</small>';
-    const actions='<div class="bg-inline-actions"><button type="button" class="commission-link" data-bg-edit>編輯明細</button><button type="button" class="commission-link" data-bg-pdf>PDF</button></div>';
+    const actions='<div class="bg-inline-actions"><button type="button" class="commission-link" data-bg-edit>編輯明細</button><button type="button" class="commission-link" data-bg-pdf>PDF</button>'+(billing?'<button type="button" class="commission-link" data-bg-discount>議價／折讓</button>':'')+'</div>';
     const extras=(t.retentionOutstanding?'<small class="bg-inline-attention">保留款待收 '+money(t.retentionOutstanding)+'</small>':'')+(t.pendingCheque?'<small class="bg-inline-attention">待兌現預留 '+money(t.pendingCheque)+'</small>':'');
     const warning=g.termsChanged?'<small class="bg-inline-warning" role="status">原單已變動，出單前請核對修訂。</small>':g.settlementChanged?'<small class="bg-inline-notice" role="status">收款已更新，出單前請核對修訂。</small>':'';
     const values=billing?{
@@ -190,6 +190,7 @@
     button.onclick=()=>{if(expand.has(key))expand.delete(key);else expand.add(key);update()};update();
     $('[data-bg-edit]',box).onclick=()=>openEditor(g.document.sourceIds,g.document.id);
     $('[data-bg-pdf]',box).onclick=()=>printSaved(g.document.id);
+    $('[data-bg-discount]',box)?.addEventListener('click',()=>{try{if(!window.KusheBillingGroupDiscountPreview)throw Error('合併議價試算元件尚未載入');window.KusheBillingGroupDiscountPreview.open(g.document.id)}catch(error){notifyError(error.message||String(error))}});
     $$('[data-bg-history]',box).forEach(button=>button.onclick=()=>openDocumentHistory(g.document.id));
   }
   function mountList(root,kind,context){

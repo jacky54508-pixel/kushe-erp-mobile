@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>P40-15B whole billing module isolated integration</title>
+<link rel="stylesheet" href="/assets/css/app.css">
+<link rel="stylesheet" href="/assets/css/commissions-scoped.css">
+<link rel="stylesheet" href="/assets/css/billing-groups.css">
+<link rel="stylesheet" href="/assets/css/receivables-scoped.css">
+<style>body{background:#eef3f9;padding:16px;min-height:100vh}.p40-test-watermark{font:600 13px system-ui;color:#26445d;padding:10px}
+#billingsApp{background:#fff;padding:12px;border-radius:14px}</style>
+</head><body>
+<div class="p40-test-watermark">P40-15B 隔離測試 · 僅虛構資料 · 不連線正式 ERP</div>
+<div id="billingsApp"></div><div id="receivablesApp"></div>
+<script>
+'use strict';
+// This fake Store lives solely in memory and every writer throws.
+const makeSource=(id,project,gross,tax,retention,received,status,invoiceNo)=>{
+  const untaxed=gross-tax,receivable=gross-retention;
+  return {document:{billingId:id,receivableId:'AR-'+id,number:id,date:'2026-11-16',
+      customerId:'FAKE-C',customerName:'虛構建商',projectId:'P-'+id,
+      projectName:project,taxMode:'未稅',invoiceStatus:status,invoiceNo,
+      anchors:{untaxed,tax,grossTotal:gross,retention,receivable},
+      originalLines:Array.from({length:9},(_,i)=>({house:'H'+(i+1),item:'虛構施工 '+(i+1),
+        unit:'式',qty:1,price:100,subtotal:100}))},
+    settlement:{billingId:id,received,outstanding:receivable-received,retentionReceived:0,
+      retentionOutstanding:retention,pendingCheque:0,availableToCollect:receivable-received}};
+};
+const sources=[
+ makeSource('FAKE-A','虛構 A 區',350000,16667,17500,10000,'invoiced','FAKE-INVOICE'),
+ makeSource('FAKE-B','虛構 B 區',282100,13433,14105,0,'invoice_pending','')
+];
+const fields=['untaxed','tax','grossTotal','retention','receivable','received',
+  'outstanding','retentionReceived','retentionOutstanding','pendingCheque','availableToCollect'];
+const totals=Object.fromEntries(fields.map(k=>[k,sources.reduce(
+  (n,s)=>n+(s.document.anchors[k]??s.settlement[k]??0),0)]));
+const group={document:{id:'FAKE-GROUP',status:'active',revision:1,
+    sourceIds:['FAKE-A','FAKE-B'],displayProjectName:'虛構合併案場',
+    customerName:'虛構建商',documentDate:'2026-11-16',history:[]},
+    sources,totals,issues:[],termsChanged:false,settlementChanged:false,canGroup:true};
+const billings=sources.map(s=>{
+  const d=s.document,a=d.anchors;
+  return {id:d.billingId,number:d.number,date:d.date,customer:d.customerId,
+    customerName:d.customerName,project:d.projectId,projectName:d.projectName,
+    amount:a.untaxed,preTaxAmount:a.untaxed,tax:a.tax,taxAmount:a.tax,
+    grossTotal:a.grossTotal,taxIncludedAmount:a.grossTotal,
+    retention:a.retention,retentionAmount:a.retention,total:a.receivable,
+    taxMode:'未稅',invoiceStatus:d.invoiceStatus,invoiceNo:d.invoiceNo,
+    hasInvoice:true,retentionMode:'5',retentionBase:'taxIncluded',retentionRate:5,
+    receivableId:d.receivableId,lines:d.originalLines.map((x,i)=>({...x,
+      date:'2026-11-16',sourceRefs:['FAKE-WORK-'+i]}))};
+});
+billings.push({id:'FAKE-SINGLE',number:'FAKE-SINGLE',date:'2026-11-16',
+  customer:'FAKE-C',customerName:'虛構建商',project:'P-FAKE-SINGLE',
+  projectName:'虛構單筆案場',amount:100000,preTaxAmount:100000,tax:0,taxAmount:0,
+  grossTotal:100000,taxIncludedAmount:100000,total:100000,
+  retention:0,retentionAmount:0,taxMode:'未稅',invoiceStatus:'no_invoice',invoiceNo:'',
+  hasInvoice:false,retentionMode:'none',retentionBase:'taxIncluded',retentionRate:0,
+  receivableId:'AR-FAKE-SINGLE',
+  lines:[{house:'S1',item:'虛構單筆工程',date:'2026-11-16',unit:'式',qty:1,price:100000}]});
+const receivables=billings.map(b=>{
+  const src=sources.find(s=>s.document.billingId===b.id);
+  return {id:b.receivableId,billingId:b.id,amount:b.total,untaxedAmount:b.preTaxAmount,
+    taxAmount:b.tax,grossTotal:b.grossTotal,retentionAmount:b.retentionAmount,
+    received:src?.settlement.received??0,retentionReceived:0,
+    project:b.project,customer:b.customer};
+});
+const state={billings,receivables,customers:[{id:'FAKE-C',name:'虛構建商'}],
+  projects:billings.map(b=>({id:b.project,customer:b.customer,name:b.projectName})),
+  banks:[],invoices:[],receipts:[],retentionReceipts:[],bankTransactions:[],
+  payroll:[],commissions:[],dailyLogs:[],settings:{defaultTax:5},
+  meta:{externalBillingDocuments:[{id:'FAKE-GROUP',status:'active',sourceIds:['FAKE-A','FAKE-B']}]}};
+window.__p40integrated={state,group,writes:[],lastToast:'',
+  snapshot(){return JSON.stringify({billings:this.state.billings,receivables:this.state.receivables,
+    sources:this.group.sources,totals:this.group.totals,
+    other:[this.state.invoices,this.state.bankTransactions,this.state.payroll,this.state.commissions],
+    meta:this.state.meta})}};
+const ctx=window.__p40integrated;
+const bad=(label)=>()=>{ctx.writes.push(label);throw Error('禁止在隔離測試中寫入 '+label)};
+const store={
+  getState:()=>state,load:async()=>state,num:v=>Number(v)||0,masterOptions:key=>state[key]||[],
+  billingReceiptState:b=>{
+    const ar=receivables.find(row=>row.billingId===b.id),
+      received=ar?.received||0,unreceived=Math.max(0,(ar?.amount||0)-received);
+    return {received,unreceived,status:received===0?'未收':unreceived===0?'已收':'部分收款',
+      receivable:ar};
+  },
+  billingEditable:()=>false,billingDeletable:()=>false,
+  billingDocumentLines:b=>b.lines||[],billingDocumentState:(id)=>{
+    const b=billings.find(row=>row.id===id),ar=receivables.find(row=>row.billingId===id);
+    return {protected:true,issues:[],snapshot:'FAKE-READONLY-SNAPSHOT',amounts:{
+      untaxed:b.amount,tax:b.tax,grossTotal:b.grossTotal,retention:b.retention,
+      receivable:b.total,unreceived:b.total-(ar?.received||0)}};
+  },
+  externalBillingDocumentIndex:()=>({documents:[group],issues:[]}),
+  externalBillingContext:()=>{throw Error('隔離測試不准進入編輯')},
+  saveExternalBillingDocument:bad('saveExternalBillingDocument'),
+  updateBilling:bad('updateBilling'),createBilling:bad('createBilling'),
+  saveBilling:bad('saveBilling'),deleteBilling:bad('deleteBilling'),
+  updateInvoice:bad('updateInvoice'),saveInvoice:bad('saveInvoice'),
+  saveReceipt:bad('saveReceipt'),persist:bad('persist'),
+  replaceSnapshot:bad('replaceSnapshot'),getLastStoreTransactionResult:()=>null
+};
+window.KuSheERPStore=Object.freeze(store);
+window.KusheBillingBundlePrint={sameCustomer:()=>true,customerIdentity:()=> 'FAKE-C'};
+window.KusheKpi={register:()=>{}};
+window.KushePhase1={toast:text=>{ctx.lastToast=String(text)},navigate:()=>{}};
+</script>
+<script src="/assets/js/billing-discount-calculator.js"></script>
+<script src="/assets/js/billing-discount-preview.js"></script>
+<script src="/assets/js/billing-groups.js"></script>
+<script src="/assets/js/billing-group-discount-preview.js"></script>
+<script src="/assets/js/billing.js"></script>
+<script>window.KusheBilling.activate();</script>
+</body></html>
