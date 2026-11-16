@@ -166,7 +166,7 @@ BEGIN
     seen := array_append(seen,row_data.source_id);
     SELECT * INTO s FROM p40_16f_lab.fake_sources
       WHERE document_id=p_document_id AND source_id=row_data.source_id
-        AND tenant_id=trusted_tenant FOR SHARE;
+        AND tenant_id=trusted_tenant; -- Only SELECT on immutable source rows; document FOR UPDATE protects CAS.
     IF NOT FOUND OR s.invoice_state<>'pending' OR s.received<>0 OR
        s.retention_received<>0 OR s.cheque_reserved<>0 THEN
       RAISE EXCEPTION 'Source is missing, invoiced, collected or has pending cheque'; END IF;
