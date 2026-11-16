@@ -18,6 +18,9 @@ def make_page(browser,width):
     page.on("request",lambda req:outside.append(req.url) if not req.url.startswith("http://127.0.0.1:8797/") else None)
     page.on("pageerror",lambda exc:errors.append(str(exc)))
     page.goto(BASE,wait_until="load")
+    # Apply actual production stylesheets; source is the same pinned GitHub candidate.
+    page.add_style_tag(url="http://127.0.0.1:8797/assets/css/app.css")
+    page.add_style_tag(url="http://127.0.0.1:8797/assets/css/billing-groups.css")
     page.wait_for_function("() => window.KuSheERPStore && window.KusheBillingDiscountPreview && window.KusheBilling")
     page.evaluate("async()=>await window.KuSheERPStore.load()")
     return ctx,page,outside,errors
