@@ -1,0 +1,63 @@
+name: P40-16D append-only synthetic ledger CAS and reversal - NO WRITES
+on:
+  push:
+    branches: [p40-16d-ledger-cas-reversal-sim-20261116]
+    paths:
+      - '.p40-16d-tests/**'
+      - 'assets/js/p40-16d-ledger-simulator.js'
+      - '.github/workflows/p40-16d-simulated-ledger.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+jobs:
+  synthetic-ledger-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify isolated branch, unchanged main/beta and no ERP app modifications
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN=2ab9c9d5944b1360ba3eebf49695713168caca8a
+          BASE=5ad6a4d4db280f89801e36c4116b0bb5c09a6410
+          test "$GITHUB_REF_NAME" = "p40-16d-ledger-cas-reversal-sim-20261116"
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = "$MAIN"
+          test "$(git merge-base origin/main HEAD)" = "$MAIN"
+          test "$(git merge-base "$BASE" HEAD)" = "$BASE"
+          git diff --name-only "$BASE"...HEAD > /tmp/p40-16d-changed
+          cat /tmp/p40-16d-changed
+          test -s /tmp/p40-16d-changed
+          if grep -Ev '^(.p40-16d-tests/|.github/workflows/p40-16d-simulated-ledger.yml$|assets/js/p40-16d-ledger-simulator.js$)' /tmp/p40-16d-changed; then
+            echo 'BLOCK: non-isolated file changed';exit 1
+          fi
+          for f in index.html assets/js/erp-store.js assets/js/billing.js assets/js/invoices.js assets/js/commissions.js assets/js/payroll.js assets/js/banks.js assets/js/external-billing-print.js; do
+            test "$(git rev-parse origin/main:"$f")" = "$(git rev-parse HEAD:"$f")"
+          done
+      - name: All P40-16 A/B/C/D pure synthetic safety regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in assets/js/p40-16{a-concession-review,b-concession-allocation-ui,c-accounting-gate,d-ledger-simulator}.js; do
+            node --check "$f"
+          done
+          node --check .p40-16d-tests/simulated-ledger.test.cjs
+          node --test .p40-16a-tests/review.test.cjs .p40-16b-tests/ui.test.cjs .p40-16c-tests/accounting-gate.test.cjs .p40-16d-tests/simulated-ledger.test.cjs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run prior isolated mobile and desktop browser regression
+        shell: bash
+        env:
+          P40_CHROME_BINARY: /usr/bin/google-chrome
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+          python -m http.server 8799 --bind 127.0.0.1 >/tmp/p40-16d-localonly.log 2>&1 &
+          python .p40-16b-tests/ui_acceptance.py
