@@ -34,7 +34,7 @@
   }
   function retentionCalc(net,gross,options){
     const base=options.retentionBase==='preTax'?net:gross;
-    const raw=options.retentionCustom!==null?options.retentionCustom:Math.round(base*options.retentionRate/100);
+    const raw=options.retentionCustom!==null&&options.retentionCustom>0?options.retentionCustom:Math.round(base*options.retentionRate/100);
     return Math.min(raw,gross);
   }
   function approvedTotals(approvedGross,o){
