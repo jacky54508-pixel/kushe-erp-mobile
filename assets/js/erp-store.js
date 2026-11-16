@@ -6350,6 +6350,32 @@
   async function saveQuotationPrice(values) {
     requireStoreTransactionDraft();const row=writeQuotationPrice(values);persist(`新增報價價格歷史 ${row.item}`);return row;
   }
+  // P40-3: Store-level guard so non-UI status paths cannot approve a
+  // negotiation revision whose notes changed but real quotation prices did not.
+  // Read-only on the existing source; never rewrites source, commission, AR or payroll.
+  function assertQuotationRevisionApproval(revision, values) {
+    if(!revision?.revisionOf)return;
+    const original=state.quotations.find(row=>String(row.id)===String(revision.revisionOf));
+    if(!original)throw storeError('修訂來源報價單不存在，已停止送出或確認','QUOTATION_REVISION_SOURCE_MISSING');
+    const lines=Array.isArray(values.lines)?values.lines:[],
+      originalLines=Array.isArray(original.lines)?original.lines:[],
+      notes=[values.internalNote,values.publicNote,values.note,...lines.map(line=>line.note)].map(v=>String(v||'')).join(' ');
+    if(!/議價|折讓|降價|減價|讓價|折扣|優惠|改價|價格調整|單價調整/.test(notes))return;
+    const priceShape=rows=>JSON.stringify(rows.map(line=>[
+      String(line.pricingType||'actual'),num(line.price),num(line.lumpSumAmount)
+    ]).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))));
+    const originalPricingMode=pricingMode(original.pricingMode)||'actual',
+      revisedPricingMode=pricingMode(values.pricingMode)||originalPricingMode;
+    const priceChanged=priceShape(lines)!==priceShape(originalLines)
+      ||revisedPricingMode!==originalPricingMode
+      ||num(values.lumpSumTotal)!==num(original.lumpSumTotal);
+    const revisedAmount=values.amount===undefined
+      ?quotationTotals(lines,values.taxMode,revisedPricingMode,values.lumpSumTotal).amount
+      :Number(values.amount);
+    if(!Number.isFinite(revisedAmount))throw storeError('修訂金額無法核對，已停止送出或確認','QUOTATION_REVISION_INVALID_AMOUNT');
+    if(!priceChanged&&Math.abs(revisedAmount-num(original.amount))<0.001)
+      throw storeError('議價／折讓備註尚未反映實際單價或金額，僅能保存草稿，不能送出或確認','QUOTATION_REVISION_NOTE_ONLY');
+  }
   function writeQuotation(values, id = '') {
     const customer=state.customers.find((row)=>String(row.id)===String(values.customer)),project=state.projects.find((row)=>String(row.id)===String(values.project));
     if(!customer)throw new Error('請選擇客戶／建設公司'); if(!project)throw new Error('請選擇案場');
@@ -6361,6 +6387,8 @@
     if(existing?.status==='已確認'&&values.allowConfirmedEdit!==true)throw new Error('已確認報價不可直接修改歷史內容');
     const lumpSumTotal=mode==='lump_sum'?Math.max(0,num(values.lumpSumTotal)):0;if(mode==='lump_sum'&&lumpSumTotal<=0)throw new Error('請輸入合約／報價總價');
     const totals=quotationTotals(lines,values.taxMode,mode,lumpSumTotal),row=existing||{id:uid(),number:nextQuotationNumber(values.date),createdAt:now};
+    const nextStatus=['草稿','已送出','已確認','作廢'].includes(values.status)?values.status:(row.status||'草稿');
+    if(['已送出','已確認'].includes(nextStatus))assertQuotationRevisionApproval(row,{...values,lines,pricingMode:mode,lumpSumTotal,amount:totals.amount});
     Object.assign(row,{customer:customer.id,customerName:customer.name,project:project.id,projectName:project.name,date:values.date||businessDate(new Date(now)),dueDate:values.dueDate||'',pricingMode:mode,lumpSumTotal,billingPlan:values.billingPlan||row.billingPlan||'one_time',billingMilestones:Array.isArray(row.billingMilestones)?row.billingMilestones:[],taxMode:values.taxMode==='含稅'?'含稅':'未稅',lines,amount:totals.amount,tax:totals.tax,total:totals.total,status:['草稿','已送出','已確認','作廢'].includes(values.status)?values.status:(row.status||'草稿'),internalNote:clean(values.internalNote),publicNote:clean(values.publicNote),note:clean(values.publicNote),sourceType:values.sourceType||row.sourceType||'manual',importTemplateId:values.importTemplateId||row.importTemplateId||'',updatedAt:now});
     if(!existing){rememberQuotationNumber(row.number);state.quotations.unshift(row)}mergeQuotationUnitPresets(lines.map((line)=>line.unit));return row;
   }
@@ -6371,6 +6399,7 @@
     requireStoreTransactionDraft(); const row=state.quotations.find((item)=>item.id===id); if(!row)throw new Error('找不到報價單');
     if(!['草稿','已送出','已確認','作廢'].includes(status))throw new Error('無效的報價狀態');
     if(row.status==='已確認'&&status!=='已確認')throw new Error('已確認報價請使用「取消確認」或「建立修訂版」');
+    if(['已送出','已確認'].includes(status))assertQuotationRevisionApproval(row,row);
     row.status=status;row.updatedAt=new Date().toISOString();persist(`報價單 ${row.number} 狀態改為 ${status}`);return row;
   }
   function quotationUsage(id) {
