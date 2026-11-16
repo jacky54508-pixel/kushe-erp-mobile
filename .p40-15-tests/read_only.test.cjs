@@ -80,7 +80,7 @@ test('all bill lists, details and merged rows visibly provide concession actions
   assert.ok(groups.includes('KusheBillingGroupDiscountPreview.open(g.document.id)'));
   assert.ok(index.includes('billing-group-discount-preview.js?v=p40-15-readonly-1'));
   assert.ok(index.indexOf('billing-groups.js')<index.indexOf('billing-group-discount-preview.js'));
-  assert.ok(index.indexOf('billing-group-discount-preview.js')<index.indexOf('billing.js'));
+  assert.ok(index.indexOf('src="assets/js/billing-group-discount-preview.js')<index.indexOf('src="assets/js/billing.js?v='));
 });
 test('new module has no ERP or browser persistence writers',()=>{
   const source=src('assets/js/billing-group-discount-preview.js');
