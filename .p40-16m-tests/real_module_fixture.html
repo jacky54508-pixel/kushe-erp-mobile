@@ -23,7 +23,8 @@ window.KusheAuthGate=Object.freeze({
  mfaStatus:()=>({aal:'aal2'})
 });
 window.KuSheLegacyData=Object.freeze({getState:()=>({}),refresh:async()=>{}});
-window.confirm=()=>false;
+window.P40M_ALLOW_APPROVAL=false;
+window.confirm=()=>window.P40M_ALLOW_APPROVAL;
 </script>
 <!-- Exact production main files by URL, never transformed or copied into this fixture. -->
 <script src="/assets/js/erp-store.js"></script>
