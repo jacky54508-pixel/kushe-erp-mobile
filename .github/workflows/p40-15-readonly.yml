@@ -49,3 +49,34 @@ jobs:
           node --check .p40-15-tests/read_only.test.cjs
           node --test .p40-15-tests/read_only.test.cjs
           node --test .p39-inv1-tests/projection.test.js
+
+  browser-ui-isolated:
+    name: Chrome desktop/mobile synthetic-only visual acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Use system Chrome on localhost only
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+          python -m http.server 8799 --bind 127.0.0.1 > /tmp/p40-15-8799.log 2>&1 &
+      - name: Click through both layouts and compare immutable synthetic state
+        shell: bash
+        env:
+          P40_CHROME_BINARY: /usr/bin/google-chrome
+        run: python .p40-15-tests/browser_ui.py
+      - name: Save isolated QA screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p40-15a-desktop-mobile-synthetic
+          path: .p40-15-tests/screenshots/*.png
+          if-no-files-found: ignore
