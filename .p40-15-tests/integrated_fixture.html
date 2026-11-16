@@ -76,7 +76,7 @@ window.__p40integrated={state,group,writes:[],lastToast:'',
 const ctx=window.__p40integrated;
 const bad=(label)=>()=>{ctx.writes.push(label);throw Error('禁止在隔離測試中寫入 '+label)};
 const store={
-  getState:()=>state,load:async()=>state,num:v=>Number(v)||0,masterOptions:(_,rows)=>rows,
+  getState:()=>state,load:async()=>state,num:v=>Number(v)||0,masterOptions:key=>state[key]||[],
   billingReceiptState:b=>{
     const ar=receivables.find(row=>row.billingId===b.id),
       received=ar?.received||0,unreceived=Math.max(0,(ar?.amount||0)-received);
