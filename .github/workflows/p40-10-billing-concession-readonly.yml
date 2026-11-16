@@ -1,0 +1,123 @@
+name: P40-10 billing negotiation read-only safety classification (never deploy)
+
+on:
+  push:
+    branches:
+      - p40-10-billing-negotiation-readonly-gate-20261116
+    paths:
+      - '.github/workflows/p40-10-billing-concession-readonly.yml'
+      - '.p40-10-tests/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  code-and-policy-safety:
+    name: P40-10 exact main pin, protected accounting, billing concession math
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Strict candidate-only diff and unmodified ERP
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          base="767cdc3b1303fa603c10a576505aee3f6eb03264"
+          test "$GITHUB_REF_NAME" = "p40-10-billing-negotiation-readonly-gate-20261116"
+          test "$(git rev-parse FETCH_HEAD)" = "$base" || { echo 'HOLD main changed'; exit 1; }
+          test "$(git merge-base "$base" HEAD)" = "$base" || { echo 'HOLD wrong main parent'; exit 1; }
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          base="767cdc3b1303fa603c10a576505aee3f6eb03264"
+          files=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          expected={
+            '.github/workflows/p40-10-billing-concession-readonly.yml',
+            '.p40-10-tests/synthetic_billing.html',
+            '.p40-10-tests/billing_negotiation.test.py',
+            '.p40-10-tests/discount_policy.test.cjs'
+          }
+          assert files==expected,(files,expected)
+          for path in ['assets/js/erp-store.js','assets/js/billing.js','assets/js/quotations.js',
+                       'assets/js/commissions.js','assets/js/payroll.js','assets/js/cloud-sync.js',
+                       'assets/js/billing-groups.js','assets/js/external-billing-print.js',
+                       'external-billing-print.html','billing-print.html','index.html']:
+            old=subprocess.check_output(['git','show',base+':'+path])
+            new=Path(path).read_bytes()
+            assert old==new,('protected ERP source changed',path)
+          print('PASS: no program, PDF, main, beta, business or production data changes')
+          PY
+      - name: Verify original calculations, locks and PDF display with code tests
+        run: |
+          set -euo pipefail
+          node --check assets/js/erp-store.js
+          node --check assets/js/billing.js
+          node --test .p40-10-tests/discount_policy.test.cjs
+          node --test .p39-inv1-tests/projection.test.js
+
+  actual-store:
+    name: P40-10 actual Store synthetic billing edits vs locked records and original PDF
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Browser dependencies and localhost-only server
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
+          python -m http.server 8797 --bind 127.0.0.1 >/tmp/p40-10-http-8797.log 2>&1 &
+      - name: Execute real ERP Store billing concession scenarios using synthetic records
+        env:
+          P39_INV_USE_SYSTEM_CHROME: '1'
+        run: python .p40-10-tests/billing_negotiation.test.py
+      - name: Existing detailed PDF with original houses, rows, summary and A4
+        env:
+          P39_INV_USE_SYSTEM_CHROME: '1'
+        run: python .p39-inv1a-tests/pdf_display.test.py
+      - name: Existing invoice and external group accounting unchanged
+        env:
+          P39_INV_USE_SYSTEM_CHROME: '1'
+        run: |
+          python .p39-inv1-tests/test_store.py
+          python .p39-inv1-tests/layout_preflight.test.py
+
+  original-erp:
+    name: Existing P33-P36 commission, payroll, paid-bank and auth regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Original tests in isolated Chromium and local servers
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+          for port in 8774 8784 8795 8796; do
+            python -m http.server "$port" --bind 127.0.0.1 >"/tmp/p40-10-$port.log" 2>&1 &
+          done
+      - name: P33 original commission, conflict and prior source safety
+        run: python .p39-inv1-tests/chrome_legacy.py .p33-4-tests/regression.py
+      - name: P34 original payroll, point-work and revenue commission
+        run: python .p39-inv1-tests/chrome_legacy.py .p34-tests/test.py
+      - name: P35 original correction and money UI
+        run: python .p39-inv1-tests/chrome_legacy.py .p35-tests/test_ui.py
+      - name: P36 original permissions and session
+        run: python .p39-inv1-tests/chrome_legacy.py .p36-tests/test_permissions.py
