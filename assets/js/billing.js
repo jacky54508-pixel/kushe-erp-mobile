@@ -155,7 +155,15 @@
   // document once; never recalculate a constituent bill as a separate concession.
   function openBillingDiscountReadOnly(id){
     try{
+      // P40-15B fail closed: never silently fall back to standalone discount if
+      // the original belongs to an ACTIVE combined document whose index is stale.
+      const docs=store.getState()?.meta?.externalBillingDocuments;
+      if(docs!==undefined&&!Array.isArray(docs))throw Error('合併請款來源格式待核對，停止試算');
+      const joined=(docs||[]).filter(d=>d?.status==='active'&&Array.isArray(d.sourceIds)&&d.sourceIds.some(sourceId=>String(sourceId)===String(id)));
+      if(joined.length>1)throw Error('同一張請款出現在多個有效合併文件，停止試算');
       const g=window.KusheBillingGroups?.activeFor(id);
+      if(joined.length&&(!g||String(g.document?.id)!==String(joined[0].id)))
+        throw Error('此請款已納入合併文件，但來源或版本待核對，禁止改以單筆折讓試算');
       if(g){
         if(!window.KusheBillingGroupDiscountPreview)throw Error('合併請款試算元件尚未載入');
         window.KusheBillingGroupDiscountPreview.open(g.document.id);
