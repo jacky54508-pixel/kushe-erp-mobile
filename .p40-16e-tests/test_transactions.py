@@ -259,7 +259,7 @@ class IsolatedDatabaseTests(unittest.TestCase):
     def setUpClass(cls):
         # ClientCursor sends a standalone multi-statement SQL file using simple query protocol.
         with connect() as conn:
-            with conn.cursor(cursor_factory=psycopg.ClientCursor) as cur:
+            with psycopg.ClientCursor(conn) as cur:
                 cur.execute(Path(__file__).with_name("isolated_schema.sql").read_text())
 
     def setUp(self):
