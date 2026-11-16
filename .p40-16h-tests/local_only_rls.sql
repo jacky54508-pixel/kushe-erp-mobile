@@ -1,6 +1,7 @@
 -- P40-16H: One-time GitHub Actions LOCAL PostgreSQL ONLY. NEVER Supabase migration.
 -- PostgREST verifies the JWT signature BEFORE setting request.jwt.claims.
 -- Direct SQL is inaccessible to clients. No financial writes or real data.
+CREATE SCHEMA IF NOT EXISTS auth; -- required by GoTrue automatic migration in disposable CI only
 CREATE ROLE anon NOLOGIN NOBYPASSRLS;
 CREATE ROLE authenticated NOLOGIN NOBYPASSRLS;
 CREATE ROLE authenticator LOGIN PASSWORD 'ci-only-authenticator' NOINHERIT NOBYPASSRLS;
