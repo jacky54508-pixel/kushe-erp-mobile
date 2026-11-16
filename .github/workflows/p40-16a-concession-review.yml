@@ -1,0 +1,44 @@
+name: P40-16A read-only formal concession readiness (synthetic only)
+on:
+  push:
+    branches: [p40-16a-concession-posting-design-20261116]
+    paths:
+      - '.p40-16a-tests/**'
+      - 'assets/js/p40-16a-concession-review.js'
+      - '.github/workflows/p40-16a-concession-review.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout isolated candidate (no write credentials)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Require exact main baseline and exclusive allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$GITHUB_REF_NAME" = "p40-16a-concession-posting-design-20261116"
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = "$BASE"
+          test "$(git merge-base origin/main HEAD)" = "$BASE"
+          git diff --name-only origin/main...HEAD > /tmp/p40-16a-files
+          cat /tmp/p40-16a-files
+          test -s /tmp/p40-16a-files
+          if grep -Ev '^(.p40-16a-tests/|.github/workflows/p40-16a-concession-review.yml$|assets/js/p40-16a-concession-review.js$)' /tmp/p40-16a-files; then
+            echo "REJECT: file outside read-only isolated P40-16A scope"; exit 1
+          fi
+          test "$(git show origin/main:index.html | sha256sum)" = "$(sha256sum index.html)"
+          test "$(git show origin/beta:index.html | sha256sum)" != "" || exit 1
+      - name: Pure JavaScript syntax and synthetic safety suite
+        run: |
+          set -euo pipefail
+          node --check assets/js/p40-16a-concession-review.js
+          node --check .p40-16a-tests/review.test.cjs
+          node --test .p40-16a-tests/review.test.cjs
