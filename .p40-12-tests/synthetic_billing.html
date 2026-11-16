@@ -1,0 +1,65 @@
+<!doctype html><html lang="zh-Hant"><meta charset="UTF-8"><title>P40-10 Synthetic Billing Negotiation Store</title><body>
+<script>
+window.KUSHE_PHASE1_CONFIG={};
+window.KusheAuthGate={session:()=>({access_token:'synthetic-token'}),user:()=>({id:'SYN-OWNER',email:'test@example.invalid'}),
+ companyContext:()=>({userId:'SYN-OWNER',companyId:'SYN-COMPANY',role:'owner',status:'active'}),canWrite:()=>true,
+ requireAuth:async()=>true,requireMfa:async()=>true};
+window.KusheLegacyData={refresh(){}};window.KusheRecovery={showResult(){}};
+const base=(id,options={})=>{
+ const amount=100000, tax=5000, grossTotal=105000, retention=5250, receivable=99750,
+ invoiceNo=options.issued?'SYN-AA000001':'',invoiceStatus=options.issued?'invoiced':'invoice_pending',received=options.received||0;
+ const line={id:id+'-LINE',item:'虛構牆面美容',unit:'式',date:'2026-11-16',house:'A1',
+   qty:10,price:10000,amount,subtotal:amount,pricingType:'actual',sourceRefs:[],sourceContractRefs:[]};
+ return {
+   billing:{id,number:'SYN-'+id,date:'2026-11-16',customer:'SYN-CUSTOMER',customerName:'虛構建設',
+     project:'SYN-PROJECT',projectName:'虛構工程',taxMode:'未稅',retentionMode:'5',
+     retentionRate:5,retentionBase:'taxIncluded',retentionReceived:0,remainingRetention:retention,
+     retentionStatus:'holding',retentionEnabled:true,invoiceStatus,invoiceNo,hasInvoice:true,
+     lines:[line],sourceType:'synthetic-only',sourceItemRefs:[],sourceContractRefs:[],
+     amount,preTaxAmount:amount,tax,taxAmount:tax,grossTotal,taxIncludedAmount:grossTotal,
+     retention,retentionAmount:retention,total:receivable,receivableId:id+'-AR',status:received?'部分收款':'未收款'},
+   ar:{id:id+'-AR',billingId:id,sourceNo:'SYN-'+id,date:'2026-11-16',customer:'SYN-CUSTOMER',
+     project:'SYN-PROJECT',taxMode:'未稅',amount:receivable,received,
+     untaxedAmount:amount,preTaxAmount:amount,tax,taxAmount:tax,grossTotal,taxIncludedAmount:grossTotal,
+     retention,retentionAmount:retention,retentionReceived:0,remainingRetention:retention,
+     retentionBase:'taxIncluded',invoiceStatus,invoiceNo,
+     receivableCheques:options.cheque?[{id:'SYN-CHEQUE',status:'pending'}]:[],
+     status:received?'部分收款':'未收',note:''},
+   invoice:options.issued?{id:id+'-I',invoiceId:id+'-I',sourceType:'billing',sourceId:id,
+     billingId:id,invoiceNumber:invoiceNo,number:invoiceNo,status:'issued',
+     netAmount:amount,taxAmount:tax,grossAmount:grossTotal}:null
+ };
+};
+const cases=[
+ base('SYN-EDIT'),
+ base('SYN-ISSUED',{issued:true}),
+ base('SYN-RECEIVED',{received:10000}),
+ base('SYN-CHEQUE',{cheque:true}),
+ base('SYN-RETENTION')
+];
+const seed={
+ meta:{updatedAt:'2026-11-16T00:00:00.000Z',p40Synthetic:true},settings:{defaultTax:5},
+ customers:[{id:'SYN-CUSTOMER',name:'虛構建設'}],
+ projects:[{id:'SYN-PROJECT',customer:'SYN-CUSTOMER',name:'虛構工程'}],
+ employees:[],dailyLogs:[],commissions:[],attendance:[],payroll:[],
+ billings:cases.map(x=>x.billing),receivables:cases.map(x=>x.ar),
+ invoices:cases.map(x=>x.invoice).filter(Boolean),
+ receipts:[{id:'SYN-RECEIPT',receivableId:'SYN-RECEIVED-AR',billingId:'SYN-RECEIVED',amount:10000,date:'2026-11-16'}],
+ retentionReceipts:[{id:'SYN-RET-RECEIPT',receivableId:'SYN-RETENTION-AR',billingId:'SYN-RETENTION',amount:2000,date:'2026-11-16'}],
+ salaryPayments:[],commissionSettlements:[],bankTransactions:[],banks:[],payables:[],payments:[],
+ vendors:[],materials:[],materialUsages:[],inventoryReceipts:[],projectCosts:[],dailyItemPresets:[],
+ quotations:[],quotationPrices:[],quotationTemplates:[],audit:[]
+};
+localStorage.setItem('KuSheERP25_EMERGENCY',JSON.stringify(seed));
+</script>
+<script src="/assets/js/erp-store.js"></script>
+<script>
+window.KusheKpi={register(){}};
+window.KushePhase1={toast(message){window.__p40_last_toast=message},navigate(){}};
+window.KusheBillingBundlePrint={sameCustomer:()=>true};
+window.KusheHistoricalBilling={mount(){}};
+</script>
+<script src="/assets/js/billing-discount-calculator.js"></script>
+<script src="/assets/js/billing-discount-preview.js"></script>
+<script src="/assets/js/billing.js"></script>
+</body></html>
