@@ -1,0 +1,94 @@
+name: P40-16F isolated RLS + limited-role protected SQL RPC (NO PRODUCTION)
+on:
+  push:
+    branches: [p40-16f-rls-protected-rpc-ci-20261116]
+    paths:
+      - '.p40-16f-tests/**'
+      - '.github/workflows/p40-16f-isolated-permissions.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-tenants-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: p40_16f_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: synthetic-f-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d p40_16f_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      P40F_CI_ADMIN_DSN: postgresql://postgres:synthetic-f-ci-only@127.0.0.1:5432/p40_16f_ci
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Fail closed on main/beta SHA changes or out-of-scope files
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN=2ab9c9d5944b1360ba3eebf49695713168caca8a
+          BETA=62669539053a15174081ba8670b18248195c6f8c
+          BASE=6b621015a1c12305fcc381e3f0258717cde37751
+          test "$GITHUB_REF_NAME" = "p40-16f-rls-protected-rpc-ci-20261116"
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = "$MAIN"
+          test "$(git rev-parse origin/beta)" = "$BETA"
+          test "$(git merge-base origin/main HEAD)" = "$MAIN"
+          test "$(git merge-base "$BASE" HEAD)" = "$BASE"
+          git diff --name-only "$BASE"...HEAD >/tmp/p40-16f-changes
+          cat /tmp/p40-16f-changes
+          test -s /tmp/p40-16f-changes
+          if grep -Ev '^(.p40-16f-tests/|.github/workflows/p40-16f-isolated-permissions.yml$)' /tmp/p40-16f-changes; then
+            echo "FAIL: unexpected production change";exit 1
+          fi
+          for f in index.html assets/js/erp-store.js assets/js/billing.js assets/js/invoices.js assets/js/commissions.js assets/js/payroll.js assets/js/banks.js; do
+            test "$(git rev-parse origin/main:"$f")" = "$(git rev-parse HEAD:"$f")"
+          done
+          test ! -f .env
+          echo 'PASS main/beta/production JS immutable'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Local ephemeral DSN only and pinned PostgreSQL test driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install 'psycopg[binary]==3.2.9'
+          python - <<'PY'
+          from urllib.parse import urlsplit
+          import os
+          url=urlsplit(os.environ['P40F_CI_ADMIN_DSN'])
+          assert url.hostname=='127.0.0.1' and url.path=='/p40_16f_ci'
+          print('PASS ephemeral CI database only')
+          PY
+      - name: Test real RLS and fake company login permissions / guarded RPC
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .p40-16f-tests/test_rls_rpc.py
+      - name: Regress A-B-C-D synthetic account safety without real data
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test .p40-16a-tests/review.test.cjs .p40-16b-tests/ui.test.cjs .p40-16c-tests/accounting-gate.test.cjs .p40-16d-tests/simulated-ledger.test.cjs
+      - name: Ensure production does not import isolated financial schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -q 'p40_16f_lab' index.html
+          ! grep -q 'p40_16f_lab' assets/js/erp-store.js
+          ! grep -q 'p40-16f' index.html
+          echo 'PASS no actual ERP integration'
