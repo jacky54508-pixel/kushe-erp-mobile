@@ -15,7 +15,13 @@ def run_case(browser, width, height, mobile):
         if not r.url.startswith('http://127.0.0.1:8799/') else None)
     try:
         page.goto(URL,wait_until='load')
-        page.wait_for_selector('#billingsApp .billing-list-table')
+        try:
+            page.wait_for_selector('#billingsApp .billing-list-table',timeout=7000)
+        except Exception:
+            print('DIAGNOSTIC',name,'pageerrors',errors,flush=True)
+            print('DIAGNOSTIC body',page.locator('#billingsApp').inner_text()[:1500],flush=True)
+            print('DIAGNOSTIC billing-present',page.evaluate('() => !!window.KusheBilling'),flush=True)
+            raise
         page.wait_for_function('!!window.KusheBillingGroups && !!window.KusheBilling')
         assert not errors, (name,errors)
         before=page.evaluate('() => window.__p40integrated.snapshot()')
