@@ -69,7 +69,7 @@ test('missing tax evidence or unknown filing/buyer rejects further review, prese
   p=>{p.reviewInput.sources[0].settlement.received=1000},
   p=>{p.reviewInput.sources[0].settlement.pendingCheque=900}
  ];
- for(const modify of modifiers){const p=fixture();modify(p),before=JSON.stringify(p);
+ for(const modify of modifiers){const p=fixture();modify(p);const before=JSON.stringify(p);
    const o=C.reviewPostingPlan(p,evaluate);
    assert.equal(o.readyForFurtherReview,false);
    assert.ok(o.blockers.length);
