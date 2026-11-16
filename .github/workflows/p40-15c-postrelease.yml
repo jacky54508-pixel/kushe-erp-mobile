@@ -1,0 +1,76 @@
+name: P40-15C post-release read-only verification (synthetic + public site)
+on:
+  push:
+    branches: [p40-15c-postrelease-qa-20261116]
+    paths:
+      - '.p40-15-tests/**'
+      - '.github/workflows/p40-15c-postrelease.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-released-main:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Ensure exact published main and unchanged app files
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED=2ab9c9d5944b1360ba3eebf49695713168caca8a
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = "$EXPECTED"
+          for f in index.html assets/js/billing.js assets/js/billing-groups.js assets/js/billing-group-discount-preview.js; do
+            test "$(git rev-parse "HEAD:$f")" = "$(git rev-parse "origin/main:$f")"
+            node --check "$f" || [ "$f" = "index.html" ]
+          done
+          git diff --name-only origin/main...HEAD | grep -Ev '^(.p40-15-tests/|.github/workflows/p40-15c-postrelease.yml$)' > /tmp/p40-15c-unexpected || true
+          test ! -s /tmp/p40-15c-unexpected
+          node --test .p40-15-tests/read_only.test.cjs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare isolated Chrome and localhost
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+          python -m http.server 8799 --bind 127.0.0.1 > /tmp/p40-15c-postrelease.log 2>&1 &
+      - name: Validate released JS in desktop and mobile synthetic browser
+        env:
+          P40_CHROME_BINARY: /usr/bin/google-chrome
+        run: |
+          python .p40-15-tests/browser_ui.py
+          python .p40-15-tests/integration_ui.py
+      - name: Verify actual public Github Pages HTML and scripts match released main
+        shell: bash
+        run: |
+          python - <<'PY'
+          import pathlib, urllib.request, hashlib
+          base='https://jacky54508-pixel.github.io/kushe-erp-mobile/'
+          files=['index.html','assets/js/billing.js','assets/js/billing-groups.js',
+            'assets/js/billing-group-discount-preview.js']
+          for filename in files:
+            local=pathlib.Path(filename).read_bytes()
+            url=base+filename+'?p40-15c=2ab9c9d5'
+            req=urllib.request.Request(url,headers={'User-Agent':'KuShe-ERP-P40-15C-postrelease-readonly-QA/1.0','Cache-Control':'no-cache'})
+            with urllib.request.urlopen(req,timeout=25) as response:
+              status=response.status
+              served=response.read()
+            assert status==200,(filename,status)
+            assert hashlib.sha256(served).digest()==hashlib.sha256(local).digest(),(filename,'deployed resource differs from main')
+            print('PASS live GitHub Pages',filename,len(served),flush=True)
+          PY
+      - name: Upload synthetic screenshots (no real business data)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p40-15c-postrelease-synthetic-screenshots
+          path: .p40-15-tests/screenshots/*.png
+          if-no-files-found: ignore
