@@ -1,0 +1,68 @@
+name: P40-16B manual allocation UI - isolated read-only acceptance
+on:
+  push:
+    branches: [p40-16b-allocation-ui-isolated-20261116]
+    paths:
+      - '.p40-16b-tests/**'
+      - 'assets/js/p40-16b-concession-allocation-ui.js'
+      - '.github/workflows/p40-16b-isolated-ui.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check main and beta are not touched, only isolated files added
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN=2ab9c9d5944b1360ba3eebf49695713168caca8a
+          A=536c965b48b99d64c53438d5100303fe08f3b848
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = "$MAIN"
+          test "$(git merge-base origin/main HEAD)" = "$MAIN"
+          test "$(git merge-base "$A" HEAD)" = "$A"
+          git diff --name-only "$A"...HEAD > /tmp/p40-16b-change-list
+          cat /tmp/p40-16b-change-list
+          test -s /tmp/p40-16b-change-list
+          if grep -Ev '^(.p40-16b-tests/|.github/workflows/p40-16b-isolated-ui.yml$|assets/js/p40-16b-concession-allocation-ui.js$)' /tmp/p40-16b-change-list; then
+            echo 'BLOCK: files outside P40-16B review-only area'; exit 1
+          fi
+          test "$(git rev-parse origin/main:index.html)" = "$(git rev-parse HEAD:index.html)"
+          test "$(git rev-parse origin/main:assets/js/erp-store.js)" = "$(git rev-parse HEAD:assets/js/erp-store.js)"
+      - name: Run P40-16A source review and P40-16B form tests
+        run: |
+          set -euo pipefail
+          node --check assets/js/p40-16a-concession-review.js
+          node --check assets/js/p40-16b-concession-allocation-ui.js
+          node --check .p40-16b-tests/ui.test.cjs
+          node --test .p40-16a-tests/review.test.cjs .p40-16b-tests/ui.test.cjs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Start localhost-only test website
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+          python -m http.server 8799 --bind 127.0.0.1 >/tmp/p40-16b-sandbox.log 2>&1 &
+      - name: Chrome desktop/mobile no-save acceptance
+        env:
+          P40_CHROME_BINARY: /usr/bin/google-chrome
+        run: python .p40-16b-tests/ui_acceptance.py
+      - name: Upload only synthetic screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: P40-16B-isolated-desktop-mobile-qa
+          path: .p40-16b-tests/screenshots/*.png
+          if-no-files-found: ignore
