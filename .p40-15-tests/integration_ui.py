@@ -16,7 +16,7 @@ def run_case(browser, width, height, mobile):
     try:
         page.goto(URL,wait_until='load')
         try:
-            page.wait_for_selector('#billingsApp .billing-list-table',timeout=7000)
+            page.wait_for_selector('#billingsApp .billing-list-table',state='attached',timeout=7000)
         except Exception:
             print('DIAGNOSTIC',name,'pageerrors',errors,flush=True)
             print('DIAGNOSTIC body',page.locator('#billingsApp').inner_text()[:1500],flush=True)
