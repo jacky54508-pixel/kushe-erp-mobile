@@ -1,0 +1,13 @@
+<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>P40-3 isolated quotation approval Store test</title><body>
+<script>
+window.KUSHE_PHASE1_CONFIG={};
+window.KusheAuthGate={session:()=>({access_token:'p40-synthetic'}),user:()=>({id:'p40-synthetic-user',email:'synthetic@example.invalid'}),companyContext:()=>({role:'owner',status:'active',companyId:'SYN-COMPANY',userId:'p40-synthetic-user'}),canWrite:()=>true,requireAuth:async()=>true,requireMfa:async()=>true};
+window.KusheLegacyData={refresh(){}};
+window.KusheRecovery={showResult(){}};
+const oldLine={id:'SYN-ORIGINAL-LINE',house:'L1',item:'虛構鋁窗美容',unit:'式',pricingType:'actual',qty:52,estimatedQty:52,price:24000,lumpSumAmount:0,subtotal:1248000,note:''};
+const quotation={id:'SYN-Q-ORIGINAL',number:'Q-20261114-001',customer:'SYN-CUST',customerName:'虛構公司',project:'SYN-PROJECT',projectName:'虛構案場',status:'已確認',date:'2026-11-14',taxMode:'未稅',pricingMode:'actual',lumpSumTotal:0,lines:[oldLine],amount:1248000,tax:62400,total:1310400,publicNote:'原單金額'};
+const revision={...quotation,id:'SYN-Q-REVISION',number:'Q-20261114-001 Rev.1',revisionOf:'SYN-Q-ORIGINAL',revisionNumber:1,status:'草稿',lines:[{...oldLine,id:'SYN-REV-LINE'}],internalNote:'議價每戶降為23500',publicNote:'',note:''};
+const seed={customers:[{id:'SYN-CUST',name:'虛構公司'}],projects:[{id:'SYN-PROJECT',name:'虛構案場',customer:'SYN-CUST'}],employees:[],dailyLogs:[],commissions:[],attendance:[],payroll:[],billings:[],receivables:[],invoices:[],receipts:[],retentionReceipts:[],salaryPayments:[],commissionSettlements:[],bankTransactions:[],banks:[],payables:[],payments:[],vendors:[],materials:[],materialUsages:[],inventoryReceipts:[],projectCosts:[],dailyItemPresets:[],quotations:[quotation,revision],quotationPrices:[],quotationTemplates:[],audit:[],settings:{defaultTax:5,quotationUnitPresets:['式']},meta:{}};
+localStorage.setItem('KuSheERP25_EMERGENCY',JSON.stringify(seed));
+</script><script src="/assets/js/erp-store.js"></script>
+</body></html>
