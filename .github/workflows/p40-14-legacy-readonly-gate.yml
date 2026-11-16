@@ -1,0 +1,114 @@
+name: P40-14 legacy invoice compatibility and zero-write release readiness (never deploy)
+
+on:
+  push:
+    branches:
+      - p40-14-legacy-readonly-release-gate-20261116
+    paths:
+      - '.github/workflows/p40-14-legacy-readonly-gate.yml'
+      - '.p40-14-tests/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-safety:
+    name: Exact production pin, no ERP/PDF changes and audited preview formula
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Enforce independently isolated legacy tests only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-14-legacy-readonly-release-gate-20261116
+          git fetch --no-tags origin main
+          test "$(git rev-parse FETCH_HEAD)" = '767cdc3b1303fa603c10a576505aee3f6eb03264' || { echo "HOLD: main moved"; exit 1; }
+          base='9a3848a0a1cf0ca1b14dd1ae83e3d076013e23b9'
+          test "$(git merge-base "$base" HEAD)" = "$base" || { echo "HOLD: not based on P40-13 visual acceptance"; exit 1; }
+          python - <<'PY'
+          import subprocess
+          base='9a3848a0a1cf0ca1b14dd1ae83e3d076013e23b9'
+          changes=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          allowed={'.github/workflows/p40-14-legacy-readonly-gate.yml',
+                   '.p40-14-tests/synthetic_history.html',
+                   '.p40-14-tests/legacy_safety.test.py'}
+          assert changes==allowed,(changes,allowed)
+          print('PASS: only three new P40-14 synthetic-only files; no billing or financial code changed')
+          PY
+          for path in index.html assets/js/billing.js assets/js/billing-discount-calculator.js assets/js/billing-discount-preview.js assets/js/erp-store.js assets/js/quotations.js assets/js/commissions.js assets/js/payroll.js assets/js/cloud-sync.js assets/js/billing-groups.js assets/js/external-billing-print.js billing-print.html external-billing-print.html; do
+            test "$(git rev-parse HEAD:"$path")" = "$(git rev-parse "$base":"$path")" || { echo "HOLD: modified protected ERP/PDF file: $path"; exit 1; }
+          done
+      - name: Reuse real Store comparison and old invoice projection checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check assets/js/billing-discount-calculator.js
+          node --check assets/js/billing-discount-preview.js
+          node --test .p40-12-tests/discount_math.test.cjs
+          node --test .p39-inv1-tests/projection.test.js
+
+  historic-legacy:
+    name: P40-14 six synthetic historical records must reject safely
+    runs-on: ubuntu-24.04
+    timeout-minutes: 17
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Run fake Store strictly on localhost
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
+          python -m http.server 8797 --bind 127.0.0.1 >/tmp/p40-14-http.log 2>&1 &
+      - name: Block incomplete settings and inconsistent invoice/AR; never mutate data
+        env:
+          P39_INV_USE_SYSTEM_CHROME: '1'
+        run: python .p40-14-tests/legacy_safety.test.py
+      - name: Valid invoice preview, original detail and A4 PDF remain intact
+        env:
+          P39_INV_USE_SYSTEM_CHROME: '1'
+        run: |
+          python .p40-12-tests/billing_ui_readonly.test.py
+          python .p39-inv1a-tests/pdf_display.test.py
+          python .p39-inv1-tests/test_store.py
+          python .p39-inv1-tests/layout_preflight.test.py
+
+  original-accounting:
+    name: Original P33-P36 commissions, payroll, banking, access and auth
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Local-only regression browsers
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+          for port in 8774 8784 8795 8796; do
+            python -m http.server "$port" --bind 127.0.0.1 >"/tmp/p40-14-$port.log" 2>&1 &
+          done
+      - name: P33 commission and source freeze
+        run: python .p39-inv1-tests/chrome_legacy.py .p33-4-tests/regression.py
+      - name: P34 payroll, time work and commission amounts
+        run: python .p39-inv1-tests/chrome_legacy.py .p34-tests/test.py
+      - name: P35 historical settlement and bank preservation
+        run: python .p39-inv1-tests/chrome_legacy.py .p35-tests/test_ui.py
+      - name: P36 role auth
+        run: python .p39-inv1-tests/chrome_legacy.py .p36-tests/test_permissions.py
