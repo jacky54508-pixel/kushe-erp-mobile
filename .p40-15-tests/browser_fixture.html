@@ -1,0 +1,95 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>P40-15 isolated synthetic UI acceptance</title>
+<link rel="stylesheet" href="/assets/css/billing-groups.css">
+<style>
+*{box-sizing:border-box}body{font-family:system-ui,"Noto Sans TC",sans-serif;margin:0;background:#edf2f7;color:#123;padding:20px}
+h1{font-size:20px}.commission-panel{background:#fff;border:1px solid #dce5ed;border-radius:12px;padding:14px;margin:12px 0}
+.commission-table-wrap{overflow-x:auto}.billing-list-table{border-collapse:collapse;min-width:1000px;width:100%}
+.billing-list-table th,.billing-list-table td{border-bottom:1px solid #d5dfea;padding:11px;text-align:left}
+button{cursor:pointer;background:#fff;color:#174360;border:1px solid #b7c7d7;border-radius:8px;padding:8px 10px;margin:2px;font:inherit}
+button.commission-primary{background:#154968;color:#fff;border-color:#154968}.bg-group-mobile,.mobile-billing-card{background:white;border:1px solid #d7e2ea;border-radius:12px;padding:14px;margin:12px 0}
+.mobile-billings{display:none}.mobile-billing-card{display:block}
+@media(max-width:640px){body{padding:10px}.billing-desktop-list{display:none}.mobile-billings{display:block}}
+</style></head><body>
+<h1>P40-15｜虛構請款畫面測試（不連接正式 ERP）</h1>
+<div id="billingsApp">
+<section class="commission-panel commissions-heading">虛構請款清單</section>
+<section class="commission-panel billing-desktop-list">
+<div class="commission-table-wrap"><table class="billing-list-table commission-table">
+<thead><tr><th>選取</th><th>請款單號</th><th>日期</th><th>客戶</th><th>案場</th><th>請款金額</th><th>保留款</th><th>應收金額</th><th>已沖銷</th><th>未沖銷</th><th>發票</th><th>狀態</th><th>操作</th></tr></thead>
+<tbody id="billingBody"></tbody></table></div></section>
+<section class="mobile-billings" id="mobileBills"></section></div>
+<script>
+'use strict';
+// No auth, production site, network APIs, persistent storage, or real business records.
+const makeSource=(id,name,gross,tax,retention,received,invoiceStatus,invoiceNo)=> {
+ const untaxed=gross-tax,receivable=gross-retention;
+ const anchors={untaxed,tax,grossTotal:gross,retention,receivable};
+ const settlement={billingId:id,received,outstanding:receivable-received,
+   retentionReceived:0,retentionOutstanding:retention,pendingCheque:0,availableToCollect:receivable-received};
+ return {document:{billingId:id,receivableId:'AR-'+id,number:id,date:'2026-11-16',
+   customerId:'FAKE-C',customerName:'虛構建商',projectId:'FAKE-P-'+id,projectName:name,
+   taxMode:'未稅',anchors,invoiceStatus,invoiceNo,
+   originalLines:Array.from({length:9},(_,i)=>({house:String(i+1),item:'虛構工項 '+(i+1),
+     unit:'式',qty:1,price:100,subtotal:100}))},settlement};
+};
+const groupSources=[
+ makeSource('FAKE-A','虛構 A 區',350000,16667,17500,10000,'invoiced','FAKE-INV-01'),
+ makeSource('FAKE-B','虛構 B 區',282100,13433,14105,0,'invoice_pending','')
+];
+const totals={};
+for(const field of ['untaxed','tax','grossTotal','retention','receivable','received',
+  'outstanding','retentionReceived','retentionOutstanding','pendingCheque','availableToCollect']){
+ totals[field]=groupSources.reduce((n,s)=>n+(s.document.anchors[field]??s.settlement[field]??0),0);
+}
+const group={document:{id:'FAKE-GROUP',status:'active',revision:1,
+  sourceIds:['FAKE-A','FAKE-B'],displayProjectName:'虛構合併案場',
+  customerName:'虛構建商',documentDate:'2026-11-16',history:[]},
+  sources:groupSources,totals,issues:[],canGroup:true,termsChanged:false,settlementChanged:false};
+const solo={id:'FAKE-SINGLE',number:'FAKE-SINGLE',customerName:'虛構建商',
+  projectName:'虛構單筆案場',preTaxAmount:100000,amount:100000,taxAmount:0,tax:0,
+  taxIncludedAmount:100000,grossTotal:100000,retentionAmount:0,retention:0,total:100000,
+  taxMode:'未稅',invoiceStatus:'no_invoice',invoiceNo:'',retentionMode:'none',
+  retentionBase:'taxIncluded',retentionRate:0,hasInvoice:false,
+  receivableId:'AR-FAKE-SINGLE'};
+const state={billings:[solo],receivables:[{id:'AR-FAKE-SINGLE',billingId:'FAKE-SINGLE',
+  amount:100000,untaxedAmount:100000,taxAmount:0,grossTotal:100000,
+  retentionAmount:0,received:0,retentionReceived:0}],invoices:[],
+  receipts:[],retentionReceipts:[],bankTransactions:[],settings:{defaultTax:5},
+  meta:{externalBillingDocuments:[{id:'FAKE-GROUP',status:'active',
+    sourceIds:['FAKE-A','FAKE-B']}]}};
+const test={state,group,writes:[],snapshot:()=>JSON.stringify({state,group})};
+window.__p40synthetic=test;
+const blocked=()=>{test.writes.push('WRITE ATTEMPT');throw Error('Synthetic fixture rejects all writes')};
+window.KuSheERPStore={
+ getState:()=>state,externalBillingDocumentIndex:()=>({documents:[group],issues:[]}),
+ billingEditable:()=>true,billingDocumentState:()=>({issues:[]}),
+ updateBilling:blocked,saveBilling:blocked,saveExternalBillingDocument:blocked,
+ persist:blocked,saveInvoice:blocked,saveReceipt:blocked,saveSystemSettings:blocked
+};
+const body=document.getElementById('billingBody'),cards=document.getElementById('mobileBills');
+for(const [id,label] of [['FAKE-A','虛構 A 區'],['FAKE-B','虛構 B 區'],['FAKE-SINGLE','虛構單筆案場']]){
+ const row=document.createElement('tr');
+ row.innerHTML='<td><input type="checkbox" data-billing-bundle-select="'+id+'"></td>'+
+   '<td>'+id+'</td><td>2026-11-16</td><td>虛構建商</td><td>'+label+'</td>'+
+   '<td>虛構</td><td>虛構</td><td>虛構</td><td>虛構</td><td>虛構</td><td>虛構</td><td>未收</td>'+
+   '<td><button type="button" data-billing-detail="'+id+'">查看</button>'+
+   '<button type="button" data-billing-discount-readonly="'+id+'">議價／折讓</button></td>';
+ body.append(row);
+ const card=document.createElement('article');card.className='mobile-card mobile-billing-card';
+ card.innerHTML='<strong>'+label+'</strong> <button type="button" data-billing-detail="'+id+'">查看</button>'+
+ '<button type="button" data-billing-discount-readonly="'+id+'">議價／折讓</button>';
+ cards.append(card);
+}
+</script>
+<script src="/assets/js/billing-discount-calculator.js"></script>
+<script src="/assets/js/billing-discount-preview.js"></script>
+<script src="/assets/js/billing-group-discount-preview.js"></script>
+<script src="/assets/js/billing-groups.js"></script>
+<script>
+window.KusheBillingGroups.mountList(document.getElementById('billingsApp'),'billing',{render:()=>{}});
+// Synthetic click wiring for standalone originals; actual list binding is checked by source regression.
+document.querySelectorAll('[data-billing-discount-readonly="FAKE-SINGLE"]').forEach(button=>
+  button.addEventListener('click',()=>window.KusheBillingDiscountPreview.open('FAKE-SINGLE')));
+</script></body></html>
