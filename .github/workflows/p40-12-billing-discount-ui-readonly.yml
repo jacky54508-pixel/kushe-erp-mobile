@@ -1,0 +1,143 @@
+name: P40-12 readonly concession preview in ERP billing details (never deploy)
+
+on:
+  push:
+    branches:
+      - p40-12-billing-discount-readonly-entry-main-20261116
+    paths:
+      - '.github/workflows/p40-12-billing-discount-ui-readonly.yml'
+      - '.p40-12-tests/**'
+      - 'assets/js/billing-discount-calculator.js'
+      - 'assets/js/billing-discount-preview.js'
+      - 'assets/js/billing.js'
+      - 'index.html'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-and-finance:
+    name: Exact main pin, protected ERP/PDF, safe arithmetic
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Strict candidate-only changes and complete protection of printed billing detail
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          base='767cdc3b1303fa603c10a576505aee3f6eb03264'
+          test "$GITHUB_REF_NAME" = 'p40-12-billing-discount-readonly-entry-main-20261116'
+          test "$(git rev-parse FETCH_HEAD)" = "$base" || { echo 'STOP: main moved'; exit 1; }
+          test "$(git merge-base "$base" HEAD)" = "$base" || { echo 'STOP: wrong candidate parent'; exit 1; }
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          base='767cdc3b1303fa603c10a576505aee3f6eb03264'
+          actual=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          expected={
+            '.github/workflows/p40-12-billing-discount-ui-readonly.yml',
+            '.p40-12-tests/discount_math.test.cjs',
+            '.p40-12-tests/synthetic_billing.html',
+            '.p40-12-tests/billing_ui_readonly.test.py',
+            'assets/js/billing-discount-calculator.js',
+            'assets/js/billing-discount-preview.js',
+            'assets/js/billing.js',
+            'index.html'
+          }
+          assert actual==expected,(actual,expected)
+          for path in ['assets/js/erp-store.js','assets/js/billing-print.js','billing-print.html',
+              'external-billing-print.html','assets/js/external-billing-print.js',
+              'assets/js/billing-groups.js','assets/js/external-billing-invoice.js',
+              'assets/js/commissions.js','assets/js/quotations.js','assets/js/payroll.js',
+              'assets/js/cloud-sync.js','assets/js/invoices.js']:
+            assert subprocess.check_output(['git','show',base+':'+path])==Path(path).read_bytes(),path
+          oldIndex=subprocess.check_output(['git','show',base+':index.html']).decode()
+          oldScript='<script src="assets/js/billing.js?v=p31-2-actions-1"></script>'
+          newScript='<script src="assets/js/billing-discount-calculator.js?v=p40-12-readonly-1"></script>\n  <script src="assets/js/billing-discount-preview.js?v=p40-12-readonly-1"></script>\n  <script src="assets/js/billing.js?v=p40-12-readonly-1"></script>'
+          assert oldIndex.count(oldScript)==1
+          assert Path('index.html').read_text()==oldIndex.replace(oldScript,newScript)
+          source=subprocess.check_output(['git','show',base+':assets/js/billing.js']).decode()
+          current=Path('assets/js/billing.js').read_text()
+          assert current.count('data-billing-discount-readonly')==2
+          assert current.count('KusheBillingDiscountPreview.open(id)')==1
+          assert 'data-billing-discount-readonly' not in source
+          assert len(current)-len(source)<700
+          assert subprocess.check_output(['git','hash-object','assets/js/billing-discount-calculator.js'],text=True).strip()=='071df754cb59a35c938d0679d86a0056ffb463c9'
+          print('PASS: 4 minimal app files, byte-frozen PDF/Store/payroll and approved unchanged P40-11 calculator')
+          PY
+      - name: Arithmetic parity, no writer calls, original PDF projection
+        run: |
+          set -euo pipefail
+          node --check assets/js/billing.js
+          node --check assets/js/billing-discount-preview.js
+          node --check assets/js/billing-discount-calculator.js
+          node --test .p40-12-tests/discount_math.test.cjs
+          node --test .p39-inv1-tests/projection.test.js
+
+  browser-ui:
+    name: Real billing detail, synthetic Store, zero-write modal and 18-row A4
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Localhost only synthetic scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
+          python -m http.server 8797 --bind 127.0.0.1 > /tmp/p40-12-8797.log 2>&1 &
+      - name: Real billing detail button and concession preview, unchanged Store fingerprint
+        env:
+          P39_INV_USE_SYSTEM_CHROME: '1'
+        run: python .p40-12-tests/billing_ui_readonly.test.py
+      - name: Preserve original 18 detailed house rows and A4 single page
+        env:
+          P39_INV_USE_SYSTEM_CHROME: '1'
+        run: python .p39-inv1a-tests/pdf_display.test.py
+      - name: Preserve sales invoices and original accounting
+        env:
+          P39_INV_USE_SYSTEM_CHROME: '1'
+        run: |
+          python .p39-inv1-tests/test_store.py
+          python .p39-inv1-tests/layout_preflight.test.py
+
+  original-erp:
+    name: P33-P36 commission, payroll, bank and auth regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Synthetic baseline servers
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+          for port in 8774 8784 8795 8796; do
+            python -m http.server "$port" --bind 127.0.0.1 >"/tmp/p40-12-$port.log" 2>&1 &
+          done
+      - name: P33 original commission
+        run: python .p39-inv1-tests/chrome_legacy.py .p33-4-tests/regression.py
+      - name: P34 payroll
+        run: python .p39-inv1-tests/chrome_legacy.py .p34-tests/test.py
+      - name: P35 historical corrections
+        run: python .p39-inv1-tests/chrome_legacy.py .p35-tests/test_ui.py
+      - name: P36 session roles and permission
+        run: python .p39-inv1-tests/chrome_legacy.py .p36-tests/test_permissions.py
