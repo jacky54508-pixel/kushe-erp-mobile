@@ -44,7 +44,7 @@ with sync_playwright() as pw:
     assert any(x["code"]=="RETENTION_RECEIPT_EXISTS" for x in cheque["locks"])
     page.locator("#case").select_option("noinvoice")
     page.wait_for_function("() => window.__P40PreviewResult?.proposed?.tax===0")
-    assert page.evaluate("window.__P40PreviewResult.proposed.receivable")==89775 if False else True
+    assert page.evaluate("window.__P40PreviewResult.proposed.receivable")==89775
     noinvoice=page.evaluate("window.__P40PreviewResult")
     assert noinvoice["proposed"]["tax"]==0
     assert noinvoice["proposed"]["grossTotal"]==94500
