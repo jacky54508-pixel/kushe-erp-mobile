@@ -283,7 +283,6 @@ class FencedSyntheticSync(unittest.TestCase):
     def test_29_post_event_does_not_enable_unauthorized_client_finance_changes(self):
         toggle(True);post()
         s=snapshot()
-        self.assertEqual(fenced(s[0],s[1],edited("bad old financial projection"))[0] if False else 'SKIPPED','SKIPPED')
         # A clean current snapshot with ONLY non-financial UI change is allowed.
         new=copy.deepcopy(s[3]);new["ui"]["note"]="note after fictitious discount"
         self.assertEqual(fenced(s[0],s[1],new)[0],"APPLIED_GUARDED")
