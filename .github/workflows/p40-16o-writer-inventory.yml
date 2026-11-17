@@ -1,0 +1,87 @@
+name: P40-16O formal ERP complete-available-JS writer inventory CI (NO PRODUCTION WRITES)
+on:
+  push:
+    branches: [p40-16o-production-writer-inventory-20261117]
+    paths:
+      - '.p40-16o-tests/**'
+      - '.github/workflows/p40-16o-writer-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  formal-writer-inventory-readonly:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 13
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Gate immutable production main and beta plus candidate diff allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN=2ab9c9d5944b1360ba3eebf49695713168caca8a
+          BETA=62669539053a15174081ba8670b18248195c6f8c
+          BASE=63531e5d71568e73498d2aa2ebe60a7766988fce
+          test "$GITHUB_REF_NAME" = p40-16o-production-writer-inventory-20261117
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = "$MAIN"
+          test "$(git rev-parse origin/beta)" = "$BETA"
+          test "$(git merge-base origin/main HEAD)" = "$MAIN"
+          test "$(git merge-base "$BASE" HEAD)" = "$BASE"
+          git diff --name-only "$BASE"...HEAD >/tmp/p40o-candidate-diff
+          cat /tmp/p40o-candidate-diff
+          test -s /tmp/p40o-candidate-diff
+          if grep -Ev '^(.p40-16o-tests/|.github/workflows/p40-16o-writer-inventory.yml$)' /tmp/p40o-candidate-diff; then
+            echo 'STOP: cannot touch formal app or outside isolated P40-16O';exit 1
+          fi
+          for f in index.html assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/app.js assets/js/recovery.js assets/js/settings.js assets/js/legacy-adapter.js assets/js/employee-shell.js assets/js/billing.js assets/js/invoices.js assets/js/commissions.js assets/js/payroll.js assets/js/banks.js assets/js/billing-groups.js assets/js/external-billing-print.js; do
+            test "$(git rev-parse origin/main:"$f")" = "$(git rev-parse HEAD:"$f")"
+          done
+          echo 'PASS: formal source and branches are unchanged'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: P40-16O strict source-only writer and rollback entrypoint scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .p40-16o-tests/audit_writers.py --root . --output "$RUNNER_TEMP/p40o-audit.json" --strict
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          z=json.loads((Path(os.environ['RUNNER_TEMP'])/'p40o-audit.json').read_text())
+          assert not z['errors']
+          assert z['production_posting_safe'] is False
+          assert z['formal_erp_ledger_version_integrated'] is False
+          summary=Path(os.environ['GITHUB_STEP_SUMMARY'])
+          with summary.open('a') as fp:
+            fp.write('## P40-16O: Formal source WRITE inventory (READ ONLY)\n')
+            fp.write('Scanned JavaScript modules: **%s**\n\n'%z['scanned_js_files'])
+            fp.write('Critical reviewed anchors: **%s**\n\n'%len(z['anchors']))
+            fp.write('Lexical API/storage counts: `%s`\n\n'%z['counts'])
+            fp.write('**BLOCKED**: no production ledger fence or posting authorization.\n\n')
+          print('PASS: no unmapped new writer, production posting remains BLOCKED')
+          PY
+      - name: P40-16O in-memory negative tests for unreviewed writer and CAS changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .p40-16o-tests/test_writer_inventory.py
+      - name: Regress P40-16A-D, I, K synthetic accounting and offline protections
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test .p40-16a-tests/review.test.cjs .p40-16b-tests/ui.test.cjs .p40-16c-tests/accounting-gate.test.cjs .p40-16d-tests/simulated-ledger.test.cjs .p40-16i-tests/financial_links_readonly.test.cjs .p40-16k-tests/offline_recovery.test.cjs
+      - name: Confirm no migration, production import or live business integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -q 'p40-16o' index.html
+          ! grep -q 'p40-16o' assets/js/erp-store.js
+          ! grep -q 'p40-16o' assets/js/cloud-sync.js
+          test "$(find .p40-16o-tests -maxdepth 1 -type f | wc -l)" -eq 3
+          echo 'PASS: no real ERP or Supabase data modified or migrated'

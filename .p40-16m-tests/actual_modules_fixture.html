@@ -1,0 +1,36 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"/>
+<title>P40-16M Isolated REAL ERP source integration</title></head>
+<body><main><h1>P40-16M SYNTHETIC ONLY</h1><p>No real ERP origin, DB, auth or network.</p>
+<div id="appShell"></div><output id="integrationResult">local only</output></main>
+<script>
+'use strict';
+// All original ERP sources are unmodified. These fixture shims are never on main.
+window.KUSHE_PHASE1_CONFIG = {
+ supabaseUrl: 'https://p40m-synthetic.invalid',
+ supabasePublishableKey: 'synthetic-publishable-only-never-prod'
+};
+const TEST_USER='SYNTH-P40M-USER-0001';
+window.KusheAuthGate=Object.freeze({
+ session:()=>({access_token:'SYNTHETIC-NONAUTH-TOKEN'}),
+ user:()=>({id:TEST_USER,email:'synthetic@example.invalid'}),
+ requireAuth:async()=>true
+});
+window.KuSheLegacyData=Object.freeze({
+ getState:()=>({customers:[],projects:[],employees:[],billings:[],receivables:[],
+ invoices:[],receipts:[],retentionReceipts:[],payroll:[],salaryPayments:[],
+ commissions:[],bankTransactions:[],audit:[],settings:{defaultTax:5},
+ meta:{updatedAt:'2026-11-16T00:00:00.000Z'}}),
+ refresh:async()=>true
+});
+localStorage.setItem('kushe_erp_device_trust_v1',JSON.stringify({
+ schema:'kushe-device-trust-v1',version:1,mode:'trusted',
+ userId:TEST_USER,updatedAt:'2026-11-16T00:00:00.000Z'
+}));
+window.confirm=()=>false; // Disallow ALL prompts that might authorize uploads/restore.
+window.__p40mNetworkForbidden=0;
+window.addEventListener('error',e=>{document.querySelector('#integrationResult').textContent='ERROR: '+e.message});
+</script>
+<!-- THESE ARE THE ACTUAL CHECKED-IN MAIN ERP MODULES, UNMODIFIED. -->
+<script src="/assets/js/erp-store.js"></script>
+<script src="/assets/js/cloud-sync.js"></script>
+</body></html>
