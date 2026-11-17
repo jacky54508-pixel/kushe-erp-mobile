@@ -17,7 +17,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: FAIL CLOSED: official ERP, main and beta identical; only test paths
+      - name: Fail closed - official ERP main beta identical and only test paths
         shell: bash
         run: |
           set -euo pipefail
