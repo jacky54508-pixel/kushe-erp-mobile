@@ -1,0 +1,142 @@
+name: P40-16H disposable real GoTrue Auth -> signed JWT -> PostgREST RLS (NO PRODUCTION)
+on:
+  push:
+    branches: [p40-16h-auth-postgrest-e2e-ci-20261116]
+    paths:
+      - '.p40-16h-tests/**'
+      - '.github/workflows/p40-16h-auth-postgrest-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-local-auth-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: p40_16h_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ephemeral-h-ci-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d p40_16h_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      P40H_LOCAL_PG: postgresql://postgres:ephemeral-h-ci-only@127.0.0.1:5432/p40_16h_ci
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Fail closed on main/beta or any real ERP code change
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN=2ab9c9d5944b1360ba3eebf49695713168caca8a
+          BETA=62669539053a15174081ba8670b18248195c6f8c
+          BASE=dfcff13b9a08713c8e18e13d3417967a96142a57
+          test "$GITHUB_REF_NAME" = p40-16h-auth-postgrest-e2e-ci-20261116
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = "$MAIN"
+          test "$(git rev-parse origin/beta)" = "$BETA"
+          test "$(git merge-base origin/main HEAD)" = "$MAIN"
+          test "$(git merge-base "$BASE" HEAD)" = "$BASE"
+          git diff --name-only "$BASE"...HEAD > /tmp/p40-16h-scope
+          cat /tmp/p40-16h-scope
+          test -s /tmp/p40-16h-scope
+          if grep -Ev '^(.p40-16h-tests/|.github/workflows/p40-16h-auth-postgrest-e2e.yml$)' /tmp/p40-16h-scope; then
+            echo 'BLOCKED: production file or data change'; exit 1
+          fi
+          for f in index.html assets/js/auth-gate.js assets/js/cloud-sync.js assets/js/erp-store.js assets/js/billing.js assets/js/invoices.js assets/js/payroll.js assets/js/commissions.js; do
+            test "$(git rev-parse origin/main:"$f")" = "$(git rev-parse HEAD:"$f")"
+          done
+          echo 'PASS production main/beta and ERP app immutable'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned LOCAL-ONLY test dependencies
+        run: |
+          python -m pip install 'psycopg[binary]==3.2.9' 'pyotp==2.9.0'
+          python - <<'PY'
+          from urllib.parse import urlsplit
+          import os
+          d=urlsplit(os.environ['P40H_LOCAL_PG'])
+          assert d.hostname == '127.0.0.1' and d.path == '/p40_16h_ci'
+          print('PASS local ephemeral database only')
+          PY
+      - name: Install isolated roles/RLS and fake nonfinancial source rows
+        shell: bash
+        run: |
+          python - <<'PY'
+          import psycopg,os
+          from pathlib import Path
+          with psycopg.connect(os.environ['P40H_LOCAL_PG']) as db:
+              with psycopg.ClientCursor(db) as cursor:
+                  cursor.execute(Path('.p40-16h-tests/local_only_rls.sql').read_text())
+          print('PASS only fake P40-16H lab schema created')
+          PY
+      - name: Generate only ephemeral runner JWT signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEY="$(openssl rand -hex 40)"
+          echo "::add-mask::$KEY"
+          echo "P40H_JWT_SECRET=$KEY" >> "$GITHUB_ENV"
+      - name: Start pinned local Supabase Auth GoTrue and PostgREST containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name p40h-auth --network host \
+            -e GOTRUE_API_HOST=0.0.0.0 -e GOTRUE_API_PORT=9999 \
+            -e GOTRUE_SITE_URL=http://127.0.0.1:9999 \
+            -e API_EXTERNAL_URL=http://127.0.0.1:9999 \
+            -e GOTRUE_DB_DRIVER=postgres \
+            -e "GOTRUE_DB_DATABASE_URL=$P40H_LOCAL_PG" \
+            -e "GOTRUE_JWT_SECRET=$P40H_JWT_SECRET" \
+            -e GOTRUE_JWT_AUD=authenticated \
+            -e GOTRUE_JWT_DEFAULT_GROUP_NAME=authenticated \
+            -e GOTRUE_JWT_EXP=3600 \
+            -e GOTRUE_DISABLE_SIGNUP=false \
+            -e GOTRUE_EXTERNAL_EMAIL_ENABLED=true \
+            -e GOTRUE_MAILER_AUTOCONFIRM=true \
+            -e GOTRUE_MFA_TOTP_ENROLL_ENABLED=true \
+            -e GOTRUE_MFA_TOTP_VERIFY_ENABLED=true \
+            supabase/gotrue:v2.197.0
+          for i in $(seq 1 45); do
+            if curl -fsS --max-time 2 http://127.0.0.1:9999/health >/dev/null; then break; fi
+            if [ "$i" -eq 45 ]; then echo 'Auth did not become healthy';docker logs --tail 70 p40h-auth;exit 1; fi
+            sleep 2
+          done
+          docker run -d --name p40h-postgrest --network host \
+            -e PGRST_DB_URI=postgres://authenticator:ci-only-authenticator@127.0.0.1:5432/p40_16h_ci \
+            -e PGRST_DB_SCHEMAS=p40h_ci -e PGRST_DB_ANON_ROLE=anon \
+            -e "PGRST_JWT_SECRET=$P40H_JWT_SECRET" \
+            -e PGRST_SERVER_HOST=0.0.0.0 -e PGRST_SERVER_PORT=3000 \
+            -e PGRST_DB_USE_LEGACY_GUCS=false \
+            postgrest/postgrest:v14.18
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 2 http://127.0.0.1:3000/ >/dev/null; then break; fi
+            if [ "$i" -eq 30 ]; then echo 'PostgREST did not become healthy';docker logs --tail 70 p40h-postgrest;exit 1; fi
+            sleep 2
+          done
+          echo 'PASS only localhost GoTrue and PostgREST started'
+      - name: End-to-end real Auth TOTP signed-JWT / verifying PostgREST / RLS
+        shell: bash
+        run: python .p40-16h-tests/real_auth_e2e.py
+      - name: Regress A/B/C/D synthetic no-posting rules
+        shell: bash
+        run: node --test .p40-16a-tests/review.test.cjs .p40-16b-tests/ui.test.cjs .p40-16c-tests/accounting-gate.test.cjs .p40-16d-tests/simulated-ledger.test.cjs
+      - name: Ensure no production app integration
+        run: |
+          ! grep -q 'p40h_ci' index.html
+          ! grep -q 'p40h_ci' assets/js/erp-store.js
+          echo 'PASS no production ERP integration'
+      - name: Stop temporary Auth and REST containers
+        if: always()
+        shell: bash
+        run: |
+          docker rm -f p40h-postgrest p40h-auth >/dev/null 2>&1 || true
