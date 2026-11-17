@@ -94,7 +94,7 @@ ANCHORS={
   "legacy_emergency_reader":("function readLocal()", "LOCAL_READ"),
  },
  "assets/js/app.js":{
-  "cloud_start":("window.KusheCloudSync?.startAutoBackup?.()", "REMOTE_WRITE_TRIGGER"),
+  "cloud_start":("if(device.trusted)try { void Promise.resolve(window.KusheCloudSync?.startAutoBackup?.()).catch(() => {}); } catch (_) {}", "REMOTE_WRITE_TRIGGER"),
  },
 }
 DATA_API_WRITER="erp_state_cas_write_v2"
