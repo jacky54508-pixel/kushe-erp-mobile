@@ -35,7 +35,7 @@ INSERT INTO p40q_lab.fake_state VALUES(
    "ledgerProjection":{"gross":632100},"ui":{"note":"base"},
    "daily":[],"projects":[],"billings":[],"receivables":[],"invoices":[],
    "receipts":[],"retentionReceipts":[],"materials":[],"payables":[],
-   "payroll":[],"commissions":[],"bankTransactions":[]}'::jsonb
+   "payroll":[],"commissions":[],"bankTransactions":[],"settings":{}}'::jsonb
 );
 INSERT INTO p40q_lab.fake_clients(client_id) VALUES('SYNTH-PC'),('SYNTH-PHONE');
 
@@ -88,6 +88,8 @@ BEGIN
  END LOOP;
  IF jsonb_typeof(proposed->'settings') IS DISTINCT FROM 'object'
     THEN RAISE EXCEPTION 'INVALID_SETTINGS'; END IF;
+ IF financial_frozen AND proposed->'settings' IS DISTINCT FROM previous->'settings'
+    THEN RAISE EXCEPTION 'FINANCIAL_SETTINGS_NEED_ACCOUNTING_RPC'; END IF;
 END $$;
 
 CREATE FUNCTION p40q_lab.legacy_write(
@@ -170,7 +172,8 @@ BEGIN
    IF (SELECT count(*) FROM p40q_lab.fake_clients)<2 OR
       EXISTS(SELECT 1 FROM p40q_lab.fake_clients WHERE generation<>2
         OR pending<>0 OR backup_verified IS DISTINCT FROM true
-        OR last_ack_sync IS NULL OR last_ack_ledger IS DISTINCT FROM s.ledger_version)
+        OR last_ack_sync IS DISTINCT FROM s.sync_version
+        OR last_ack_ledger IS DISTINCT FROM s.ledger_version)
    THEN RAISE EXCEPTION 'LEGACY_CLIENT_OR_DIRTY_DRAFT_REMAINS';END IF;
    UPDATE p40q_lab.fake_state SET phase='guarded',sync_version=sync_version+1
     WHERE owner=s.owner;
