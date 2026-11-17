@@ -1,0 +1,50 @@
+name: P40-16AE fictional per-document authorization and source boundary (NO PRODUCTION)
+on:
+  push:
+    branches: [p40-16ae-single-document-authz-lab-20261117]
+    paths:
+      - '.p40-16ae-tests/**'
+      - '.p40-16ae-review/**'
+      - '.github/workflows/p40-16ae-fake-authz.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-no-cloud-authz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP if main beta or production files changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16ae-single-document-authz-lab-20261117
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40ae-files
+          cat /tmp/p40ae-files
+          test -s /tmp/p40ae-files
+          if grep -Ev '^(\.p40-16ae-tests/|\.p40-16ae-review/|\.github/workflows/p40-16ae-fake-authz\.yml$)' /tmp/p40ae-files; then
+            echo "STOP: modification to formal application or sensitive source"; exit 1
+          fi
+          for f in index.html billing-print.html external-billing-print.html assets/js/billing-print.js assets/js/billing-bundle-print.js assets/js/external-billing-print.js assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/config.js; do
+            test "$(git rev-parse "origin/main:$f")" = "$(git rev-parse "HEAD:$f")"
+          done
+          test ! -f .env
+          echo 'PASS: source unchanged; no cloud credentials or real data used'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Execute strictly fictional authorization contract tests
+        run: |
+          python -m py_compile .p40-16ae-tests/test_fake_single_document_authz.py
+          python -m unittest discover -s .p40-16ae-tests -p 'test_*.py' -v
+          echo 'LAB ONLY: Source adapter and cryptographic JWT verification NOT implemented.'
