@@ -1,0 +1,50 @@
+name: P40-16AF metadata-only source safety gate (NO PRODUCTION)
+on:
+  push:
+    branches: [p40-16af-metadata-readonly-gate-20261118]
+    paths:
+      - '.p40-16af-review/**'
+      - '.p40-16af-tests/**'
+      - '.github/workflows/p40-16af-metadata-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-gate-no-production:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP if main/beta moved or production app differs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16af-metadata-readonly-gate-20261118
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40af-changes
+          cat /tmp/p40af-changes
+          test -s /tmp/p40af-changes
+          if grep -Ev '^(\.p40-16af-review/|\.p40-16af-tests/|\.github/workflows/p40-16af-metadata-gate\.yml$)' /tmp/p40af-changes; then
+            echo 'STOP: formal application, PDF or financial logic has changed'; exit 1
+          fi
+          for f in index.html billing-print.html assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/erp-store.js assets/js/external-billing-print.js; do
+            test "$(git rev-parse "origin/main:$f")" = "$(git rev-parse "HEAD:$f")"
+          done
+          test ! -f .env
+          echo 'PASS: only documentation and offline tests; formal source unchanged'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Test fail-closed no-whole-snapshot design with offline metadata
+        run: |
+          python -m py_compile .p40-16af-tests/test_metadata_gate.py
+          python -m unittest discover -s .p40-16af-tests -p 'test_*.py' -v
+          echo 'DESIGN GATE ONLY: G1 BLOCKED; no Supabase data, mutations or deployment.'
