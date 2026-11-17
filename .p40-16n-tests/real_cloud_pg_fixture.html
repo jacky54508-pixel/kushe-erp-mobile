@@ -1,0 +1,35 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
+<title>P40-16N fake PG cloud and REAL ERP modules</title></head>
+<body><main><h1>P40-16N Local synthetic-only ERP CloudSync</h1>
+<div id="appShell"></div><output id="status">SYNTHETIC NO PROD</output></main>
+<script>
+'use strict';
+// Never any real Supabase domain or credentials. Interception aborts external network.
+window.KUSHE_PHASE1_CONFIG={
+ supabaseUrl:'https://p40n-synthetic.invalid',
+ supabasePublishableKey:'SYNTH-P40N-LOCAL-KEY'
+};
+const SYNTH_OWNER='SYNTH-P40N-OWNER';
+window.KusheAuthGate=Object.freeze({
+ session:()=>({access_token:'SYNTH-P40N-LOCAL-TOKEN'}),
+ user:()=>({id:SYNTH_OWNER,email:'fake-n@example.invalid'}),
+ requireAuth:async()=>true
+});
+window.KuSheLegacyData=Object.freeze({
+ getState:()=>({customers:[],projects:[],vendors:[],materials:[],employees:[],
+  billings:[],receivables:[],invoices:[],receipts:[],retentionReceipts:[],
+  commissions:[],payroll:[],salaryPayments:[],bankTransactions:[],audit:[],
+  settings:{defaultTax:5},meta:{updatedAt:'2026-11-16T00:00:00.000Z'}}),
+ refresh:async()=>true
+});
+localStorage.setItem('kushe_erp_device_trust_v1',JSON.stringify({
+ schema:'kushe-device-trust-v1',version:1,mode:'trusted',userId:SYNTH_OWNER,
+ updatedAt:'2026-11-16T00:00:00.000Z'
+}));
+// A separate test may explicitly enable manual upload. Defaults are NO.
+window.confirm=()=>false;
+window.addEventListener('error',e=>{document.querySelector('#status').textContent='ERROR: '+e.message});
+</script>
+<!-- Genuine, unchanged production ERP sources, not copies or modified code -->
+<script src="/assets/js/erp-store.js"></script>
+<script src="/assets/js/cloud-sync.js"></script></body></html>
