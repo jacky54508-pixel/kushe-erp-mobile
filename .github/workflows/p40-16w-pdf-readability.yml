@@ -54,5 +54,6 @@ jobs:
         with:
           name: p40-16w-synthetic-pdf-review
           path: .p40-16w-review/
-          if-no-files-found: warn
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 3
