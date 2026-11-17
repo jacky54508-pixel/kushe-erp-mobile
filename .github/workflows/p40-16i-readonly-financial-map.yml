@@ -1,0 +1,63 @@
+name: P40-16I official-schema READ-ONLY mapping + synthetic financial links (NO WRITES)
+on:
+  push:
+    branches: [p40-16i-financial-schema-readonly-20261116]
+    paths:
+      - '.p40-16i-tests/**'
+      - '.github/workflows/p40-16i-readonly-financial-map.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  jsonb-financial-links-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Refuse any changes to production main/beta or real ERP files
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN=2ab9c9d5944b1360ba3eebf49695713168caca8a
+          BETA=62669539053a15174081ba8670b18248195c6f8c
+          BASE=8856e0fd1ba293a1dd21527bcf162af45dc6f9cd
+          test "$GITHUB_REF_NAME" = p40-16i-financial-schema-readonly-20261116
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = "$MAIN"
+          test "$(git rev-parse origin/beta)" = "$BETA"
+          test "$(git merge-base origin/main HEAD)" = "$MAIN"
+          test "$(git merge-base "$BASE" HEAD)" = "$BASE"
+          git diff --name-only "$BASE"...HEAD > /tmp/p40i-diff
+          cat /tmp/p40i-diff
+          test -s /tmp/p40i-diff
+          if grep -Ev '^(.p40-16i-tests/|.github/workflows/p40-16i-readonly-financial-map.yml$)' /tmp/p40i-diff; then
+            echo 'BLOCKED change outside isolated read-only scope'; exit 1
+          fi
+          for f in index.html assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/app.js assets/js/billing.js assets/js/invoices.js assets/js/commissions.js assets/js/payroll.js assets/js/banks.js assets/js/billing-groups.js assets/js/external-billing-invoice.js assets/js/external-billing-print.js; do
+            test "$(git rev-parse origin/main:"$f")" = "$(git rev-parse HEAD:"$f")"
+          done
+          echo 'PASS: main and beta untouched; all live app files identical'
+      - name: P40-16I synthetic-only financial link audits
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check .p40-16i-tests/financial_links_readonly.cjs
+          node --check .p40-16i-tests/financial_links_readonly.test.cjs
+          node --test .p40-16i-tests/financial_links_readonly.test.cjs
+      - name: P40-16A-D previous nonposting rules
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test .p40-16a-tests/review.test.cjs .p40-16b-tests/ui.test.cjs .p40-16c-tests/accounting-gate.test.cjs .p40-16d-tests/simulated-ledger.test.cjs
+      - name: Confirm no production module import, SQL migration or cloud secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -q 'p40-16i' index.html
+          ! grep -q 'p40-16i' assets/js/erp-store.js
+          ! grep -q 'p40-16i' assets/js/cloud-sync.js
+          test "$(find .p40-16i-tests -type f | wc -l)" -ge 3
+          echo 'PASS: no ERP write, backend call, or production app load'

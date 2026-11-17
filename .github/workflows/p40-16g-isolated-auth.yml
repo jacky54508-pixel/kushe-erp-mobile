@@ -1,0 +1,89 @@
+name: P40-16G CI-only verified-claim gateway simulation, RLS and live membership (NO POSTING)
+on:
+  push:
+    branches: [p40-16g-supabase-auth-model-ci-20261116]
+    paths:
+      - '.p40-16g-tests/**'
+      - '.github/workflows/p40-16g-isolated-auth.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-auth-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: p40_16g_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: synthetic-g-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d p40_16g_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      P40G_CI_ADMIN_DSN: postgresql://postgres:synthetic-g-ci-only@127.0.0.1:5432/p40_16g_ci
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: PRE-COMMIT guard — no production main beta or ERP app modifications
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN=2ab9c9d5944b1360ba3eebf49695713168caca8a
+          BETA=62669539053a15174081ba8670b18248195c6f8c
+          BASE=6359a3f9f2a85b99d68933a6bff964b44002efb6
+          test "$GITHUB_REF_NAME" = p40-16g-supabase-auth-model-ci-20261116
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = "$MAIN"
+          test "$(git rev-parse origin/beta)" = "$BETA"
+          test "$(git merge-base origin/main HEAD)" = "$MAIN"
+          test "$(git merge-base "$BASE" HEAD)" = "$BASE"
+          git diff --name-only "$BASE"...HEAD > /tmp/p40-16g-diff
+          cat /tmp/p40-16g-diff
+          test -s /tmp/p40-16g-diff
+          if grep -Ev '^(.p40-16g-tests/|.github/workflows/p40-16g-isolated-auth.yml$)' /tmp/p40-16g-diff; then
+            echo 'BLOCKED: files outside isolated test/docs';exit 1
+          fi
+          for f in index.html assets/js/erp-store.js assets/js/auth-gate.js assets/js/cloud-sync.js assets/js/app.js assets/js/billing.js assets/js/invoices.js assets/js/commissions.js assets/js/payroll.js assets/js/banks.js; do
+            test "$(git rev-parse origin/main:"$f")" = "$(git rev-parse HEAD:"$f")"
+          done
+          echo 'PASS: production ERP code and both release branches untouched'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Local ephemeral DB and pinned driver only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install 'psycopg[binary]==3.2.9'
+          python - <<'PY'
+          from urllib.parse import urlsplit
+          import os
+          u=urlsplit(os.environ['P40G_CI_ADMIN_DSN'])
+          assert u.hostname=='127.0.0.1' and u.path=='/p40_16g_ci'
+          print('PASS: local disposable DB only')
+          PY
+      - name: Exercise simulated trusted gateway RLS, role revocation and read-only preview
+        run: python .p40-16g-tests/test_gateway_rls.py
+      - name: Regress prior P40-16A-D no-posting rules (fake inputs)
+        run: |
+          node --test .p40-16a-tests/review.test.cjs .p40-16b-tests/ui.test.cjs .p40-16c-tests/accounting-gate.test.cjs .p40-16d-tests/simulated-ledger.test.cjs
+      - name: Verify no production login, posting, migration or real data import
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -q 'p40g_ci' index.html
+          ! grep -q 'p40g_ci' assets/js/erp-store.js
+          ! grep -q 'p40-16g' index.html
+          ! grep -qi 'service_role' .p40-16g-tests/isolated_gateway_rls.sql
+          echo 'PASS: no production app or business integration'
