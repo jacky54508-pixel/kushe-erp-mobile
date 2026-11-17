@@ -100,6 +100,7 @@ try:
         page = browser.new_page(viewport={'width': 1280, 'height': 900})
         page.route('**/*', lambda route: route.continue_()
                    if route.request.url.startswith(ORIGIN) else route.abort())
+        failures = []
         for count in (6, 18, 30):
             verify_page(page, count)
             pdf = page.pdf(format='A4', print_background=True,
@@ -107,7 +108,8 @@ try:
             pages = len(PdfReader(io.BytesIO(pdf)).pages)
             print(f'CASE {count} synthetic unique lines: rows verified, A4 PDF pages={pages}')
             # A4-one-page requirement is intentionally fail-closed.
-            assert pages == 1, f'BLOCKED: {count} synthetic lines span {pages} pages; not A4 single page'
+            if pages != 1:
+                failures.append(f'BLOCKED: {count} synthetic lines span {pages} pages; not A4 single page')
         mobile = browser.new_page(viewport={'width': 390, 'height': 844},
                                   device_scale_factor=1, is_mobile=True,
                                   has_touch=True)
@@ -117,6 +119,10 @@ try:
         mobile_width=mobile.locator('body').evaluate('(el)=>el.scrollWidth')
         assert mobile_width <= 390+3, f'Unexpected mobile horizontal overflow {mobile_width}px'
         print('PASS mobile synthetic document, no horizontal overflow')
+        if failures:
+            for failure in failures:
+                print(failure, flush=True)
+            raise AssertionError('; '.join(failures))
         browser.close()
 finally:
     server.shutdown()
