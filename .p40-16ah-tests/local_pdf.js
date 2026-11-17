@@ -7,7 +7,7 @@
 (function() {
   "use strict";
   const A4=[595.28,841.89], LEFT=32, RIGHT=563, BOTTOM=30;
-  const TEXT=8.3, ROW=10.7;
+  const TEXT=8.3, ROW=10.4;
   const allowedTop=new Set(["schema","documentType","title","customer","project",
     "date","taxMode","lines","salesAmount","taxAmount","totalAmount",
     "retentionAmount","receivableAmount","publicNote","company"]);
@@ -101,7 +101,7 @@
     y-=13;
     for(const item of items){
       const wrapped=wrapText(item.item,font,8.1,widths[0]-7);
-      const h=Math.max(ROW,wrapped.length*9.2+2);
+      const h=Math.max(ROW,wrapped.length*9.1+1.3);
       if(h>25)stop("LONG_SUMMARY_ITEM");
       rowColumns(page,font,[wrapped,String(item.qty),money(item.price),money(item.amount)],
          x,y,widths,h,8.1);
@@ -139,7 +139,7 @@
     y-=14;
     for(const l of view.lines){
       const item=wrapText(l.item,font,8.15,cols[1]-8);
-      const h=Math.max(ROW,item.length*9.25+2);
+      const h=Math.max(ROW,item.length*9.1+1.3);
       if(h>26)stop("ORIGINAL_DESCRIPTION_TOO_LONG");
       rowColumns(page,font,[l.house,item,l.unit,String(l.qty),money(l.price),money(l.amount)],
          LEFT,y,cols,h,8.15);
