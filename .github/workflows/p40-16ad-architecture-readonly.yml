@@ -1,0 +1,50 @@
+name: P40-16AD read-only PDF architecture and synthetic public-data contract
+on:
+  push:
+    branches: [p40-16ad-pdf-architecture-readonly-20261117]
+    paths:
+      - '.p40-16ad-architecture/**'
+      - '.p40-16ad-tests/**'
+      - '.github/workflows/p40-16ad-architecture-readonly.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  no-production-writes-and-contract-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP if formal main/beta moved or ANY source code touched
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16ad-pdf-architecture-readonly-20261117
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/ad-files
+          cat /tmp/ad-files
+          test -s /tmp/ad-files
+          if grep -Ev '^(\.p40-16ad-architecture/|\.p40-16ad-tests/|\.github/workflows/p40-16ad-architecture-readonly\.yml$)' /tmp/ad-files; then
+            echo 'STOP: code / ERP / PDF / financial file changed'; exit 1
+          fi
+          for file in index.html billing-print.html billing-bundle-print.html external-billing-print.html assets/js/billing-print.js assets/js/billing-bundle-print.js assets/js/external-billing-print.js assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/config.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "origin/main:$file")" = "$(git rev-parse "HEAD:$file")"
+          done
+          echo 'PASS unchanged formal ERP and PDF source'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Verify synthetic public-only PDF service contract
+        shell: bash
+        run: |
+          python -m compileall -q .p40-16ad-tests
+          python -m unittest discover -s .p40-16ad-tests -p 'test_*.py' -v
+          echo 'DESIGN CONTRACT ONLY: no backend, production PDF gate, Supabase or ERP data has changed.'
