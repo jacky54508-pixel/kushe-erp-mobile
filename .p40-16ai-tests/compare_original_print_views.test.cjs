@@ -190,7 +190,7 @@ test('published print display switches dropped from candidate publicOnly view',(
   const projected=c.local.publicOnly(testActive(v),v.project);
   assert.equal('invoiceStatus' in projected,false);
   assert.equal('pricingMode' in projected,false);
-  assert.ok(printHtml.includes('const hasTax='));
+  assert.ok(printHtml.includes("hasTax=isQuote||d.invoiceStatus!=='no_invoice'"));
   block('PRINT_DISPLAY_SWITCHES','must reproduce invoice/tax/pricing presentation without disclosing internal invoice numbers');
 });
 
