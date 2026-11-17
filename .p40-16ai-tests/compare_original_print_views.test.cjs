@@ -119,7 +119,7 @@ test('ordinary combined document is its own nested schema and cannot use AH dire
   assert.equal(v.documentType,'combined-billing');
   assert.equal(v.billings.length,2);
   assert.equal(v.projects.length,2);
-  assert.equal(v.totals.grossTotal,315);
+  assert.equal(v.totals.totalAmount,315);
   assert.throws(()=>c.local.publicOnly(testActive(v),'虛構M區'),/WRONG_TARGET_OR_STATUS/);
   block('NESTED_COMBINED_FORMAT','combined view has nested billings/projects/totals, and no verified local adapter exists');
 });
