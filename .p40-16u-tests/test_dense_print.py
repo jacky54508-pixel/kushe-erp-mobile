@@ -52,7 +52,11 @@ def specimen(size):
     }
 
 def verify_page(page, count):
-    page.goto(ORIGIN+'billing-print.html?print=0#'+encode(specimen(count)), wait_until='load')
+    # A hash-only navigation on the same path DOES NOT reload document scripts.
+    # Include a distinct query parameter so each fixture runs a fresh renderer.
+    page.goto(ORIGIN+f'billing-print.html?print=0&synthetic_case={count}#'+encode(specimen(count)), wait_until='load')
+    assert page.url.split('#', 1)[0].endswith(f'synthetic_case={count}'), (
+        'fixture navigation failed', count, page.url.split('#', 1)[0])
     page.locator('#paper .section').first.wait_for()
     text = page.locator('#paper').inner_text()
     assert 'SYNTH-M區' in text and 'SYNTH-L區' not in text
