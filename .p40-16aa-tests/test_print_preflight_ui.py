@@ -165,7 +165,7 @@ try:
             summary_selector=(".p40x-two-column-summary tbody tr" if n==30 else
                               ".grouped-item-summary-table tbody tr")
             assert page.locator(summary_selector).count()==(n if n==30 else n+1)
-            assert page.evaluate("window.__p40aa.status")==="UNKNOWN" if False else True
+            assert page.evaluate("window.__p40aa.status")=="UNKNOWN"
             # Verify UNKNOWN refuses both user click AND direct JS print().
             page.locator(".toolbar button").first.click()
             assert page.evaluate("window.__p40aa.blockedAttempts")==1
