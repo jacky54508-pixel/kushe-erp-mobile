@@ -1,0 +1,104 @@
+name: P40-16P synthetic all-writer dual-version fence PostgreSQL CI (NO PRODUCTION)
+on:
+  push:
+    branches: [p40-16p-all-writers-fence-synthetic-20261117]
+    paths:
+      - '.p40-16p-tests/**'
+      - '.github/workflows/p40-16p-all-writers-fence.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-all-writers-fence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: p40_16p_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: only-ci-local-superuser
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d p40_16p_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      P40P_LOCAL_ADMIN_DSN: postgresql://postgres:only-ci-local-superuser@127.0.0.1:5432/p40_16p_ci
+      P40P_LOCAL_CLIENT_DSN: postgresql://p40p_client:synthetic-client-ci-only@127.0.0.1:5432/p40_16p_ci
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Fail closed if formal ERP code, main or beta or scope was changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN=2ab9c9d5944b1360ba3eebf49695713168caca8a
+          BETA=62669539053a15174081ba8670b18248195c6f8c
+          BASE=72198bde56dd3e73ef2550719a26e1dea589a271
+          test "$GITHUB_REF_NAME" = p40-16p-all-writers-fence-synthetic-20261117
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = "$MAIN"
+          test "$(git rev-parse origin/beta)" = "$BETA"
+          test "$(git merge-base origin/main HEAD)" = "$MAIN"
+          test "$(git merge-base "$BASE" HEAD)" = "$BASE"
+          git diff --name-only "$BASE"...HEAD >/tmp/p40p-files
+          cat /tmp/p40p-files
+          test -s /tmp/p40p-files
+          if grep -Ev '^(.p40-16p-tests/|.github/workflows/p40-16p-all-writers-fence.yml$)' /tmp/p40p-files; then
+            echo 'STOP: out-of-scope changes detected';exit 1
+          fi
+          for f in index.html assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/app.js assets/js/billing.js assets/js/invoices.js assets/js/commissions.js assets/js/payroll.js assets/js/banks.js assets/js/billing-groups.js assets/js/external-billing-print.js; do
+            test "$(git rev-parse origin/main:"$f")" = "$(git rev-parse HEAD:"$f")"
+          done
+          test ! -f .env
+          echo 'PASS formal ERP/main/beta unchanged'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install fixed local-only PostgreSQL driver and validate DSNs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install 'psycopg[binary]==3.2.9'
+          python - <<'PY'
+          from urllib.parse import urlparse
+          import os
+          for name,role in [('P40P_LOCAL_ADMIN_DSN','postgres'),('P40P_LOCAL_CLIENT_DSN','p40p_client')]:
+            x=urlparse(os.environ[name])
+            assert x.hostname=='127.0.0.1' and x.path=='/p40_16p_ci' and x.username==role
+          print('PASS disposable localhost PostgreSQL only')
+          PY
+      - name: Actual disposable PostgreSQL dual-version and append-only synthetic tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .p40-16p-tests/test_all_writers_fence.py
+      - name: Re-run P40-16O source-only writer entrypoint guard and negative tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .p40-16o-tests/audit_writers.py --root . --strict
+          python .p40-16o-tests/test_writer_inventory.py
+      - name: Regression on historical synthetic financial and recovery protections
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test .p40-16a-tests/review.test.cjs .p40-16b-tests/ui.test.cjs .p40-16c-tests/accounting-gate.test.cjs .p40-16d-tests/simulated-ledger.test.cjs .p40-16i-tests/financial_links_readonly.test.cjs .p40-16k-tests/offline_recovery.test.cjs
+      - name: Confirm no production migrations or official ERP integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -q 'p40-16p' index.html
+          ! grep -q 'p40-16p' assets/js/cloud-sync.js
+          ! grep -q 'p40-16p' assets/js/erp-store.js
+          ! grep -q 'public.erp_states' .p40-16p-tests/disposable_all_writers_fence.sql
+          test "$(find .p40-16p-tests -maxdepth 1 -type f | wc -l)" -eq 3
+          echo 'PASS no production Supabase, company data, migrations or application change'
