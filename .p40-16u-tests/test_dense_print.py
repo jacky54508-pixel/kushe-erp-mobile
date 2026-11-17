@@ -65,7 +65,16 @@ def verify_page(page, count):
     # The real template renders TWO .detail tables for dense merged documents:
     # the per-house original lines and a separate item summary. Counting both
     # as one table gives a false assertion failure (18/30-line fixture).
-    if count > 12:
+    is_dense = page.locator('#paper').evaluate(
+        "(el) => el.classList.contains('invoice-group-document') "
+        "&& !!el.querySelector('.dense-original-details')"
+    )
+    # The published template selects dense mode when houses > 9,
+    # item types > 5, OR original lines > 12. Inspect the rendered
+    # structure instead of guessing from line count.
+    assert is_dense == (count > 5), (
+        'Unexpected print mode', count, is_dense)
+    if is_dense:
         original_rows = page.locator('.dense-original-details .dense-line-table tbody tr')
         summary_rows = page.locator('.grouped-item-summary .grouped-item-summary-table tbody tr')
         assert original_rows.count() == count + 1, (
