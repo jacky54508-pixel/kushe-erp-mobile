@@ -34,7 +34,7 @@
 
 - `.p40-16o-tests/audit_writers.py` 唯讀掃描 `assets/js/**/*.js`，略過第三方 minified library，以 Python 字面規則找出 `fetch()`、REST/RPC URL、XMLHttpRequest/WebSocket/Beacon、IndexedDB 開庫、原生 IDB 寫入候選、localStorage/sessionStorage 持久化操作。
 - 目前已人工審過的網路檔案只有：`cloud-sync.js`、`auth-gate.js`、`employee-shell.js`。其他 JS 出現新的 `fetch` 或 `/rest/v1` 就立即 fail-closed。
-- 另建立 **31 個具體關鍵錨點**，涵蓋 cloud CAS、手動/自動/臨時/信任優先寫入、Store journal、收款/應付/薪資/案場合併回復與維修、授權查詢、匯出備份等。錨點缺失、重複、修改 CAS RPC path 或 body、出現 ledgerVersion 結構，都需先重新人工審查，**不能自動默認是安全的更新**。
+- 另建立 **36 個具體關鍵錨點**，涵蓋 cloud CAS、手動/自動/臨時/信任優先寫入、Store journal、收款/應付/薪資/案場合併回復與維修、授權查詢、匯出備份等。錨點缺失、重複、修改 CAS RPC path 或 body、出現 ledgerVersion 結構，都需先重新人工審查，**不能自動默認是安全的更新**。
 - `.p40-16o-tests/test_writer_inventory.py` 使用原始碼的深拷貝做破壞性*虛構字串注入*（例如在報表模組新增不受審查的 `fetch(PATCH)`、偷換 CAS RPC、減少 CAS 參數、改名復原 API、偷加 ledgerVersion），要確定 scanner 在這些情境會報錯並拒絕變更。正式工作樹所有程式一律保持不變。
 - GitHub CI 執行差異白名單、檔案 SHA 比對、掃描 strict 模式、上一階段安全回歸。scanner 產生 CI JSON 報告，**只包含來源路徑、行號、類別、錨點、數量，不包含任何使用者帳務資料或可用密碼**。
 - 此 scanner 是**靜態候選入口發現**；例如透過字串組合構造 HTTP endpoint、重命名的 `fetch`、動態 require、PostgreSQL SECURITY DEFINER 特權或未納入 GitHub 的舊客戶端，不可能單靠它證明沒有問題。不得將掃描 PASS 當作允許入帳。
