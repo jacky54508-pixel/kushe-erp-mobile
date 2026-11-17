@@ -69,11 +69,11 @@ BEGIN
    RETURN QUERY SELECT 'CONFLICT'::text,prior.sync_version,
      prior.updated_at,prior.last_writer_mode,prior.last_base_sync_version;RETURN;
   END IF;
-  UPDATE p40n_ci.fake_erp_states
+  UPDATE p40n_ci.fake_erp_states AS t
     SET data=p_data, sync_version=prior.sync_version+1,
     updated_at=GREATEST(clock_timestamp(),prior.updated_at+interval '1 microsecond'),
     last_writer_mode=p_mode,last_base_sync_version=p_expected
-    WHERE user_id=p_user AND sync_version=p_expected
+    WHERE t.user_id=p_user AND t.sync_version=p_expected
     RETURNING * INTO applied;
  END IF;
  RETURN QUERY SELECT 'APPLIED'::text,applied.sync_version,
