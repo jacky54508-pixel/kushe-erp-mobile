@@ -7,7 +7,7 @@
 (function() {
   "use strict";
   const A4=[595.28,841.89], LEFT=32, RIGHT=563, BOTTOM=30;
-  const TEXT=8.3, ROW=11.4;
+  const TEXT=8.3, ROW=10.7;
   const allowedTop=new Set(["schema","documentType","title","customer","project",
     "date","taxMode","lines","salesAmount","taxAmount","totalAmount",
     "retentionAmount","receivableAmount","publicNote","company"]);
@@ -124,13 +124,13 @@
     const {rgb}=PDFLib;let y=808;
     const ink=rgb(.12,.19,.29), blue=rgb(.91,.95,.98), gray=rgb(.67,.74,.8);
     page.drawText("虛構測試公司",{x:LEFT,y,size:14,font,color:ink});
-    stroke(page,502,782,59,35,rgb(.97,.97,.97),gray);
-    put(page,font,"模擬LOGO",507,798,8.1);
+    stroke(page,510,780,51,40,rgb(.97,.97,.97),gray);
+    put(page,font,"模擬LOGO",513,798,8.1);
     put(page,font,"對外請款單（僅虛構測試）",LEFT,783,10);
     put(page,font,"建商："+view.customer,LEFT,764,9);
     put(page,font,"案場："+view.project,LEFT,748,9);
     put(page,font,"日期："+view.date+"　統編："+view.company.taxId,LEFT,732,8.2);
-    y=712;
+    y=728;
     stroke(page,LEFT,y-15,RIGHT-LEFT,15,blue,gray);
     put(page,font,"原施工明細（戶別、施工項目、數量、單價）",LEFT+5,y-10,9.0);
     y-=15;
@@ -174,9 +174,9 @@
     put(page,font,"保留款："+money(view.retentionAmount)+"  應收："+money(view.receivableAmount),
         amountX+5,footTop-45,8.1);
     const sigY=footTop-footerH-26;
-    if(sigY-32<BOTTOM)stop("STAMP_AREA_OVERFLOW");
+    if(sigY-45<BOTTOM)stop("STAMP_AREA_OVERFLOW");
     put(page,font,"客戶簽章：__________________",LEFT,sigY+15,8.2);
-    stroke(page,RIGHT-154,sigY-32,154,46,rgb(.98,.98,.98),gray);
+    stroke(page,RIGHT-154,sigY-45,154,68,rgb(.98,.98,.98),gray);
     put(page,font,"模擬大小章（無真實印章）",RIGHT-150,sigY-7,8.2);
     put(page,font,"54 × 24 mm 預留概念",RIGHT-150,sigY-19,8.1);
     const bytes=await doc.save({useObjectStreams:false});
