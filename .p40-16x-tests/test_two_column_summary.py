@@ -149,7 +149,9 @@ try:
             assert page.locator(".grouped-item-summary tbody tr").count()==summaryCount+1
             page.add_style_tag(content=COMPACT)
             if unique:
-                assert page.evaluate(TWOCOL_JS)=={"rows":30,"total":"NT$3,000","twoColumns":2} if False else True
+                conversion=page.evaluate(TWOCOL_JS)
+                assert conversion["rows"]==30 and conversion["twoColumns"]==2
+                assert conversion["total"], "summary total missing"
                 # Verification below uses rendered section + PDF rather than currency formatting.
                 assert page.locator(".p40x-two-column-summary table").count()==2
                 assert page.locator(".p40x-two-column-summary tbody tr").count()==30
