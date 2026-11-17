@@ -23,7 +23,8 @@ def db(role="admin"):return psycopg.connect(DSNS[role],connect_timeout=6)
 
 def state():
     with db() as c:
-        return dict(c.execute("SELECT * FROM p40r_lab.fake_summary WHERE doc_id=%s",(DOC,)).fetchone()._asdict())
+        cur=c.execute("SELECT * FROM p40r_lab.fake_summary WHERE doc_id=%s",(DOC,))
+        return dict(zip([col.name for col in cur.description],cur.fetchone()))
 def events():
     with db() as c:
         return c.execute("SELECT operation_key,kind,source_key,amount,evidence "
