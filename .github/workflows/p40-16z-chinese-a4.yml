@@ -1,0 +1,62 @@
+name: P40-16Z Chinese PDF and real-size mock logo/seal A4 gate (NO PRODUCTION)
+on:
+  push:
+    branches: [p40-16z-chinese-pdf-guard-lab-20261117]
+    paths:
+      - '.p40-16z-tests/**'
+      - '.github/workflows/p40-16z-chinese-a4.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cjk-a4-preview-and-safety-diagnostics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP if current main beta or production app files differ
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16z-chinese-pdf-guard-lab-20261117
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40z-files
+          cat /tmp/p40z-files
+          test -s /tmp/p40z-files
+          if grep -Ev '^(\.p40-16t-tests/|\.p40-16u-tests/|\.p40-16v-tests/|\.p40-16w-tests/|\.p40-16x-tests/|\.p40-16y-tests/|\.p40-16z-tests/|\.github/workflows/p40-16t-real-customer-pdf\.yml$|\.github/workflows/p40-16u-dense-pdf\.yml$|\.github/workflows/p40-16v-layout-feasibility\.yml$|\.github/workflows/p40-16w-pdf-readability\.yml$|\.github/workflows/p40-16x-two-column-a4\.yml$|\.github/workflows/p40-16y-footer-a4\.yml$|\.github/workflows/p40-16z-chinese-a4\.yml$)' /tmp/p40z-files; then
+            echo 'STOP production ERP code changed'; exit 1
+          fi
+          for f in index.html billing-print.html external-billing-print.html assets/js/external-billing-print.js assets/js/external-billing-invoice.js assets/js/erp-store.js assets/js/cloud-sync.js; do
+            test "$(git rev-parse "origin/main:$f")" = "$(git rev-parse "HEAD:$f")"
+          done
+          test ! -f .env
+          echo 'PASS immutable formal sources and isolated test-only branch'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install ephemeral Chrome PDF test tools and CJK fonts
+        run: |
+          python -m pip install 'playwright==1.56.0' 'pymupdf==1.26.5'
+          python -m playwright install --with-deps chromium
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-noto-cjk
+          fc-cache -f
+      - name: Render Chinese fictitious invoices, check print and report BLOCKED cases
+        run: python .p40-16z-tests/test_chinese_a4_guard.py
+      - name: Archive SYNTHETIC pdf png and diagnostics only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p40-16z-cjk-print-safe-diagnostics
+          path: .p40-16z-artifacts/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
