@@ -205,7 +205,7 @@ class RealCloudSyncPostgres(unittest.TestCase):
         self.assertEqual(current()[1],1)
         self.assertEqual(current()[0]['customers'][0]['name'],'SYNTH-PC-CUSTOMER')
         phone_local=self.ev(phone,'async()=>await KuSheERPStore.readCommittedSnapshot()')
-        self.assertEqual(len(phone_local['data']['customers']),0)
+        self.assertEqual(len(phone_local['data'].get('customers',[])),0)
     def test_07_browser_network_offline_no_cloud_write_and_local_still_preserved(self):
         self.seed(self.page)
         self.offline_labels.add('SYNTH-PC')
