@@ -69,9 +69,9 @@ def op(kind,source="L",amount=1,key=None,inv=None,role="clerk",
 def credit(source="L",key=None,**kw):
     params=({"amount":21000,"net":20000,"tax":1000} if source=="L"
             else {"amount":11100,"net":10571,"tax":529})
+    params.update({"approval":"SYNTH-APPROVAL-Q","credit":"SYNTH-CREDIT-Q"})
     params.update(kw)
-    return op("CREDIT",source,key=key,approval="SYNTH-APPROVAL-Q",
-              credit="SYNTH-CREDIT-Q",**params)
+    return op("CREDIT",source,key=key,**params)
 def hold(source="L",rate=10,amount=None,**kwargs):
     return op("RETENTION_SET",source,amount=amount if amount is not None
        else (37900 if source=="L" else 22100),
@@ -82,8 +82,9 @@ def release(source="L",amount=37900,key=None,**kwargs):
     return op("RETENTION_RECEIPT",source,amount,key=key,**kwargs)
 def accrual(source="L",worker="SYNTH-EMP-A",base=14000,rate=2500,
             amount=3500,key=None,**kwargs):
-    return op("COMMISSION_ACCRUAL",source,amount,key=key,
-        worker=worker,untaxedBase=base,rateBps=rate,review="SYNTH-REVIEW-Q",**kwargs)
+    values={"worker":worker,"untaxedBase":base,"rateBps":rate,"review":"SYNTH-REVIEW-Q"}
+    values.update(kwargs)
+    return op("COMMISSION_ACCRUAL",source,amount,key=key,**values)
 def target(source="L",sync=None,ledger=None,key="SYNTH-SELECT-TARGET"):
     h=header()
     with db() as c:
