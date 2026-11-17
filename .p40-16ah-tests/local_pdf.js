@@ -173,7 +173,7 @@
     put(page,font,"含稅："+money(view.totalAmount),amountX+5,footTop-34,8.4);
     put(page,font,"保留款："+money(view.retentionAmount)+"  應收："+money(view.receivableAmount),
         amountX+5,footTop-45,8.1);
-    const sigY=footTop-footerH-26;
+    const sigY=footTop-footerH-24;
     if(sigY-45<BOTTOM)stop("STAMP_AREA_OVERFLOW");
     put(page,font,"客戶簽章：__________________",LEFT,sigY+15,8.2);
     stroke(page,RIGHT-154,sigY-45,154,68,rgb(.98,.98,.98),gray);
