@@ -62,7 +62,22 @@ def verify_page(page, count):
     assert '原票號／狀態' not in text
     for i in range(1, count+1):
         assert f'SYNTH-施工項目-{i:02d}' in text, ('missing row', i)
-    assert page.locator('table.detail tbody tr').count() == count+1
+    # The real template renders TWO .detail tables for dense merged documents:
+    # the per-house original lines and a separate item summary. Counting both
+    # as one table gives a false assertion failure (18/30-line fixture).
+    if count > 12:
+        original_rows = page.locator('.dense-original-details .dense-line-table tbody tr')
+        summary_rows = page.locator('.grouped-item-summary .grouped-item-summary-table tbody tr')
+        assert original_rows.count() == count + 1, (
+            'original lines count mismatch', count, original_rows.count())
+        assert summary_rows.count() == count + 1, (
+            'summary lines count mismatch', count, summary_rows.count())
+        assert '原施工明細合計' in original_rows.last.inner_text()
+        assert '明細合計' in summary_rows.last.inner_text()
+    else:
+        standard_rows = page.locator('.section .detail tbody tr')
+        assert standard_rows.count() == count + 1, (
+            'standard summary count mismatch', count, standard_rows.count())
     assert page.locator('#paper').evaluate('(el)=>el.scrollWidth <= el.clientWidth+2')
     return text
 
