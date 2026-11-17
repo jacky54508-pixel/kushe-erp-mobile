@@ -159,7 +159,7 @@ try:
             page.evaluate(z["LOGO_JS"])
             page.add_style_tag(content=z["LOGO_CSS"])
             page.add_style_tag(content=WARNING_CSS)
-            page.emulate_media(media="print")
+            page.emulate_media(media="screen")  # Toolbar is hidden in print media
             page.evaluate("async()=>{if(document.fonts?.ready) await document.fonts.ready}")
             assert page.locator(".dense-original-details .dense-line-table tbody tr").count()==n+1
             summary_selector=(".p40x-two-column-summary tbody tr" if n==30 else
@@ -173,7 +173,9 @@ try:
             assert page.evaluate("window.__p40aa.nativePrintCalls")==0
             page.evaluate("window.print()")
             assert page.evaluate("window.__p40aa.blockedAttempts")==2
+            page.emulate_media(media="print")
             pdf=page.pdf(format="A4",print_background=True,prefer_css_page_size=True)
+            page.emulate_media(media="screen")  # Return to clickable toolbar for UX checks
             doc=fitz.open(stream=pdf,filetype="pdf")
             pages=len(doc)
             assert pages==expected, (case,"Unexpected PDF pages",pages,expected)
