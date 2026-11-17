@@ -1,0 +1,50 @@
+name: P40-16AI published billing views vs local PDF model (NO PRODUCTION)
+on:
+  push:
+    branches: [p40-16ai-original-pdf-readonly-contract-20261118]
+    paths:
+      - '.p40-16ai-tests/**'
+      - '.p40-16ai-review/**'
+      - '.github/workflows/p40-16ai-original-pdf-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare-original-views-offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Strict STOP on main beta or production files changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16ai-original-pdf-readonly-contract-20261118
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40ai-changes
+          cat /tmp/p40ai-changes
+          test -s /tmp/p40ai-changes
+          if grep -Ev '^(\.p40-16ah-tests/|\.p40-16ah-review/|\.p40-16ai-tests/|\.p40-16ai-review/|\.github/workflows/p40-16ah-local-pdf\.yml$|\.github/workflows/p40-16ai-original-pdf-contract\.yml$)' /tmp/p40ai-changes; then
+            echo 'STOP: unexpected formal ERP change'; exit 1
+          fi
+          for f in index.html billing-print.html billing-bundle-print.html external-billing-print.html assets/js/billing-print.js assets/js/billing-bundle-print.js assets/js/external-billing-print.js assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "origin/main:$f")" = "$(git rev-parse "HEAD:$f")"
+          done
+          test ! -f .env
+          echo 'PASS original ERP, all print endpoints and cloud storage unmodified'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Test actual published single/combined/cross-zone view compatibility
+        run: |
+          node --check .p40-16ai-tests/compare_original_print_views.test.cjs
+          node --test .p40-16ai-tests/compare_original_print_views.test.cjs
+          echo 'P40AI DESIGN ONLY: detected gaps are RELEASE BLOCKERS even when diagnostic CI passes'
