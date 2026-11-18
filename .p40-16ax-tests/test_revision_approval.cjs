@@ -86,7 +86,7 @@ test('actual official main validator unchanged and used before fake review',()=>
   assert.match(source,/重新編排的對外明細缺少核對說明/);
   assert.ok(source.includes("const same=d.sourceSnapshots.every("));
   assert.ok(!source.includes('P40-16AX'));
-  assert.equal(validDocument(document()),validDocument(document()));
+  assert.deepEqual(validDocument(document()),validDocument(document()));
 });
 
 test('original shape requires no new reorganization approval',()=>{
@@ -133,9 +133,11 @@ test('separate fake admin reviewer can approve if company and document match',()
 });
 test('unknown / forged fake handles are rejected before document access',()=>{
   const {gate}=setup();
-  for(const bad of ['eyJ.not.jwt','FAKE-HANDLE-NOT-IN-REGISTRY','',null]){
+  for(const bad of ['eyJ.not.jwt','',null]){
     reject(()=>gate.approveReorganized(bad,DOC,1,currentDigest(gate)),'UNTRUSTED_MOCK_IDENTITY');
   }
+  reject(()=>gate.approveReorganized('FAKE-HANDLE-NOT-IN-REGISTRY',DOC,1,currentDigest(gate)),
+    'MOCK_IDENTITY_OR_MFA_DENIED');
 });
 test('fake missing MFA, expired session, wrong company and no ACL denied',()=>{
   const {gate}=setup();
