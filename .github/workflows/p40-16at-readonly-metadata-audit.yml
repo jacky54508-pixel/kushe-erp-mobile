@@ -1,0 +1,51 @@
+name: P40-16AT production Supabase metadata audit - offline decision only
+on:
+  push:
+    branches: [p40-16at-prod-supabase-metadata-readonly-audit-20261118]
+    paths:
+      - '.p40-16at-review/**'
+      - '.p40-16at-tests/**'
+      - '.github/workflows/p40-16at-readonly-metadata-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-sanitized-report-no-live-access:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP if main beta moved or ANY production source changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16at-prod-supabase-metadata-readonly-audit-20261118
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40at-changed
+          cat /tmp/p40at-changed
+          test "$(wc -l < /tmp/p40at-changed)" -eq 4
+          if grep -Ev '^(\.p40-16at-(review|tests)/.+|\.github/workflows/p40-16at-readonly-metadata-audit\.yml)$' /tmp/p40at-changed; then
+            echo 'STOP: unrelated code or sensitive data changed'; exit 1
+          fi
+          for file in index.html billing-print.html billing-bundle-print.html external-billing-print.html assets/js/config.js assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/billing-print.js assets/js/billing-groups.js assets/js/external-billing-print.js assets/js/external-billing-invoice.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "HEAD:$file")" = "$(git rev-parse "origin/main:$file")" || { echo "STOP: official source changed: $file"; exit 1; }
+          done
+          test ! -f .env
+          test ! -d supabase/migrations
+          echo 'PASS original main beta, authentication, cloud sync, all financial and PDF print code unchanged'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Verify sanitized decision and release BLOCKED only - no database access
+        run: |
+          python -m unittest discover -s .p40-16at-tests -p 'test_*.py' -v
+          python -m json.tool .p40-16at-review/decision.json > /dev/null
+          echo 'P40-16AT audit report PASS; live business access and production PDF release remain BLOCKED'
