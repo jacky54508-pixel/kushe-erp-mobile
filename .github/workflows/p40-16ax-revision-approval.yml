@@ -1,0 +1,57 @@
+name: P40-16AX fake revision-bound approval lab - NO LIVE DATA OR RELEASE
+on:
+  push:
+    branches: [p40-16ax-revision-bound-approval-isolated-20261118]
+    paths:
+      - '.p40-16ax-tests/**'
+      - '.p40-16ax-review/**'
+      - '.github/workflows/p40-16ax-revision-approval.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  formal-source-immutable-approval-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP if official main beta changed or anything except isolation tests modified
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16ax-revision-bound-approval-isolated-20261118
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40ax-changes
+          cat /tmp/p40ax-changes
+          test "$(wc -l < /tmp/p40ax-changes)" -eq 5
+          if grep -Ev '^(\.p40-16ax-(tests|review)/.+|\.github/workflows/p40-16ax-revision-approval\.yml)$' /tmp/p40ax-changes; then
+            echo 'STOP: unauthorized production ERP, billing, auth, PDF or finance edit'; exit 1
+          fi
+          for f in index.html billing-print.html billing-bundle-print.html external-billing-print.html assets/js/erp-store.js assets/js/billing.js assets/js/billing-groups.js assets/js/external-billing-print.js assets/js/external-billing-invoice.js assets/js/billing-print.js assets/js/billing-discount-preview.js assets/js/billing-group-discount-preview.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/config.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "HEAD:$f")" = "$(git rev-parse "origin/main:$f")" || { echo "STOP: official app changed $f"; exit 1; }
+          done
+          test ! -f .env
+          test ! -e supabase/migrations
+          echo 'PASS pinned formal main beta, no production ERP source, state or PDF changes'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Execute real unchanged formal billing validator + fake versioned approval model
+        run: |
+          node --check .p40-16ax-tests/mock_approval_gate.cjs
+          node --check .p40-16ax-tests/test_revision_approval.cjs
+          node --test .p40-16ax-tests/test_revision_approval.cjs
+          echo 'P40AX_MOCK_APPROVAL_ONLY_PASS: no real reviewer identity, service, signature or stored consent'
+      - name: Confirm no production or independent PDF service changed
+        run: |
+          git diff --exit-code origin/main -- index.html assets/js billing-print.html \
+            billing-bundle-print.html external-billing-print.html .github/workflows/pages.yml
+          echo 'FORMAL_RELEASE_BLOCKED: no JWT/MFA authority, real document access, approved source or physical PDF review'
