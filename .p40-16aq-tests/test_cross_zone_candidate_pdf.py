@@ -180,7 +180,10 @@ def inspect_pdf(blob,expected,tag):
                     x0,y0,x1,y1=s["bbox"]
                     assert x0>=-.6 and y0>=-.6 and x1<=p.rect.width+.6 and y1<=p.rect.height+.6,(
                       tag,"TEXT_OFF_PAGE",s["text"],s["bbox"])
-    assert spans and min(s["size"] for s in spans)>=7.8,(tag,"TOO_SMALL_FONT")
+    # The EXISTING formal print contains some small font sizes; do not
+    # silently fail its own baseline under an invented hard minimum.
+    # Compare actual candidate to the unchanged formal baseline below.
+    assert spans,(tag,"NO_EXTRACTABLE_PDF_TEXT")
     doc.close()
     return {"pages":count,"sha256":hashlib.sha256(blob).hexdigest(),
             "source_rows":len(expected["lines"]),"minimum_pt":round(min(s["size"] for s in spans),2)}
@@ -294,6 +297,9 @@ try:
                 new_blob=external.pdf(**pdf_opt)
                 base_check=inspect_pdf(baseline_blob,public_view,case+" baseline")
                 now_check=inspect_pdf(new_blob,public_view,case+" candidate")
+                assert now_check["minimum_pt"]>=base_check["minimum_pt"]-0.1,(
+                    case,"MIN_FONT_SHRANK_FROM_FORMAL_BASELINE",
+                    base_check["minimum_pt"],now_check["minimum_pt"])
                 if should_fit:
                     assert now_check["pages"]==1,(case,"EXPECTED_ONE_PAGE",now_check)
                     (OUTPUT/(case+".pdf")).write_bytes(new_blob)
@@ -306,6 +312,8 @@ try:
                     "candidate_pages":now_check["pages"],"disposition":decision,
                     "candidate_pdf_sha256":now_check["sha256"],
                     "source_rows":now_check["source_rows"],
+                    "minimum_font_pt_original":base_check["minimum_pt"],
+                    "minimum_font_pt_candidate":now_check["minimum_pt"],
                     "production_byte_gate":False})
                 print("P40AQ_PDF "+json.dumps(results[-1],ensure_ascii=False),flush=True)
                 original.close()
