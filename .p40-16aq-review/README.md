@@ -36,6 +36,16 @@
 5. 驗證 8 筆及 18 筆測試資料的單頁、30 筆超頁安全阻擋、其他區域/票號不外洩；單筆請款、報價單、一般／舊跨區資料**沒有取得專用新 CSS class**。
 6. 測試通過 **不代表**真實帳務、實際手機/電腦使用者操作、跨裝置同步、所有瀏覽器列印入口和真正品牌文件均 PASS。
 
+## 2026-11-18 實際 GitHub CI 記錄（已驗證）
+
+- GitHub Actions [#44299494484](https://github.com/jacky54508-pixel/kushe-erp-mobile/actions/runs/44299494484) **SUCCESS**：固定 `main`／`beta` 與所有其他 ERP JS/HTML 路徑安全檢查 PASS。
+- 真正透過正式 `external-billing-print.html` → 候選 `billing-print.html` 列印，不是虛構的獨立 PDF HTML 版型；同一份虛構公開 View 分別交給正式 main HTML 與候選 HTML，在 Chrome 產生 PDF bytes，PyMuPDF 再次獨立開啟核對。
+- 電腦 1280px + 手機模擬 390px：**6 份通過單頁的虛構 PDF**（8筆短單、18筆6種項目、18筆9種項目，各兩裝置）；**4 個多頁拒絕交付**（30筆6種、30筆15種，各兩裝置）。
+- 施工來源戶別與品名、核定總額、備註、指定唯一案場、內部來源票號／其他區名不外露，以及公司標題/章位尺寸，均在測試中對照；最低可抽取字體實測**原版 7.8pt、候選版 7.8pt**，沒有再縮小。
+- **6 次其他模式隔離驗證 PASS**：單筆、報價、舊跨區（各電腦＋手機模擬）都沒有套用 `p40aq-current-customer-zone` CSS。
+- 只有通過單頁的虛構 PDF 被放進 3 天的 Actions artifact。沒有任何正式帳務、真實章印、真實原發票或 ERP 登入資料。
+- **重要：`production_byte_gate:false`。** 證據已確認這是「候選版型＋CI 的 PDF bytes 驗證」，**不是正式 ERP 已安裝 PDF-first 單頁阻擋服務**。
+
 ## 此分支正式發布仍需全部七項門檻
 
 1. **最新正式 SYNCED** 且無雲端衝突；
