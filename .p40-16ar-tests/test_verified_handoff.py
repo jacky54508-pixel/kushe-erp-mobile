@@ -305,10 +305,13 @@ try:
 
                     # Deliberately force a second A4 page in ACTUAL browser
                     # printing; reject despite unchanged original source.
+                    assert page.locator(".sign").count()==1,(
+                        "MISSING_REQUIRED_SIGNATURE_SECTION")
                     page.add_style_tag(content=
-                        "@media print {.grouped-item-summary{break-before:page!important;page-break-before:always!important}}")
+                        "@media print {.sign{break-before:page!important;page-break-before:always!important}}")
                     forced=page.pdf(print_background=True,prefer_css_page_size=True)
-                    assert len(fitz.open(stream=forced,filetype="pdf"))>=2
+                    assert len(fitz.open(stream=forced,filetype="pdf"))>=2,(
+                        "FORCED_PRINT_BREAK_DID_NOT_CREATE_TWO_PAGES")
                     expected_denial(lambda:gate.approve(owner,docid,revision,forced),
                         "NOT_EXACTLY_ONE_A4_PAGE","FORCED_CSS")
                     EVENTS.append({"defense":"FORCED_SECOND_PAGE","decision":"BLOCKED"})
