@@ -1,0 +1,85 @@
+{
+  "phase": "P40-16AT",
+  "audited_on": "2026-11-18",
+  "source_type": "Production Supabase live metadata only, plus pinned GitHub main",
+  "verified_production_project": true,
+  "production_project_identifier_in_artifact": false,
+  "main_sha": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "beta_sha": "62669539053a15174081ba8670b18248195c6f8c",
+  "live_business_rows_accessed": false,
+  "any_live_write": false,
+  "any_rls_or_schema_change": false,
+  "production_code_changed": false,
+  "finding_categories": {
+    "public_tables": 4,
+    "all_public_tables_rls_enabled": true,
+    "application_pdf_single_document_table_found": false,
+    "document_pdf_specific_rpc_found": false,
+    "deployed_edge_functions": 0,
+    "existing_employee_projection_rpc": true,
+    "employee_projection_dedicated_to_billing_pdf": false,
+    "company_state_data_select_granted_to_authenticated": false,
+    "company_state_metadata_fields_have_select_grants": true,
+    "user_state_data_select_granted_to_authenticated": true,
+    "user_state_rls_restricts_to_user_and_aal2": true,
+    "dedicated_verified_server_document_authorization": false,
+    "live_jwt_and_role_simulations_performed": false
+  },
+  "security_advisories": {
+    "leaked_password_protection_disabled": true,
+    "maintenance_backup_table_rls_enabled_no_policy": true,
+    "maintenance_backup_general_authenticated_select": false,
+    "notes": "Advisory metadata only; remediation was not applied. Backup table deny-by-default may be intentional."
+  },
+  "supported_conclusion": "NO_VERIFIED_PRODUCTION_SINGLE_DOCUMENT_PDF_SOURCE",
+  "production_pdf_backend_release": "BLOCKED",
+  "gates": [
+    {
+      "id": "G1",
+      "state": "BLOCK",
+      "why": "No independently authorized per-billing document data source with company, target and revision control"
+    },
+    {
+      "id": "G2",
+      "state": "BLOCK",
+      "why": "No installed server-side signature-verified JWT, MFA and document-specific permission gate"
+    },
+    {
+      "id": "G3",
+      "state": "BLOCK",
+      "why": "No runtime negative RLS/IDOR test with isolated test identities for a document PDF API"
+    },
+    {
+      "id": "G4",
+      "state": "BLOCK",
+      "why": "No current ERP SYNCED confirmation and complete restorable backup acceptance"
+    },
+    {
+      "id": "G5",
+      "state": "BLOCK",
+      "why": "No real company letterhead, logo, seal, physical phone and desktop PDF approval"
+    },
+    {
+      "id": "G6",
+      "state": "BLOCK",
+      "why": "Actual ERP browser print does not deliver only the exact verified PDF bytes; financial and invoice privacy regression still pending"
+    },
+    {
+      "id": "G7",
+      "state": "BLOCK",
+      "why": "Owner has not separately authorized any production schema, code, auth or PDF gateway deployment"
+    }
+  ],
+  "next_step_requires_separate_approval": true,
+  "next_step": "Propose least-disruptive single-billing source and authorization architecture in independent isolated lab; prove it with synthetic data and security tests before requesting any production migration.",
+  "invariants": [
+    "No business data read/write while auditing metadata",
+    "No existing ERP snapshot is sent to PDF service",
+    "Do not treat employee projection or company sync metadata as an authorized billing PDF API",
+    "Do not trust client-submitted companyId, roles, publicView, invoices, payroll, bank, backup or whole erp_states.data",
+    "Never expose Supabase secret/service_role to a browser",
+    "Never conflate 25 mock P40-16AS tests with live integration success",
+    "No code, RLS, database, URL, credentials or production printer changes in P40-16AT",
+    "Draft report only; no merge or deployment"
+  ]
+}
