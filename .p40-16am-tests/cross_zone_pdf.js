@@ -106,11 +106,17 @@ async function generate(payload){
   note.forEach((part,i)=>put(page,font,part,X+5,158-i*11));
   border(page,X+323,171,W-323,62);
   const a=view.amounts;
-  put(page,font,'未稅：'+fmt(a.salesAmount),X+328,158);
-  put(page,font,'稅額：'+fmt(a.taxAmount),X+328,147);
-  put(page,font,'含稅：'+fmt(a.totalAmount),X+328,136);
-  put(page,font,'保留款：'+fmt(a.retentionAmount),X+328,125);
-  put(page,font,'應收：'+fmt(a.receivableAmount),X+328,114);
+  if(view.invoiceStatus==='no_invoice'){
+    put(page,font,'請款總額：'+fmt(a.totalAmount),X+328,158);
+    put(page,font,'保留款：'+fmt(a.retentionAmount),X+328,145);
+    put(page,font,'應收：'+fmt(a.receivableAmount),X+328,132);
+  }else{
+    put(page,font,'未稅：'+fmt(a.salesAmount),X+328,158);
+    put(page,font,'稅額：'+fmt(a.taxAmount),X+328,147);
+    put(page,font,'含稅：'+fmt(a.totalAmount),X+328,136);
+    put(page,font,'保留款：'+fmt(a.retentionAmount),X+328,125);
+    put(page,font,'應收：'+fmt(a.receivableAmount),X+328,114);
+  }
   put(page,font,'客戶簽章：__________________',X,84);
   border(page,409,101,154,68);
   put(page,font,'模擬大小章',413,67);
