@@ -62,7 +62,7 @@ async function generate(combined,trust){
   const widths=[51,206,36,59,75,104];
   for(const bill of view.billings){
     if(y<300)fail('BILLING_SECTIONS_EXCEED_A4');
-    text(page,font,'【'+bill.projectName+'】 '+bill.number+'　'+bill.date,
+    text(page,font,'【'+bill.projectName+'】 '+bill.number+'　'+bill.date+'　'+bill.taxMode,
          LEFT,y,8.6);
     y-=13;
     cells(page,font,['戶別','施工項目','單位','數量','單價','小計'],
