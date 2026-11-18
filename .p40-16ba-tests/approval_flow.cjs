@@ -89,7 +89,7 @@ class FakeReviewWorkflow{
   #log(action,actor,reason=''){
     this.#events.push({seq:this.#events.length+1,action,
       userId:actor.userId,documentId:this.#record.id,revision:this.#record.revision,
-      fingerprint:this.currentHash,reason:reason.slice(0,120)});
+      fingerprint:this.currentHash,reasonDigest:reason?hash(reason):''});
   }
   #assertUnchangedSource(){
     if(hash(this.#record)!==this.currentHash)throw Error('SOURCE_CHANGED_WITHOUT_VERSION');
@@ -108,7 +108,7 @@ class FakeReviewWorkflow{
     const s=this.getSummary(handle);
     return {
       edit:EDIT.includes(a.role)&&['legacy_unchanged','editing','returned','approved'].includes(s.status),
-      submit:EDIT.includes(a.role)&&['editing','returned'].includes(s.status)&&
+      submit:EDIT.includes(a.role)&&s.status==='editing'&&
         s.mode==='enforced'&&s.rearranged,
       approve:REVIEW.includes(a.role)&&s.status==='pending_review'&&a.userId!==this.#lastEditor,
       return:REVIEW.includes(a.role)&&s.status==='pending_review'&&a.userId!==this.#lastEditor,
@@ -138,7 +138,7 @@ class FakeReviewWorkflow{
   submit(handle,expectedRevision,expectedHash){
     const a=this.#actor(handle);this.#allowed(a,EDIT);
     this.#assertUnchangedSource();
-    if(!['editing','returned'].includes(this.status)||this.mode!=='enforced')
+    if(this.status!=='editing'||this.mode!=='enforced')
       throw Error('NOT_EDITABLE_FOR_SUBMISSION');
     if(this.#record.revision!==expectedRevision||this.currentHash!==expectedHash)
       throw Error('STALE_SUBMISSION');
