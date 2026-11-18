@@ -1,0 +1,157 @@
+{
+  "phase": "P40-16AP",
+  "category": "read-only production PDF integration preflight",
+  "evaluated_at": "2026-11-18",
+  "base_main": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "base_beta": "62669539053a15174081ba8670b18248195c6f8c",
+  "disposition": "PRODUCTION_RELEASE_BLOCKED",
+  "change_scope": "only standalone P40-16AP audit files and workflow",
+  "acceptance_labels": {
+    "static_audit_pass": "source behaviors confirmed in pinned GitHub main",
+    "prototype_pdf_pass": "fictional sample was generated and opened by PyMuPDF",
+    "production_pass": "not reached"
+  },
+  "entrypoints": [
+    {
+      "id": "single",
+      "input": "kushe-external-document-v1",
+      "builder": "assets/js/billing-print.js",
+      "html": "billing-print.html",
+      "route": "openView() / ?print=0|1 / window.print()",
+      "customer_visibility": "one selected project",
+      "pdf_guard": "no verified PDF-bytes gate in formal main",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "quotation",
+      "input": "kushe-external-document-v1",
+      "builder": "assets/js/billing-print.js",
+      "html": "billing-print.html",
+      "route": "quotation print / ?print=0|1 / window.print()",
+      "customer_visibility": "quotation pricing modes (actual/mixed/lump_sum)",
+      "pdf_guard": "quotation-specific fit-to-A4 is not equivalent to verified exact PDF-byte gate",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "ordinary_combined",
+      "input": "kushe-combined-billing-v1",
+      "builder": "assets/js/billing-bundle-print.js",
+      "html": "billing-bundle-print.html",
+      "route": "bundle openView() / ?print=0|1 / window.print()",
+      "customer_visibility": "each original source project and each original bill; invoice status only",
+      "pdf_guard": "no verified PDF-bytes gate in formal main",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "cross_zone_customer",
+      "input": "kushe-external-billing-group-v2 active",
+      "builder": "assets/js/billing-groups.js and assets/js/external-billing-print.js",
+      "html": "external-billing-print.html redirects to billing-print.html",
+      "route": "printSaved() -> historical=false -> originalTemplateView() -> billing-print.html?print=0",
+      "customer_visibility": "only verified displayProjectName, no original invoice numbers",
+      "pdf_guard": "AO standalone CSS is not loaded by formal main; formal window.print still active",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "cross_zone_archived",
+      "input": "kushe-external-billing-group-v1|v2 archived or historical=true",
+      "builder": "assets/js/billing-groups.js and assets/js/external-billing-print.js",
+      "html": "external-billing-print.html",
+      "route": "printSaved(...historyOnly=true) -> archive rendering -> window.print()",
+      "customer_visibility": "historical reference invoice dates/numbers may be printed, must not treat as ordinary customer PDF",
+      "pdf_guard": "different privacy classification and layout; no verified byte gate",
+      "status": "BLOCKED"
+    }
+  ],
+  "evidence": [
+    {
+      "phase": "P40-16AI",
+      "ci_run": 44133662034,
+      "conclusion": "diagnostic source compatibility pass (11), not PDF parity"
+    },
+    {
+      "phase": "P40-16AJ",
+      "ci_run": 44199813327,
+      "conclusion": "isolated single adapter pass (18), not deployed"
+    },
+    {
+      "phase": "P40-16AK",
+      "ci_run": 44203390825,
+      "conclusion": "14 fictitious single A4 PDFs, 4 layout rejection; no genuine logo/seal"
+    },
+    {
+      "phase": "P40-16AL",
+      "ci_run": 44236476326,
+      "conclusion": "12 fictitious ordinary combined A4 PDFs; experimental bottom summary not official"
+    },
+    {
+      "phase": "P40-16AM",
+      "ci_run": 44238452651,
+      "conclusion": "14 fictitious target-only cross-zone A4 PDFs, no original invoices"
+    },
+    {
+      "phase": "P40-16AN",
+      "ci_run": 44278424365,
+      "conclusion": "official vs prototype mismatch; 18/30 originals 2 pages in synthetic examples"
+    },
+    {
+      "phase": "P40-16AO",
+      "ci_run": 44287729369,
+      "conclusion": "formal style retained; 18-line synthetic spacing PDF 1 page, 30-line still blocked"
+    }
+  ],
+  "invariants": [
+    "no changes to current production main, beta, Supabase, stored ERP records or original PDF source",
+    "no automatic main merge of any P40-16AH-through-AO research branch",
+    "no edits to billed amounts, retention, invoices, receivables, payroll, bank or commission from print",
+    "no original invoice number, dates or source-area details in active customer-only cross-zone PDF",
+    "historical invoice-reference display must be separately classified and approved",
+    "no removal of original construction rows or bottom item grouping where official display requires them",
+    "no font-size reduction, fake house-number replacement or clipped A4 output to force single page",
+    "only independently verified exact PDF bytes may be labeled one-page safe; DOM height cannot certify",
+    "a green synthetic CI is not a release authorization"
+  ],
+  "outstanding_gates": [
+    {
+      "id": "G1",
+      "state": "BLOCK",
+      "reason": "no real ERP latest SYNCED verification in this audit"
+    },
+    {
+      "id": "G2",
+      "state": "BLOCK",
+      "reason": "no complete fresh restorable production backup/restore test"
+    },
+    {
+      "id": "G3",
+      "state": "BLOCK",
+      "reason": "no actual company logo/seal asset and outward exact PDF appearance approval"
+    },
+    {
+      "id": "G4",
+      "state": "BLOCK",
+      "reason": "no actual physical mobile + desktop printing/byte-level verification of all types"
+    },
+    {
+      "id": "G5",
+      "state": "BLOCK",
+      "reason": "no formal per-document verified PDF-first gateway/authorization bypass control"
+    },
+    {
+      "id": "G6",
+      "state": "BLOCK",
+      "reason": "no complete true billing, tax, historic concession, retention, invoices and bank/payroll/commission regression"
+    },
+    {
+      "id": "G7",
+      "state": "BLOCK",
+      "reason": "no separate user explicit authorization for a formal production code change"
+    }
+  ],
+  "next_recommendation": {
+    "id": "P40-16AQ",
+    "type": "standalone isolation-only specification and exit-gate tests, not formal development permission",
+    "preferred": "separate smallest cross-zone candidate from then-latest main, full real PDF-byte and original-style acceptance; no production merge without seven gates",
+    "alternative": "keep existing native print unchanged; label A4 single page guarantee unavailable"
+  }
+}
