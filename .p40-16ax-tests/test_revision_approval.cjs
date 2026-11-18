@@ -8,6 +8,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
+const ROOT=path.resolve(__dirname,'..');
 const {fixture}=require('./fixture.cjs');
 const {MockTrustedApprovalGate,changedArrangement,hash,validDocument}=
   require('./mock_approval_gate.cjs');
@@ -115,10 +116,21 @@ test('real source remains readonly after the test approves its fake copy',()=>{
   assert.equal(JSON.stringify(d),before);
   assert.equal(allowed(gate).revision,1);
 });
-test('same author cannot approve own changes',()=>{
+test('same author cannot approve own changes, even when an editor has reviewer role',()=>{
   const {gate}=setup();
-  reject(()=>approve(gate,EDITOR),'INDEPENDENT_REVIEWER_REQUIRED');
-  reject(()=>approve(gate,SAME),'FAKE_ROLE_NOT_AUTHORIZED');
+  // The ordinary editor is accounting, so role gate already blocks reviewer.
+  reject(()=>approve(gate,EDITOR),'FAKE_ROLE_NOT_AUTHORIZED');
+  const who=sessions();
+  who[EDITOR].role='owner'; // Special fake owner who edits own document.
+  who[SAME].role='owner';   // Distinct fake handle, SAME user ID.
+  const independent=new MockTrustedApprovalGate(who),d=document();
+  independent.registerInitialTrustedOnly(d,CO,EDITOR);
+  reject(()=>independent.approveReorganized(EDITOR,DOC,1,
+    independent.documentMeta(READER,DOC).sourceHash),
+    'INDEPENDENT_REVIEWER_REQUIRED');
+  reject(()=>independent.approveReorganized(SAME,DOC,1,
+    independent.documentMeta(READER,DOC).sourceHash),
+    'INDEPENDENT_REVIEWER_REQUIRED');
 });
 test('only proposed fake owner/admin reviewers can approve, not accounting',()=>{
   const {gate}=setup();
