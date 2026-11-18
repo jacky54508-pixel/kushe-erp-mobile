@@ -1,0 +1,55 @@
+name: P40-16AV original billing financial integrity - SYNTHETIC ONLY
+on:
+  push:
+    branches: [p40-16av-original-billing-integrity-lab-20261118]
+    paths:
+      - '.p40-16av-tests/**'
+      - '.p40-16av-review/**'
+      - '.github/workflows/p40-16av-original-integrity.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  original-source-no-data-mutation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP unless pinned production main/beta and strict four-file allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16av-original-billing-integrity-lab-20261118
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40av-changes
+          cat /tmp/p40av-changes
+          test "$(wc -l < /tmp/p40av-changes)" -eq 4
+          if grep -Ev '^(\.p40-16av-(tests|review)/.+|\.github/workflows/p40-16av-original-integrity\.yml)$' /tmp/p40av-changes; then
+            echo 'STOP: unauthorized production source change'; exit 1
+          fi
+          for file in index.html billing-print.html billing-bundle-print.html external-billing-print.html assets/js/billing.js assets/js/billing-print.js assets/js/billing-groups.js assets/js/billing-bundle-print.js assets/js/external-billing-print.js assets/js/external-billing-invoice.js assets/js/billing-discount-calculator.js assets/js/billing-discount-preview.js assets/js/billing-group-discount-preview.js assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/config.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "HEAD:$file")" = "$(git rev-parse "origin/main:$file")" || { echo "STOP: $file modified"; exit 1; }
+          done
+          test ! -e .env
+          test ! -d supabase/migrations
+          echo 'PASS: all formal billing/invoice/discount/payroll/sync/auth/PDF sources UNCHANGED'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Run ACTUAL unchanged formal business validators on only FAKE source bills
+        run: |
+          node --test .p40-16av-tests/test_original_financial_integrity.cjs
+          echo 'PASS is ONLY synthetically verified original source behavior, not real ERP, discount posting, or public-note privacy remediation'
+      - name: Confirm zero business data or source code changes
+        run: |
+          git diff --exit-code origin/main -- index.html assets/js billing-print.html \
+            billing-bundle-print.html external-billing-print.html .github/workflows/pages.yml
+          echo 'P40AV_PRODUCTION_GATEWAY_BLOCKED: no trusted live document source, actual JWT or authorized tax/discount posting'
