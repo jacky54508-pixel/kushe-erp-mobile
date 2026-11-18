@@ -44,7 +44,7 @@ class PrintSourceAudit(unittest.TestCase):
         self.assertIn("window.KusheQuotationPrint={",SINGLE)
         self.assertIn("schema:'kushe-external-document-v1'",SINGLE)
         self.assertIn("documentType:type==='quotation'?'quotation':'billing'",SINGLE)
-        self.assertIn("type==='quotation'?'酷舍_報價單':'酷舍_請款單'",SINGLE)
+        self.assertIn("view.documentType==='quotation'?'酷舍_報價單':'酷舍_請款單'",SINGLE)
         self.assertIn("isQuote=d.documentType==='quotation'",SINGLE_HTML)
         self.assertIn("prepareQuotationPrint()",SINGLE_HTML)
         self.assertIn("isActual=isQuote",SINGLE_HTML)
@@ -113,7 +113,7 @@ class PrintSourceAudit(unittest.TestCase):
         self.assertIn("原請款／發票對照",historical)
         self.assertIn("payload.historical?",historical)
         self.assertIn("button.onclick=()=>window.print()",historical)
-        self.assertIn("歷史",CROSS_HTML)
+        self.assertIn("保存版本・僅供查閱",historical)
 
     def test_saved_document_print_switch_recognizes_archived_and_current_versions(self):
         self.assertIn("function printSaved(id,revision=0,historyOnly=false)",GROUP)
