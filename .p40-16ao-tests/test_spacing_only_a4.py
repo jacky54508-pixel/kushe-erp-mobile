@@ -238,9 +238,18 @@ try:
           "PRIVATE-INVOICE","invoiceNo","sourceSnapshots","PRIVATE-BANK"
         ):
           assert forbidden not in obj["text"],(name,variant,"private leak",forbidden)
-        normalized=obj["text"]
+        normalized=re.sub(r"\s+","",obj["text"])
         for line in view["lines"]:
           assert line["house"] in normalized,(name,variant,"missing house",line["house"])
+          assert re.sub(r"\s+","",line["item"]) in normalized,(
+            name,variant,"missing original item",line["item"])
+        for k in ("salesAmount","taxAmount","totalAmount",
+                  "retentionAmount","receivableAmount"):
+          amount=view.get(k,0)
+          if amount and abs(amount)>0:
+            expected=f"{amount:,.0f}".replace(",","")
+            assert expected in normalized.replace(",",""),(
+              name,variant,"approved total absent",k,expected)
         assert all(s["on_page"] for s in obj["spans"]),(name,variant,"clipped outside A4")
       render_side_by_side(name,baseline["preview"],compact["preview"],
                           baseline["pages"],compact["pages"])
@@ -249,10 +258,11 @@ try:
       one_page=compact["pages"]==1
       important_text=compact["text"]
       summary_kept=(
-        "施工項目彙總" in important_text if candidate_style["is_dense"] else
-        "施工明細" in important_text
+        "施工明細" in important_text and "施工項目彙總" in important_text
+        if candidate_style["is_dense"] else
+        "戶別施工統計" in important_text and "施工項目彙總" in important_text
       )
-      note_kept=view["publicNote"] in important_text
+      note_kept=re.sub(r"\s+","",view["publicNote"]) in re.sub(r"\s+","",important_text)
       sign_kept="客戶簽章" in important_text
       if one_page and summary_kept and note_kept and sign_kept:
         (OUT/(name+"-approved-fixture-only.pdf")).write_bytes(candidate_pdf)
