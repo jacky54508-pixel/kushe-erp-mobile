@@ -1,0 +1,84 @@
+name: P40-16AL general combined billing A4 PDF lab (NO PRODUCTION)
+on:
+  push:
+    branches: [p40-16al-combined-billing-pdf-lab-20261118]
+    paths:
+      - '.p40-16al-tests/**'
+      - '.p40-16al-review/**'
+      - '.github/workflows/p40-16al-general-combined-a4.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-general-combined-a4:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP if official main beta or any production source differs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16al-combined-billing-pdf-lab-20261118
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40al-files
+          cat /tmp/p40al-files
+          test -s /tmp/p40al-files
+          if grep -Ev '^(\.p40-16(ah|ai|aj|ak|al)-(tests|review)/|\.github/workflows/p40-16(ah-local-pdf|ai-original-pdf-contract|aj-source-adapter|ak-real-single-a4|al-general-combined-a4)\.yml$)' /tmp/p40al-files; then
+            echo 'STOP: unexpected formal ERP change'; exit 1
+          fi
+          for f in index.html billing-print.html billing-bundle-print.html external-billing-print.html assets/js/billing-print.js assets/js/billing-bundle-print.js assets/js/external-billing-print.js assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "origin/main:$f")" = "$(git rev-parse "HEAD:$f")"
+          done
+          if git ls-tree -r --name-only HEAD | grep -Ei '^\.p40-16a(h|k|l)-tests/.*\.(ttf|ttc|otf|woff2?)$'; then
+            echo 'STOP: prohibited font file committed'; exit 1
+          fi
+          test ! -f .env
+          echo 'PASS: all original ERP/PDF/accounting/source code unchanged'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Original source-view and approved-single-source regression
+        run: |
+          node --test .p40-16ai-tests/compare_original_print_views.test.cjs
+          node --test .p40-16aj-tests/source_preserving_single_adapter.test.cjs
+          node --check .p40-16al-tests/combined_contract.js
+          node --check .p40-16al-tests/combined_pdf.js
+      - name: Ephemeral local libraries, Chrome and Traditional Chinese test font
+        run: |
+          npm install --prefix .p40-16ah-tests --no-save --package-lock=false --ignore-scripts --no-audit --no-fund pdf-lib@1.17.1 @pdf-lib/fontkit@1.1.1
+          python -m pip install 'playwright==1.56.0' 'pymupdf==1.26.5'
+          python -m playwright install --with-deps chromium
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-arphic-bsmi00lp
+          test -s /usr/share/fonts/truetype/arphic-bsmi00lp/bsmi00lp.ttf
+          cp /usr/share/fonts/truetype/arphic-bsmi00lp/bsmi00lp.ttf .p40-16ah-tests/runtime-font.ttf
+      - name: Browser-side true PDF bytes and independent A4, money, privacy, source checks
+        run: |
+          python -m py_compile .p40-16al-tests/test_combined_pdf.py
+          python .p40-16al-tests/test_combined_pdf.py
+      - name: Delete transient font before upload
+        if: always()
+        run: |
+          rm -f .p40-16ah-tests/runtime-font.ttf
+          echo 'No font binaries stored or shared'
+      - name: Only passing fictitious PDF and PNG (3 day retention)
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p40-16al-general-combined-synthetic-pdfs
+          path: .p40-16al-review/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
