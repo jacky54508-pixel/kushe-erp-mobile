@@ -1,0 +1,96 @@
+{
+  "phase": "P40-16AS",
+  "date": "2026-11-18",
+  "main_sha": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "beta_sha": "62669539053a15174081ba8670b18248195c6f8c",
+  "scope": "offline source inspection and strictly fake preflight, not any live Supabase data",
+  "verdict": "PRODUCTION_GATEWAY_BLOCKED",
+  "observations": [
+    {
+      "type": "verified_source",
+      "file": "assets/js/cloud-sync.js",
+      "symbol": "remotePath(userId)",
+      "detail": "GET /rest/v1/erp_states selects data, updated_at, sync_version and other metadata scoped by user_id. data is treated as state snapshot via snapshotInfo(). The code path does not expose a trusted single-billing public PDF query."
+    },
+    {
+      "type": "verified_source",
+      "file": "assets/js/cloud-sync.js",
+      "symbol": "casWrite",
+      "detail": "RPC erp_state_cas_write_v2 accepts new_data for state CAS writes; never call this in PDF exporter."
+    },
+    {
+      "type": "verified_source",
+      "file": "assets/js/auth-gate.js",
+      "symbol": "resolveCompanyContext",
+      "detail": "Frontend requires aal2 and queries company_members, companies, erp_company_states metadata. Browser canView billings depends on owner/admin/accounting. Role/identity must be verified independently server-side for PDF handoff."
+    },
+    {
+      "type": "verified_source",
+      "file": "assets/js/auth-gate.js",
+      "symbol": "sessionAal",
+      "detail": "Browser decodes JWT payload to decide aal for UI; decoding is NOT cryptographic verification for a new PDF server."
+    },
+    {
+      "type": "verified_source",
+      "file": "assets/js/billing-groups.js",
+      "symbol": "printSaved",
+      "detail": "Builds external-billing-print-v1 client payload from saved grouped document, and template from local Store; navigation via URL fragment to external-billing-print.html. This is not a trusted network endpoint."
+    },
+    {
+      "type": "not_verified",
+      "source": "live Supabase database",
+      "detail": "No live schema, RLS policies, actual data or authorized per-document table/view/RPC were queried. A per-document API may exist outside inspected files, but its security is unproven."
+    }
+  ],
+  "requirements": [
+    "Only request locator documentType/documentId/targetBillingId/expectedRevision; no client-supplied company, posted ERP snapshot or public view as trusted input",
+    "Cryptographically validate real access token on trusted server; verify issuer, audience, expiry and session revocation as appropriate; require aal2 and company active membership and billings permission",
+    "Do not authorize from user_metadata or from a decoded but unverified JWT; never expose service_role or secret key to browser",
+    "Trusted data source MUST demonstrate only a single billing document returned, scoped by company/user, target billing and expected revision; enforce RLS and test cross-company/IDOR",
+    "Do not use existing erp_states full data snapshot API or frontend company metadata lookup as substitute for single-document authorized business data",
+    "Preserve authoritative original construction rows and approved totals; never mutate or reprice original bills for PDF",
+    "Public allowlist strips original invoice numbers, other regions, salary, bank, snapshots, payroll, auth and employee data",
+    "Old browser File Print/window.print bypasses cannot be blocked by a host PDF gate; must be separately documented and migrated or marked unsupported",
+    "Every actual exported PDF must be validated by PDF bytes and exactly the same bytes delivered under a scoped one-use ticket",
+    "No live schema migration, RLS change, Edge Function, production URL or database query without fresh explicit authorization and proven recoverability"
+  ],
+  "blockers": [
+    {
+      "code": "B1",
+      "status": "BLOCK",
+      "description": "Trusted production single-document source not established; current observed cloud sync reads erp_states.data snapshot"
+    },
+    {
+      "code": "B2",
+      "status": "BLOCK",
+      "description": "Server-side JWT/MFA/company permission validation not implemented or tested against actual source"
+    },
+    {
+      "code": "B3",
+      "status": "BLOCK",
+      "description": "No verified server-to-document company/target/revision authorization and RLS/IDOR tests"
+    },
+    {
+      "code": "B4",
+      "status": "BLOCK",
+      "description": "No real SYNCED or current safe restorable complete backup verification"
+    },
+    {
+      "code": "B5",
+      "status": "BLOCK",
+      "description": "No actual corporate logo/seal, physical mobile/desktop or full account/invoice/discount/retention acceptance"
+    },
+    {
+      "code": "B6",
+      "status": "BLOCK",
+      "description": "Existing native print routes remain; production exact-bytes handoff not wired"
+    },
+    {
+      "code": "B7",
+      "status": "BLOCK",
+      "description": "Owner has not separately authorized any production deployment"
+    }
+  ],
+  "next_decision": "STOP any production backend. If approved separately, first inspect only live schema/RLS/function metadata read-only with scoped credentials and no business rows or personal data; independently prove a per-document source before developing a real PDF service.",
+  "tests_may_pass_without_lifting_blockers": true
+}
