@@ -1,0 +1,72 @@
+/*
+ * P40-16AO — EXPERIMENTAL PRINT-ONLY spacing policy for the UNCHANGED
+ * published billing-print.html used solely within isolated Chromium tests.
+ *
+ * No overrides of font-size, font-family, logo frame, company title,
+ * document title, seal-wrap, seal size, printed money, rows or summaries.
+ * Not linked to index.html or any production page.
+ */
+@media print {
+  .paper.invoice-group-document {
+    padding-top: 3.5mm;
+    padding-bottom: 3.5mm;
+  }
+  .paper.invoice-group-document .head {
+    padding-bottom: 1.2mm;
+  }
+  .paper.invoice-group-document .info {
+    margin-top: 1mm;
+    margin-bottom: 1mm;
+    padding: 1mm;
+    gap: .8mm 1.5mm;
+  }
+  .paper.invoice-group-document .info div {
+    min-height: 7.4mm;
+    padding-top: .8mm;
+    padding-bottom: .8mm;
+  }
+  .paper.invoice-group-document .section {
+    margin-top: 1mm;
+  }
+  .paper.invoice-group-document .section-title {
+    padding-top: 1mm;
+    padding-bottom: 1mm;
+  }
+  .paper.invoice-group-document .dense-original-details .dense-line-table th,
+  .paper.invoice-group-document .dense-original-details .dense-line-table td {
+    padding-top: .55mm;
+    padding-bottom: .55mm;
+  }
+  .paper.invoice-group-document .grouped-item-summary {
+    margin-top: 1mm;
+  }
+  .paper.invoice-group-document .grouped-item-summary .section-title {
+    padding-top: 1mm;
+    padding-bottom: 1mm;
+  }
+  .paper.invoice-group-document .grouped-item-summary-table th,
+  .paper.invoice-group-document .grouped-item-summary-table td {
+    padding-top: .65mm;
+    padding-bottom: .65mm;
+  }
+  .paper.invoice-group-document .summary {
+    margin-top: 1mm;
+  }
+  .paper.invoice-group-document .summary-row {
+    min-height: 6.9mm;
+    padding-top: .75mm;
+    padding-bottom: .75mm;
+  }
+  .paper.invoice-group-document .note {
+    margin-top: 1mm;
+    padding-top: 1.1mm;
+    padding-bottom: 1.1mm;
+  }
+  .paper.invoice-group-document .sign {
+    margin-top: 1mm;
+  }
+  /* Deliberately do not touch:
+   * .company h1, .doc-title h2, company-logo-frame,
+   * .seal-wrap, .seal, .client-sign or any font-size rule.
+   */
+}

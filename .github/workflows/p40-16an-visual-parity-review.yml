@@ -1,0 +1,83 @@
+name: P40-16AN official vs local PDF visual diagnostic (NO PRODUCTION)
+on:
+  push:
+    branches: [p40-16an-original-pdf-visual-parity-review-20261118]
+    paths:
+      - '.p40-16an-tests/**'
+      - '.p40-16an-review/**'
+      - '.github/workflows/p40-16an-visual-parity-review.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare-unchanged-formal-with-isolated-pdf:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP on main beta movement or any changed production source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16an-original-pdf-visual-parity-review-20261118
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40an-changes
+          cat /tmp/p40an-changes
+          test -s /tmp/p40an-changes
+          if grep -Ev '^(\.p40-16(ah|ai|aj|ak|al|am|an)-(tests|review)/|\.github/workflows/p40-16(ah-local-pdf|ai-original-pdf-contract|aj-source-adapter|ak-real-single-a4|al-general-combined-a4|am-cross-zone-a4|an-visual-parity-review)\.yml$)' /tmp/p40an-changes; then
+            echo 'STOP: unauthorized formal source changed'; exit 1
+          fi
+          for f in index.html billing-print.html billing-bundle-print.html external-billing-print.html assets/js/billing-print.js assets/js/billing-bundle-print.js assets/js/external-billing-print.js assets/js/external-billing-invoice.js assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "origin/main:$f")" = "$(git rev-parse "HEAD:$f")"
+          done
+          if git ls-tree -r --name-only HEAD | grep -Ei '^\.p40-16a(h|k|l|m|n)-tests/.*\.(ttf|ttc|otf|woff2?)$'; then
+            echo 'STOP: font files not permitted in repo'; exit 1
+          fi
+          test ! -f .env
+          echo 'PASS exact official PDF, financial, sync and auth files unchanged'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Prior official builder and source preservation regression
+        run: |
+          node --test .p40-16ai-tests/compare_original_print_views.test.cjs
+          node --test .p40-16aj-tests/source_preserving_single_adapter.test.cjs
+      - name: Install isolated browser/PDF libraries and temporary legal CJK test font
+        run: |
+          npm install --prefix .p40-16ah-tests --no-save --package-lock=false --ignore-scripts --no-audit --no-fund pdf-lib@1.17.1 @pdf-lib/fontkit@1.1.1
+          python -m pip install 'playwright==1.56.0' 'pymupdf==1.26.5' 'pillow==11.3.0'
+          python -m playwright install --with-deps chromium
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-arphic-bsmi00lp
+          test -s /usr/share/fonts/truetype/arphic-bsmi00lp/bsmi00lp.ttf
+          cp /usr/share/fonts/truetype/arphic-bsmi00lp/bsmi00lp.ttf .p40-16ah-tests/runtime-font.ttf
+      - name: Actual official Chromium print PDF vs separate browser PDF generated from same fictitious data
+        run: |
+          python -m py_compile .p40-16an-tests/compare_official_to_candidate.py
+          python .p40-16an-tests/compare_official_to_candidate.py
+          echo 'SUCCESS = parity gaps identified; real release remains BLOCKED'
+      - name: Destroy temporary CJK test font and extracted code wrapper
+        if: always()
+        run: |
+          rm -f .p40-16ah-tests/runtime-font.ttf .p40-16am-tests/runtime_official_extract.js
+          echo 'No shared/uploaded font or true enterprise image'
+      - name: Archive only faux PDF and masked visual side-by-side evidence
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p40-16an-synthetic-visual-gap-diagnostic
+          path: .p40-16an-review/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3

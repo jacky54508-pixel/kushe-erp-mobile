@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>P40-16AK Synthetic Single Billing PDF — ISOLATED</title></head>
+<body>
+<h1>P40-16AK 虛構單筆請款驗證 — 禁止正式使用</h1>
+<p>不載入真實 ERP 資料、不連 Supabase、不保存薪資或銀行資訊，沒有正式列印／下載按鈕。</p>
+<script>
+ window.__syntheticProtected = new Map();
+ window.KuSheERPStore = {
+   billingDocumentLines: row => row.lines,
+   billingDocumentState: id => window.__syntheticProtected.get(id) || null,
+   getState: () => ({ settings: {} })
+ };
+ window.KusheDisplaySort = {sortWorkRows: rows => rows};
+</script>
+<script src="../.p40-16ah-tests/node_modules/pdf-lib/dist/pdf-lib.min.js"></script>
+<script src="../.p40-16ah-tests/node_modules/@pdf-lib/fontkit/dist/fontkit.umd.min.js"></script>
+<script src="../assets/js/billing-print.js"></script>
+<script src="../.p40-16aj-tests/source_preserving_single_adapter.js"></script>
+<script src="./real_single_a4.js"></script>
+</body></html>
