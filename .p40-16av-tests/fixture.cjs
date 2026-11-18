@@ -39,7 +39,10 @@ function fixture(options={}){
       anchors,originalLines:lines};
     sources.push(source);
     settlements.push({billingId,...rest});
-    allLines.push(...lines);
+    // Important: original and customer-view lines MUST be independent
+    // immutable-in-practice snapshots. Shared object identity would hide
+    // a source-vs-customer tampering test and produce a false PASS.
+    allLines.push(...lines.map(line=>({...line})));
     for(const [key,value] of Object.entries({...anchors,...rest}))totals[key]+=value;
   });
   const unitTotal=taxMode==='含稅'?totals.grossTotal:totals.untaxed;
