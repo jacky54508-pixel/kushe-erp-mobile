@@ -1,0 +1,65 @@
+name: P40-16AS real-source audit and MOCK per-document authorization (NO LIVE DATA)
+on:
+  push:
+    branches: [p40-16as-single-document-readonly-feasibility-20261118]
+    paths:
+      - '.p40-16as-tests/**'
+      - '.p40-16as-review/**'
+      - '.github/workflows/p40-16as-document-source-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-source-and-fake-security-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Fail closed if formal main beta or ANY production source changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16as-single-document-readonly-feasibility-20261118
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40as-files
+          cat /tmp/p40as-files
+          test "$(wc -l < /tmp/p40as-files)" -eq 5
+          if grep -Ev '^(\.p40-16as-(tests|review)/.+|\.github/workflows/p40-16as-document-source-audit\.yml)$' /tmp/p40as-files; then
+            echo 'STOP: unauthorized formal app, financial, PDF, login or sync source changed'; exit 1
+          fi
+          for path in index.html billing-print.html billing-bundle-print.html external-billing-print.html assets/js/billing-print.js assets/js/billing-bundle-print.js assets/js/external-billing-print.js assets/js/external-billing-invoice.js assets/js/billing-groups.js assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/config.js assets/js/billing-discount-preview.js assets/js/billing-group-discount-preview.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "HEAD:$path")" = "$(git rev-parse "origin/main:$path")" || { echo "STOP: $path"; exit 1; }
+          done
+          test ! -f .env
+          test ! -d .p40-16ar-tests
+          test ! -d .p40-16aq-tests
+          echo 'PASS: official main beta pinned, no ERP cloud billing auth or print changes'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Offline standard-library source audit and synthetic permission denials
+        run: |
+          python -m unittest discover -s .p40-16as-tests -p 'test_*.py' -v
+          python -m json.tool .p40-16as-review/source_risk_matrix.json > /dev/null
+          echo 'SOURCE-ONLY CI PASS DOES NOT UNBLOCK REAL PDF SERVICE'
+      - name: Report all hard production blockers
+        run: |
+          python - <<'PY'
+          import json
+          m=json.load(open('.p40-16as-review/source_risk_matrix.json'))
+          assert m['verdict']=='PRODUCTION_GATEWAY_BLOCKED'
+          assert all(r['status']=='BLOCK' for r in m['blockers'])
+          assert len(m['blockers'])==7
+          print('P40AS_REPORT: actual erp_states.data cloud snapshot is NOT an authenticated per-document PDF read interface')
+          print('P40AS_PRODUCTION_GATEWAY',m['verdict'])
+          print('P40AS_REQUIRED_BLOCKERS',len(m['blockers']))
+          print('P40AS_NO_LIVE_DATA_OR_SUPABASE_ACTIONS')
+          PY
