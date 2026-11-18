@@ -99,6 +99,76 @@
       }
       .paper.invoice-group-document .grouped-item-summary-table td.item{font-size:8.4pt}
     }
+
+    /* P40-16AQ: CURRENT cross-zone customer ONLY; copied AO spacing policy.
+     * No font, brand logo, stamp, financial or amount style changes.
+     * This is an UNDEPLOYED candidate; native window.print remains ungated.
+     */
+    @media print {
+      .paper.invoice-group-document.p40aq-current-customer-zone {
+        padding-top: 3.5mm;
+        padding-bottom: 3.5mm;
+      }
+      .paper.invoice-group-document.p40aq-current-customer-zone .head {
+        padding-bottom: 1.2mm;
+      }
+      .paper.invoice-group-document.p40aq-current-customer-zone .info {
+        margin-top: 1mm;
+        margin-bottom: 1mm;
+        padding: 1mm;
+        gap: .8mm 1.5mm;
+      }
+      .paper.invoice-group-document.p40aq-current-customer-zone .info div {
+        min-height: 7.4mm;
+        padding-top: .8mm;
+        padding-bottom: .8mm;
+      }
+      .paper.invoice-group-document.p40aq-current-customer-zone .section {
+        margin-top: 1mm;
+      }
+      .paper.invoice-group-document.p40aq-current-customer-zone .section-title {
+        padding-top: 1mm;
+        padding-bottom: 1mm;
+      }
+      .paper.invoice-group-document.p40aq-current-customer-zone .dense-original-details .dense-line-table th,
+      .paper.invoice-group-document.p40aq-current-customer-zone .dense-original-details .dense-line-table td {
+        padding-top: .55mm;
+        padding-bottom: .55mm;
+      }
+      .paper.invoice-group-document.p40aq-current-customer-zone .grouped-item-summary {
+        margin-top: 1mm;
+      }
+      .paper.invoice-group-document.p40aq-current-customer-zone .grouped-item-summary .section-title {
+        padding-top: 1mm;
+        padding-bottom: 1mm;
+      }
+      .paper.invoice-group-document.p40aq-current-customer-zone .grouped-item-summary-table th,
+      .paper.invoice-group-document.p40aq-current-customer-zone .grouped-item-summary-table td {
+        padding-top: .65mm;
+        padding-bottom: .65mm;
+      }
+      .paper.invoice-group-document.p40aq-current-customer-zone .summary {
+        margin-top: 1mm;
+      }
+      .paper.invoice-group-document.p40aq-current-customer-zone .summary-row {
+        min-height: 6.9mm;
+        padding-top: .75mm;
+        padding-bottom: .75mm;
+      }
+      .paper.invoice-group-document.p40aq-current-customer-zone .note {
+        margin-top: 1mm;
+        padding-top: 1.1mm;
+        padding-bottom: 1.1mm;
+      }
+      .paper.invoice-group-document.p40aq-current-customer-zone .sign {
+        margin-top: 1mm;
+      }
+      /* Deliberately do not touch:
+       * .company h1, .doc-title h2, company-logo-frame,
+       * .seal-wrap, .seal, .client-sign or any font-size rule.
+       */
+    }
+    
   </style>
 </head>
 <body>
@@ -207,7 +277,7 @@
     const documentMatrix=denseInvoiceGroup?'':matrix;
     const documentDetail=denseInvoiceGroup?denseDetails:detail;
 
-    document.title=d.fileName||d.title||'酷舍對外文件';const paper=document.getElementById('paper');paper.classList.toggle('billing-document',!isQuote);paper.classList.toggle('quotation-document',isQuote);paper.classList.toggle('invoice-group-document',isMergedExternalBilling);paper.innerHTML=`<header class="head"><div class="company-block"><span class="company-logo-frame"><img class="company-logo" id="formalCompanyLogo" alt="酷舍企業" onerror="this.hidden=true"></span><div class="company"><h1>${esc(c.name||'酷舍企業有限公司')}</h1><div class="en">${esc(c.englishName||'Cool Sir Limited Company')}</div><div class="sub">${companyInfo.map(value=>`<span>${esc(value)}</span>`).join('')}</div></div></div><div class="doc-title"><h2>${esc(d.title||'請款單')}</h2></div></header><section class="info"><div><span class="label">客戶</span>${esc(d.customer||'—')}</div><div><span class="label">案場</span>${esc(d.project||'—')}</div><div><span class="label">日期</span>${esc(d.date||'—')}</div>${isActual?`<div><span class="label">稅別</span>${esc(d.taxMode==='含稅'?'含稅':'未稅')}</div>`:`<div><span class="label">稅額方式</span>${esc(d.taxMode||'—')}</div>`}</section>${mergedScope}${documentMatrix}${documentDetail}${groupedSummary}${summary}${d.publicNote?`<section class="note"><b>備註：</b><br>${esc(d.publicNote)}</section>`:''}<section class="sign"><div class="client-sign">客戶簽章</div><div class="company-seals"><div>公司大小章</div><div class="seal-wrap"><img class="seal" id="formalCompanySeal" alt="公司大小章" onerror="this.hidden=true"></div></div></section>`;if(isQuote)paper.innerHTML=`<div class="quotation-content" id="quotationContent">${paper.innerHTML}</div>`;
+    document.title=d.fileName||d.title||'酷舍對外文件';const paper=document.getElementById('paper');paper.classList.toggle('billing-document',!isQuote);paper.classList.toggle('quotation-document',isQuote);paper.classList.toggle('invoice-group-document',isMergedExternalBilling);const p40aqCurrentZone=!isQuote&&d.documentType==='billing'&&d.isMergedExternalBilling===true&&!invoiceRefs&&Array.isArray(d.mergedBillingProjects)&&d.mergedBillingProjects.length===1&&String(d.mergedBillingProjects[0]||'').trim()===String(d.project||'').trim()&&String(d.number||'').trim()==='';paper.classList.toggle('p40aq-current-customer-zone',p40aqCurrentZone);paper.innerHTML=`<header class="head"><div class="company-block"><span class="company-logo-frame"><img class="company-logo" id="formalCompanyLogo" alt="酷舍企業" onerror="this.hidden=true"></span><div class="company"><h1>${esc(c.name||'酷舍企業有限公司')}</h1><div class="en">${esc(c.englishName||'Cool Sir Limited Company')}</div><div class="sub">${companyInfo.map(value=>`<span>${esc(value)}</span>`).join('')}</div></div></div><div class="doc-title"><h2>${esc(d.title||'請款單')}</h2></div></header><section class="info"><div><span class="label">客戶</span>${esc(d.customer||'—')}</div><div><span class="label">案場</span>${esc(d.project||'—')}</div><div><span class="label">日期</span>${esc(d.date||'—')}</div>${isActual?`<div><span class="label">稅別</span>${esc(d.taxMode==='含稅'?'含稅':'未稅')}</div>`:`<div><span class="label">稅額方式</span>${esc(d.taxMode||'—')}</div>`}</section>${mergedScope}${documentMatrix}${documentDetail}${groupedSummary}${summary}${d.publicNote?`<section class="note"><b>備註：</b><br>${esc(d.publicNote)}</section>`:''}<section class="sign"><div class="client-sign">客戶簽章</div><div class="company-seals"><div>公司大小章</div><div class="seal-wrap"><img class="seal" id="formalCompanySeal" alt="公司大小章" onerror="this.hidden=true"></div></div></section>`;if(isQuote)paper.innerHTML=`<div class="quotation-content" id="quotationContent">${paper.innerHTML}</div>`;
     function centerPaperInViewport(){const zoom=Number.parseFloat(getComputedStyle(paper).zoom)||1,viewportWidth=document.documentElement.clientWidth;paper.style.setProperty('--preview-center-left',`${viewportWidth/(2*zoom)}px`)}
     if(window.matchMedia('screen').matches){centerPaperInViewport();window.addEventListener('resize',()=>requestAnimationFrame(centerPaperInViewport),{passive:true})}
     async function loadAssets(){const enterpriseUrl=/\/beta(?:\/|$)/.test(window.location.pathname)?'../enterprise/index.html':'./enterprise/index.html';try{const source=await fetch(enterpriseUrl).then(r=>r.text());for(const [name,id] of [['companyLogoAsset','formalCompanyLogo'],['companySealAsset','formalCompanySeal']]){const start=source.indexOf('const '+name+'=');if(start<0)continue;let end=source.indexOf(';\n',start);if(end<0)end=source.indexOf(';\r',start);const parts=[...source.slice(start,end).matchAll(/'([^']*)'/g)].map(x=>x[1]);if(parts.length){const image=document.getElementById(id);if(id==='formalCompanySeal')image.onload=()=>{image.onload=null;removeSealBackground(image)};image.src=parts.join('');if(id==='formalCompanyLogo')image.style.display='block'}}}catch(e){}}

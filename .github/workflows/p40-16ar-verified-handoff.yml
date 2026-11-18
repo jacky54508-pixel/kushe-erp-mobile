@@ -1,0 +1,73 @@
+name: P40-16AR exact verified PDF bytes handoff - synthetic loopback only
+on:
+  push:
+    branches: [p40-16ar-verified-byte-handoff-isolated-20261118]
+    paths:
+      - '.p40-16ar-tests/**'
+      - '.p40-16ar-review/**'
+      - '.github/workflows/p40-16ar-verified-handoff.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-a4-pdf-byte-gate-local-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP on formal main beta movement or unexpected source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16ar-verified-byte-handoff-isolated-20261118
+          git fetch --no-tags origin main beta p40-16aq-cross-zone-print-candidate-20261118
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git rev-parse origin/p40-16aq-cross-zone-print-candidate-20261118)" = 85e0ea828903c74c9e17ca401cf28d706d685ce3
+          test "$(git merge-base origin/p40-16aq-cross-zone-print-candidate-20261118 HEAD)" = "$(git rev-parse origin/p40-16aq-cross-zone-print-candidate-20261118)"
+          git diff --name-only origin/p40-16aq-cross-zone-print-candidate-20261118...HEAD > /tmp/p40ar-changed
+          cat /tmp/p40ar-changed
+          test -s /tmp/p40ar-changed
+          if grep -Ev '^(\.p40-16ar-(tests|review)/.+|\.github/workflows/p40-16ar-verified-handoff\.yml)$' /tmp/p40ar-changed; then
+            echo 'STOP: this lab is NOT allowed to alter even the AQ candidate app'; exit 1
+          fi
+          git diff --name-only origin/main...HEAD > /tmp/p40ar-diff-main
+          if grep -Ev '^(billing-print\.html|\.p40-16(aq|ar)-(tests|review)/.+|\.github/workflows/p40-16(aq-cross-zone-candidate|ar-verified-handoff)\.yml)$' /tmp/p40ar-diff-main; then
+            echo 'STOP: unauthorized production source diff'; exit 1
+          fi
+          for path in index.html billing-print.html billing-bundle-print.html external-billing-print.html assets/js/billing-print.js assets/js/billing-bundle-print.js assets/js/external-billing-print.js assets/js/external-billing-invoice.js assets/js/billing-groups.js assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "HEAD:$path")" = "$(git rev-parse "origin/p40-16aq-cross-zone-print-candidate-20261118:$path")"
+          done
+          for path in index.html billing-bundle-print.html external-billing-print.html assets/js/billing-print.js assets/js/billing-bundle-print.js assets/js/external-billing-print.js assets/js/external-billing-invoice.js assets/js/billing-groups.js assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "HEAD:$path")" = "$(git rev-parse "origin/main:$path")"
+          done
+          test ! -f .env
+          echo 'PASS: pinned official branches; exact inherited AQ candidate; only new standalone AR lab files'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install isolated PDF-byte and browser tools
+        run: |
+          python -m pip install 'playwright==1.56.0' 'pymupdf==1.26.5'
+          python -m playwright install --with-deps chromium
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-arphic-bsmi00lp
+      - name: Strict actual official route -> PDF -> SHA256 -> one-use local HTTP delivery
+        run: |
+          python -m py_compile .p40-16ar-tests/verified_bytes_handoff.py .p40-16ar-tests/test_verified_handoff.py
+          python .p40-16ar-tests/test_verified_handoff.py
+          echo 'CI PASS means local fictional exact bytes only. No production download gate was created.'
+      - name: Upload ONLY verified fictional one-page PDF bytes plus manifest
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p40-16ar-synthetic-verified-bytes-handoff
+          path: .p40-16ar-review/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
