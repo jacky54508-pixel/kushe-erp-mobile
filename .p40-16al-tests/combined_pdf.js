@@ -82,6 +82,13 @@ async function generate(combined,trust){
       '　總額 '+n(amount.totalAmount)+'　保留 '+n(amount.retentionAmount)+
       '　應收 '+n(amount.receivableAmount),LEFT+2,y-10,8.1);
     y-=27;
+    if(bill.publicNote){
+      const notes=wrap('備註：'+bill.publicNote,font,WIDTH-8);
+      if(notes.length>2)fail('LONG_PUBLIC_NOTE_CANNOT_FIT');
+      for(const part of notes){text(page,font,part,LEFT+2,y,MIN);y-=10;}
+      y-=3;
+      if(y<260)fail('NOTE_OVERLAPS_BOTTOM_SUMMARY');
+    }
   }
   // Bottom summary is included as a new safety-review requirement, not yet
   // identical to the official HTML bundle template.
