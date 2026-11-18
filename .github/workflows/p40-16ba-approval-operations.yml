@@ -1,0 +1,77 @@
+name: P40-16BA FAKE approval-operations UI and workflow (NO LIVE DATA)
+on:
+  push:
+    branches: [p40-16ba-approval-operations-demo-isolated-20261118]
+    paths:
+      - '.p40-16ba-tests/**'
+      - '.p40-16ba-demo/**'
+      - '.p40-16ba-review/**'
+      - '.github/workflows/p40-16ba-approval-operations.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fake-approval-operations-source-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP if main beta drift or any ERP production sources modified
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16ba-approval-operations-demo-isolated-20261118
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40ba-filelist
+          cat /tmp/p40ba-filelist
+          test "$(wc -l < /tmp/p40ba-filelist)" -eq 6
+          if grep -Ev '^(\.p40-16ba-(tests|demo|review)/.+|\.github/workflows/p40-16ba-approval-operations\.yml)$' /tmp/p40ba-filelist; then
+            echo 'STOP: unapproved billing/finance/auth/sync/PDF source changed';exit 1
+          fi
+          for file in index.html billing-print.html billing-bundle-print.html external-billing-print.html assets/js/billing-groups.js assets/js/erp-store.js assets/js/external-billing-print.js assets/js/external-billing-invoice.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/billing-print.js assets/js/billing-group-discount-preview.js assets/js/config.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "HEAD:$file")" = "$(git rev-parse "origin/main:$file")" || { echo "STOP: formal app changed $file";exit 1; }
+          done
+          test ! -e .env
+          test ! -d supabase/migrations
+          echo 'P40BA_OFFICIAL_MAIN_BETA_IMMUTABLE'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Fake state-machine test against official immutable billing validation
+        run: |
+          node --check .p40-16ba-tests/approval_flow.cjs
+          node --check .p40-16ba-tests/test_approval_flow.cjs
+          node --test .p40-16ba-tests/test_approval_flow.cjs
+          echo 'P40BA_FAKE_ONLY_PASS: not real JWT, MFA, authorized source, signed approval or PDF'
+      - name: Static demo cannot contain live API calls, storage, secrets or release service
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('.p40-16ba-demo/index.html').read_text()
+          for label in ('編輯新版本','送審','核准','退回修改','查看歷史',
+                        '虛構資料','未連接正式 ERP'):
+              assert label in s,label
+          for unsafe in ('fetch(', 'XMLHttpRequest', 'localStorage', 'sessionStorage',
+                         'navigator.sendBeacon', 'supabase.', 'sb_secret_',
+                         'service_role', 'indexedDB.open', 'window.print(',
+                         '<script src=', 'https://'):
+              assert unsafe not in s,unsafe
+          assert s.count('<button')>=6
+          assert re.search(r'@media\(max-width:720px\)',s)
+          print('P40BA_OFFLINE_UI_STATIC_GUARD_PASS')
+          PY
+      - name: Verify no production deploy and no mutated original source
+        run: |
+          git diff --exit-code origin/main -- index.html assets/js \
+            billing-print.html external-billing-print.html \
+            billing-bundle-print.html .github/workflows/pages.yml
+          echo 'P40BA_PRODUCTION_BLOCKED_NO_DEPLOY_NO_REAL_FINANCIAL_DATA'
