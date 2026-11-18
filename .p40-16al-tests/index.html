@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>P40-16AL Synthetic General Combined PDF LAB — NO PRODUCTION</title></head>
+<body>
+<h1>P40-16AL 全虛構合併請款 PDF 本機測試</h1>
+<p>正式 ERP 檔案只作唯讀程式引用；不使用真實資料、印章、Supabase 或列印功能。</p>
+<script>
+window.__p40alStates = new Map();
+window.KuSheERPStore = {
+  getState:()=>({settings:{}}),
+  billingDocumentLines: record=>record.lines,
+  billingDocumentState: id=>window.__p40alStates.get(id)||null
+};
+window.KusheDisplaySort={sortWorkRows:rows=>rows};
+</script>
+<script src="../.p40-16ah-tests/node_modules/pdf-lib/dist/pdf-lib.min.js"></script>
+<script src="../.p40-16ah-tests/node_modules/@pdf-lib/fontkit/dist/fontkit.umd.min.js"></script>
+<script src="../assets/js/billing-print.js"></script>
+<script src="../assets/js/billing-bundle-print.js"></script>
+<script src="./combined_contract.js"></script>
+<script src="./combined_pdf.js"></script>
+</body></html>
