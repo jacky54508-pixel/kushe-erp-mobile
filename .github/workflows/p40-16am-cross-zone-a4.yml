@@ -1,0 +1,84 @@
+name: P40-16AM cross-zone target-only customer A4 PDF lab (NO PRODUCTION)
+on:
+  push:
+    branches: [p40-16am-cross-zone-customer-a4-lab-20261118]
+    paths:
+      - '.p40-16am-tests/**'
+      - '.p40-16am-review/**'
+      - '.github/workflows/p40-16am-cross-zone-a4.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-target-project-pdf:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Strict STOP if main beta or any production ERP file differs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16am-cross-zone-customer-a4-lab-20261118
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40am-files
+          cat /tmp/p40am-files
+          test -s /tmp/p40am-files
+          if grep -Ev '^(\.p40-16(ah|ai|aj|ak|al|am)-(tests|review)/|\.github/workflows/p40-16(ah-local-pdf|ai-original-pdf-contract|aj-source-adapter|ak-real-single-a4|al-general-combined-a4|am-cross-zone-a4)\.yml$)' /tmp/p40am-files; then
+            echo 'STOP: unauthorized production file modified'; exit 1
+          fi
+          for f in index.html billing-print.html billing-bundle-print.html external-billing-print.html assets/js/billing-print.js assets/js/billing-bundle-print.js assets/js/external-billing-print.js assets/js/external-billing-invoice.js assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "origin/main:$f")" = "$(git rev-parse "HEAD:$f")"
+          done
+          if git ls-tree -r --name-only HEAD | grep -Ei '^\.p40-16a(h|k|l|m)-tests/.*\.(ttf|ttc|otf|woff2?)$'; then
+            echo 'STOP: prohibited font binary added'; exit 1
+          fi
+          test ! -f .env
+          echo 'PASS: exact formal print, customer, finance, sync and login code unchanged'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Prior original-view and single billing source tests
+        run: |
+          node --test .p40-16ai-tests/compare_original_print_views.test.cjs
+          node --test .p40-16aj-tests/source_preserving_single_adapter.test.cjs
+          node --check .p40-16am-tests/cross_zone_contract.js
+          node --check .p40-16am-tests/cross_zone_pdf.js
+      - name: Ephemeral pinned local browser libraries and test-only CJK font
+        run: |
+          npm install --prefix .p40-16ah-tests --no-save --package-lock=false --ignore-scripts --no-audit --no-fund pdf-lib@1.17.1 @pdf-lib/fontkit@1.1.1
+          python -m pip install 'playwright==1.56.0' 'pymupdf==1.26.5'
+          python -m playwright install --with-deps chromium
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-arphic-bsmi00lp
+          test -s /usr/share/fonts/truetype/arphic-bsmi00lp/bsmi00lp.ttf
+          cp /usr/share/fonts/truetype/arphic-bsmi00lp/bsmi00lp.ttf .p40-16ah-tests/runtime-font.ttf
+      - name: Generate actual device-local synthetic PDFs using verbatim official cross-zone validation
+        run: |
+          python -m py_compile .p40-16am-tests/test_cross_zone_customer_pdf.py
+          python .p40-16am-tests/test_cross_zone_customer_pdf.py
+      - name: Clean ephemeral test font and generated source wrapper
+        if: always()
+        run: |
+          rm -f .p40-16ah-tests/runtime-font.ttf .p40-16am-tests/runtime_official_extract.js
+          echo 'No font binary or dynamically extracted official source in artifact'
+      - name: Upload only passing fictitious PDFs, previews and manifest
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p40-16am-target-only-synthetic-pdfs
+          path: .p40-16am-review/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
