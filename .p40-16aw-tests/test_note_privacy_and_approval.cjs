@@ -197,10 +197,10 @@ function fingerprint(d){
     targets:[d.targetBillingId,d.displayProjectName],
     customer:d.customerName,
     original:d.sourceSnapshots.map(s=>({
-      billingId:s.billingId,anchors:s.anchors,originalLines:s.originalLines.map(shape),
+      billingId:s.billingId,anchors:s.anchors,originalLines:s.originalLines.map(l=>({...shape(l),amount:l.amount})),
       taxMode:s.taxMode,projectName:s.projectName
     })),
-    published:d.unified.lines.map(shape),
+    published:d.unified.lines.map(l=>({...shape(l),amount:l.amount})),
     unifiedTaxMode:d.unified.taxMode,
     financial:d.totals,
     revision:d.revision
