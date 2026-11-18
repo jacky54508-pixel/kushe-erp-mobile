@@ -224,7 +224,7 @@ class MockSingleDocumentBoundary(unittest.TestCase):
 
     def test_denies_archived_or_missing_document(self):
         gate,p,owner,doc,req=fixture()
-        p.records[doc.document_id].active=False
+        p.records[doc.document_id]=replace(p.records[doc.document_id],active=False)
         self.refused(gate,req,"DOCUMENT_MISSING_OR_ARCHIVED")
         p.records={}
         self.refused(gate,req,"DOCUMENT_MISSING_OR_ARCHIVED")
