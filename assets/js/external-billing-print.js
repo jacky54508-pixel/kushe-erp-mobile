@@ -39,6 +39,38 @@
     if(!Array.isArray(d.sourceIds)||d.sourceIds.length!==ids.size||new Set(d.sourceIds).size!==ids.size||d.sourceIds.some(id=>!ids.has(id))||!d.sourceSnapshots.some(s=>s.billingId===d.targetBillingId&&s.projectName===d.displayProjectName)||new Set(d.sourceSnapshots.map(s=>s.customerId)).size!==1)throw new Error('客戶／對外案場來源不一致');
     return d;
   }
+  // P40-16AW DRAFT ONLY: fail closed for KNOWN original invoice/source tokens
+  // or other-region names in the CURRENT customer-facing note. Do not edit
+  // the note, source bill, invoice, finance or historical archive render.
+  // This is NOT a general DLP system: free text still needs human review.
+  function assertCurrentCustomerNotePrivacy(payload,d,note){
+    if(payload?.historical)return;
+    if(typeof note!=='string'||note.length>2000)
+      throw new Error('對外備註格式或長度待核對，請先檢查後再列印');
+    const normalize=v=>String(v??'').normalize('NFKC').toLowerCase()
+      .replace(/[\s\u200b-\u200d\ufeff_\-－]/g,'');
+    const value=normalize(note);
+    if(!value)return;
+    const hidden=new Set();
+    function add(raw,minimum=4){
+      const token=normalize(raw);
+      if(token.length>=minimum)hidden.add(token);
+    }
+    for(const source of d.sourceSnapshots||[]){
+      if(String(source.projectName||'').trim()!==String(d.displayProjectName||'').trim())
+        add(source.projectName,2);
+      for(const key of ['invoiceNo','invoiceId','invoiceDate','billingId','receivableId','number'])
+        add(source[key]);
+      for(const line of source.originalLines||[]){
+        if(line&&typeof line==='object'){
+          add(line.invoiceNo);
+          add(line.invoiceId);
+        }
+      }
+    }
+    if([...hidden].some(token=>value.includes(token)))
+      throw new Error('對外備註包含原發票、原單識別或其他區域資訊，請人工確認並修改備註後再列印；原始資料不變');
+  }
   // P31-4: adapt validated document data to the existing single-billing renderer.
   // No independent public layout, no tax recomputation, no Store/database access.
   function originalTemplateView(payload,d){
@@ -58,6 +90,7 @@
     const company={name:'酷舍企業有限公司',englishName:'Cool Sir Limited Company',taxId:'82980636',address:'台中市豐原區瑞興路 62 號',line:'eing0519'};
     if(template?.company){for(const key of ['name','englishName','taxId','address','phone','line'])if(typeof template.company[key]==='string')company[key]=template.company[key];}
     const publicNote=String(d.note||template?.publicNote||'');
+    assertCurrentCustomerNotePrivacy(payload,d,publicNote);
     // invoiceStatus is a print-only switch for the existing template's tax rows.
     // Individual invoice numbers/statuses/amounts stay exclusively in the originals.
     const invoiceStatus=t.tax===0&&d.sourceSnapshots.every(s=>s.invoiceStatus==='no_invoice')?'no_invoice':'invoice_pending';
