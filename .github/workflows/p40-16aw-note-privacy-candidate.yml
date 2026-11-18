@@ -1,0 +1,61 @@
+name: P40-16AW current cross-zone customer-note privacy - DRAFT synthetic
+on:
+  push:
+    branches: [p40-16aw-customer-note-privacy-candidate-20261118]
+    paths:
+      - 'assets/js/external-billing-print.js'
+      - '.p40-16aw-tests/**'
+      - '.p40-16aw-review/**'
+      - '.github/workflows/p40-16aw-note-privacy-candidate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-only-cross-zone-note-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP if main or beta moved or unrelated app changes exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16aw-customer-note-privacy-candidate-20261118
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40aw-changes
+          cat /tmp/p40aw-changes
+          test "$(wc -l < /tmp/p40aw-changes)" -eq 5
+          if grep -Ev '^(assets/js/external-billing-print\.js|\.p40-16aw-(review|tests)/.+|\.github/workflows/p40-16aw-note-privacy-candidate\.yml)$' /tmp/p40aw-changes; then
+            echo 'STOP: unrelated ERP source, finance, auth, sync, PDF, or real data touched'; exit 1
+          fi
+          test "$(git diff --name-only origin/main...HEAD -- assets/js | tr -d '\n')" = assets/js/external-billing-print.js
+          for file in index.html billing-print.html billing-bundle-print.html external-billing-print.html assets/js/billing.js assets/js/billing-print.js assets/js/billing-groups.js assets/js/billing-bundle-print.js assets/js/external-billing-invoice.js assets/js/billing-discount-calculator.js assets/js/billing-discount-preview.js assets/js/billing-group-discount-preview.js assets/js/invoices.js assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/config.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "HEAD:$file")" = "$(git rev-parse "origin/main:$file")" || { echo "STOP: $file changed"; exit 1; }
+          done
+          test ! -e .env
+          test ! -d supabase/migrations
+          echo 'PASS pinned main beta, finance, auth, sync, official print HTML remain unchanged'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Verify candidate syntax and source-only customer note / fake approvals
+        run: |
+          node --check assets/js/external-billing-print.js
+          node --check .p40-16aw-tests/test_note_privacy_and_approval.cjs
+          node --test .p40-16aw-tests/test_note_privacy_and_approval.cjs
+          echo 'P40AW_SOURCE_ONLY_PASS is NOT real RLS/JWT/approval, actual print PDF or production authorization'
+      - name: Stop any accidental deployment semantics
+        run: |
+          git diff --exit-code origin/main -- index.html assets/js/billing.js \
+            assets/js/billing-groups.js assets/js/erp-store.js assets/js/cloud-sync.js \
+            assets/js/auth-gate.js billing-print.html external-billing-print.html \
+            billing-bundle-print.html .github/workflows/pages.yml
+          echo 'PRODUCTION_RELEASE_BLOCKED: no live trusted approval, no DLP guarantee, no backend and no PDF byte gate'
