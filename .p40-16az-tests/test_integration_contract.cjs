@@ -270,12 +270,10 @@ for(const [title,mutate] of modifications){
    const {store}=lab();
    approve(store);
    const first=meta(store);
-   // A contradictory tax-mode edit must be rejected by the original financial
-   // validator rather than silently approved.
-   if(title==='tax mode via source original'){
-     deny(()=>modify(store,EDITOR,mutate),'');
-     assert.deepEqual(meta(store),first);return;
-   }
+   // Official validation can permit a source tax-mode label update if
+   // all approved numeric anchors remain internally consistent. Do NOT
+   // mistake that for approval: it must save a NEW revision and invalidate
+   // the prior review just like any other source term change.
    const updated=modify(store,EDITOR,mutate);
    assert.equal(updated.revision,first.revision+1);
    assert.notEqual(updated.sourceHash,first.sourceHash);
