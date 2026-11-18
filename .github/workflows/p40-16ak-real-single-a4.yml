@@ -1,0 +1,83 @@
+name: P40-16AK real local single-billing A4 PDF lab (NO PRODUCTION)
+on:
+  push:
+    branches: [p40-16ak-real-single-a4-lab-20261118]
+    paths:
+      - '.p40-16ak-tests/**'
+      - '.p40-16ak-review/**'
+      - '.github/workflows/p40-16ak-real-single-a4.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-billing-a4-synthetic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP if main or beta moved or any production file differs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16ak-real-single-a4-lab-20261118
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40ak-files
+          cat /tmp/p40ak-files
+          test -s /tmp/p40ak-files
+          if grep -Ev '^(\.p40-16(ah|ai|aj|ak)-(tests|review)/|\.github/workflows/p40-16(ah-local-pdf|ai-original-pdf-contract|aj-source-adapter|ak-real-single-a4)\.yml$)' /tmp/p40ak-files; then
+            echo 'STOP: non-test application change'; exit 1
+          fi
+          for f in index.html billing-print.html billing-bundle-print.html external-billing-print.html assets/js/billing-print.js assets/js/billing-bundle-print.js assets/js/external-billing-print.js assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "origin/main:$f")" = "$(git rev-parse "HEAD:$f")"
+          done
+          if git ls-tree -r --name-only HEAD | grep -Ei '^\.p40-16a(h|k)-tests/.*\.(ttf|ttc|otf|woff2?)$'; then
+            echo 'STOP font file in repository'; exit 1
+          fi
+          test ! -f .env
+          echo 'PASS: original production ERP / PDF / finance / sync code unaffected'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Run original billing builder regression & standalone AJ normalization
+        run: |
+          node --test .p40-16ai-tests/compare_original_print_views.test.cjs
+          node --test .p40-16aj-tests/source_preserving_single_adapter.test.cjs
+          node --check .p40-16ak-tests/real_single_a4.js
+      - name: Install pinned ephemeral browser dependencies
+        run: |
+          npm install --prefix .p40-16ah-tests --no-save --package-lock=false --ignore-scripts --no-audit --no-fund pdf-lib@1.17.1 @pdf-lib/fontkit@1.1.1
+          python -m pip install 'playwright==1.56.0' 'pymupdf==1.26.5'
+          python -m playwright install --with-deps chromium
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-arphic-bsmi00lp
+          test -s /usr/share/fonts/truetype/arphic-bsmi00lp/bsmi00lp.ttf
+          cp /usr/share/fonts/truetype/arphic-bsmi00lp/bsmi00lp.ttf .p40-16ah-tests/runtime-font.ttf
+      - name: Actual browser-local A4 PDFs; independent PyMuPDF text and geometry validation
+        run: |
+          python -m py_compile .p40-16ak-tests/test_real_single_a4.py
+          python .p40-16ak-tests/test_real_single_a4.py
+      - name: Remove transient CJK font before artifact upload
+        if: always()
+        run: |
+          rm -f .p40-16ah-tests/runtime-font.ttf
+          echo 'No font binary committed or uploaded'
+      - name: Archive ONLY passing fictitious A4 PDF, preview PNG and manifest
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p40-16ak-synthetic-single-billing-a4
+          path: .p40-16ak-review/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
