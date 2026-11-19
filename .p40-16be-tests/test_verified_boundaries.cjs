@@ -79,7 +79,7 @@ test('unavailable JWKS is not proof of HS256',()=>{
  assert.match(auth.public_jwks_read_result,/Inaccessible/);
 });
 test('advertised standby JWKS keys do NOT prove currently active signing mode',()=>{
- assert.match(auth.jwks_warning,/do NOT establish/);
+ assert.match(auth.jwks_warning,/does NOT establish/);
 });
 test('authoritative current signing key check is required',()=>{
  assert.match(auth.required_verification,/CURRENT signing key/);
@@ -132,7 +132,7 @@ test('all necessary formal release gates remain incomplete',()=>{
 });
 test('owner must explicitly approve any main, policy, database or deployment change',()=>{
  const gates=decision.production_deployment_gates.join('\n');
- for(const term of ['owner-approved','single-document','AAL2','RLS','backup','Separate explicit owner permission']){
+ for(const term of ['owner-approved','per-document','AAL2','RLS','backup','Separate explicit owner permission']){
   assert.ok(gates.includes(term),term);
  }
 });
