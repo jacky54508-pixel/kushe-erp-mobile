@@ -1,0 +1,76 @@
+name: P40-16BC solo-owner reviewer availability and exception contract (FAKE ONLY)
+on:
+  push:
+    branches: [p40-16bc-approver-availability-escalation-lab-20261119]
+    paths:
+      - '.p40-16bc-tests/**'
+      - '.p40-16bc-review/**'
+      - '.github/workflows/p40-16bc-reviewer-availability.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  review-availability-safe-hold:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP if production main/beta drift or ANY ERP files changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16bc-approver-availability-escalation-lab-20261119
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40bc-files
+          cat /tmp/p40bc-files
+          test "$(wc -l < /tmp/p40bc-files)" -eq 6
+          if grep -Ev '^(\.p40-16bc-(tests|review)/.+|\.github/workflows/p40-16bc-reviewer-availability\.yml)$' /tmp/p40bc-files; then
+            echo 'STOP: unauthorized formal app, finance, auth, PDF or database file change'; exit 1
+          fi
+          for p in index.html billing-print.html billing-bundle-print.html external-billing-print.html assets/js/erp-store.js assets/js/billing-groups.js assets/js/external-billing-print.js assets/js/external-billing-invoice.js assets/js/billing-print.js assets/js/billing-group-discount-preview.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/config.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "HEAD:$p")" = "$(git rev-parse "origin/main:$p")" || { echo "STOP: official source modified: $p"; exit 1; }
+          done
+          test ! -e .env
+          test ! -e supabase/migrations
+          echo 'P40BC_PINNED_MAIN_BETA_ALL_PRODUCTION_SOURCES_UNCHANGED'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Mock-only reviewer availability, solo-owner, revocation, reassignment and legacy checks
+        run: |
+          node --check .p40-16bc-tests/mock_policy_authority.cjs
+          node --check .p40-16bc-tests/availability_queue.cjs
+          node --check .p40-16bc-tests/test_availability.cjs
+          node --test .p40-16bc-tests/test_availability.cjs
+          echo 'P40BC_ONLY_FAKE_POLICY_TESTED_NO_ACTUAL_REVIEW_JWT_DATABASE_OR_PDF'
+      - name: Preserve undecided owner policy and hard release BLOCKED
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          d=json.loads(Path('.p40-16bc-review/decision.json').read_text())
+          assert d['phase']=='P40-16BC'
+          assert d['status']=='REVIEWER_EXCEPTION_POLICY_NOT_APPROVED'
+          assert d['formal_release']=='BLOCKED'
+          assert not d['real_data_accessed']
+          assert not d['production_code_modified']
+          assert not d['supabase_modified']
+          assert d['trusted_jwt_auth']=='NOT_IMPLEMENTED'
+          assert d['verified_pdf_download']=='NOT_IMPLEMENTED'
+          assert len(d['technical_blockers'])>=6
+          assert all(x['role_policy']=='NOT APPROVED'
+                     for x in d['candidate_policies'].values())
+          print('P40BC_OWNER_POLICY_UNDECIDED_PRODUCTION_BLOCKED')
+          PY
+          git diff --exit-code origin/main -- index.html assets/js \
+            billing-print.html external-billing-print.html billing-bundle-print.html \
+            .github/workflows/pages.yml
+          echo 'P40BC_NO_FORMAL_RELEASE_OR_MODIFICATION'
