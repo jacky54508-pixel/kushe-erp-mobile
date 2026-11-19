@@ -1,0 +1,17 @@
+{
+  "phase": "P40-16BJ",
+  "date_taiwan": "2026-11-19",
+  "formal_main_sha_at_start": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "formal_beta_sha_reference": "62669539053a15174081ba8670b18248195c6f8c",
+  "scope": "ISOLATED_GITHUB_ACTIONS_POSTGRES_17_FAKE_ONLY",
+  "production_supabase_access": false,
+  "production_erp_code_edited": false,
+  "real_business_rows_read": 0,
+  "test_auth_claims_are_real_jwt": false,
+  "trusted_production_source_verified": false,
+  "actual_pdf_bytes_verified": false,
+  "local_postgresql_test_executed": false,
+  "github_postgres_ci_verified": false,
+  "production_release": "BLOCKED",
+  "requires_separate_owner_approval_to_deploy": true
+}
