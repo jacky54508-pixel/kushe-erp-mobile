@@ -1,0 +1,78 @@
+{
+  "phase": "P40-16BB",
+  "date": "2026-11-19",
+  "status": "PROPOSED_POLICY_NOT_OWNER_APPROVED",
+  "formal_main_pinned": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "formal_beta_pinned": "62669539053a15174081ba8670b18248195c6f8c",
+  "purpose": "decide review separation and safe trusted-server boundary without altering existing ERP",
+  "existing_main_facts": [
+    "auth-gate.js frontend owner, admin, accounting can view/write billings; employee cannot",
+    "auth-gate.js frontend uses AAL2 and company context but does not provide trusted new-server signing verification",
+    "erp-store.js saveExternalBillingDocument uses expectedSnapshot, revision+1, history and original bill checks",
+    "billing-groups.js printSaved has separate current/history path and rejects current when source/settlements drift"
+  ],
+  "candidate_policy": {
+    "id": "candidate-owner-or-admin-independent",
+    "company_decision": "NOT YET GIVEN",
+    "view_current_and_history": [
+      "owner",
+      "admin",
+      "accounting"
+    ],
+    "edit_and_submit": [
+      "owner",
+      "admin",
+      "accounting"
+    ],
+    "independent_approve_and_return": [
+      "owner",
+      "admin"
+    ],
+    "employee_actions": [],
+    "separation_of_duties": "Reviewer must differ from last editor AND submitter; review-only roles are independent of existing billing write rights",
+    "review_binding": [
+      "company_id",
+      "document_id",
+      "current_revision",
+      "full_authoritative_source_sha256",
+      "approved_reviewer_id",
+      "editor_id",
+      "submitter_id"
+    ],
+    "original_legacy": "Do not retrospectively block confirmed unchanged saved legacy documents; preserve original print and historical lookup",
+    "future_revision": "New changed rearranged version must have a new independent approval; retained historic versions remain read only",
+    "sole_editor_owner": "No automatic override or self-approval; queue remains pending, operational fallback requires an approved policy and separately authorized reviewer",
+    "evidence": "Server-authoritative, immutable/tamper-evident log required; fake in-memory tests do not satisfy this",
+    "financial_effect": "No posting/discount/AR/invoice/retention/bank/payroll/commission mutation",
+    "release_effect": "An approval only permits consideration of a future PDF-bytes validation gate, never delivery by itself"
+  },
+  "alternative_policy": {
+    "id": "alternative-owner-only-independent",
+    "company_decision": "NOT YET GIVEN",
+    "review_roles": [
+      "owner"
+    ],
+    "separation_of_duties": "Same strict independent reviewer condition; if sole owner is the editor, STOP until company explicitly chooses safe authorized escalation",
+    "differences": "Limits approval to owner; may require additional operational arrangements when only one owner or available reviewer"
+  },
+  "decisions_owner_must_make": [
+    "Choose whether reviewer may be owner or admin, or owner only; establish safe exception/escalation for a one-person company without allowing silent self-approval",
+    "Approve treatment of pre-existing valid archived and already-issued/received customer billing, and cutover rule for newly saved versions",
+    "Decide whether dual review is needed for any special discount, value threshold, or already-invoiced originals; do not silently couple construction-only review with financial posting",
+    "Determine legal/audit retention for identities and approval events, and who may revoke approvals or deal with employee departure"
+  ],
+  "formal_release_blockers": [
+    "No verified single-document authoritative approved billing source from current JSONB ERP state",
+    "No trusted server JWT-signature/issuer/audience/expiration/session-revocation/AAL2 and company/document ACL/RLS integration",
+    "No durable externally tamper-resistant approval evidence and approved role/cutover policy",
+    "No real production PDF-first exact-byte gate or disposition of native browser print bypass",
+    "No full source-to-public privacy gate including handwritten notes, other zone and source invoice checks",
+    "No latest SYNCED or complete restorable backup verification, live financial regression, real logo/seal, desktop/mobile acceptance",
+    "No separate explicit owner authorization to change or release formal ERP"
+  ],
+  "rules": "All tests use FAKE actors and FAKE documents; never deploy or merge candidate authority in main/beta, never write Supabase or use a whole ERP snapshot as PDF input.",
+  "production_release": "BLOCKED",
+  "real_data_accessed": false,
+  "current_main_mutated": false,
+  "supabase_mutated": false
+}
