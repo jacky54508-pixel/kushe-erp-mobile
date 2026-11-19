@@ -11,7 +11,9 @@
   "trusted_production_source_verified": false,
   "actual_pdf_bytes_verified": false,
   "local_postgresql_test_executed": false,
-  "github_postgres_ci_verified": false,
+  "github_postgres_ci_verified": true,
   "production_release": "BLOCKED",
-  "requires_separate_owner_approval_to_deploy": true
+  "requires_separate_owner_approval_to_deploy": true,
+  "github_actions_success_run": "https://github.com/jacky54508-pixel/kushe-erp-mobile/actions/runs/44530644606",
+  "github_ci_scope": "EPHEMERAL_PG17_FAKE_ONLY"
 }
