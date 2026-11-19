@@ -1,0 +1,102 @@
+{
+  "phase": "P40-16BE",
+  "checked_local_date": "2026-11-19",
+  "status": "METADATA_ONLY_VERIFIED_WITH_FORMAL_AUTH_ALGORITHM_UNRESOLVED",
+  "repository": {
+    "formal_main": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+    "formal_beta": "62669539053a15174081ba8670b18248195c6f8c",
+    "code_files_changed": 0
+  },
+  "scope": {
+    "production_database_queries": "READ ONLY pg_catalog and information_schema metadata exclusively",
+    "business_rows_read": 0,
+    "auth_users_or_sessions_rows_read": 0,
+    "jwt_or_private_signing_secrets_read": 0,
+    "production_schema_or_policies_modified": false,
+    "edge_functions_deployed": false
+  },
+  "verified_database_metadata": {
+    "project_status": "ACTIVE_HEALTHY",
+    "postgres_major_version": 17,
+    "public_tables": {
+      "erp_states": {
+        "rls": true,
+        "primary_key": "user_id",
+        "data_column": "jsonb",
+        "authenticated_select_data_column": true,
+        "has_restrictive_mfa_policy": true,
+        "read_boundary": "User-specific policy; never assume every user's data is available to another user"
+      },
+      "erp_company_states": {
+        "rls": true,
+        "primary_key": "company_id",
+        "data_column": "jsonb",
+        "authenticated_select_data_column": false,
+        "authenticated_select_metadata_columns": true,
+        "has_restrictive_mfa_policy": true,
+        "read_boundary": "RLS policy alone does not confer SELECT grant for the data column"
+      },
+      "companies": {
+        "rls": true,
+        "has_restrictive_mfa_policy": true
+      },
+      "company_members": {
+        "rls": true,
+        "roles": [
+          "owner",
+          "admin",
+          "accounting",
+          "employee"
+        ],
+        "has_restrictive_mfa_policy": true
+      }
+    },
+    "excluded_sensitive_table": {
+      "name": "erp_maintenance.recovery_backups",
+      "rls": true,
+      "authenticated_select": false
+    },
+    "per_billing_table_or_view_present": false,
+    "per_billing_auth_rpc_present": false,
+    "limited_employee_projection_rpc_present": true,
+    "edge_functions_count": 0,
+    "metadata_only_jwt_signing_algorithm": "UNDETERMINED",
+    "auth_schema_signing_table_visible_in_catalog": false,
+    "warn": "Failure to see an auth signing table in catalog is NOT evidence of HS256 or proof the project lacks asymmetric keys."
+  },
+  "verified_formal_git_source": {
+    "config_js": "assets/js/config.js resolves the same formal Supabase project; do not copy project reference or keys into PR",
+    "cloud_sync_js": "assets/js/cloud-sync.js reads erp_states.data full JSONB document with sync version for the logged-in user",
+    "billing_groups_js": "assets/js/billing-groups.js printSaved prepares customer print from current local ERP and original document templates, with separate active vs historical cases",
+    "auth_gate_js": "assets/js/auth-gate.js front-end sessionAal decodes JWT claims; frontend role view gates do not constitute cryptographic server authority",
+    "no_formal_single_document_pdf_gateway": true
+  },
+  "auth_signing_mode": {
+    "conclusion": "UNKNOWN_NEITHER_RS256_ES256_NOR_HS256_CONFIRMED",
+    "public_jwks_read_result": "Inaccessible through current external web source; no keys returned or stored",
+    "required_verification": "Verify CURRENT signing key algorithm and key state through authorized Supabase project Dashboard JWT Signing Keys OR obtain valid verified JWT algorithm evidence without copying bearer token; compare with trusted JWKS where asymmetric",
+    "jwks_warning": "JWKS may publish standby and previously used asymmetric keys, so their presence alone does NOT establish the algorithm of currently issued access tokens",
+    "empty_jwks_warning": "Missing/inaccessible JWKS alone does NOT prove legacy HS256",
+    "supported_official_method": "Supabase Auth getClaims() for genuine Supabase-issued access tokens, with authoritative revocation/session and AAL2 policy checks where sensitive",
+    "forbidden": "Do not publish private keys, JWT secrets, service_role, real bearer tokens, company/project IDs or user identifiers in GitHub reports"
+  },
+  "production_deployment_gates": [
+    "Determine project CURRENT JWT signing algorithm with authenticated read-only evidence and inspect rotation and accepted past keys, not from test RS256 success.",
+    "Choose owner-approved independent reviewer policy and documented single-owner exception; latest P40-16BB/BC are only proposals.",
+    "Design trusted per-document approved source and a transactional sync/version binding; do not send the whole ERP JSONB snapshot to any new PDF backend.",
+    "Prove genuine validated JWT, current session, AAL2 and active company role plus document-specific ACL; frontend sessionAal is not server verification.",
+    "Create approved and reversible database design for independent persistent audit and source version changes only after explicit approval; no SECURITY DEFINER shortcut.",
+    "Preserve preexisting confirmed bills and original historical print paths and financial calculations, do not bulk mutate legacy docs.",
+    "Enforce external note/invoice/other-zone privacy and exact validated A4 PDF bytes to customer.",
+    "Latest SYNCED and full restorable safe backup, complete CI and finance/retention/tax/invoice/bank/payroll/commission regressions plus actual desktop/mobile and official logo/seal.",
+    "Separate explicit owner permission for any GitHub main merge, Supabase schema/policy change or deployment."
+  ],
+  "result": "READ_ONLY_AUDIT_COMPLETED_NO_FORMAL_RELEASE",
+  "production_release": "BLOCKED",
+  "owner_policy_approved": false,
+  "jwt_current_algorithm_verified": false,
+  "trusted_document_projection_exists": false,
+  "synced_checked": false,
+  "backup_recovery_tested": false,
+  "device_acceptance_done": false
+}
