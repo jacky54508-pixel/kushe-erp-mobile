@@ -1,0 +1,62 @@
+name: P40-16BI FAKE ES256 and SQLite gateway (NO PROD ACCESS)
+on:
+  push:
+    branches: [p40-16bi-fake-es256-sqlite-gateway-20261119]
+    paths:
+      - '.p40-16bi-tests/**'
+      - '.p40-16bi-review/**'
+      - '.github/workflows/p40-16bi-fake-integrated-gateway.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fake-isolated-gateway:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify formal main and beta are pinned; allow ONLY 4 isolated files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16bi-fake-es256-sqlite-gateway-20261119
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40bi-allowlist
+          cat /tmp/p40bi-allowlist
+          test "$(wc -l </tmp/p40bi-allowlist)" -eq 4
+          if grep -Ev '^(\.p40-16bi-(tests|review)/.+|\.github/workflows/p40-16bi-fake-integrated-gateway\.yml)$' /tmp/p40bi-allowlist; then
+            echo 'STOP: unauthorized ERP/financial/auth/PDF file'; exit 1
+          fi
+          git diff --exit-code origin/main -- assets/js index.html billing-print.html \
+            billing-bundle-print.html external-billing-print.html .github/workflows/pages.yml
+          test ! -e .env
+          test ! -d supabase/migrations
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Run real FAKE ES256 maths and SQLite transactions (offline)
+        env:
+          SUPABASE_URL: ''
+          SUPABASE_SERVICE_ROLE_KEY: ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check .p40-16bi-tests/test_trusted_gateway.cjs
+          node --test .p40-16bi-tests/test_trusted_gateway.cjs
+          node - <<'NODE'
+          const fs = require('fs');
+          const d = JSON.parse(fs.readFileSync('.p40-16bi-review/decision.json','utf8'));
+          if (d.production_release!=='BLOCKED' || d.production_files_changed!==0 ||
+              !d.fake_es256_signature_verified || !d.local_sqlite_transaction_rollback_verified ||
+              d.actual_supabase_jwt_session_verified || d.postgresql_rls_verified ||
+              d.trusted_production_single_document_projection_exists ||
+              d.independent_durable_approval_verified || d.customer_pdf_bytes_verified ||
+              d.local_tests.passed!==19) process.exit(1);
+          console.log('P40BI_FAKE_ONLY_NO_REAL_AUTH_RLS_OR_PDF_PRODUCTION_RELEASE_BLOCKED');
+          NODE
