@@ -1,0 +1,53 @@
+name: P40-16BN fake reviewer policy only (NO PROD ACCESS)
+on:
+  push:
+    branches: [p40-16bn-reviewer-policy-readonly-20261119]
+    paths:
+      - '.p40-16bn-tests/**'
+      - '.p40-16bn-review/**'
+      - '.github/workflows/p40-16bn-reviewer-policy-fake.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  readonly-policy-candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Reject production drift or non-add-only change
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16bn-reviewer-policy-readonly-20261119
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40bn-only
+          test "$(wc -l < /tmp/p40bn-only)" -eq 5
+          if grep -Ev '^(\.p40-16bn-(tests|review)/.+|\.github/workflows/p40-16bn-reviewer-policy-fake\.yml)$' /tmp/p40bn-only; then
+            echo 'STOP unapproved production source or deployment change'; exit 1
+          fi
+          test "$(git diff --name-status origin/main...HEAD | grep -c '^A')" -eq 5
+          git diff --exit-code origin/main -- assets/js index.html billing-print.html billing-bundle-print.html external-billing-print.html .github/workflows/pages.yml
+          test ! -f .env
+          echo 'P40BN_ONLY_FIVE_ADD_FILES_AND_PINNED_FORMAL'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Contract only - cannot authorize real billing or deploy
+        env:
+          CI: 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check .p40-16bn-tests/approval_policy.cjs
+          node --check .p40-16bn-tests/test_approval_policy.cjs
+          node --test .p40-16bn-tests/test_approval_policy.cjs | tee /tmp/p40bn-test-out
+          ! grep -Eq 'skipped [1-9][0-9]*' /tmp/p40bn-test-out
+          node -e "const a=require('./.p40-16bn-review/decision.json'); if(a.production_release!=='BLOCKED'||a.owner_policy_selected!==false||a.self_review_exception_enabled!==false||a.eligible_for_real_approvals!==false||a.official_main_unchanged_required!==true)process.exit(1)"
+          echo 'P40BN_FAKE_POLICY_ONLY_NO_APPROVAL_NO_DEPLOY'
