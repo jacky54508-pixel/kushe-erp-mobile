@@ -24,3 +24,7 @@ GitHub Actions 使用單獨的 `postgres:17` 服務容器，資料庫名稱 `p40
 SQLite P40-16BI、此 PostgreSQL CI、及之前 P40-16AU 的 RLS 模型都**不是正式資料接入／跨裝置同步／真實財務或 PDF bytes 實測**。仍須通過真實資料來源版本、備份可還原、正式驗證、行動/桌面、發票、折讓、保留款、薪資、抽成、銀行、印章/LOGO 和 PDF 逐位元組交付的獨立驗收。既有已確認歷史請款不可被新原型一律阻斷。
 
 **只有 GitHub Actions 真正以 postgres:17 完成執行，才能稱為 PostgreSQL CI PASS。** 在 CI 證據之前僅能標示隔離測試已提交、待驗證。任何正式 `main`、beta、資料庫 schema/RLS、Edge、網站發佈皆須負責人另行明確批准。
+
+## GitHub Actions 確認（2026-11-19）
+
+[GitHub CI #44530644606](https://github.com/jacky54508-pixel/kushe-erp-mobile/actions/runs/44530644606) **SUCCESS**。`postgres:17` 真的啟動；RLS 與欄位白名單、假 ACL/AAL2/session、版本綁定、錯誤更新回滾、舊版禁止核准沿用、雙連線一成功一衝突及單一 audit event 均通過。GitHub CI 項目已核對成功日誌，這仍**不是**正式 Supabase Auth、真實請款或正式 PDF bytes 的驗證；正式發布仍為 BLOCKED。
