@@ -1,5 +1,11 @@
 name: P40-16BJ fake-only PostgreSQL 17 RLS and atomic source (NO PROD)
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.p40-16bj-tests/**'
+      - '.p40-16bj-review/**'
+      - '.github/workflows/p40-16bj-ephemeral-pg17-only.yml'
   push:
     branches: [p40-16bj-ephemeral-postgres17-lab-20261119]
     paths:
@@ -40,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF_NAME" = p40-16bj-ephemeral-postgres17-lab-20261119
+          test "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" = p40-16bj-ephemeral-postgres17-lab-20261119
           git fetch --no-tags origin main beta
           test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
           test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
