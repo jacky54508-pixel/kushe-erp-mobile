@@ -79,10 +79,10 @@ test('valid signed fake session plus server registry returns only approval eligi
 });
 test('no private key material in GitHub source files; key generated only inside CI',()=>{
  const body=fs.readFileSync(path.join(__dirname,'verify_fake_jwt.cjs'),'utf8');
- assert.ok(!body.includes('-----BEGIN PRIVATE KEY-----'));
+ assert.ok(!body.includes('-----BEGIN '+'PRIVATE KEY-----'));
  assert.ok(!body.includes('supabase.from('));
  assert.ok(!body.includes('window.print('));
- assert.ok(!body.includes('service_role_key'));
+ assert.ok(!body.includes('service_'+'role_key'));
 });
 test('payload tampering after genuine signature is rejected',()=>{
  const t=signToken();const parts=t.split('.');
