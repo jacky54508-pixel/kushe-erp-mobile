@@ -1,0 +1,45 @@
+name: P40-16BH FAKE atomic single-document source (NO PROD ACCESS)
+on:
+  push:
+    branches: [p40-16bh-atomic-source-fake-lab-20261119]
+    paths:
+      - '.p40-16bh-tests/**'
+      - '.p40-16bh-review/**'
+      - '.github/workflows/p40-16bh-fake-atomic-source.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-contract-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Confirm isolated branch and formal main/beta pinned; never modify formal code
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16bh-atomic-source-fake-lab-20261119
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD >/tmp/allowlist
+          if grep -Ev '^(\.p40-16bh-(tests|review)/.+|\.github/workflows/p40-16bh-fake-atomic-source\.yml)$' /tmp/allowlist; then echo 'STOP unauthorized production file'; exit 1; fi
+          test "$(wc -l </tmp/allowlist)" -eq 4
+          git diff --exit-code origin/main -- assets/js index.html billing-print.html external-billing-print.html .github/workflows/pages.yml
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Run FAKE contract with no Supabase credentials or network
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d .p40-16bh-tests/test_atomic_document_gateway.cjs.gz.b64 | gzip -dc > /tmp/p40bh_test.cjs
+          node --check /tmp/p40bh_test.cjs
+          node --test /tmp/p40bh_test.cjs
+          node -e "let d=require('./.p40-16bh-review/decision.json'); if(d.production_release!=='BLOCKED'||d.tests_local.passed!==11||d.actual_jwt_verified||d.production_document_projection_proven||d.production_atomicity_proven||d.production_document_acl_proven||d.actual_customer_pdf_bytes_verified)process.exit(1)"
+          echo 'FAKE_MODEL_ONLY_NO_REAL_AUTH_OR_PDF_PRODUCTION_RELEASE_BLOCKED'
