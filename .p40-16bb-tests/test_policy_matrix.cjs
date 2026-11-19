@@ -152,7 +152,10 @@ test('fake employee cannot read historical or current billing',()=>{
 });
 test('fake employee cannot submit, approve, return or release',()=>{
  for(const action of ['submit','approve','return','release_to_pdf_gate']){
-  denied(action,'BILLING_ROLE_DENIED',{role:'employee'});
+  const req=action==='return'
+    ? request('return',{reason:'FAKE-COMPLETE-RETURN-REASON'})
+    : request(action);
+  denied(action,'BILLING_ROLE_DENIED',{role:'employee',requestObj:req});
  }
 });
 test('approved owner or admin can review but accounting cannot',()=>{
