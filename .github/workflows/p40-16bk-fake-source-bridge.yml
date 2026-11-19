@@ -1,0 +1,59 @@
+name: P40-16BK FAKE ERP-to-document bridge (NO PRODUCTION DATA)
+on:
+  push:
+    branches: [p40-16bk-fake-trusted-source-bridge-20261119]
+    paths:
+      - '.p40-16bk-tests/**'
+      - '.p40-16bk-review/**'
+      - '.github/workflows/p40-16bk-fake-source-bridge.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-erp-source-bridge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP unless formal main/beta pinned and only 5 approved files are added
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16bk-fake-trusted-source-bridge-20261119
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD >/tmp/p40bk_allowlist
+          cat /tmp/p40bk_allowlist
+          test "$(wc -l </tmp/p40bk_allowlist)" -eq 5
+          if grep -Ev '^(\.p40-16bk-(tests|review)/.+|\.github/workflows/p40-16bk-fake-source-bridge\.yml)$' /tmp/p40bk_allowlist; then
+            echo 'STOP unexpected production file changed'; exit 1
+          fi
+          git diff --exit-code origin/main -- assets/js index.html billing-print.html billing-bundle-print.html external-billing-print.html .github/workflows/pages.yml
+          test ! -f .env
+          test ! -d supabase/migrations
+          for f in assets/js/erp-store.js assets/js/billing-groups.js assets/js/cloud-sync.js assets/js/external-billing-print.js; do test -f "$f"; done
+          echo 'PINNED_OFFICIAL_SOURCE_UNMODIFIED_AND_NO_PRODUCTION_WRITE'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Run fake source-bridge contract; source guard MUST NOT SKIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check .p40-16bk-tests/source_bridge.cjs
+          node --check .p40-16bk-tests/test_source_bridge.cjs
+          node --test .p40-16bk-tests/test_source_bridge.cjs | tee /tmp/p40bk_output.txt
+          grep -Eq '^# tests 40$' /tmp/p40bk_output.txt
+          grep -Eq '^# pass 40$' /tmp/p40bk_output.txt
+          grep -Eq '^# fail 0$' /tmp/p40bk_output.txt
+          grep -Eq '^# skipped 0$' /tmp/p40bk_output.txt
+          node - <<'NODE'
+          const d=require('./.p40-16bk-review/decision.json');
+          if(d.production_release!=='BLOCKED'||d.production_trusted_document_source_exists||d.real_auth_verified||d.production_code_changed||d.production_supabase_access||d.actual_pdf_bytes_verified)process.exit(1);
+          NODE
+          echo 'P40BK_FAKE_ONLY_NO_REAL_JWT_OR_TRUSTED_PRODUCTION_SOURCE_NO_MERGE'
