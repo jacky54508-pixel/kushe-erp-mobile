@@ -1,0 +1,51 @@
+name: P40-16BM readonly release decisions (NO PROD OR REAL DATA)
+on:
+  push:
+    branches: [p40-16bm-trusted-source-owner-policy-readonly-20261119]
+    paths:
+      - '.p40-16bm-review/**'
+      - '.p40-16bm-tests/**'
+      - '.github/workflows/p40-16bm-readonly-release-decisions.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  formal-source-and-decision-guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Enforce pinned main/beta and five add-only isolated files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16bm-trusted-source-owner-policy-readonly-20261119
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40bm-only
+          test "$(wc -l </tmp/p40bm-only)" -eq 5
+          if grep -Ev '^(\.p40-16bm-(review|tests)/.+|\.github/workflows/p40-16bm-readonly-release-decisions\.yml)$' /tmp/p40bm-only; then
+            echo 'STOP: unexpected production source/CI/deployment change';exit 1
+          fi
+          git diff --exit-code origin/main -- assets/js index.html billing-print.html billing-bundle-print.html external-billing-print.html .github/workflows/pages.yml
+          test ! -f .env
+          echo 'FORMAL_MAIN_BETA_PINNED_FIVE_ADD_ONLY'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Run offline decision guard with actual formal source checks (no skips)
+        env:
+          CI: 'true'
+        run: |
+          set -euo pipefail
+          node --check .p40-16bm-tests/release-gate.cjs
+          node --check .p40-16bm-tests/test_release_gate.cjs
+          node --test .p40-16bm-tests/test_release_gate.cjs | tee /tmp/p40bm-result
+          ! grep -q 'ℹ skipped [1-9]' /tmp/p40bm-result
+          node -e "const d=require('./.p40-16bm-review/decision.json');if(d.production_release!=='BLOCKED'||d.proposal.reviewer_policy!=='UNDECIDED_NOT_OWNER_APPROVED'||d.source_state.trusted_server_atomic_document_projection_exists)process.exit(1)"
+          echo 'READ_ONLY_CONTRACT_ONLY_PRODUCTION_RELEASE_BLOCKED'

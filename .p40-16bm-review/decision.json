@@ -1,0 +1,52 @@
+{
+  "phase": "P40-16BM",
+  "checked_local_date": "2026-11-19",
+  "type": "READ_ONLY_INTEGRATION_DECISION_AND_RELEASE_GATE_LAB",
+  "formal_main_pinned": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "formal_beta_pinned": "62669539053a15174081ba8670b18248195c6f8c",
+  "production_application_files_modified": 0,
+  "production_schema_or_policies_modified": false,
+  "real_business_rows_read_or_changed": false,
+  "production_deployment_performed": false,
+  "current_supabase_signing_algorithm": "ES256_DASHBOARD_SCREENSHOT_ONLY",
+  "live_session_jwt_verified": false,
+  "source_state": {
+    "browser_sync_table": "public.erp_states.data",
+    "browser_sync_scope": "authenticated user-specific full JSONB state, not an approved per-document API",
+    "company_state_data_authenticated_select_verified": false,
+    "company_context_role_from_frontend_only": true,
+    "company_to_authoritative_document_source_verified": false,
+    "trusted_server_atomic_document_projection_exists": false,
+    "independent_durable_reviewer_ledger_exists": false
+  },
+  "proposal": {
+    "recommended_first_path": "CONTINUE_LEGACY_ERP_AND_PDF_UNCHANGED_WHILE_REVIEWING_SERVER_CAS_ATOMIC_PROJECTION",
+    "source_authority_selection": "UNDECIDED",
+    "reviewer_policy": "UNDECIDED_NOT_OWNER_APPROVED",
+    "reviewer_options_to_approve_separately": ["OWNER_ONLY_WITH_EXPLICIT_SELF_REVIEW_EXCEPTION", "SEPARATE_MAKER_CHECKER_OWNER_OR_ADMIN"],
+    "legacy_customer_pdf": "UNCHANGED_NOT_REDIRECTED",
+    "historical_pdf_external_release": "MUST_AUDIT_LEGACY_INVOICE_AND_INTERNAL_CONTENT_BEFORE_EXPOSURE",
+    "existing_finance_write_path": "UNMODIFIED",
+    "security_rule": "CLIENT_SUPPLIED_ERP_JSONB_CAS_IS_NOT_ITSELF_INDEPENDENT_FINANCIAL_TRUTH",
+    "fail_closed_if_projection_missing": true
+  },
+  "evidence_gates": {
+    "formal_erp_source_authority_verified": false,
+    "company_user_ledger_mapping_confirmed": false,
+    "server_side_atomic_projection_verified": false,
+    "auth_es256_live_token_verified": false,
+    "session_revocation_verified": false,
+    "mfa_aal2_verified": false,
+    "membership_and_document_acl_verified": false,
+    "owner_approved_reviewer_policy": false,
+    "durable_revision_review_log_verified": false,
+    "customer_privacy_historical_pdf_verified": false,
+    "pdf_bytes_final_delivery_verified": false,
+    "financial_regressions_verified": false,
+    "latest_synced_and_restorable_backup": false,
+    "mobile_desktop_accepted": false,
+    "separate_owner_deployment_approval": false
+  },
+  "github_ci_is_offline_contract_check_not_live_auth_test": true,
+  "production_release": "BLOCKED"
+}
