@@ -132,7 +132,7 @@ test('all necessary formal release gates remain incomplete',()=>{
 });
 test('owner must explicitly approve any main, policy, database or deployment change',()=>{
  const gates=decision.production_deployment_gates.join('\n');
- for(const term of ['owner-approved','per-document','AAL2','RLS','backup','Separate explicit owner permission']){
+ for(const term of ['owner-approved','per-document','AAL2','document-specific ACL','backup','Separate explicit owner permission']){
   assert.ok(gates.includes(term),term);
  }
 });
