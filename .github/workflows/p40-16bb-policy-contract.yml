@@ -1,0 +1,72 @@
+name: P40-16BB proposed reviewer policy / authority contract (FAKE ONLY)
+on:
+  push:
+    branches: [p40-16bb-approval-policy-authority-contract-20261119]
+    paths:
+      - '.p40-16bb-tests/**'
+      - '.p40-16bb-review/**'
+      - '.github/workflows/p40-16bb-policy-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proposed-reviewer-authority-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP if formal main beta advanced or ANY production source altered
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16bb-approval-policy-authority-contract-20261119
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40bb-files
+          cat /tmp/p40bb-files
+          test "$(wc -l < /tmp/p40bb-files)" -eq 5
+          if grep -Ev '^(\.p40-16bb-(tests|review)/.+|\.github/workflows/p40-16bb-policy-contract\.yml)$' /tmp/p40bb-files; then
+            echo 'STOP: unrelated ERP/billing/finance/auth/cloud/PDF source changed'; exit 1
+          fi
+          for path in index.html billing-print.html billing-bundle-print.html external-billing-print.html assets/js/erp-store.js assets/js/billing-groups.js assets/js/external-billing-print.js assets/js/external-billing-invoice.js assets/js/billing-print.js assets/js/billing-group-discount-preview.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/config.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "HEAD:$path")" = "$(git rev-parse "origin/main:$path")" || { echo "STOP: official file changed $path"; exit 1; }
+          done
+          test ! -e .env
+          test ! -d supabase/migrations
+          echo 'P40BB_FORMAL_MAIN_BETA_IMMUTABLE'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Validate test-only policy and company/role/revocation negative matrix
+        run: |
+          node --check .p40-16bb-tests/mock_policy_authority.cjs
+          node --check .p40-16bb-tests/test_policy_matrix.cjs
+          node --test .p40-16bb-tests/test_policy_matrix.cjs
+          echo 'P40BB_FAKE_POLICY_ONLY: not real JWT, signed review, trusted source, or PDF delivery'
+      - name: Confirm policy undecided and all deployment blockers remain BLOCKED
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          x=json.loads(Path('.p40-16bb-review/decision.json').read_text())
+          assert x['status']=='PROPOSED_POLICY_NOT_OWNER_APPROVED'
+          assert x['production_release']=='BLOCKED'
+          assert not x['real_data_accessed']
+          assert not x['current_main_mutated']
+          assert not x['supabase_mutated']
+          assert len(x['formal_release_blockers'])>=7
+          assert x['candidate_policy']['company_decision']=='NOT YET GIVEN'
+          assert x['alternative_policy']['company_decision']=='NOT YET GIVEN'
+          print('P40BB_POLICY_STILL_UNAPPROVED_AND_RELEASE_BLOCKED')
+          PY
+          git diff --exit-code origin/main -- index.html assets/js \
+            billing-print.html billing-bundle-print.html external-billing-print.html \
+            .github/workflows/pages.yml
+          echo 'P40BB_NO_PRODUCTION_DEPLOY_OR_DATA_ACCESS'
