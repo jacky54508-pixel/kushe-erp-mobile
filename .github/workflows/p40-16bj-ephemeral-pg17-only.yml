@@ -1,0 +1,80 @@
+name: P40-16BJ fake-only PostgreSQL 17 RLS and atomic source (NO PROD)
+on:
+  push:
+    branches: [p40-16bj-ephemeral-postgres17-lab-20261119]
+    paths:
+      - '.p40-16bj-tests/**'
+      - '.p40-16bj-review/**'
+      - '.github/workflows/p40-16bj-ephemeral-pg17-only.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  postgres-17-fake-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: isolated_fake_only_2026
+          POSTGRES_DB: p40bj_fake_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d p40bj_fake_only"
+          --health-interval 10s --health-timeout 5s --health-retries 8
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGDATABASE: p40bj_fake_only
+      PGPASSWORD: isolated_fake_only_2026
+      PGPASSFILE: /dev/null
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Stop if formal main or beta drift or any production file changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16bj-ephemeral-postgres17-lab-20261119
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40bj_allowlist
+          cat /tmp/p40bj_allowlist
+          test "$(wc -l < /tmp/p40bj_allowlist)" -eq 6
+          if grep -Ev '^(\.p40-16bj-(tests|review)/.+|\.github/workflows/p40-16bj-ephemeral-pg17-only\.yml)$' /tmp/p40bj_allowlist; then
+            echo 'STOP production path in candidate'; exit 1
+          fi
+          git diff --exit-code origin/main -- assets/js index.html billing-print.html billing-bundle-print.html external-billing-print.html .github/workflows/pages.yml
+          test ! -d supabase/migrations
+      - name: Verify available PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v psql >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y postgresql-client; fi
+          psql --version
+          pg_isready -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE"
+      - name: Exercise real PostgreSQL 17 with FAKE roles and documents ONLY
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$PGDATABASE" = p40bj_fake_only
+          psql -X -v ON_ERROR_STOP=1 -f .p40-16bj-tests/setup.sql
+          psql -X -v ON_ERROR_STOP=1 -f .p40-16bj-tests/assertions.sql
+          bash .p40-16bj-tests/concurrency.sh
+          python3 - <<'PY'
+          import json
+          with open('.p40-16bj-review/decision.json',encoding='utf-8') as f: d=json.load(f)
+          assert d['production_release']=='BLOCKED'
+          assert d['production_supabase_access'] is False
+          assert d['test_auth_claims_are_real_jwt'] is False
+          assert d['trusted_production_source_verified'] is False
+          assert d['actual_pdf_bytes_verified'] is False
+          print('P40BJ_POSTGRES_MODEL_ONLY_NOT_REAL_SUPABASE_AUTH')
+          PY
