@@ -1,0 +1,76 @@
+name: P40-16BE formal auth/signing source metadata ONLY (NO LIVE DATA)
+on:
+  push:
+    branches: [p40-16be-formal-auth-source-metadata-audit-20261119]
+    paths:
+      - '.p40-16be-tests/**'
+      - '.p40-16be-review/**'
+      - '.github/workflows/p40-16be-readonly-metadata-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-and-sanitized-readonly-metadata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: STOP if formal main or beta drift or unauthorized source touched
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16be-formal-auth-source-metadata-audit-20261119
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD > /tmp/p40be-allowlist
+          cat /tmp/p40be-allowlist
+          test "$(wc -l < /tmp/p40be-allowlist)" -eq 4
+          if grep -Ev '^(\.p40-16be-(tests|review)/.+|\.github/workflows/p40-16be-readonly-metadata-audit\.yml)$' /tmp/p40be-allowlist; then
+            echo 'STOP unauthorized formal production source, finance, auth or PDF change'; exit 1
+          fi
+          for f in index.html billing-print.html billing-bundle-print.html external-billing-print.html assets/js/erp-store.js assets/js/billing-groups.js assets/js/external-billing-print.js assets/js/external-billing-invoice.js assets/js/billing-print.js assets/js/billing-group-discount-preview.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/config.js .github/workflows/pages.yml; do
+            test "$(git rev-parse "HEAD:$f")" = "$(git rev-parse "origin/main:$f")" || { echo "STOP official code modified $f"; exit 1; }
+          done
+          test ! -f .env
+          test ! -d supabase/migrations
+          echo 'P40BE_PINNED_MAIN_BETA_PRODUCTION_SOURCE_UNMODIFIED'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Verify report cannot mistake JSONB, signing mode, RLS policy or mock JWT for live authority
+        run: |
+          node --check .p40-16be-tests/test_verified_boundaries.cjs
+          node --test .p40-16be-tests/test_verified_boundaries.cjs
+          echo 'P40BE_STATIC_AUDIT_ONLY_NOT_LIVE_RLS_OR_CURRENT_JWT_ALGORITHM_PROOF'
+      - name: STOP if decision incorrectly authorizes production or leaks project identifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          p=Path('.p40-16be-review/decision.json')
+          j=json.loads(p.read_text())
+          assert j['phase']=='P40-16BE'
+          assert j['production_release']=='BLOCKED'
+          assert j['jwt_current_algorithm_verified'] is False
+          assert j['trusted_document_projection_exists'] is False
+          assert j['owner_policy_approved'] is False
+          assert j['scope']['business_rows_read']==0
+          assert j['scope']['auth_users_or_sessions_rows_read']==0
+          assert j['scope']['jwt_or_private_signing_secrets_read']==0
+          assert not j['scope']['production_schema_or_policies_modified']
+          assert j['verified_database_metadata']['public_tables']['erp_company_states']['authenticated_select_data_column'] is False
+          assert j['verified_database_metadata']['public_tables']['erp_states']['authenticated_select_data_column'] is True
+          assert 'jimcybsztnwfzrnvexsp' not in p.read_text()
+          print('P40BE_FAIL_CLOSED_UNVERIFIED_SIGNATURE_AND_DOCUMENT_SOURCE')
+          PY
+          git diff --exit-code origin/main -- index.html assets/js \
+            billing-print.html billing-bundle-print.html external-billing-print.html \
+            .github/workflows/pages.yml
+          echo 'P40BE_PRODUCTION_RELEASE_BLOCKED_NO_DATA_OR_SCHEMA_CHANGE'
