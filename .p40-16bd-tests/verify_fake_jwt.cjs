@@ -51,6 +51,7 @@ function verifyAsymmetricJwt({
   let publicKey;
   try{publicKey=crypto.createPublicKey({key:publicJwk,format:'jwk'});}
   catch(_){throw Error('INVALID_RSA_PUBLIC_JWK')}
+  fail((publicKey.asymmetricKeyDetails?.modulusLength||0)<2048,'RSA_MODULUS_TOO_SMALL');
   const signature=Buffer.from(s,'base64url');
   fail(signature.toString('base64url')!==s,'INVALID_SIGNATURE_ENCODING');
   const valid=crypto.verify('RSA-SHA256',Buffer.from(h+'.'+p,'utf8'),publicKey,signature);
@@ -64,7 +65,7 @@ function verifyAsymmetricJwt({
     'JWT_ISSUED_AT_INVALID');
   fail(!Number.isSafeInteger(claims.exp)||claims.exp<=nowSeconds,
     'JWT_EXPIRED_OR_INVALID');
-  fail(!Number.isSafeInteger(claims.nbf)||claims.nbf>nowSeconds,
+  fail(claims.nbf!==undefined&&(!Number.isSafeInteger(claims.nbf)||claims.nbf>nowSeconds),
     'JWT_NOT_BEFORE_INVALID');
   fail(claims.exp<=claims.iat||claims.exp-claims.iat>maxTokenTtlSeconds,
     'JWT_TTL_TOO_LONG');
@@ -106,7 +107,7 @@ function authorizeFakeBillingReview({
   const d=registry.documents[request.documentId];
   if(!d||d.status!=='active'||d.id!==request.documentId)
     return DENY('DOCUMENT_NOT_CURRENT_OR_MISSING');
-  if(d.companyId===undefined||!d.companyId.startsWith('FAKE-COMPANY-'))
+  if(typeof d.companyId!=='string'||!d.companyId.startsWith('FAKE-COMPANY-'))
     return DENY('DOCUMENT_COMPANY_UNTRUSTED');
   const m=registry.memberships[identity.userId+'|'+d.companyId];
   if(!m||!m.active||m.companyId!==d.companyId||
