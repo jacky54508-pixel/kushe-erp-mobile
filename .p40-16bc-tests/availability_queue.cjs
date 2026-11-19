@@ -120,6 +120,22 @@ class FakeReviewAvailabilityQueue{
   releaseCheck(requesterId){
     const x=this.#check(requesterId,'release_to_pdf_gate');
     if(!x.allowed)return x;
+    if(this.#doc.mode!=='legacy'&&this.#doc.reorganized&&this.#review){
+      // TEST-ONLY conservative departure rule: before PDF review, if the
+      // reviewer is now revoked, unassigned, expired or demoted, HOLD for
+      // separate policy decision. This is NOT a final company policy on the
+      // legal validity of past approvals after an employee leaves.
+      const record=this.#review;
+      const principal=this.#principal(record.reviewerId);
+      if(!principal||principal.role!==record.reviewerRole)
+        return deny('SIGNER_ROLE_CHANGED_POLICY_DECISION_REQUIRED');
+      const fakePending=clone(this.#doc);
+      fakePending.workflow='pending_review';
+      const reviewerCheck=makeDecision({request:this.#q('approve'),
+        principal,document:fakePending,policyId:this.#policyId});
+      if(!reviewerCheck.allowed)
+        return deny('SIGNER_REVOKED_OR_INELIGIBLE_POLICY_DECISION_REQUIRED');
+    }
     return Object.freeze({allowed:true,next:x.next,
       // this means ONLY next-stage eligibility, never PDF bytes delivered
       deliveredPdfBytes:false,releaseVerified:false});
