@@ -1,0 +1,51 @@
+name: P40-16BP FAKE owner-review boundary no production access
+on:
+  push:
+    branches: [p40-16bp-owner-review-no-self-legacy-safe-20261119]
+    paths:
+      - '.p40-16bp-review/**'
+      - '.p40-16bp-tests/**'
+      - '.github/workflows/p40-16bp-fake-boundary.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  owner-review-fake-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Stop if formal main or beta drifts or any application file touched
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16bp-owner-review-no-self-legacy-safe-20261119
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD >/tmp/p40bp-changed
+          test "$(wc -l </tmp/p40bp-changed)" -eq 5
+          if grep -Ev '^((\.p40-16bp-(review|tests)/.+)|(\.github/workflows/p40-16bp-fake-boundary\.yml))$' /tmp/p40bp-changed; then
+            echo 'STOP unauthorized production source modification';exit 1
+          fi
+          git diff --exit-code origin/main -- assets/js index.html billing-print.html billing-bundle-print.html external-billing-print.html .github/workflows/pages.yml
+          test ! -f .env
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Exercise fake-only owner review without skipping formal source guard
+        env:
+          P40BP_FULL_SOURCE_REQUIRED: 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check .p40-16bp-tests/rollout_boundary.cjs
+          node --check .p40-16bp-tests/test_rollout_boundary.cjs
+          node --test .p40-16bp-tests/test_rollout_boundary.cjs | tee /tmp/p40bp-tests.log
+          ! grep -Eq '^[# ]*#? skipped [1-9]' /tmp/p40bp-tests.log
+          node -e "const d=require('./.p40-16bp-review/decision.json');if(d.production_release!=='BLOCKED'||d.owner_policy_selected||d.self_review_exception_enabled||d.candidate_can_produce_real_approval||d.separate_owner_deployment_approval)process.exit(1)"
+          echo 'P40BP_SIMULATION_ONLY_NO_FORMAL_APPROVAL_OR_DEPLOY'
