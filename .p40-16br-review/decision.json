@@ -1,0 +1,23 @@
+{
+  "phase": "P40-16BR",
+  "date_taiwan": "2026-11-20",
+  "mode": "ISOLATED_PRINT_ONLY_CANDIDATE_NO_PRODUCTION_DATA",
+  "formal_main_pinned": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "formal_beta_pinned": "62669539053a15174081ba8670b18248195c6f8c",
+  "candidate_print_file": "assets/js/external-billing-print.js",
+  "formal_main_modified": false,
+  "formal_beta_modified": false,
+  "formal_supabase_modified": false,
+  "real_erp_rows_read_or_modified": false,
+  "real_finance_source_changed": false,
+  "legacy_historical_invoice_table_removed_in_candidate": true,
+  "historic_preserved_work_details_and_bottom_summary_in_candidate": true,
+  "existing_intermediate_full_snapshot_fragment_exposure_eliminated": false,
+  "safe_shareable_pdf_link_implemented": false,
+  "real_pdf_bytes_visual_acceptance_verified": false,
+  "mobile_desktop_accepted": false,
+  "latest_synced_and_restorable_backup_verified": false,
+  "owner_formal_merge_or_deploy_authorization": false,
+  "github_ci_verified": false,
+  "production_release": "BLOCKED"
+}
