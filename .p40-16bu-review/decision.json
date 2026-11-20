@@ -1,0 +1,22 @@
+{
+  "phase": "P40-16BU",
+  "type": "FAKE_ONLY_EPHEMERAL_BROWSER_HANDOFF",
+  "base_pr74_head": "838af8eb8641ea6ef857f69f116022bd30658ad7",
+  "formal_main_sha": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "formal_beta_sha": "62669539053a15174081ba8670b18248195c6f8c",
+  "candidate_erp_files": [
+    "assets/js/billing-groups.js",
+    "assets/js/external-billing-print.js"
+  ],
+  "original_billing_print_template_modified": false,
+  "formal_main_beta_or_supabase_modified": false,
+  "real_business_data_read_or_written": false,
+  "legacy_snapshot_url_removed_in_candidate": true,
+  "old_bookmarked_url_works": false,
+  "safe_shareable_pdf_link_implemented": false,
+  "real_browser_two_window_verified": false,
+  "real_financial_regressions_verified": false,
+  "live_backup_synced_verified": false,
+  "owner_release_approved": false,
+  "production_release": "BLOCKED"
+}
