@@ -1,0 +1,85 @@
+name: P40-16BW Dali A4 reference style FAKE visual gate (NO DEPLOY)
+on:
+  push:
+    branches: [p40-16bw-match-dali-template-isolated-20261120]
+    paths:
+      - 'billing-print.html'
+      - 'assets/js/external-billing-print.js'
+      - '.p40-16bw-tests/**'
+      - '.p40-16bw-review/**'
+      - '.github/workflows/p40-16bw-dali-reference-fake.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fake-reference-style-a4:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fail-closed if formal branches change or isolated diff exceeds 6 files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16bw-match-dali-template-isolated-20261120
+          git fetch --no-tags origin main beta p40-16bv-real-chrome-fake-20261120
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git rev-parse origin/p40-16bv-real-chrome-fake-20261120)" = 650a544ef73c6b09243cfbe4e3d469f5be95646d
+          test "$(git merge-base origin/p40-16bv-real-chrome-fake-20261120 HEAD)" = 650a544ef73c6b09243cfbe4e3d469f5be95646d
+          git diff --name-status origin/p40-16bv-real-chrome-fake-20261120...HEAD | tee /tmp/p40bw-diff
+          test "$(wc -l </tmp/p40bw-diff)" -eq 6
+          test "$(grep -c '^M[[:space:]]' /tmp/p40bw-diff)" -eq 2
+          test "$(grep -c '^A[[:space:]]' /tmp/p40bw-diff)" -eq 4
+          if grep -Ev '^(M[[:space:]]+(billing-print\.html|assets/js/external-billing-print\.js)|A[[:space:]]+(\.p40-16bw-(tests|review)/.+|\.github/workflows/p40-16bw-dali-reference-fake\.yml))$' /tmp/p40bw-diff; then
+            echo 'STOP scope violation';exit 1
+          fi
+          git diff --exit-code origin/p40-16bv-real-chrome-fake-20261120 -- assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/billing-groups.js assets/js/billing-print.js index.html .github/workflows/pages.yml
+          node -e "const d=require('./.p40-16bw-review/decision.json');if(d.production_release!=='BLOCKED'||!d.original_standard_billing_and_quotation_unchanged||d.owner_formal_release_authorized)process.exit(1)"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Fake secure document projection tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check assets/js/external-billing-print.js
+          node --check .p40-16bw-tests/real_chrome_reference.cjs
+          node --test .p40-16bu-tests/test_one_time_handoff.cjs | tee /tmp/p40bw-safe
+          grep -q '# pass 14' /tmp/p40bw-safe
+          grep -q '# fail 0' /tmp/p40bw-safe
+          grep -q '# skipped 0' /tmp/p40bw-safe
+      - name: Temporary Chinese fonts, PDF inspection and Playwright
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq poppler-utils fonts-noto-cjk fontconfig
+          sudo fc-cache -f >/dev/null
+          mkdir -p /tmp/p40bv
+          npm install --prefix /tmp/p40bv --no-audit --no-fund --silent playwright-core@1.56.0
+          command -v google-chrome || command -v google-chrome-stable
+          command -v pdfinfo
+          command -v pdftotext
+      - name: REAL Chromium fake two-tab A4 plus reference style + unaffected ordinary style
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v google-chrome >/dev/null; then export CHROME_BIN="$(command -v google-chrome)";else export CHROME_BIN="$(command -v google-chrome-stable)";fi
+          node .p40-16bw-tests/real_chrome_reference.cjs
+          test -s p40bw-artifacts/FAKE_desktop_A4.pdf
+          test -s p40bw-artifacts/FAKE_mobile390_A4.pdf
+          test -s p40bw-artifacts/FAKE_desktop_preview.png
+          test -s p40bw-artifacts/FAKE_mobile390_preview.png
+          node -e "const r=require('./p40bw-artifacts/RESULT.json');if(r.production_release!=='BLOCKED'||r.cases?.length!==2||!r.cases.every(x=>x.pages===1&&x.has_real_browser_popup)||!r.negative_cases.reject_old_snapshot_url||!r.negative_cases.reject_missing_ticket)process.exit(1)"
+          echo 'P40-16BW FAKE REFERENCE CSS ONLY PASS; REAL OWNER PDF/DEVICE STILL NEEDS ACCEPTANCE'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: success()
+        with:
+          name: p40bw-fake-dali-original-reference-A4
+          path: p40bw-artifacts/
+          if-no-files-found: error
+          retention-days: 7
