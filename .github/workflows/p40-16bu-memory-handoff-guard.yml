@@ -1,0 +1,56 @@
+name: P40-16BU fake one-time browser handoff (NO DEPLOY)
+on:
+  push:
+    branches: [p40-16bu-no-snapshot-url-handoff-20261120]
+    paths:
+      - 'assets/js/billing-groups.js'
+      - 'assets/js/external-billing-print.js'
+      - '.p40-16bu-tests/**'
+      - '.p40-16bu-review/**'
+      - '.github/workflows/p40-16bu-memory-handoff-guard.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fake-two-tab-handoff:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Enforce pinned formal and stacked PR 74 SHA, six scoped files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16bu-no-snapshot-url-handoff-20261120
+          git fetch --no-tags origin main beta p40-16br-historical-external-pdf-privacy-candidate-20261120
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git rev-parse origin/p40-16br-historical-external-pdf-privacy-candidate-20261120)" = 838af8eb8641ea6ef857f69f116022bd30658ad7
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-status origin/p40-16br-historical-external-pdf-privacy-candidate-20261120...HEAD >/tmp/p40bu-diff
+          cat /tmp/p40bu-diff
+          test "$(wc -l </tmp/p40bu-diff)" -eq 6
+          test "$(grep -c '^M[[:space:]]' /tmp/p40bu-diff)" -eq 2
+          test "$(grep -c '^A[[:space:]]' /tmp/p40bu-diff)" -eq 4
+          if grep -Ev '^(M[[:space:]]+(assets/js/billing-groups\.js|assets/js/external-billing-print\.js)|A[[:space:]]+(\.p40-16bu-(tests|review)/.+|\.github/workflows/p40-16bu-memory-handoff-guard\.yml))$' /tmp/p40bu-diff; then echo 'STOP SCOPE VIOLATION';exit 1; fi
+          git diff --exit-code origin/main -- assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/billing-print.js billing-print.html index.html .github/workflows/pages.yml
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Execute fake parent and child memory transfer tests, no skipped cases
+        env:
+          CI: 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check assets/js/billing-groups.js
+          node --check assets/js/external-billing-print.js
+          node --check .p40-16bu-tests/test_one_time_handoff.cjs
+          node --test .p40-16bu-tests/test_one_time_handoff.cjs | tee /tmp/p40bu-result
+          grep -q '# fail 0' /tmp/p40bu-result
+          grep -q '# skipped 0' /tmp/p40bu-result
+          node -e "const d=require('./.p40-16bu-review/decision.json');if(d.production_release!=='BLOCKED'||d.original_billing_print_template_modified||d.safe_shareable_pdf_link_implemented)process.exit(1)"
+          echo 'P40-16BU FAKE ONLY; NO LIVE CUSTOMER OR FORMAL PDF ACCEPTANCE'
