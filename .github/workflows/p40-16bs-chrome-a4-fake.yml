@@ -49,6 +49,14 @@ jobs:
           grep -q '# pass 15' /tmp/p40bs-vm
           grep -q '# fail 0' /tmp/p40bs-vm
           grep -q '# skipped 0' /tmp/p40bs-vm
+      - name: Install PDF inspection tools in throwaway GitHub runner only
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq poppler-utils
+          command -v pdfinfo
+          command -v pdftotext
       - name: Actual candidate HTML + Chrome fake A4 PDF and mobile/desktop screenshots
         shell: bash
         run: |
