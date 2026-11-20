@@ -61,7 +61,7 @@
     // Individual invoice numbers/statuses/amounts stay exclusively in the originals.
     const invoiceStatus=t.tax===0&&d.sourceSnapshots.every(s=>s.invoiceStatus==='no_invoice')?'no_invoice':'invoice_pending';
     const fileName=('酷舍_請款單_'+d.displayProjectName+'_'+String(d.documentDate).slice(0,7)).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_')+'.pdf';
-    return {schema:'kushe-external-document-v1',documentType:'billing',title:'請款單',number:'',customer:d.customerName,project:d.displayProjectName,date:d.documentDate,taxMode,pricingMode:'',invoiceStatus,lines,salesAmount:t.untaxed,taxAmount:t.tax,totalAmount:t.grossTotal,retentionAmount:t.retention,receivableAmount:t.receivable,publicNote,company,fileName,mergedBillingProjects,isMergedExternalBilling:true};
+    return {schema:'kushe-external-document-v1',documentType:'billing',title:'請款單',number:'',customer:d.customerName,project:d.displayProjectName,date:d.documentDate,taxMode,pricingMode:'',invoiceStatus,lines,salesAmount:t.untaxed,taxAmount:t.tax,totalAmount:t.grossTotal,retentionAmount:t.retention,receivableAmount:t.receivable,publicNote,company,fileName,mergedBillingProjects,isMergedExternalBilling:true,referenceTemplateStyle:'dali-standard-2026-11'};
   }
   document.getElementById('close').onclick=()=>window.close();
   // P40-16BU: the protected source stays in the ERP tab's transient memory.
