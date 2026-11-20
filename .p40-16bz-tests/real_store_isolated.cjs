@@ -86,7 +86,7 @@ async function run(){
   await page.evaluate(value=>localStorage.setItem('KuSheERP25_EMERGENCY',value),snapshot.mirror);await page.reload({waitUntil:'load'});const recovered=await page.evaluate(async()=>{const a=await window.KuSheERPStore.readCommittedSnapshot();return {revision:a.revision.id,receipts:a.data.receipts.length,payments:a.data.payments.length}});
   assert.equal(recovered.revision,snapshot.revision);assert.equal(recovered.receipts,1);assert.equal(recovered.payments,1);log('FAKE_MIRROR_RESTORED_RELOAD_SUCCESS');
   assert.deepEqual(denied,[],'NO_EXTERNAL_REQUEST_ALLOWED');log('NO_PRODUCTION_NETWORK_OR_EXTERNAL_ORIGINS');
-  const result={phase:'P40-16BZ',fakeOnly:true,realBrowser:true,actualERPStore:true,actualIndexedDB:true,actualEmergencyMirror:true,rollbackVerified:true,financialStaticAndMutationTests:true,productionDataUsed:false,userBackupUploadedToGithub:false,realAuthUsed:false,realSupabaseTouched:false,mainBetaModified:false,productionRelease:'BLOCKED',passed};
+  const result={phase:'P40-16BZ',fakeOnly:true,realBrowser:true,actualERPStore:true,actualIndexedDB:true,actualEmergencyMirror:true,rollbackVerified:true,financialStaticAndMutationTests:true,productionDataUsed:false,userBackupUploadedToGithub:false,realAuthUsed:false,realSupabaseTouched:false,mainBetaModified:false,production_release:'BLOCKED',passed};
   fs.writeFileSync(path.join(OUT,'RESULT.json'),JSON.stringify(result,null,2));console.log('P40-16BZ_REAL_CHROMIUM_PASS '+passed.length);
  }catch(e){console.error('P40-16BZ_REAL_CHROMIUM_FAILURE '+(e?.stack||e));process.exitCode=1}
  finally{if(ctx)await ctx.close();await browser.close();await new Promise(resolve=>server.close(resolve))}
