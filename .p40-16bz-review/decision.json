@@ -1,0 +1,19 @@
+{
+  "phase": "P40-16BZ",
+  "mode": "ISOLATED_FAKE_REAL_BROWSER_ERP_STORE",
+  "base_pr": 78,
+  "parent_head_sha": "a5042ac83cbbaede285074e568576d16abd5ddc5",
+  "formal_main_sha": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "formal_beta_sha": "62669539053a15174081ba8670b18248195c6f8c",
+  "real_backup_committed": false,
+  "real_data_used": false,
+  "real_erp_code_used": true,
+  "real_browser_used": true,
+  "mock_auth_only": true,
+  "real_auth_or_supabase_verified": false,
+  "full_business_workflow_covered": false,
+  "original_main_beta_modified": false,
+  "user_visual_approval_received": false,
+  "owner_formal_release_authorized": false,
+  "production_release": "BLOCKED"
+}

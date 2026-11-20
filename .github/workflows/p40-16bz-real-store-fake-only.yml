@@ -1,0 +1,64 @@
+name: P40-16BZ isolated REAL ERP Store + IndexedDB fake finance (NO DEPLOY)
+on:
+  push:
+    branches: [p40-16bz-isolated-real-store-fake-20261121]
+    paths:
+      - '.p40-16bz-tests/**'
+      - '.p40-16bz-review/**'
+      - '.github/workflows/p40-16bz-real-store-fake-only.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test-real-browser-erp-store:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fail closed unless EXACT 4 fake-only files added to pinned draft parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16bz-isolated-real-store-fake-20261121
+          git fetch --no-tags origin main beta p40-16bw-match-dali-template-isolated-20261120
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git rev-parse origin/p40-16bw-match-dali-template-isolated-20261120)" = a5042ac83cbbaede285074e568576d16abd5ddc5
+          test "$(git merge-base origin/p40-16bw-match-dali-template-isolated-20261120 HEAD)" = a5042ac83cbbaede285074e568576d16abd5ddc5
+          git diff --name-status origin/p40-16bw-match-dali-template-isolated-20261120...HEAD >/tmp/p40bz-add-only
+          cat /tmp/p40bz-add-only
+          test "$(wc -l </tmp/p40bz-add-only)" -eq 4
+          if grep -Ev '^A[[:space:]]+(\.p40-16bz-(tests|review)/.+|\.github/workflows/p40-16bz-real-store-fake-only\.yml)$' /tmp/p40bz-add-only;then echo 'STOP UNAUTHORIZED CHANGES';exit 1;fi
+          git diff --exit-code origin/p40-16bw-match-dali-template-isolated-20261120 -- assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/billing-groups.js assets/js/external-billing-print.js billing-print.html index.html
+          test ! -e KusheERP_safe_backup_20261121_000502.json
+          node -e "const x=require('./.p40-16bz-review/decision.json');if(x.production_release!=='BLOCKED'||x.real_backup_committed||x.real_data_used||x.owner_formal_release_authorized)process.exit(1)"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Install Chromium browser driver in throwaway runner only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x /usr/bin/google-chrome || command -v google-chrome-stable
+          mkdir -p /tmp/p40bz
+          npm install --prefix /tmp/p40bz --no-audit --no-fund --silent playwright-core@1.56.0
+          node --check .p40-16bz-tests/real_store_isolated.cjs
+      - name: Actual browser + REAL ERP Store + fake IndexedDB/Emergency and finance operations
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v google-chrome >/dev/null;then export CHROME_BIN="$(command -v google-chrome)";else export CHROME_BIN="$(command -v google-chrome-stable)";fi
+          node .p40-16bz-tests/real_store_isolated.cjs
+          test -s p40bz-artifacts/RESULT.json
+          node -e "const x=require('./p40bz-artifacts/RESULT.json');if(x.productionRelease!==undefined||x.production_release!=='BLOCKED'||x.passed.length<10||!x.passed.every(k=>k.status==='PASS')||x.productionDataUsed||x.realSupabaseTouched)process.exit(1)"
+          echo 'P40-16BZ PASS ONLY FOR FAKE REAL BROWSER AND EXACT TESTED FLOWS; FORMAL RELEASE BLOCKED'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: success()
+        with:
+          name: p40bz-FAKE-real-browser-finance-test-report
+          path: p40bz-artifacts/RESULT.json
+          if-no-files-found: error
+          retention-days: 7
