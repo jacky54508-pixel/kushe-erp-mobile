@@ -54,7 +54,9 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq poppler-utils
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq poppler-utils fonts-noto-cjk fontconfig
+          sudo fc-cache -f >/dev/null
+          fc-match 'Noto Sans CJK TC'
           command -v pdfinfo
           command -v pdftotext
       - name: Actual candidate HTML + Chrome fake A4 PDF and mobile/desktop screenshots
