@@ -36,7 +36,9 @@ try {
  const info=cp.execFileSync('pdfinfo',[pdf],{encoding:'utf8'});
  const txt=cp.execFileSync('pdftotext',['-layout',pdf,'-'],{encoding:'utf8'});
  fs.writeFileSync(path.join(out,'FAKE_pdf_text.txt'),txt);
- assert.match(info,/Page size:\s*595(?:\.\d+)?\s+x\s+841(?:\.\d+)?\s+pts\s+\(A4\)/,'NOT_A4');
+ const paperSize=info.match(/Page size:\s*([0-9.]+)\s+x\s+([0-9.]+)\s+pts\s+\(A4\)/);
+ assert(paperSize,'PDF_NOT_LABELED_A4');
+ assert(Math.abs(Number(paperSize[1])-595.28)<1&&Math.abs(Number(paperSize[2])-841.89)<1,'PDF_A4_DIMENSIONS_WRONG');
  const pages=Number(info.match(/^Pages:\s*(\d+)/m)?.[1]);
  assert.equal(pages,1,'FAKE_SHORT_BILL_EXCEEDS_ONE_PAGE');
  for(const phrase of ['FAKE_TARGET_M','FAKE施工','施工項目彙總','非本次付款通知'])assert(txt.includes(phrase),'PDF_TEXT_MISSING '+phrase);
