@@ -1,0 +1,68 @@
+name: P40-16BS pinned PR74 Chrome fake A4 PDF audit (NO DEPLOY)
+on:
+  push:
+    branches: [p40-16bs-browser-pdf-audit-20261120]
+    paths:
+      - '.p40-16bs-tests/**'
+      - '.p40-16bs-review/**'
+      - '.github/workflows/p40-16bs-chrome-a4-fake.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fake-chrome-a4-pdf:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Formal main and beta unchanged, only 3 new audit files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16bs-browser-pdf-audit-20261120
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-status origin/main...HEAD > /tmp/p40bs-diff
+          test "$(wc -l </tmp/p40bs-diff)" -eq 3
+          if grep -Ev '^A[[:space:]]+(\.p40-16bs-(review|tests)/.+|\.github/workflows/p40-16bs-chrome-a4-fake\.yml)$' /tmp/p40bs-diff; then
+            echo 'STOP: production file changed';exit 1
+          fi
+      - name: Checkout exact PR74 isolated candidate SHA
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 84aca677b786c15e0e33a41aff8881a2b6944846
+          path: candidate
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Candidate unchanged and 15 existing integration tests PASS
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C candidate rev-parse HEAD)" = 84aca677b786c15e0e33a41aff8881a2b6944846
+          node --check candidate/assets/js/external-billing-print.js
+          CI=true node --test candidate/.p40-16br-tests/test_historical_external.cjs | tee /tmp/p40bs-vm
+          grep -q '# pass 15' /tmp/p40bs-vm
+          grep -q '# fail 0' /tmp/p40bs-vm
+          grep -q '# skipped 0' /tmp/p40bs-vm
+      - name: Actual candidate HTML + Chrome fake A4 PDF and mobile/desktop screenshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check .p40-16bs-tests/browser_pdf_ci.cjs
+          node .p40-16bs-tests/browser_pdf_ci.cjs
+          test -s p40bs-artifacts/FAKE_historical_A4.pdf
+          test -s p40bs-artifacts/FAKE_mobile_390.png
+          test -s p40bs-artifacts/FAKE_desktop_1280.png
+          echo 'FAKE_BROWSER_A4_CHECK_COMPLETE; NO REAL CUSTOMER ACCEPTANCE'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: success()
+        with:
+          name: p40bs-fake-A4-PDF-and-preview
+          path: p40bs-artifacts/
+          if-no-files-found: error
+          retention-days: 7
