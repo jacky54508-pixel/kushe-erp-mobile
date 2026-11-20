@@ -59,7 +59,7 @@ function run(extra){
 try{
  const html=run(['--dump-dom']);
  fs.writeFileSync(path.join(output,'FAKE_native_rendered_DOM.html'),html);
- const paper=(html.match(/<main class="paper" id="paper">([\s\S]*?)<\/main>/)||[])[1]||'';
+ const paper=(html.match(/<main\b[^>]*\bid="paper"[^>]*>([\s\S]*?)<\/main>/)||[])[1]||'';
  assert(paper.includes('測試M區')&&paper.includes('戶別施工統計')&&paper.includes('施工項目彙總'),'NOT_ORIGINAL_BILLING_TEMPLATE');
  for(const word of ['不得外顯L區','FAKE_PRIVATE_INVOICE_2026','FAKE_PRIVATE_BANK','原請款／發票對照']){
    assert(!paper.includes(word),'PUBLIC_DOM_LEAKED '+word);
