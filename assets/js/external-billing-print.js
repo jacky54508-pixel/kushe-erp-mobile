@@ -1,4 +1,4 @@
-(function(){
+(async function(){
   'use strict';
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const money=v=>'$'+v.toLocaleString('zh-TW',{maximumFractionDigits:0}),decimal=v=>v.toLocaleString('zh-TW',{maximumFractionDigits:4}),paper=document.getElementById('paper');
@@ -64,11 +64,36 @@
     return {schema:'kushe-external-document-v1',documentType:'billing',title:'請款單',number:'',customer:d.customerName,project:d.displayProjectName,date:d.documentDate,taxMode,pricingMode:'',invoiceStatus,lines,salesAmount:t.untaxed,taxAmount:t.tax,totalAmount:t.grossTotal,retentionAmount:t.retention,receivableAmount:t.receivable,publicNote,company,fileName,mergedBillingProjects,isMergedExternalBilling:true};
   }
   document.getElementById('close').onclick=()=>window.close();
+  // P40-16BU: the protected source stays in the ERP tab's transient memory.
+  // One-use random ticket in URL is NOT a shareable link, and contains no billing JSON.
+  async function receiveOneTimePrint(){
+    if(location.hash)throw new Error('舊式請款快照網址不安全，請由 ERP 重新開啟；原資料未修改');
+    const ticket=new URLSearchParams(location.search).get('ksprint')||'';
+    if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ticket)
+       ||typeof window.BroadcastChannel!=='function')
+      throw new Error('安全列印憑證不存在或瀏覽器不支援；請由 ERP 重新開啟');
+    const transport=new window.BroadcastChannel('kushe-external-print-'+ticket);
+    const serialized=await new Promise((resolve,reject)=>{
+      let finished=false;
+      const finish=(err,value)=>{if(finished)return;finished=true;
+        try{transport.close()}catch(_){}
+        if(err)reject(err);else resolve(value);
+      };
+      window.setTimeout(()=>finish(new Error('安全列印請求已過期，請由 ERP 重新開啟')),12000);
+      transport.onmessage=event=>{
+        const msg=event?.data;
+        if(msg?.type!=='KUSHE_PRINT_DATA'||msg.ticket!==ticket)return;
+        if(typeof msg.serialized!=='string'||msg.serialized.length>1500000)
+          return finish(new Error('安全列印內容格式錯誤'));
+        finish(null,msg.serialized);
+      };
+      transport.postMessage({type:'KUSHE_PRINT_GET',ticket});
+    });
+    try{history.replaceState(null,'',location.pathname+'?v=p40-16bu-memory-handoff')}catch(_){}
+    return JSON.parse(serialized);
+  }
   try{
-    // Erase the incoming full-snapshot fragment after saving it in memory (NOT a share-safe URL).
-    const incomingHash=location.hash.slice(1);
-    try{history.replaceState(null,'',location.pathname+location.search)}catch(_){/* browser may refuse URL cleanup */}
-    const payload=JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(incomingHash))))),d=validate(payload);
+    const payload=await receiveOneTimePrint(),d=validate(payload);
     // P40-16BT: route ALL validated customer outputs through the UNMODIFIED
     // original billing-print.html template (LOGO, four info boxes, matrix,
     // construction summary, formal seals and client signature).
