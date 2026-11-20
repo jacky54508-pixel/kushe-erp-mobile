@@ -1,0 +1,54 @@
+name: P40-16BR historical external privacy FAKE candidate (NO DEPLOY)
+on:
+  push:
+    branches: [p40-16br-historical-external-pdf-privacy-candidate-20261120]
+    paths:
+      - 'assets/js/external-billing-print.js'
+      - '.p40-16br-review/**'
+      - '.p40-16br-tests/**'
+      - '.github/workflows/p40-16br-historical-external-privacy.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  historical-pdf-privacy-candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Stop if main/beta shifted or any unauthorized code changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16br-historical-external-pdf-privacy-candidate-20261120
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = "$(git rev-parse origin/main)"
+          git diff --name-only origin/main...HEAD >/tmp/p40br-changed
+          test "$(wc -l </tmp/p40br-changed)" -eq 5
+          if grep -Ev '^(assets/js/external-billing-print\.js|\.p40-16br-(review|tests)/.+|\.github/workflows/p40-16br-historical-external-privacy\.yml)$' /tmp/p40br-changed; then
+            echo 'STOP unauthorized changes';exit 1
+          fi
+          git diff --exit-code origin/main -- assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/billing-groups.js assets/js/billing-print.js billing-print.html index.html .github/workflows/pages.yml
+          git diff --name-status origin/main...HEAD | tee /tmp/p40br-status
+          test "$(grep -c '^M[[:space:]]\+assets/js/external-billing-print\.js$' /tmp/p40br-status)" -eq 1
+          test "$(grep -c '^A[[:space:]]' /tmp/p40br-status)" -eq 4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Run fake browser VM regression against patched real source, no skipped tests
+        env:
+          CI: 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check assets/js/external-billing-print.js
+          node --check .p40-16br-tests/test_historical_external.cjs
+          node --test .p40-16br-tests/test_historical_external.cjs | tee /tmp/p40br-result
+          ! grep -q 'ℹ skipped [1-9]' /tmp/p40br-result
+          node -e "const d=require('./.p40-16br-review/decision.json');if(d.production_release!=='BLOCKED'||d.safe_shareable_pdf_link_implemented||d.existing_intermediate_full_snapshot_fragment_exposure_eliminated||d.owner_formal_merge_or_deploy_authorization)process.exit(1)"
+          echo 'ISOLATED_CANDIDATE_ONLY_NO_PROD_DEPLOY_OR_REAL_PDF_EVIDENCE'
