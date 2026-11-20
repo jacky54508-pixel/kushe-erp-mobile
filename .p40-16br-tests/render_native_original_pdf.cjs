@@ -73,7 +73,9 @@ try{
  fs.writeFileSync(path.join(output,'FAKE_pdf_text.txt'),text);
  const pages=Number(info.match(/^Pages:\s*(\d+)/m)?.[1]);
  assert.equal(pages,1,'FAKE_PREVIEW_SHOULD_BE_A4_SINGLE_PAGE');
- assert.match(info,/Page size:\s*595(?:\.\d+)?\s+x\s+841(?:\.\d+)?\s+pts\s+\(A4\)/);
+ const dimensions=info.match(/Page size:\s*([0-9.]+)\s+x\s+([0-9.]+)\s+pts\s+\(A4\)/);
+ assert(dimensions,'PDF_IS_NOT_A4');
+ assert(Math.abs(Number(dimensions[1])-595.28)<1 && Math.abs(Number(dimensions[2])-841.89)<1,'PDF_A4_POINT_DIMENSIONS_WRONG');
  for(const required of ['酷舍企業有限公司','請款單','戶別施工統計','施工項目彙總','公司大小章','客戶簽章','測試M區']){
    assert(text.includes(required),'ORIGINAL_TEMPLATE_PDF_REQUIRED '+required);
  }
