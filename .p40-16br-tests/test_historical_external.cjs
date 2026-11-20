@@ -39,19 +39,102 @@ test('fixture includes one target and one prohibited other area',()=>{const d=fi
 test('fake source financial anchors are internally consistent',()=>{const d=fixture().document;assert.equal(d.totals.untaxed+d.totals.tax,d.totals.grossTotal);assert.equal(d.totals.grossTotal-d.totals.retention,d.totals.receivable);});
 test('mock URL payload intentionally demonstrates non-share-safe legacy snapshot',()=>{const text=JSON.stringify(fixture());assert.match(text,/PRIVATE-INVOICE-7738/);assert.match(text,/SECRET_OTHER_AREA_L/);});
 test('historical mixed-mode fixture preserves per-section tax modes',()=>{const d=fixture({mixed:true}).document;assert.deepEqual(d.sections.map(x=>x.taxMode),['未稅','含稅']);});
-// Full integration only in repository checkout. Do not count any skipped test as CI PASS.
-integration('historical active print shows one target, all lines and bottom work summary without invoice or bank',()=>{
- const r=execute(fixture()); const html=r.paper.innerHTML;
- assert.equal(r.replaced.length,0);assert.equal(r.print.disabled,false);assert.match(html,/FAKE_TARGET_M/);assert.match(html,/施工項目彙總/);assert.match(html,/保存版本/);assert.equal((html.match(/FAKE施工/g)||[]).length,3);
- for(const secret of ['SECRET_OTHER_AREA_L','PRIVATE-INVOICE-7738','PRIVATE_BANK_RECORD','原票號','原請款／發票對照','待兌現'])assert.ok(!html.includes(secret),'historical public HTML leaked '+secret);
+// Full integrated tests run only with the exact real GitHub repository checkout.
+function redirectedView(payload){
+  const r=execute(payload);
+  assert.equal(r.replaced.length,1,'public view must redirect to unchanged formal billing-print.html');
+  const url=new URL(r.replaced[0]);
+  assert.match(url.pathname,/\/billing-print\.html$/);
+  const view=JSON.parse(Buffer.from(decodeURIComponent(url.hash.slice(1)),'base64').toString('utf8'));
+  return {r,url,view};
+}
+integration('historical active bill uses original billing-print template, not alternate HTML',()=>{
+  const {r,view}=redirectedView(fixture());
+  assert.equal(r.paper.innerHTML,'');
+  assert.equal(view.schema,'kushe-external-document-v1');
+  assert.equal(view.documentType,'billing');
+  assert.equal(view.title,'請款單');
+  assert.equal(view.project,'FAKE_TARGET_M');
+  assert.equal(view.customer,'FAKE建商');
+  assert.equal(view.isMergedExternalBilling,false,'short historic bill must match normal 4-box template');
 });
-integration('archived historical document remains readable and marked not a current demand',()=>{const r=execute(fixture({archived:true}));assert.equal(r.print.disabled,false);assert.match(r.paper.innerHTML,/非本次付款通知/);});
-integration('legacy v1 mixed-mode historical detail is preserved',()=>{const r=execute(fixture({mixed:true}));assert.equal(r.print.disabled,false);assert.match(r.paper.innerHTML,/FAKE施工/);assert.match(r.paper.innerHTML,/施工項目彙總/);assert.match(r.paper.innerHTML,/105/);});
-integration('historical amounts remain saved values, without invoice ledger',()=>{const r=execute(fixture());assert.match(r.paper.innerHTML,/210/);assert.match(r.paper.innerHTML,/200/);assert.match(r.paper.innerHTML,/保留款/);assert.doesNotMatch(r.paper.innerHTML,/原發票稅額合計/);});
-integration('historical URL fragment is scrubbed after loading, even on validation failure',()=>{const r=execute(fixture());assert.deepEqual(r.scrubbed,['/erp/external-billing-print.html']);assert.equal(r.location.hash,'');const p=fixture();p.document.totals.tax=55;const fail=execute(p);assert.equal(fail.replaced.length,0);assert.equal(fail.paper.addedClass,'empty');assert.equal(fail.location.hash,'');});
-integration('draft document fails closed, not printed',()=>{const p=fixture();p.document.status='draft';const r=execute(p);assert.equal(r.print.disabled,true);assert.match(r.paper.innerHTML,/無法匯出/);});
-integration('archived document with current-only flag fails closed',()=>{const r=execute(fixture({archived:true,historical:false}));assert.equal(r.replaced.length,0);assert.match(r.paper.innerHTML,/無法匯出/);});
-integration('current active print flow still redirects to original external billing view',()=>{const r=execute(fixture({historical:false}));assert.equal(r.replaced.length,1);assert.match(r.replaced[0],/billing-print\.html/);const url=new URL(r.replaced[0]);const view=JSON.parse(Buffer.from(decodeURIComponent(url.hash.slice(1)),'base64').toString('utf8'));assert.equal(view.project,'FAKE_TARGET_M');assert.equal(view.isMergedExternalBilling,true);assert.equal(view.lines.length,2);assert.equal(view.totalAmount,210);assert.ok(!JSON.stringify(view).includes('PRIVATE-INVOICE-7738'));assert.ok(!JSON.stringify(view).includes('SECRET_OTHER_AREA_L'));});
-integration('invalid unified line amount rejects historical print',()=>{const p=fixture();p.document.unified.lines[0].amount=5000;const r=execute(p);assert.equal(r.print.disabled,true);assert.match(r.paper.innerHTML,/無法匯出/);});
-integration('dangerous markup in history public note is escaped',()=>{const p=fixture();p.document.note='<img src=x onerror=alert(1)>';const r=execute(p);assert.equal(r.print.disabled,false);assert.doesNotMatch(r.paper.innerHTML,/<img src=x/);assert.match(r.paper.innerHTML,/&lt;img/);});
-integration('no source invoice rows or reference list in historical renderer source',()=>{const s=readFileSync(sourcePath,'utf8');for(const word of ['const invoices=','原請款／發票對照（原帳款不變）','sourceInvoiceReferences','row.invoiceNo'])assert.ok(!s.includes(word),'private historical path still contains '+word);assert.match(s,/if\(!payload\.historical\)/);assert.match(s,/workSummary/);});
+integration('historical only displays one selected project and saved original financial amounts',()=>{
+  const {view}=redirectedView(fixture());
+  assert.deepEqual(view.mergedBillingProjects,['FAKE_TARGET_M']);
+  assert.equal(view.salesAmount,200);
+  assert.equal(view.taxAmount,10);
+  assert.equal(view.totalAmount,210);
+  assert.equal(view.retentionAmount,10);
+  assert.equal(view.receivableAmount,200);
+  assert.equal(view.lines.length,2);
+  assert.equal(view.lines[0].amount,100);
+  assert.equal(view.lines[1].amount,100);
+});
+integration('historical URL contains only customer-safe document projection, not source invoices or bank',()=>{
+  const {view,url}=redirectedView(fixture());
+  const string=JSON.stringify(view);
+  for(const secret of ['SECRET_OTHER_AREA_L','PRIVATE-INVOICE-7738','PRIVATE_BANK_RECORD','invoiceNo','sourceSnapshots','settlementSnapshots','sourceIds','bankSecret','原請款／發票對照']){
+    assert.ok(!string.includes(secret),'leaked original source in customer projection: '+secret);
+  }
+  assert.ok(!url.href.includes('PRIVATE-INVOICE-7738'));
+});
+integration('original company logo, stamp and sign areas stay owned by formal billing-print.html',()=>{
+  const template=readFileSync(path.resolve(__dirname,'../billing-print.html'),'utf8');
+  for(const required of ['formalCompanyLogo','formalCompanySeal','戶別施工統計','施工項目彙總','客戶簽章','公司大小章','class="info"']){
+    assert.ok(template.includes(required),'original billing template lacks '+required);
+  }
+  assert.ok(template.includes('esc(d.publicNote)'),'formal template must HTML-escape note');
+  const {view}=redirectedView(fixture());
+  assert.equal(view.company.name,'酷舍企業有限公司');
+});
+integration('archived historical version keeps native invoice layout and explicit read-only warning',()=>{
+  const {view}=redirectedView(fixture({archived:true}));
+  assert.match(view.publicNote,/歷史保存版本/);
+  assert.match(view.publicNote,/非本次付款通知/);
+  assert.match(view.fileName,/歷史保存v3\.pdf$/);
+  assert.equal(view.isMergedExternalBilling,false);
+});
+integration('historical input fragment is scrubbed after read even if projection fails',()=>{
+  const {r}=redirectedView(fixture());
+  assert.equal(r.scrubbed[0],'/erp/external-billing-print.html');
+  assert.equal(r.location.hash,'');
+  const invalid=fixture(); invalid.document.totals.tax=55;
+  const fail=execute(invalid);
+  assert.equal(fail.replaced.length,0);
+  assert.equal(fail.paper.addedClass,'empty');
+  assert.equal(fail.location.hash,'');
+});
+integration('draft and archived non-historical documents fail closed',()=>{
+  let p=fixture();p.document.status='draft';let r=execute(p);
+  assert.equal(r.replaced.length,0);assert.match(r.paper.innerHTML,/無法匯出/);
+  p=fixture({archived:true,historical:false});r=execute(p);
+  assert.equal(r.replaced.length,0);assert.match(r.paper.innerHTML,/無法匯出/);
+});
+integration('current active document still uses the original merged print behavior',()=>{
+  const {view}=redirectedView(fixture({historical:false}));
+  assert.equal(view.isMergedExternalBilling,true);
+  assert.equal(view.publicNote,'這是對外備註');
+  assert.equal(view.totalAmount,210);
+  assert.ok(!JSON.stringify(view).includes('PRIVATE-INVOICE-7738'));
+});
+integration('historical mixed tax mode stops instead of silently recomputing legacy totals',()=>{
+  const r=execute(fixture({mixed:true}));
+  assert.equal(r.replaced.length,0);
+  assert.match(r.paper.innerHTML,/不同單價稅別/);
+});
+integration('invalid line amount stops original-template handoff',()=>{
+  const p=fixture();p.document.unified.lines[0].amount=5000;
+  const r=execute(p);assert.equal(r.replaced.length,0);
+  assert.match(r.paper.innerHTML,/無法匯出/);
+});
+integration('native template securely escapes public note and does not invent new HTML renderer',()=>{
+  const p=fixture();p.document.note='<img src=x onerror=alert(1)>';
+  const {view}=redirectedView(p);assert.ok(view.publicNote.includes('<img src=x'));
+  const native=readFileSync(path.resolve(__dirname,'../billing-print.html'),'utf8');
+  assert.ok(native.includes('esc(d.publicNote)'));
+  const source=readFileSync(sourcePath,'utf8');
+  assert.ok(!source.includes('paper.innerHTML=\'<header class="masthead"'));
+  assert.ok(!source.includes('const invoices='));
+  assert.ok(!source.includes('const workSummary='));
+  assert.ok(source.includes('P40-16BT: route ALL'));
+});
