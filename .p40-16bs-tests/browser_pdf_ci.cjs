@@ -42,6 +42,7 @@ try {
  const pages=Number(info.match(/^Pages:\s*(\d+)/m)?.[1]);
  assert.equal(pages,1,'FAKE_SHORT_BILL_EXCEEDS_ONE_PAGE');
  for(const phrase of ['FAKE_TARGET_M','FAKE施工','施工項目彙總','非本次付款通知'])assert(txt.includes(phrase),'PDF_TEXT_MISSING '+phrase);
+ assert(txt.includes('酷舍企業有限公司')&&txt.includes('統編'),'CJK_FONT_FALLBACK_FAILED_PDF_TEXT');
  for(const secret of ['SECRET_ZONE_L','PRIVATE_INVOICE_7738','PRIVATE_BANK_551','原請款／發票對照'])assert(!txt.includes(secret),'PDF_LEAK '+secret);
  run(['--window-size=390,844','--screenshot='+path.join(out,'FAKE_mobile_390.png')]);
  run(['--window-size=1280,1000','--screenshot='+path.join(out,'FAKE_desktop_1280.png')]);
