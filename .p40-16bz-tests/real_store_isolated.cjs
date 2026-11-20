@@ -15,7 +15,7 @@ const fake={
  banks:[{id:'fake-bank',name:'FAKE BANK',openingBalance:100000,income:0,expense:0,balance:100000}],
  billings:[{id:'fake-billing',number:'B20261101-001',date:'2026-11-01',project:'fake-project',customer:'fake-customer',projectName:'FAKE PROJECT',customerName:'FAKE CUSTOMER',amount:10000,tax:500,grossTotal:10500,retention:500,total:10000,retentionAmount:500,retentionReceived:0,invoiceStatus:'invoice_pending',taxMode:'未稅',lines:[{house:'FAKE-1',item:'FAKE construction',unit:'式',qty:1,price:10000,subtotal:10000}]}],
  receivables:[{id:'fake-ar',billingId:'fake-billing',sourceNo:'B20261101-001',date:'2026-11-01',project:'fake-project',customer:'fake-customer',projectName:'FAKE PROJECT',customerName:'FAKE CUSTOMER',amount:10000,received:0,retention:500,retentionAmount:500,retentionReceived:0,status:'未收'}],
- attendance:[{id:'fake-attendance',date:'2026-11-01',employee:'fake-employee',project:'fake-project',days:1,hours:8}],
+ attendance:[{id:'fake-attendance',date:'2026-11-01',employee:'fake-employee',project:'fake-project',days:1,hours:8,dailyRate:2000,amount:2000}],
  payroll:[{id:'fake-payroll',month:'2026-11',employee:'fake-employee',days:1,baseSalary:2000,commission:0,fuel:0,meal:0,other:0,overtime:0,bonus:0,allowance:0,advance:0,laborInsurance:0,incomeTax:0,deduction:0,total:2000,status:'未付款'}],
  receipts:[],retentionReceipts:[],payables:[],payments:[],salaryPayments:[],commissions:[],bankTransactions:[],invoices:[],dailyLogs:[],quotations:[],audit:[]
 };
