@@ -1,0 +1,21 @@
+{
+  "phase": "P40-16BW",
+  "date": "2026-11-20",
+  "reference": "Owner uploaded 酷舍_請款單_達莉心閱_2026-11.pdf (kept private; NOT committed)",
+  "mode": "ISOLATED_FAKE_CUSTOMER_PDF_CSS_ONLY",
+  "parent_pr": 77,
+  "parent_sha": "650a544ef73c6b09243cfbe4e3d469f5be95646d",
+  "formal_main_sha": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "formal_beta_sha": "62669539053a15174081ba8670b18248195c6f8c",
+  "css_scope": "Only external merged billing projections marked referenceTemplateStyle: dali-standard-2026-11",
+  "original_standard_billing_and_quotation_unchanged": true,
+  "erp_store_cloud_sync_supabase_unchanged": true,
+  "real_rows_read_or_modified": false,
+  "financial_anchor_recalculation": false,
+  "template_pixel_equivalence_proven": false,
+  "real_phone_print_approved": false,
+  "complete_finance_regression": false,
+  "latest_synced_and_backup_verified": false,
+  "owner_formal_release_authorized": false,
+  "production_release": "BLOCKED"
+}
