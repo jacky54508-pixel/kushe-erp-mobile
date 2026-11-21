@@ -1,0 +1,106 @@
+name: P40-16CF A4 dense billing CSS-only rescue gate (NO DEPLOY)
+on:
+  push:
+    branches: [p40-16cf-dense-print-spacing-only-20261121]
+    paths:
+      - 'assets/css/p40-16cd-mint-quotation-billing.css'
+      - '.p40-16cf-review/**'
+      - '.github/workflows/p40-16cf-dense-a4-guard.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  print-spacing-fake-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fail closed: only appended CSS, pinned PR83/main/beta
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16cf-dense-print-spacing-only-20261121
+          git fetch --no-tags origin main beta p40-16ce-dense-a4-isolated-20261121
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git rev-parse origin/p40-16ce-dense-a4-isolated-20261121)" = aa96a4279d288dc418df325ffd1a0cf829e0ac47
+          test "$(git merge-base origin/p40-16ce-dense-a4-isolated-20261121 HEAD)" = aa96a4279d288dc418df325ffd1a0cf829e0ac47
+          git diff --name-status origin/p40-16ce-dense-a4-isolated-20261121...HEAD | tee /tmp/p40cf-diff
+          node <<'NODE'
+          const assert=require('node:assert/strict'),fs=require('node:fs'),{execFileSync}=require('node:child_process');
+          assert.deepEqual(fs.readFileSync('/tmp/p40cf-diff','utf8').trim().split('\n').sort(),[
+            'M\tassets/css/p40-16cd-mint-quotation-billing.css',
+            'A\t.p40-16cf-review/README.md',
+            'A\t.p40-16cf-review/decision.json',
+            'A\t.github/workflows/p40-16cf-dense-a4-guard.yml'
+          ].sort());
+          const base=execFileSync('git',['show','origin/p40-16ce-dense-a4-isolated-20261121:assets/css/p40-16cd-mint-quotation-billing.css'],{encoding:'utf8'}).trimEnd();
+          const css=fs.readFileSync('assets/css/p40-16cd-mint-quotation-billing.css','utf8');
+          assert.ok(css.startsWith(base+'\n'),'STOP existing approved CSS modified');
+          const appended=css.slice(base.length);
+          assert.match(appended,/P40-16CF/);
+          assert.match(appended,/@media print/);
+          assert.doesNotMatch(appended,/@import|url\(|script|localStorage|indexedDB|fetch\(/i);
+          assert.match(css,/#e2faf5/i,'Mint swatches preserved');
+          const d=require('./.p40-16cf-review/decision.json');
+          assert.equal(d.production_release,'BLOCKED');
+          assert.equal(d.owner_formal_deploy_authorized,false);
+          assert.equal(d.real_customer_data_in_repository,false);
+          assert.equal(d.all_construction_details_unchanged,true);
+          NODE
+          git diff --exit-code origin/p40-16ce-dense-a4-isolated-20261121 -- billing-print.html assets/js enterprise/index.html index.html .p40-16ce-tests .p40-16cd-tests
+          test ! -e 'KusheERP_safe_backup_20261121_000502.json'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: 14 safe print handoff tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check .p40-16ce-tests/real_dense_pagination.cjs
+          node --test .p40-16cb-tests/test_one_time_handoff.cjs | tee /tmp/p40cf-safe
+          grep -Eq '^# pass 14$' /tmp/p40cf-safe
+          grep -Eq '^# fail 0$' /tmp/p40cf-safe
+      - name: Setup Chromium, Chinese fonts, PDF inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq poppler-utils fonts-noto-cjk fontconfig
+          sudo fc-cache -f >/dev/null
+          mkdir -p /tmp/p40bv /tmp/p40bz
+          npm install --prefix /tmp/p40bv --no-audit --no-fund --silent playwright-core@1.56.0
+          ln -s /tmp/p40bv/node_modules /tmp/p40bz/node_modules
+          if command -v google-chrome >/dev/null; then echo "CHROME_BIN=$(command -v google-chrome)" >> "$GITHUB_ENV";else echo "CHROME_BIN=$(command -v google-chrome-stable)" >> "$GITHUB_ENV";fi
+      - name: Verify original mint normal quote and billing with 8 A4 samples
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16cd-tests/real_mint_quote_and_billing.cjs
+          node -e "const d=require('./p40cd-artifacts/RESULT.json');if(d.production_release!=='BLOCKED'||d.cases?.length!==8||!d.cases.every(c=>c.pages===1))process.exit(1)"
+      - name: Verify high-density billings fit A4 without missing a row or number
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16ce-tests/real_dense_pagination.cjs
+          node -e "const d=require('./p40ce-artifacts/RESULT.json');if(d.production_release!=='BLOCKED'||!d.one_page_supported_cases_pass||d.cases?.length!==6||d.cases.some(x=>x.blankPages!==0||!x.renderedTotalsUnchanged))process.exit(1)"
+          echo 'PASS: all defined 12-house/18-line/quote A4 cases, larger stress diagnostics recorded'
+      - name: Original ERP Store 28 fake financial/data recovery regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16cb-tests/real_full_workflow.cjs
+          node -e "const d=require('./p40ca-artifacts/RESULT.json');if(d.production_release!=='BLOCKED'||d.passed?.length<28||!d.passed.every(x=>x.status==='PASS'))process.exit(1)"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: p40cf-dense-billing-print-fake-A4
+          path: |
+            p40ce-artifacts/
+            p40cd-artifacts/RESULT.json
+            p40ca-artifacts/RESULT.json
+          if-no-files-found: warn
+          retention-days: 7
