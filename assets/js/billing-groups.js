@@ -400,9 +400,28 @@
         const view=window.KusheBillingPrint.buildExternalView(primary);
         payload.template={schema:'kushe-original-billing-template-v1',billingId:d.targetBillingId,company:copy(view.company),publicNote:view.publicNote||'',historicalDetails:view.lines.some(line=>line.sourcePricingType==='historical-supplement')};
       }
-      const url=new URL('external-billing-print.html?v=p39-inv1-invoice-reference',location.href);url.hash=encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(payload)))));
-      if(url.href.length>1500000)throw new Error('文件內容過大，請減少對外明細後再匯出');
-      const a=document.createElement('a');a.href=url.href;a.target='_blank';a.rel='noopener';document.body.append(a);a.click();a.remove();
+      // P40-16BU: Transfer the protected source snapshot only in memory,
+      // never in address-bar URL/history/referrer, localStorage or server.
+      if(typeof window.BroadcastChannel!=='function'||typeof window.crypto?.randomUUID!=='function')
+        throw new Error('此瀏覽器不支援安全請款列印，請更新瀏覽器；原資料未修改');
+      const serialized=JSON.stringify(payload);
+      if(serialized.length>1500000)throw new Error('文件內容過大，請減少對外明細後再匯出');
+      const ticket=window.crypto.randomUUID();
+      const transport=new window.BroadcastChannel('kushe-external-print-'+ticket);
+      let sent=false,closed=false;
+      const closeTransport=()=>{if(closed)return;closed=true;try{transport.close()}catch(_){}};
+      window.setTimeout(closeTransport,30000);
+      transport.onmessage=event=>{
+        const message=event?.data;
+        if(sent||closed||message?.type!=='KUSHE_PRINT_GET'||message.ticket!==ticket)return;
+        sent=true;
+        transport.postMessage({type:'KUSHE_PRINT_DATA',ticket,serialized});
+        window.setTimeout(closeTransport,1000);
+      };
+      const url=new URL('external-billing-print.html?v=p40-16bu-memory-handoff',location.href);
+      url.searchParams.set('ksprint',ticket);
+      const a=document.createElement('a');a.href=url.href;a.target='_blank';a.rel='noopener';
+      document.body.append(a);a.click();a.remove();
     }catch(e){notifyError(e.message)}
   }
   window.KusheBillingGroups=Object.freeze({filterRows,mountList,activeFor,openEditor,openLibrary,printSaved});
