@@ -1,0 +1,18 @@
+{
+  "phase": "P40-16CF",
+  "date": "2026-11-21",
+  "parent_pr": 83,
+  "parent_sha": "aa96a4279d288dc418df325ffd1a0cf829e0ac47",
+  "main": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "beta": "62669539053a15174081ba8670b18248195c6f8c",
+  "reason": "12-house billing and 18-line merged billing rendered two A4 pages, with totals and company chops pushed to second page",
+  "changes": "Append scoped @media print CSS for 10+ house matrix and dense merged invoice; no HTML/JS/data/accounting modifications",
+  "source_invoice_amounts_unchanged": true,
+  "all_construction_details_unchanged": true,
+  "mint_color_unchanged": "#E2FAF5",
+  "quotation_layout_unchanged": true,
+  "real_customer_data_in_repository": false,
+  "physical_devices_confirmed": false,
+  "production_release": "BLOCKED",
+  "owner_formal_deploy_authorized": false
+}
