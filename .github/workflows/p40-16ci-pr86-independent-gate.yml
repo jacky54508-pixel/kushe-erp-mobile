@@ -1,0 +1,132 @@
+name: P40-16CI independent 4-file PR86 pre-release fake CI (NO DEPLOY)
+on:
+  push:
+    branches: [p40-16ci-pr86-independent-gate-20261121]
+    paths:
+      - '.p40-16cb-tests/**'
+      - '.p40-16cd-tests/**'
+      - '.p40-16ce-tests/**'
+      - '.github/workflows/p40-16ci-pr86-independent-gate.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-four-file-release-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Confirm exact PR86 four-file release code and synthetic-only QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16ci-pr86-independent-gate-20261121
+          git fetch --no-tags origin main beta p40-16ci-publish-4-files-only-20261121
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git rev-parse origin/p40-16ci-publish-4-files-only-20261121)" = d84cb0e230cc21644432719aae7f8f4d904fd0e2
+          test "$(git merge-base origin/p40-16ci-publish-4-files-only-20261121 HEAD)" = d84cb0e230cc21644432719aae7f8f4d904fd0e2
+          git diff --name-status origin/main...origin/p40-16ci-publish-4-files-only-20261121 > /tmp/p40ci-actual-release-files
+          git diff --name-status origin/p40-16ci-publish-4-files-only-20261121...HEAD > /tmp/p40ci-qa-files
+          cat /tmp/p40ci-actual-release-files
+          cat /tmp/p40ci-qa-files
+          node <<'NODE'
+          const fs=require('node:fs'),assert=require('node:assert/strict'),{execFileSync}=require('node:child_process');
+          const lines=f=>fs.readFileSync(f,'utf8').trim().split('\n').sort();
+          assert.deepEqual(lines('/tmp/p40ci-actual-release-files'),[
+            'M\tassets/js/billing-groups.js',
+            'M\tassets/js/external-billing-print.js',
+            'M\tbilling-print.html',
+            'A\tassets/css/p40-16cd-mint-quotation-billing.css'
+          ].sort(),'STOP PR86 has extra changes');
+          assert.deepEqual(lines('/tmp/p40ci-qa-files'),[
+            'A\t.p40-16cb-tests/test_one_time_handoff.cjs',
+            'A\t.p40-16cb-tests/real_chrome_reference.cjs',
+            'A\t.p40-16cb-tests/real_full_workflow.cjs',
+            'A\t.p40-16cd-tests/real_mint_quote_and_billing.cjs',
+            'A\t.p40-16ce-tests/real_dense_pagination.cjs',
+            'A\t.github/workflows/p40-16ci-pr86-independent-gate.yml'
+          ].sort(),'STOP QA changed application source');
+          const expected={
+            'assets/js/billing-groups.js':'a91e4d555b39922087ed927a1a2fc37cc23e7163',
+            'assets/js/external-billing-print.js':'62e7f0840000bb43849b587b331e268ac5ee14c7',
+            'billing-print.html':'5e7f4906b2ecea04189c9eb37e55242273880fc4',
+            'assets/css/p40-16cd-mint-quotation-billing.css':'ed358d6ee2ebdb7dd5b8491e3501fd79d63cbc99'
+          };
+          for(const [file,blob] of Object.entries(expected)){
+            const actual=execFileSync('git',['hash-object',file],{encoding:'utf8'}).trim();
+            assert.equal(actual,blob,'STOP published application file differs from PR85 CI-passed blob: '+file);
+          }
+          NODE
+          git diff --exit-code origin/p40-16ci-publish-4-files-only-20261121 -- assets/js assets/css billing-print.html index.html enterprise/index.html
+          test ! -e 'KusheERP_safe_backup_20261121_000502.json'
+          test ! -e '清新薄荷色台灣請款單(1).png'
+          echo 'PASS: PR86 EXACT 4 FILES; QA ADDS TESTS ONLY; NO DATA AND NO DEPLOY'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Parse real source and pass 14 ephemeral print/privacy tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check assets/js/billing-groups.js
+          node --check assets/js/external-billing-print.js
+          node --check .p40-16cb-tests/real_chrome_reference.cjs
+          node --check .p40-16cb-tests/real_full_workflow.cjs
+          node --check .p40-16cd-tests/real_mint_quote_and_billing.cjs
+          node --check .p40-16ce-tests/real_dense_pagination.cjs
+          node --test .p40-16cb-tests/test_one_time_handoff.cjs | tee /tmp/p40cg-transport
+          grep -Eq '^# pass 14$' /tmp/p40cg-transport
+          grep -Eq '^# fail 0$' /tmp/p40cg-transport
+      - name: Prepare real Chromium, Chinese fonts, PDF inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq poppler-utils fonts-noto-cjk fontconfig
+          sudo fc-cache -f >/dev/null
+          mkdir -p /tmp/p40bv /tmp/p40bz
+          npm install --prefix /tmp/p40bv --no-audit --no-fund --silent playwright-core@1.56.0
+          ln -s /tmp/p40bv/node_modules /tmp/p40bz/node_modules
+          if command -v google-chrome >/dev/null; then echo "CHROME_BIN=$(command -v google-chrome)" >> "$GITHUB_ENV";else echo "CHROME_BIN=$(command -v google-chrome-stable)" >> "$GITHUB_ENV";fi
+          command -v pdfinfo
+          command -v pdftotext
+      - name: Real Chromium 4 historic/current customer A4 and confidentiality cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16cb-tests/real_chrome_reference.cjs
+          node -e "const d=require('./p40bw-artifacts/RESULT.json');if(d.production_release!=='BLOCKED'||d.cases?.length!==4||!d.cases.every(x=>x.pages===1&&x.has_real_browser_popup)||!d.negative_cases.reject_old_snapshot_url||!d.negative_cases.reject_missing_ticket)process.exit(1)"
+      - name: Real Chromium 8 mint quote/bill/retention/actual/merged A4 cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16cd-tests/real_mint_quote_and_billing.cjs
+          node -e "const d=require('./p40cd-artifacts/RESULT.json');if(d.production_release!=='BLOCKED'||d.cases?.length!==8||!d.cases.every(x=>x.pages===1&&x.hasLogo&&x.hasSeal))process.exit(1)"
+      - name: Real Chromium 6 12-house, 18-32 merged row, 18-36 quote A4 stress cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16ce-tests/real_dense_pagination.cjs
+          node -e "const d=require('./p40ce-artifacts/RESULT.json');if(d.production_release!=='BLOCKED'||d.cases?.length!==6||!d.one_page_supported_cases_pass||!d.cases.every(x=>x.pages===1&&x.blankPages===0&&x.renderedTotalsUnchanged)||d.diagnosticMultiplePage.length)process.exit(1)"
+      - name: Real ERP Store 28 isolated synthetic financial/storage checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16cb-tests/real_full_workflow.cjs
+          node -e "const d=require('./p40ca-artifacts/RESULT.json');if(d.production_release!=='BLOCKED'||d.passed?.length<28||!d.passed.every(x=>x.status==='PASS')||d.realSupabaseTouched||d.productionDataUsed||d.mainBetaModified)process.exit(1)"
+          echo 'PASS PR86 same app code: 14 privacy + 4 current/historical + 8 mint quote/billing + 6 dense A4 + 28 fake finance; release still requires separate owner gates'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: p40ci-pr86-independent-four-file-release-qa-fake
+          path: |
+            p40bw-artifacts/
+            p40cd-artifacts/
+            p40ce-artifacts/
+            p40ca-artifacts/RESULT.json
+          if-no-files-found: warn
+          retention-days: 7
