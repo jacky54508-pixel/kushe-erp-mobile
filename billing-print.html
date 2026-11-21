@@ -128,7 +128,7 @@
   <link rel="stylesheet" href="assets/css/p40-16cd-mint-quotation-billing.css?v=p40-16cd-1">
 </head>
 <body>
-  <div class="toolbar"><button onclick="printDocument()">匯出 PDF／列印</button><button class="close" onclick="closePrintView()">關閉</button></div>
+  <div class="toolbar"><button id="safePrintButton" onclick="printDocument()" disabled>載入公司 LOGO／大小章中…</button><button class="close" onclick="closePrintView()">關閉</button></div>
   <main class="paper" id="paper"></main>
   <script src="assets/js/display-sort.js?v=20260913-p17-3-house-sort1"></script>
   <script src="assets/js/external-billing-invoice.js?v=p39-inv1-source1"></script>
@@ -236,15 +236,93 @@
     document.title=d.fileName||d.title||'酷舍對外文件';const paper=document.getElementById('paper');paper.classList.toggle('billing-document',!isQuote);paper.classList.toggle('quotation-document',isQuote);paper.classList.toggle('invoice-group-document',isMergedExternalBilling);paper.classList.toggle('reference-template',!isQuote&&d.referenceTemplateStyle==='dali-standard-2026-11');paper.innerHTML=`<header class="head"><div class="company-block"><span class="company-logo-frame"><img class="company-logo" id="formalCompanyLogo" alt="酷舍企業" onerror="this.hidden=true"></span><div class="company"><h1>${esc(c.name||'酷舍企業有限公司')}</h1><div class="en">${esc(c.englishName||'Cool Sir Limited Company')}</div><div class="sub">${companyInfo.map(value=>`<span>${esc(value)}</span>`).join('')}</div></div></div><div class="doc-title"><h2>${esc(d.title||'請款單')}</h2></div></header><section class="info"><div><span class="label">客戶</span>${esc(d.customer||'—')}</div><div><span class="label">案場</span>${esc(d.project||'—')}</div><div><span class="label">日期</span>${esc(d.date||'—')}</div>${isActual?`<div><span class="label">稅別</span>${esc(d.taxMode==='含稅'?'含稅':'未稅')}</div>`:`<div><span class="label">稅額方式</span>${esc(d.taxMode||'—')}</div>`}</section>${mergedScope}${documentMatrix}${documentDetail}${groupedSummary}${summary}${d.publicNote?`<section class="note"><b>備註：</b><br>${esc(d.publicNote)}</section>`:''}<section class="sign"><div class="client-sign">客戶簽章</div><div class="company-seals"><div>公司大小章</div><div class="seal-wrap"><img class="seal" id="formalCompanySeal" alt="公司大小章" onerror="this.hidden=true"></div></div></section>`;if(isQuote)paper.innerHTML=`<div class="quotation-content" id="quotationContent">${paper.innerHTML}</div>`;
     function centerPaperInViewport(){const zoom=Number.parseFloat(getComputedStyle(paper).zoom)||1,viewportWidth=document.documentElement.clientWidth;paper.style.setProperty('--preview-center-left',`${viewportWidth/(2*zoom)}px`)}
     if(window.matchMedia('screen').matches){centerPaperInViewport();window.addEventListener('resize',()=>requestAnimationFrame(centerPaperInViewport),{passive:true})}
-    async function loadAssets(){const enterpriseUrl=/\/beta(?:\/|$)/.test(window.location.pathname)?'../enterprise/index.html':'./enterprise/index.html';try{const source=await fetch(enterpriseUrl).then(r=>r.text());for(const [name,id] of [['companyLogoAsset','formalCompanyLogo'],['companySealAsset','formalCompanySeal']]){const start=source.indexOf('const '+name+'=');if(start<0)continue;let end=source.indexOf(';\n',start);if(end<0)end=source.indexOf(';\r',start);const parts=[...source.slice(start,end).matchAll(/'([^']*)'/g)].map(x=>x[1]);if(parts.length){const image=document.getElementById(id);if(id==='formalCompanySeal')image.onload=()=>{image.onload=null;removeSealBackground(image)};image.src=parts.join('');if(id==='formalCompanyLogo')image.style.display='block'}}}catch(e){}}
+    // P40-16CK: original same-origin company logo + red seals must be decoded
+    // (including post-processing) before the print button becomes enabled.
+    async function loadAssets(){
+      const enterpriseUrl=/\/beta(?:\/|$)/.test(window.location.pathname)?'../enterprise/index.html':'./enterprise/index.html';
+      const response=await fetch(enterpriseUrl,{cache:'no-store'});
+      if(!response.ok)throw new Error('ENTERPRISE_ASSET_FETCH_FAILED');
+      const source=await response.text();
+      for(const [name,id] of [['companyLogoAsset','formalCompanyLogo'],['companySealAsset','formalCompanySeal']]){
+        const start=source.indexOf('const '+name+'=');
+        if(start<0)throw new Error('MISSING_'+name);
+        let end=source.indexOf(';\n',start);
+        if(end<0)end=source.indexOf(';\r',start);
+        if(end<0)throw new Error('INCOMPLETE_'+name);
+        const parts=[...source.slice(start,end).matchAll(/'([^']*)'/g)].map(match=>match[1]);
+        const trustedSource=parts.join('');
+        if(!trustedSource.startsWith('data:image/png;base64,')||trustedSource.length<1024)throw new Error('INVALID_'+name);
+        const prepared=new Image();
+        prepared.decoding='sync';
+        prepared.src=trustedSource;
+        await prepared.decode();
+        if(!prepared.naturalWidth||!prepared.naturalHeight)throw new Error('UNDECODABLE_'+name);
+        if(id==='formalCompanySeal'){
+          removeSealBackground(prepared);
+          await prepared.decode();
+          if(!prepared.naturalWidth)throw new Error('SEAL_TRANSPARENCY_FAILED');
+        }
+        const image=document.getElementById(id);
+        if(!image)throw new Error('MISSING_IMAGE_NODE_'+id);
+        image.hidden=false;
+        image.decoding='sync';
+        image.src=prepared.src;
+        if(id==='formalCompanyLogo')image.style.display='block';
+        await image.decode();
+        if(!image.complete||!image.naturalWidth)throw new Error('IMAGE_NOT_READY_'+id);
+      }
+      if(document.fonts&&document.fonts.ready)await document.fonts.ready;
+      return true;
+    }
     const nextFrame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
     const assetTimeout=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
     async function waitForStableImage(image){if(!image||!image.src)return;for(let attempt=0;attempt<4;attempt+=1){const source=image.currentSrc||image.src;if(!image.complete)await Promise.race([new Promise(resolve=>{image.addEventListener('load',resolve,{once:true});image.addEventListener('error',resolve,{once:true})}),assetTimeout(2000)]);try{if(image.decode)await Promise.race([image.decode(),assetTimeout(2000)])}catch(e){}await nextFrame();if(image.complete&&(image.currentSrc||image.src)===source)return}}
     function millimetersToPixels(mm){const ruler=document.createElement('div');ruler.style.cssText=`position:absolute;visibility:hidden;pointer-events:none;height:${mm}mm`;document.body.appendChild(ruler);const pixels=ruler.getBoundingClientRect().height;ruler.remove();return pixels}
     async function fitQuotationToA4(){const content=document.getElementById('quotationContent');if(!content)return 1;const targetHeight=millimetersToPixels(277.5);content.style.zoom='1';content.style.width='100%';await nextFrame();await nextFrame();const naturalHeight=content.getBoundingClientRect().height;let scale=naturalHeight>targetHeight?Math.min(1,targetHeight/naturalHeight*.995):1;for(let attempt=0;attempt<4;attempt+=1){content.style.zoom=String(scale);content.style.width=`${100/scale}%`;await nextFrame();await nextFrame();const height=content.getBoundingClientRect().height;if(height<=targetHeight+.5)break;scale=Math.max(.7,scale*(targetHeight/height)*.995)}paper.dataset.quotationScale=scale.toFixed(4);window.__quotationPrintScale=scale;return scale}
     async function prepareQuotationPrint(){await loadAssets();try{if(document.fonts&&document.fonts.ready)await document.fonts.ready}catch(e){}await Promise.all([...document.querySelectorAll('#quotationContent img')].map(waitForStableImage));await nextFrame();await nextFrame();return fitQuotationToA4()}
-    const autoPrint=new URLSearchParams(location.search).get('print')==='1';let quotationPrintReady=Promise.resolve(1);function printDocument(){if(isQuote)quotationPrintReady.then(()=>window.print());else window.print()}
-    if(isQuote){quotationPrintReady=prepareQuotationPrint().catch(()=>fitQuotationToA4());quotationPrintReady.then(()=>{window.__billingPrintReady=true;if(autoPrint)requestAnimationFrame(()=>window.print())})}else loadAssets().finally(()=>{window.__billingPrintReady=true;if(autoPrint)setTimeout(()=>window.print(),250)});
+    const autoPrint=new URLSearchParams(location.search).get('print')==='1';
+    const safePrintButton=document.getElementById('safePrintButton');
+    window.__billingPrintReady=false;
+    window.__billingPrintError='';
+    function blockPrintForMissingSeals(){
+      window.__billingPrintReady=false;
+      window.__billingPrintError='COMPANY_IMAGES_NOT_READY';
+      safePrintButton.disabled=true;
+      safePrintButton.textContent='公司圖片未載入，禁止匯出';
+      if(!document.getElementById('sealLoadError')){
+        const notice=document.createElement('span');
+        notice.id='sealLoadError';
+        notice.setAttribute('role','alert');
+        notice.textContent='公司 LOGO／大小章載入失敗，請重新開啟單據，勿使用缺章 PDF。';
+        notice.style.cssText='color:#fff;font-size:12px;font-weight:700;padding:0 8px';
+        document.querySelector('.toolbar').appendChild(notice);
+      }
+    }
+    function allowPrintWhenVerified(){
+      const logo=document.getElementById('formalCompanyLogo');
+      const seal=document.getElementById('formalCompanySeal');
+      if(!logo?.complete||!logo.naturalWidth||!seal?.complete||!seal.naturalWidth){
+        blockPrintForMissingSeals();
+        return;
+      }
+      window.__billingPrintReady=true;
+      window.__billingPrintError='';
+      safePrintButton.disabled=false;
+      safePrintButton.textContent='匯出 PDF／列印';
+      if(autoPrint)requestAnimationFrame(()=>printDocument());
+    }
+    function printDocument(){
+      if(!window.__billingPrintReady||safePrintButton.disabled)return;
+      const logo=document.getElementById('formalCompanyLogo');
+      const seal=document.getElementById('formalCompanySeal');
+      if(!logo?.naturalWidth||!seal?.naturalWidth){blockPrintForMissingSeals();return;}
+      window.print();
+    }
+    if(isQuote){
+      prepareQuotationPrint().then(allowPrintWhenVerified).catch(blockPrintForMissingSeals);
+    }else{
+      loadAssets().then(allowPrintWhenVerified).catch(blockPrintForMissingSeals);
+    }
   </script>
 </body>
 </html>
