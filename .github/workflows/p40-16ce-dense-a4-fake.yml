@@ -90,7 +90,7 @@ jobs:
           node .p40-16cb-tests/real_full_workflow.cjs
           node -e "const d=require('./p40ca-artifacts/RESULT.json');if(d.production_release!=='BLOCKED'||d.passed?.length<28||!d.passed.every(r=>r.status==='PASS'))process.exit(1)"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: success()
+        if: always()
         with:
           name: p40ce-mint-dense-quote-billing-fake-a4
           path: |
