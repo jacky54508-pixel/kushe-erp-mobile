@@ -35,3 +35,91 @@
 #paper.billing-document .client-sign,#paper.quotation-document .client-sign{color:#41546c;border-top-color:#193e6a}
 /* A dense grouped customer PDF keeps every real row; compact layout is prioritized. */
 @media print{#paper.billing-document,#paper.quotation-document{min-height:297mm}#paper.invoice-group-document:has(.dense-original-details)::before,#paper.invoice-group-document:has(.dense-original-details)::after{display:none}#paper.invoice-group-document:has(.dense-original-details){min-height:0}}
+
+/* P40-16CF — ONLY high-density billing on PRINT, no missing rows, no changes
+   to approved colors, quotation styles, financial values or source documents. */
+@media print {
+  /* Larger house matrix (10+ rows): retain all homes but remove excess padding. */
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)){
+    padding-top:5mm;padding-bottom:5mm
+  }
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .head{
+    padding-bottom:1.5mm
+  }
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .info{
+    margin:2mm 0 2mm;padding:1.5mm;gap:1mm 2mm
+  }
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .info>div{
+    min-height:8mm;padding:1mm 2mm;font-size:8.8pt
+  }
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .section{
+    margin-top:1.5mm
+  }
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .section-title{
+    padding:1.4mm 3mm;font-size:9pt
+  }
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .matrix th,
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .matrix td{
+    padding:.65mm 1.2mm;font-size:8.1pt;line-height:1.15
+  }
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .detail th,
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .detail td{
+    padding-top:.75mm;padding-bottom:.75mm;font-size:8.2pt;line-height:1.14
+  }
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .detail td.item{
+    font-size:8.6pt
+  }
+  /* Dense cross-area grouped billing: keep every original row and the summary. */
+  #paper.invoice-group-document:has(.dense-original-details) .head{padding-bottom:1.1mm}
+  #paper.invoice-group-document:has(.dense-original-details) .info{
+    margin:1.5mm 0 1.5mm;padding:1.2mm;gap:.8mm 1.5mm
+  }
+  #paper.invoice-group-document:has(.dense-original-details) .info>div{
+    min-height:7.5mm;padding:.7mm 1.6mm;font-size:8.4pt
+  }
+  #paper.invoice-group-document:has(.dense-original-details) .section{
+    margin-top:1.25mm
+  }
+  #paper.invoice-group-document:has(.dense-original-details) .section-title{
+    padding:1.2mm 2.7mm;font-size:8.8pt
+  }
+  #paper.invoice-group-document:has(.dense-original-details) .dense-line-table th,
+  #paper.invoice-group-document:has(.dense-original-details) .dense-line-table td{
+    padding:.55mm 1mm;font-size:7.7pt;line-height:1.10
+  }
+  #paper.invoice-group-document:has(.dense-original-details) .dense-line-table td.item{
+    padding:.55mm 1mm;font-size:7.9pt;line-height:1.12
+  }
+  #paper.invoice-group-document:has(.dense-original-details) .grouped-item-summary-table th,
+  #paper.invoice-group-document:has(.dense-original-details) .grouped-item-summary-table td{
+    padding:.55mm 1mm;font-size:7.7pt;line-height:1.12
+  }
+  #paper.invoice-group-document:has(.dense-original-details) .grouped-item-summary-table td.item{
+    font-size:7.9pt;line-height:1.12
+  }
+  /* Two saved totals and the real company chops must remain fully visible. */
+  #paper.billing-document:has(.matrix tbody tr:nth-child(11)) .summary,
+  #paper.invoice-group-document:has(.dense-original-details) .summary{
+    margin-top:1.6mm
+  }
+  #paper.billing-document:has(.matrix tbody tr:nth-child(11)) .summary-row,
+  #paper.invoice-group-document:has(.dense-original-details) .summary-row{
+    min-height:7mm;padding:1mm 2.7mm;font-size:8.7pt
+  }
+  #paper.billing-document:has(.matrix tbody tr:nth-child(11)) .sign,
+  #paper.invoice-group-document:has(.dense-original-details) .sign{
+    margin-top:1.1mm
+  }
+  #paper.billing-document:has(.matrix tbody tr:nth-child(11)) .seal-wrap,
+  #paper.invoice-group-document:has(.dense-original-details) .seal-wrap{
+    height:18mm
+  }
+  #paper.billing-document:has(.matrix tbody tr:nth-child(11)) .seal,
+  #paper.invoice-group-document:has(.dense-original-details) .seal{
+    max-height:17mm
+  }
+  #paper.billing-document:has(.matrix tbody tr:nth-child(11)) .client-sign,
+  #paper.invoice-group-document:has(.dense-original-details) .client-sign{
+    padding-top:4mm
+  }
+}
