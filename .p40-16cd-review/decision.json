@@ -1,0 +1,27 @@
+{
+  "phase": "P40-16CD",
+  "date": "2026-11-21",
+  "source_reference": "Owner-approved uploaded PNG 清新薄荷色台灣請款單(1).png (image NOT committed)",
+  "mode": "QUOTATION_AND_BILLING_VISUAL_STYLES_ONLY",
+  "parent_pr": 81,
+  "parent_sha": "36fb2cdf14bed7aa11358e4515acb77b336dd793",
+  "main_unchanged_expected_sha": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "beta_unchanged_expected_sha": "62669539053a15174081ba8670b18248195c6f8c",
+  "changes": [
+    "billing-print.html adds one versioned CSS link only",
+    "assets/css/p40-16cd-mint-quotation-billing.css is purely presentation"
+  ],
+  "new_fake_only_regression": "8 A4 render cases: standard quotation, actual quotation, billing, retention, merged customer, 390px emulation",
+  "quote_calculations_unchanged": true,
+  "billing_amounts_unchanged": true,
+  "original_customer_supplier_employee_bank_data_unchanged": true,
+  "retention_invoice_payroll_commissions_unchanged": true,
+  "logo_and_seal_assets_unchanged": true,
+  "cloud_sync_and_store_unchanged": true,
+  "no_real_backup_in_repo": true,
+  "all_tests_fake_only": true,
+  "actual_physical_devices_passed": false,
+  "production_release": "BLOCKED",
+  "owner_formal_deploy_authorized": false,
+  "ci_success_does_not_authorize_deploy": true
+}
