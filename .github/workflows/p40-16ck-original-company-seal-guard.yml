@@ -1,0 +1,134 @@
+name: P40-16CK original company seals PDF fail-closed fake-only guard (NO DEPLOY)
+on:
+  push:
+    branches: [p40-16ck-stamp-image-ready-isolated-20261121]
+    paths:
+      - 'billing-print.html'
+      - '.p40-16ck-tests/**'
+      - '.p40-16ck-review/**'
+      - '.p40-16cb-tests/**'
+      - '.p40-16cd-tests/**'
+      - '.p40-16ce-tests/**'
+      - '.github/workflows/p40-16ck-original-company-seal-guard.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verified-original-seals-fake:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fail closed on base sha, exactly one app file and original assets unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16ck-stamp-image-ready-isolated-20261121
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 94c5ee5888c6fb740f4f939ceed6f10cb3401b25
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = 94c5ee5888c6fb740f4f939ceed6f10cb3401b25
+          git diff --name-status origin/main...HEAD > /tmp/p40ck-diff
+          cat /tmp/p40ck-diff
+          node <<'NODE'
+          const fs=require('node:fs'),assert=require('node:assert/strict'),{execFileSync}=require('node:child_process');
+          assert.deepEqual(fs.readFileSync('/tmp/p40ck-diff','utf8').trim().split('\n').sort(),[
+            'M\tbilling-print.html',
+            'A\t.p40-16ck-tests/real_chrome_seals.cjs',
+            'A\t.p40-16ck-review/decision.json',
+            'A\t.p40-16ck-review/README.md',
+            'A\t.p40-16cb-tests/test_one_time_handoff.cjs',
+            'A\t.p40-16cb-tests/real_full_workflow.cjs',
+            'A\t.p40-16cd-tests/real_mint_quote_and_billing.cjs',
+            'A\t.p40-16ce-tests/real_dense_pagination.cjs',
+            'A\t.github/workflows/p40-16ck-original-company-seal-guard.yml'
+          ].sort());
+          const src=execFileSync('git',['show','origin/main:billing-print.html'],{encoding:'utf8'});
+          const changed=fs.readFileSync('billing-print.html','utf8');
+          assert.match(changed,/P40-16CK/);
+          assert.match(changed,/await prepared.decode\(\)/);
+          assert.match(changed,/await image.decode\(\)/);
+          assert.match(changed,/COMPANY_IMAGES_NOT_READY/);
+          assert.match(changed,/safePrintButton.*disabled|disabled>載入公司 LOGO/);
+          for(const token of [
+            "const matrix=!isQuote&&houses.length",
+            "const quoteRows=lines.map",
+            "const billingGroups=new Map()",
+            "const billingRows=[...billingGroups.values()]",
+            "const billingDetailTotal=",
+            "const detail=isQuote?",
+            "const summary=isActual?",
+            "const groupedSummary=",
+            "const documentMatrix=denseInvoiceGroup?"
+          ]){
+            assert.ok(src.includes(token)&&changed.includes(token),'STOP original billing/quotation algorithm changed: '+token);
+          }
+          const d=require('./.p40-16ck-review/decision.json');
+          assert.equal(d.production_release,'BLOCKED');
+          assert.equal(d.release_approval_for_this_patch,false);
+          assert.equal(d.user_real_data_changed,false);
+          assert.equal(d.user_logo_seal_recreated,false);
+          NODE
+          git diff --exit-code origin/main -- enterprise/index.html assets/css assets/js index.html .github/workflows/pages.yml
+          test ! -e 'KusheERP_safe_backup_20261121_000502.json'
+          echo 'PASS: one print-only HTML, real seal assets untouched; production release BLOCKED'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Original one-time external print privacy tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check .p40-16ck-tests/real_chrome_seals.cjs
+          node --test .p40-16cb-tests/test_one_time_handoff.cjs | tee /tmp/p40ck-privacy
+          grep -Eq '^# pass 14$' /tmp/p40ck-privacy
+          grep -Eq '^# fail 0$' /tmp/p40ck-privacy
+      - name: Prepare real Chromium, Chinese fonts and PDF embedded-image checker
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq poppler-utils fonts-noto-cjk fontconfig
+          sudo fc-cache -f >/dev/null
+          mkdir -p /tmp/p40bv /tmp/p40bz
+          npm install --prefix /tmp/p40bv --no-audit --no-fund --silent playwright-core@1.56.0
+          ln -s /tmp/p40bv/node_modules /tmp/p40bz/node_modules
+          if command -v google-chrome >/dev/null; then echo "CHROME_BIN=$(command -v google-chrome)" >> "$GITHUB_ENV";else echo "CHROME_BIN=$(command -v google-chrome-stable)" >> "$GITHUB_ENV";fi
+          command -v pdfimages
+          command -v pdfinfo
+      - name: Real Chrome original seals and logo actual embedded PDF + delayed/blocked asset cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16ck-tests/real_chrome_seals.cjs
+          test -s p40ck-artifacts/RESULT.json
+          node -e "const d=require('./p40ck-artifacts/RESULT.json');if(d.release!=='BLOCKED'||d.tests?.length!==5||!d.tests[4].blockedExport||!d.tests.slice(0,4).every(x=>x.pdfImages>=2&&x.logoWidth>0&&x.sealWidth>0))process.exit(1)"
+      - name: Prior 8 approved mint original quote and billing A4 samples
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16cd-tests/real_mint_quote_and_billing.cjs
+          node -e "const d=require('./p40cd-artifacts/RESULT.json');if(d.production_release!=='BLOCKED'||d.cases?.length!==8||!d.cases.every(x=>x.pages===1&&x.hasLogo&&x.hasSeal))process.exit(1)"
+      - name: Prior 6 dense A4 original-line retention and 28 fake financial checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16ce-tests/real_dense_pagination.cjs
+          node -e "const d=require('./p40ce-artifacts/RESULT.json');if(d.production_release!=='BLOCKED'||d.cases?.length!==6||!d.cases.every(x=>x.pages===1&&x.blankPages===0&&x.renderedTotalsUnchanged))process.exit(1)"
+          node .p40-16cb-tests/real_full_workflow.cjs
+          node -e "const d=require('./p40ca-artifacts/RESULT.json');if(d.production_release!=='BLOCKED'||d.passed.length<28||!d.passed.every(x=>x.status==='PASS'))process.exit(1)"
+          echo 'P40-16CK ISOLATED COMPANY SEAL FAIL-CLOSED + EXISTING PDF/FINANCE PASS, NO DEPLOY'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: p40ck-original-company-seal-real-PDF-fake
+          path: |
+            p40ck-artifacts/
+            p40cd-artifacts/RESULT.json
+            p40ce-artifacts/RESULT.json
+            p40ca-artifacts/RESULT.json
+          if-no-files-found: warn
+          retention-days: 7
