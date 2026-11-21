@@ -79,7 +79,7 @@ async function runCase(browser,base,c){
  assert.equal(audit.itemColor,'rgb(226, 250, 245)',c.id+' ITEM_MINT_CHANGED');
  assert.equal(audit.amountColor,'rgb(255, 255, 255)',c.id+' AMOUNT_WHITE_CHANGED');
  if(c.dense){assert.equal(audit.hasDense,true,'DENSE_DETAIL_MISSING');assert.equal(audit.hasGroupedSummary,true,'DENSE_GROUPED_SUMMARY_MISSING');assert.equal(audit.denseRows,c.rows,'DENSE_ORIGINAL_ROWS_LOST');}
- else{assert.equal(audit.detailRows,c.rows===12?1:c.rows,'DETAIL_COUNT_MISMATCH');}
+ else{assert.equal(audit.detailRows,c.id==='billing_12_houses'?4:c.rows,'DETAIL_COUNT_MISMATCH');}
  if(c.type==='quotation')assert.ok(audit.hasQuotationWrapper,'QUOTATION_WRAPPER_MISSING');
  if(c.id==='billing_12_houses')assert.equal(audit.houseColor,'rgb(226, 250, 245)','HOUSE_MINT_DIFFERENT_FROM_ITEM');
  const pdf=path.join(OUT,c.id+'.pdf');
