@@ -167,6 +167,83 @@ async function run(){
   },material.id);
   assert.ok(insufficient.error&&insufficient.same);log('MATERIAL_OVERSTOCK_REJECTED_NO_ACCOUNTING_WRITE');
 
+
+  const second=await page.evaluate(async()=>{
+    const s=window.KuSheERPStore,proj=await s.saveProject({name:'FAKE OTHER AREA L',customer:'fake-customer'});
+    await s.saveDailyBatch({date:'2026-12-06',employeeIds:['fake-employee'],workMode:'none',
+      commissionEnabled:false,lines:[{project:proj.id,house:'FAKE-L101',item:'FAKE repair L',unit:'式',qty:1,inputPrice:3000,taxMode:'未稅'}]});
+    const d=s.unbilledWork({project:proj.id})[0]?.details?.[0];if(!d)throw Error('FAKE_SECOND_AREA_SOURCE_MISSING');
+    const ref={sourceGroupKey:d.sourceGroupKey,sourceItemIndex:d.sourceItemIndex,workItemId:d.workItemId};
+    const b=await s.createBilling({date:'2026-12-07',customer:'fake-customer',customerName:'FAKE CUSTOMER',project:proj.id,projectName:proj.name,
+      sourceItemRefs:[ref],lines:[{house:d.house,item:d.item,unit:d.unit,qty:1,price:3000,sourceRefs:[ref]}],
+      taxMode:'未稅',invoiceStatus:'invoice_pending',retentionMode:'none'});
+    return {id:b.id,projectName:proj.name,amount:b.amount,gross:b.grossTotal,unbilled:s.unbilledWork({project:proj.id}).length};
+  });
+  assert.equal(second.amount,3000);assert.equal(second.gross,3150);assert.equal(second.unbilled,0);
+  log('SECOND_AREA_HAS_SEPARATE_SOURCE_AND_BILLING');
+  const merge=await page.evaluate(async ids=>{
+    const s=window.KuSheERPStore,before=await s.readCommittedSnapshot(),ctx=s.externalBillingContext(ids);
+    const doc=await s.saveExternalBillingDocument({idempotencyKey:'fake-merge-CA',sourceIds:ids,targetBillingId:ids[0],
+      expectedSnapshot:ctx.snapshot,status:'active',confirmed:true,detailMode:'unified',documentDate:'2026-12-08',
+      note:'FAKE external project only',unified:{taxMode:'未稅',reason:'FAKE composite view from two source areas',
+        lines:[{house:'FAKE-M101',item:'FAKE repair M',unit:'式',qty:1,price:2000},
+          {house:'FAKE-L101',item:'FAKE repair L',unit:'式',qty:1,price:3000}]}});
+    const after=await s.readCommittedSnapshot(),index=s.externalBillingDocumentIndex();
+    const entry=index.documents.find(x=>x.document.id===doc.id);
+    const unchanged=ids.every(id=>{
+      const a=before.data.billings.find(x=>x.id===id),b=after.data.billings.find(x=>x.id===id);
+      const arA=before.data.receivables.find(x=>x.id===a?.receivableId),arB=after.data.receivables.find(x=>x.id===b?.receivableId);
+      return JSON.stringify(a)===JSON.stringify(b)&&JSON.stringify(arA)===JSON.stringify(arB);
+    });
+    return {id:doc.id,target:doc.displayProjectName,sourceCount:doc.sourceIds.length,totals:doc.totals,
+      details:doc.unified.lines.length,amount:doc.unified.total,ledgerUnchanged:unchanged,indexed:entry?.canGroup,
+      issues:entry?.issues};
+  },[billed.id,second.id]);
+  assert.equal(merge.sourceCount,2);assert.equal(merge.target,'FAKE PROJECT');
+  assert.equal(merge.totals.untaxed,5000);assert.equal(merge.totals.grossTotal,5250);
+  assert.equal(merge.amount,5000);assert.equal(merge.details,2);
+  assert.ok(merge.ledgerUnchanged);assert.ok(merge.indexed,'FAKE MERGE INDEX '+JSON.stringify(merge.issues));
+  log('CROSS_ZONE_MERGED_PUBLIC_TARGET_AND_FINANCIAL_SOURCE_IMMUTABILITY');
+  const staleMerge=await page.evaluate(async ids=>{
+    const s=window.KuSheERPStore,b=await s.readCommittedSnapshot();let error='';
+    try{await s.saveExternalBillingDocument({documentId:ids[2],sourceIds:ids.slice(0,2),targetBillingId:ids[0],
+      expectedSnapshot:'FAKE_STALE_SOURCE',status:'active',confirmed:true,detailMode:'unified',
+      idempotencyKey:'fake-stale-CA',documentDate:'2026-12-08',
+      unified:{taxMode:'未稅',reason:'FAKE',lines:[{house:'FAKE',item:'FAKE',unit:'式',qty:1,price:5000}]}})}
+    catch(e){error=e.message}
+    return {error,untouched:b.baseline===(await s.readCommittedSnapshot()).baseline};
+  },[billed.id,second.id,merge.id]);
+  assert.ok(staleMerge.error&&staleMerge.untouched);
+  log('STALE_CROSS_ZONE_MERGE_REJECTED_NO_WRITE');
+  const discount=require(path.join(ROOT,'assets/js/billing-discount-calculator.js'));
+  const beforeDiscount=await page.evaluate(async()=> (await window.KuSheERPStore.readCommittedSnapshot()).baseline);
+  const calc=discount.preview({original:{recorded:{untaxed:2000,tax:100,grossTotal:2100,retention:0,receivable:2100},
+    invoiceStatus:'invoice_pending',taxMode:'未稅',taxRate:5,retentionMode:'none',retentionBase:'taxIncluded',
+    received:2100,receiptCount:1,merged:true,bankLinked:true},approval:{amountType:'gross',amount:1890}});
+  const afterDiscount=await page.evaluate(async()=> (await window.KuSheERPStore.readCommittedSnapshot()).baseline);
+  assert.equal(calc.readOnly,true);assert.equal(calc.canPost,false);assert.equal(calc.negotiatedReduction,210);
+  assert.equal(beforeDiscount,afterDiscount);
+  for(const key of ['MERGED_BILLING','RECEIPT_EXISTS','BANK_LINKED','RECEIPTS_OVER_NEW_AR'])
+    assert.ok(calc.locks.some(x=>x.code===key),'DISCOUNT_LOCK_MISSING '+key);
+  log('CONCESSION_PREVIEW_READONLY_WITH_MERGED_RECEIPT_BANK_LOCKS');
+  const checkpoint=await page.evaluate(async()=>{
+    const s=await window.KuSheERPStore.readCommittedSnapshot();
+    return {rev:s.revision.id,baseline:s.baseline, counts:{billings:s.data.billings.length,
+      ar:s.data.receivables.length,materials:s.data.materials.length,inv:s.data.inventoryReceipts.length,
+      usages:s.data.materialUsages.length,docs:s.data.meta.externalBillingDocuments?.length||0,
+      receipts:s.data.receipts.length,bank:s.data.bankTransactions.length}};
+  });
+  await page.reload({waitUntil:'load'});
+  const persisted=await page.evaluate(async()=>{
+    await window.KuSheERPStore.load();const s=await window.KuSheERPStore.readCommittedSnapshot();
+    return {rev:s.revision.id,baseline:s.baseline, counts:{billings:s.data.billings.length,
+      ar:s.data.receivables.length,materials:s.data.materials.length,inv:s.data.inventoryReceipts.length,
+      usages:s.data.materialUsages.length,docs:s.data.meta.externalBillingDocuments?.length||0,
+      receipts:s.data.receipts.length,bank:s.data.bankTransactions.length}};
+  });
+  assert.deepEqual(checkpoint,persisted);
+  log('FULL_FAKE_WORKFLOW_INDEXEDDB_EMERGENCY_RELOAD_PERSISTENCE');
+
   assert.deepEqual(denied,[],'NO_EXTERNAL_REQUEST_ALLOWED');log('NO_PRODUCTION_NETWORK_OR_EXTERNAL_ORIGINS');
   const result={phase:'P40-16CA',fakeOnly:true,realBrowser:true,actualERPStore:true,actualIndexedDB:true,actualEmergencyMirror:true,rollbackVerified:true,financialStaticAndMutationTests:true,productionDataUsed:false,userBackupUploadedToGithub:false,realAuthUsed:false,realSupabaseTouched:false,mainBetaModified:false,production_release:'BLOCKED',passed};
   fs.writeFileSync(path.join(OUT,'RESULT.json'),JSON.stringify(result,null,2));console.log('P40-16CA_REAL_CHROMIUM_PASS '+passed.length);
