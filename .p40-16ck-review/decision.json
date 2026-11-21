@@ -1,0 +1,25 @@
+{
+  "phase": "P40-16CK",
+  "date": "2026-11-21",
+  "reason": "User screenshot 2026-11-21 15:11 shows missing/broken original company red seal and logo in native Chrome print PDF",
+  "risk": "Official print page previously allowed export before image load+decode; also silently ignored failed enterprise asset fetch",
+  "baseline_main_sha": "94c5ee5888c6fb740f4f939ceed6f10cb3401b25",
+  "beta_sha": "62669539053a15174081ba8670b18248195c6f8c",
+  "app_change_allowlist": [
+    "billing-print.html"
+  ],
+  "unchanged": [
+    "enterprise/index.html",
+    "all original logo/seal source pngs",
+    "assets/css/p40-16cd-mint-quotation-billing.css",
+    "all ERP data and finance modules"
+  ],
+  "requires": "Verified original same-origin PNG source and full image decode including original red seal background transparency processing before enable export; block on failure and warn user",
+  "user_real_data_changed": false,
+  "user_logo_seal_recreated": false,
+  "supabase_changed": false,
+  "formal_main_changed": false,
+  "real_backup_uploaded": false,
+  "release_approval_for_this_patch": false,
+  "production_release": "BLOCKED"
+}
