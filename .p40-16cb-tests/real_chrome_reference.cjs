@@ -57,27 +57,48 @@ async function checkCase(browser,base,label,viewport,mobile,historical=true){
  assert.equal(printedMode.historicalNote,historical,label+' HISTORIC_NOTE_MISMATCH');
  assert.equal(printedMode.mergedClass,!historical,label+' CURRENT_MERGED_VIEW_MISMATCH');
 
+ // P40-16CG: owner explicitly approved MINT visual template on 2026-11-21.
+ // Earlier P40-16BW white-section/transparent-label expectations are obsolete.
+ // Current/historic A4, confidentiality and monetary checks remain unchanged.
  const audit=await popup.evaluate(()=>{
    const paper=document.querySelector('#paper');
-   const label=paper.querySelector('.info .label'), title=paper.querySelector('.section-title'), th=paper.querySelector('.matrix th'), total=paper.querySelector('.summary-row.total');
-   if(!paper||!label||!title||!th||!total)throw Error('MISSING_REFERENCE_STYLE_NODES');
-   const current={flag:paper.classList.contains('reference-template'),labelBackground:getComputedStyle(label).backgroundColor,
-     labelColor:getComputedStyle(label).color,titleBackground:getComputedStyle(title).backgroundColor,titleImage:getComputedStyle(title).backgroundImage,
-     tableHeader:getComputedStyle(th).backgroundColor,totalBackground:getComputedStyle(total).backgroundColor};
+   const label=paper.querySelector('.info .label');
+   const title=paper.querySelector('.section-title');
+   const th=paper.querySelector('.matrix thead th');
+   const house=paper.querySelector('.matrix tbody tr:not(.grand) td:first-child');
+   const matrixNumeric=paper.querySelector('.matrix tbody tr:not(.grand) td:nth-child(2)');
+   const item=paper.querySelector('.detail tbody tr:not(.line-total) td.item');
+   const numeric=paper.querySelector('.detail tbody tr:not(.line-total) td:nth-child(2)');
+   const total=paper.querySelector('.summary-row.total');
+   const receivable=paper.querySelector('.summary-row.receivable');
+   if(!paper||!label||!title||!th||!house||!matrixNumeric||!item||!numeric||!total||!receivable)
+     throw Error('MISSING_MINT_TEMPLATE_NODES');
+   const bg=e=>getComputedStyle(e).backgroundColor,gradient=e=>getComputedStyle(e).backgroundImage;
+   const values={
+     flag:paper.classList.contains('reference-template'),
+     labelBackground:bg(label),titleGradient:gradient(title),tableHeader:bg(th),
+     houseMint:bg(house),matrixNumeric:bg(matrixNumeric),
+     constructionItemMint:bg(item),constructionUnitBg:bg(numeric),
+     retainedTotal:bg(total),finalReceivableGradient:gradient(receivable)
+   };
    paper.classList.remove('reference-template');
-   current.normalTitleBackgroundImage=getComputedStyle(title).backgroundImage;
-   current.normalLabelBackground=getComputedStyle(label).backgroundColor;
+   values.unmarkedHouseMint=bg(house);
+   values.unmarkedTitleGradient=gradient(title);
    paper.classList.add('reference-template');
-   return current;
+   return values;
  });
- assert.equal(audit.flag,true,label+' missing template opt-in flag');
- assert.equal(audit.labelBackground,'rgba(0, 0, 0, 0)',label+' label should be gray text on transparent background');
- assert.equal(audit.titleBackground,'rgb(255, 255, 255)',label+' title must be white');
- assert.equal(audit.titleImage,'none',label+' gradient must be removed on external reference');
- assert.equal(audit.tableHeader,'rgb(255, 255, 255)',label+' reference table headers must be white');
- assert.equal(audit.totalBackground,'rgb(255, 255, 255)',label+' summary total background must be white');
- assert.match(audit.normalTitleBackgroundImage,/linear-gradient/i,label+' ordinary billing gradient must remain unchanged');
- assert.equal(audit.normalLabelBackground,'rgb(9, 45, 87)',label+' ordinary billing label must keep prior dark blue');
+ assert.equal(audit.flag,true,label+' customer projection opt-in missing');
+ assert.equal(audit.labelBackground,'rgb(246, 248, 250)',label+' header label must be owner-approved pale gray');
+ assert.match(audit.titleGradient,/linear-gradient/i,label+' approved mint section heading missing');
+ assert.equal(audit.tableHeader,'rgb(25, 62, 106)',label+' navy house matrix header changed');
+ assert.equal(audit.houseMint,'rgb(226, 250, 245)',label+' house must use approved mint');
+ assert.equal(audit.constructionItemMint,audit.houseMint,label+' construction item must match HOUSE mint exactly');
+ assert.equal(audit.matrixNumeric,'rgb(255, 255, 255)',label+' house quantity must remain white');
+ assert.equal(audit.constructionUnitBg,'rgb(255, 255, 255)',label+' construction unit must remain white');
+ assert.equal(audit.retainedTotal,'rgb(255, 255, 255)',label+' retained interim total should remain neutral');
+ assert.match(audit.finalReceivableGradient,/linear-gradient/i,label+' final receivable needs approved teal bar');
+ assert.equal(audit.unmarkedHouseMint,audit.houseMint,label+' shared mint design should not disappear for unmarked billing');
+ assert.match(audit.unmarkedTitleGradient,/linear-gradient/i,label+' title should remain branded on other billing');
 
  for(const word of ['formalCompanyLogo','formalCompanySeal','戶別施工統計','施工項目彙總','客戶簽章','公司大小章','測試M區'])
    assert.ok(html.includes(word),label+' native template missing '+word);
