@@ -48,11 +48,11 @@ function pdfReport(file,c){
  assert.ok(!text.includes('另一區發票')&&!text.includes('FAKE_BANK_SECRET'),c.id+' PRIVATE_LEAK');
  // Check no independent source amount silently changed.
  assert.ok(text.includes(c.doc.salesAmount.toLocaleString('en-US'))||c.actual,c.id+' UNEXPECTED_MISSING_PRICE');
- if(c.supported)assert.equal(pages,1,c.id+' SINGLE_A4_OVERFLOW_NOT_ACCEPTABLE');
+ // Fail the overall release gate only after recording every diagnostic case.
  fs.writeFileSync(path.join(OUT,c.id+'_text.txt'),text);
  const pageTexts=[];for(let p=1;p<=pages;p++){pageTexts.push(execFileSync('pdftotext',['-f',String(p),'-l',String(p),'-layout',file,'-'],{encoding:'utf8'}).trim());}
  const blankPages=pageTexts.filter(t=>t.length<12).length;
- assert.equal(blankPages,0,c.id+' BLANK_PDF_PAGE');
+ // Record blank pages rather than stopping stress diagnosis at the first failure.
  return {pages,blankPages,characters:text.length,uniqueItemCount:expectedWords.length};
 }
 async function runCase(browser,base,c){
@@ -97,7 +97,8 @@ async function runCase(browser,base,c){
  const diagnosticMultiplePage=cases.filter(c=>!c.supported&&c.pages>1).map(c=>({id:c.id,pages:c.pages,reason:'stress-limit; not approved as one-page'}));
  const report={phase:'P40-16CE',fakeOnly:true,actualERPPrintHTML:true,actualChromium:true,production_release:'BLOCKED',no_real_customer_data:true,no_code_accounting_changes:true,physically_tested_on_user_devices:false,one_page_supported_cases_pass:cases.filter(c=>c.supported).every(c=>c.pages===1),diagnosticMultiplePage,cases};
  fs.writeFileSync(path.join(OUT,'RESULT.json'),JSON.stringify(report,null,2));
- console.log('P40-16CE_REAL_A4_RESULT '+JSON.stringify({passed:cases.length,diagnosticMultiplePage}));
+ console.log('P40-16CE_REAL_A4_RESULT '+JSON.stringify({examined:cases.length,one_page_supported_cases_pass:report.one_page_supported_cases_pass,diagnosticMultiplePage}));
+ if(!report.one_page_supported_cases_pass||cases.some(x=>x.blankPages>0)){console.error('P40-16CE_HOLD: one-page or blank-page failure recorded, production release BLOCKED');process.exitCode=1;}
  }catch(e){console.error('P40-16CE_FAIL '+(e.stack||e));process.exitCode=1}
  finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e.stack);process.exitCode=1});
