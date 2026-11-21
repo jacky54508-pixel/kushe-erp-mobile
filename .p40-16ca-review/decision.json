@@ -1,0 +1,17 @@
+{
+  "phase": "P40-16CA",
+  "date": "2026-11-21",
+  "base_pr": 79,
+  "base_sha": "2868c000f250590ec5c2cb5283282998df12dec4",
+  "production_main": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "production_beta": "62669539053a15174081ba8670b18248195c6f8c",
+  "scope": "FAKE Chromium + original ERP Store + standalone read-only discount preview",
+  "owner_backup_in_repo": false,
+  "real_business_data_used": false,
+  "real_supabase_touched": false,
+  "production_files_modified": false,
+  "actual_physical_phone_tested": false,
+  "formal_main_release_approved": false,
+  "full_concession_posting_verified": false,
+  "production_release": "BLOCKED"
+}
