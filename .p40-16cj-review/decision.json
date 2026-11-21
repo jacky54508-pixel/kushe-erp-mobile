@@ -1,0 +1,28 @@
+{
+  "phase": "P40-16CJ",
+  "date": "2026-11-21",
+  "trigger": "User screenshots show correct mint/navajo PDF PREVIEW but browser export Save PDF loses most fill colors",
+  "diagnosis": "Native Chromium printBackground option defaults to false; existing print styles omitted print-color-adjust:exact",
+  "main_before": "7803b2186160a86ce3c6e972ba2f441006f557e5",
+  "beta_before": "62669539053a15174081ba8670b18248195c6f8c",
+  "modified_production_files": [
+    "assets/css/p40-16cd-mint-quotation-billing.css"
+  ],
+  "unchanged_app_assets": [
+    "billing-print.html",
+    "assets/js/billing-groups.js",
+    "assets/js/external-billing-print.js",
+    "assets/js/erp-store.js",
+    "assets/js/cloud-sync.js",
+    "assets/js/settings.js"
+  ],
+  "changes": "Append one scoped @media print CSS rule setting both -webkit-print-color-adjust:exact and print-color-adjust:exact for #paper billing/quotation + descendants; does not affect layout, content or color palette",
+  "fake_only_test": "On actual unmodified ERP printing HTML, print PDF with printBackground false and true, and compare a fake 'economy' control from test-only style injection; include normal billing, quotation, merged external. Regenerate original 8 A4 and six high-density A4, repeat 14 print privacy tests.",
+  "real_erp_data_used": false,
+  "real_backup_committed": false,
+  "supabase_changes": false,
+  "main_beta_changed": false,
+  "finance_data_or_amount_changed": false,
+  "formal_merge_authorized_for_new_patch": false,
+  "production_release": "BLOCKED"
+}
