@@ -1,0 +1,118 @@
+name: P40-16CB CLEAN main-based external billing PDF fake gate (NO DEPLOY)
+on:
+  push:
+    branches: [p40-16cb-clean-print-candidate-20261121]
+    paths:
+      - 'assets/js/billing-groups.js'
+      - 'assets/js/external-billing-print.js'
+      - 'billing-print.html'
+      - '.p40-16cb-tests/**'
+      - '.p40-16cb-review/**'
+      - '.github/workflows/p40-16cb-clean-print-fake-gate.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  clean-fake-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fail-closed pinned production/beta and exact nine-file allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16cb-clean-print-candidate-20261121
+          git fetch --no-tags origin main beta
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git merge-base origin/main HEAD)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          git diff --name-status origin/main...HEAD > /tmp/p40cb-diff
+          cat /tmp/p40cb-diff
+          node <<'NODE'
+          const fs=require('node:fs'), assert=require('node:assert/strict');
+          const got=fs.readFileSync('/tmp/p40cb-diff','utf8').trim().split('\n').sort();
+          const expected=[
+            'M\tassets/js/billing-groups.js',
+            'M\tassets/js/external-billing-print.js',
+            'M\tbilling-print.html',
+            'A\t.p40-16cb-tests/test_one_time_handoff.cjs',
+            'A\t.p40-16cb-tests/real_chrome_reference.cjs',
+            'A\t.p40-16cb-tests/real_full_workflow.cjs',
+            'A\t.p40-16cb-review/decision.json',
+            'A\t.p40-16cb-review/README.md',
+            'A\t.github/workflows/p40-16cb-clean-print-fake-gate.yml'
+          ].sort();
+          assert.deepEqual(got,expected,'STOP scope different from 3 code files + 6 fake-only files');
+          const d=require('./.p40-16cb-review/decision.json');
+          assert.equal(d.production_release,'BLOCKED');
+          assert.equal(d.owner_formal_release_authorized,false);
+          assert.equal(d.owner_template_accepted,false);
+          assert.equal(d.formal_erp_data_read_or_modified,false);
+          assert.equal(d.original_backup_upload_to_github,false);
+          assert.equal(d.main_beta_changed,false);
+          assert.equal(d.supabase_changes,false);
+          assert.equal(d.cloudflare_deploy,false);
+          NODE
+          test "$(git hash-object assets/js/billing-groups.js)" = a91e4d555b39922087ed927a1a2fc37cc23e7163
+          test "$(git hash-object assets/js/external-billing-print.js)" = 62e7f0840000bb43849b587b331e268ac5ee14c7
+          test "$(git hash-object billing-print.html)" = acb3aa836e71ca15a2d79fd2f627c62b3ebbcddb
+          git diff --exit-code origin/main -- assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/legacy-adapter.js assets/js/billing-print.js assets/js/billing-discount-calculator.js index.html .github/workflows/pages.yml
+          test ! -e KusheERP_safe_backup_20261121_000502.json
+          echo 'PASS: exact clean candidate scope; no production data or deployment'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Real source parse + safe ephemeral transfer regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check assets/js/billing-groups.js
+          node --check assets/js/external-billing-print.js
+          node --check .p40-16cb-tests/real_chrome_reference.cjs
+          node --check .p40-16cb-tests/real_full_workflow.cjs
+          node --test .p40-16cb-tests/test_one_time_handoff.cjs | tee /tmp/p40cb-safe
+          grep -Eq '^# pass 14$' /tmp/p40cb-safe
+          grep -Eq '^# fail 0$' /tmp/p40cb-safe
+          grep -Eq '^# skipped 0$' /tmp/p40cb-safe
+      - name: Setup isolated Chromium + fonts + PDF inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq poppler-utils fonts-noto-cjk fontconfig
+          sudo fc-cache -f >/dev/null
+          mkdir -p /tmp/p40bv /tmp/p40bz
+          npm install --prefix /tmp/p40bv --no-audit --no-fund --silent playwright-core@1.56.0
+          ln -s /tmp/p40bv/node_modules /tmp/p40bz/node_modules
+          if command -v google-chrome >/dev/null; then echo "CHROME_BIN=$(command -v google-chrome)" >> "$GITHUB_ENV";else echo "CHROME_BIN=$(command -v google-chrome-stable)" >> "$GITHUB_ENV";fi
+          command -v pdfinfo
+          command -v pdftotext
+      - name: Real Chrome desktop + mobile390 fake A4, native template and privacy
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16cb-tests/real_chrome_reference.cjs
+          test -s p40bw-artifacts/FAKE_desktop_A4.pdf
+          test -s p40bw-artifacts/FAKE_mobile390_A4.pdf
+          node -e "const r=require('./p40bw-artifacts/RESULT.json');if(r.production_release!=='BLOCKED'||r.cases?.length!==2||!r.cases.every(x=>x.pages===1&&x.has_real_browser_popup)||!r.negative_cases.reject_old_snapshot_url||!r.negative_cases.reject_missing_ticket)process.exit(1)"
+      - name: Real ERP Store 28 fake financial and recovery flows
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16cb-tests/real_full_workflow.cjs
+          test -s p40ca-artifacts/RESULT.json
+          node -e "const d=require('./p40ca-artifacts/RESULT.json');if(d.production_release!=='BLOCKED'||d.passed.length<28||!d.passed.every(x=>x.status==='PASS')||d.productionDataUsed||d.realSupabaseTouched||d.mainBetaModified)process.exit(1)"
+          echo 'P40-16CB PASS FOR FAKE CLEAN CANDIDATE ONLY; PRODUCTION RELEASE BLOCKED'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: success()
+        with:
+          name: p40cb-clean-original-template-and-finance-fake-evidence
+          path: |
+            p40bw-artifacts/
+            p40ca-artifacts/RESULT.json
+          if-no-files-found: error
+          retention-days: 7
