@@ -1,0 +1,147 @@
+/* P40-16CD | 2026-11-21 owner-approved visual reference.
+   Quote + billing PDF presentation ONLY. Preserve original data, tax,
+   retention, invoices, quotes, payroll, bank and seals. */
+#paper.billing-document,#paper.quotation-document{position:relative;isolation:isolate;background:#fff;color:#112d51}
+#paper.billing-document::before,#paper.quotation-document::before,#paper.billing-document::after,#paper.quotation-document::after{content:"";position:absolute;left:0;right:0;bottom:0;pointer-events:none;z-index:-1}
+#paper.billing-document::before,#paper.quotation-document::before{height:20mm;background:linear-gradient(105deg,#e9f7f7,#d7ecef 62%,#afe4de);clip-path:polygon(0 54%,18% 77%,36% 93%,54% 89%,72% 64%,100% 5%,100% 100%,0 100%)}
+#paper.billing-document::after,#paper.quotation-document::after{height:11mm;background:linear-gradient(105deg,#f2fbfb 0%,#7ccac3 67%,#048b83 100%);clip-path:polygon(0 9%,19% 48%,44% 91%,61% 86%,81% 42%,100% 0,100% 100%,0 100%)}
+#paper.billing-document .head,#paper.quotation-document .head{position:relative;z-index:1;border-bottom:.85mm solid #18b6ae;padding-bottom:4mm}
+#paper.billing-document .company h1,#paper.quotation-document .company h1{color:#04998f;letter-spacing:.7pt}
+#paper.billing-document .company .en,#paper.quotation-document .company .en{color:#2d4054;font-weight:500}
+#paper.billing-document .doc-title,#paper.quotation-document .doc-title{position:relative;overflow:hidden;min-width:47mm;padding:4mm 10mm 4mm 7mm;background:linear-gradient(108deg,#f7f8fa 0%,#e8f1f3 72%,#d8edef 100%);border-radius:2.4mm 1mm 0 0;text-align:center}
+#paper.billing-document .doc-title::after,#paper.quotation-document .doc-title::after{content:"";position:absolute;right:0;top:0;bottom:0;width:9mm;background:linear-gradient(125deg,#64d6cd 0 35%,#05a49b 35% 68%,#116c85 68% 100%);transform:skewX(-20deg);transform-origin:top}
+#paper.billing-document .doc-title h2,#paper.quotation-document .doc-title h2{color:#102b51;letter-spacing:3pt;font-size:20pt}
+#paper.billing-document .info,#paper.quotation-document .info{background:#fff;border:.22mm solid #d4e1e9;border-radius:3mm;padding:3mm;gap:2mm 2.5mm}
+#paper.billing-document .info>div,#paper.quotation-document .info>div{background:#fff;border:.22mm solid #c4d8e4;border-radius:2.1mm;min-height:11.5mm;color:#112a51}
+#paper.billing-document .info .label,#paper.quotation-document .info .label{min-width:20mm;width:20mm;margin-right:3mm;padding:1mm 2mm;color:#677586;background:#f6f8fa;border-radius:1.2mm;font-weight:700;font-size:8.3pt}
+#paper.billing-document .section,#paper.quotation-document .section{border:.22mm solid #cadde7;border-radius:2.6mm;background:#fff;overflow:hidden}
+#paper.billing-document .section-title,#paper.quotation-document .section-title{padding:2.35mm 3.6mm;background:linear-gradient(100deg,#e8f7f6 0%,#f1fbfb 72%,#def3f2 100%);border-bottom:.2mm solid #c2dce3;color:#123d60;font-size:10.3pt;font-weight:900;letter-spacing:.2pt}
+#paper.billing-document .section-title::before,#paper.quotation-document .section-title::before{content:"✦";display:inline-block;color:#07988e;font-size:12pt;margin-right:2mm}
+#paper.billing-document .matrix th,#paper.quotation-document .matrix th{background:#193e6a;color:#fff;font-weight:800}
+#paper.billing-document .matrix tbody tr:not(.grand) td:first-child{background:#e2faf5;color:#075f70;font-weight:900}
+#paper.billing-document .matrix tbody tr:not(.grand) td:not(:first-child),#paper.billing-document .matrix .grand td{background:#fff}
+#paper.billing-document .detail th,#paper.quotation-document .detail th{background:#fff;color:#132d4c}
+#paper.billing-document .detail th:first-child,#paper.quotation-document .detail th:first-child{background:#176e9c;color:#fff}
+#paper.billing-document .detail tbody tr:not(.line-total) td.item,#paper.quotation-document .detail tbody tr:not(.line-total) td.item{background:#e2faf5;color:#075e73;font-weight:800}
+#paper.billing-document .detail tbody tr:not(.line-total) td:not(.item),#paper.quotation-document .detail tbody tr:not(.line-total) td:not(.item){background:#fff}
+#paper.billing-document .detail .line-total td,#paper.quotation-document .detail .line-total td{background:#f4f7f9;color:#143758}
+#paper.billing-document .dense-line-table tbody tr:not(.line-total) td:first-child{background:#e2faf5;color:#075e73;font-weight:800}
+#paper.billing-document .summary,#paper.quotation-document .summary{border:.22mm solid #c2d8e3;border-radius:2.6mm}
+#paper.billing-document .summary-row,#paper.quotation-document .summary-row{background:#fff;color:#162c45}
+#paper.billing-document .summary-row.total,#paper.quotation-document .summary-row.total,#paper.billing-document .summary-row.receivable,#paper.quotation-document .summary-row.receivable{background:linear-gradient(100deg,#38c2bb,#07887f);color:#fff}
+#paper.billing-document .summary:has(.summary-row.receivable) .summary-row.total{background:#fff;color:#162c45}
+#paper.billing-document .summary-row.total strong,#paper.quotation-document .summary-row.total strong,#paper.billing-document .summary-row.receivable strong{font-size:13pt;font-weight:900}
+#paper.billing-document .sign,#paper.quotation-document .sign{position:relative;z-index:1}
+#paper.billing-document .client-sign,#paper.quotation-document .client-sign{color:#41546c;border-top-color:#193e6a}
+/* A dense grouped customer PDF keeps every real row; compact layout is prioritized. */
+@media print{#paper.billing-document,#paper.quotation-document{min-height:297mm}#paper.invoice-group-document:has(.dense-original-details)::before,#paper.invoice-group-document:has(.dense-original-details)::after{display:none}#paper.invoice-group-document:has(.dense-original-details){min-height:0}}
+
+/* P40-16CF — ONLY high-density billing on PRINT, no missing rows, no changes
+   to approved colors, quotation styles, financial values or source documents. */
+@media print {
+  /* Larger house matrix (10+ rows): retain all homes but remove excess padding. */
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)){
+    padding-top:5mm;padding-bottom:5mm
+  }
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .head{
+    padding-bottom:1.5mm
+  }
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .info{
+    margin:2mm 0 2mm;padding:1.5mm;gap:1mm 2mm
+  }
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .info>div{
+    min-height:8mm;padding:1mm 2mm;font-size:8.8pt
+  }
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .section{
+    margin-top:1.5mm
+  }
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .section-title{
+    padding:1.4mm 3mm;font-size:9pt
+  }
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .matrix th,
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .matrix td{
+    padding:.65mm 1.2mm;font-size:8.1pt;line-height:1.15
+  }
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .detail th,
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .detail td{
+    padding-top:.75mm;padding-bottom:.75mm;font-size:8.2pt;line-height:1.14
+  }
+  #paper.billing-document:not(.invoice-group-document):has(.matrix tbody tr:nth-child(11)) .detail td.item{
+    font-size:8.6pt
+  }
+  /* Dense cross-area grouped billing: keep every original row and the summary. */
+  #paper.invoice-group-document:has(.dense-original-details) .head{padding-bottom:1.1mm}
+  #paper.invoice-group-document:has(.dense-original-details) .info{
+    margin:1.5mm 0 1.5mm;padding:1.2mm;gap:.8mm 1.5mm
+  }
+  #paper.invoice-group-document:has(.dense-original-details) .info>div{
+    min-height:7.5mm;padding:.7mm 1.6mm;font-size:8.4pt
+  }
+  #paper.invoice-group-document:has(.dense-original-details) .section{
+    margin-top:1.25mm
+  }
+  #paper.invoice-group-document:has(.dense-original-details) .section-title{
+    padding:1.2mm 2.7mm;font-size:8.8pt
+  }
+  #paper.invoice-group-document:has(.dense-original-details) .dense-line-table th,
+  #paper.invoice-group-document:has(.dense-original-details) .dense-line-table td{
+    padding:.55mm 1mm;font-size:7.7pt;line-height:1.10
+  }
+  #paper.invoice-group-document:has(.dense-original-details) .dense-line-table td.item{
+    padding:.55mm 1mm;font-size:7.9pt;line-height:1.12
+  }
+  #paper.invoice-group-document:has(.dense-original-details) .grouped-item-summary-table th,
+  #paper.invoice-group-document:has(.dense-original-details) .grouped-item-summary-table td{
+    padding:.55mm 1mm;font-size:7.7pt;line-height:1.12
+  }
+  #paper.invoice-group-document:has(.dense-original-details) .grouped-item-summary-table td.item{
+    font-size:7.9pt;line-height:1.12
+  }
+  /* Two saved totals and the real company chops must remain fully visible. */
+  #paper.billing-document:has(.matrix tbody tr:nth-child(11)) .summary,
+  #paper.invoice-group-document:has(.dense-original-details) .summary{
+    margin-top:1.6mm
+  }
+  #paper.billing-document:has(.matrix tbody tr:nth-child(11)) .summary-row,
+  #paper.invoice-group-document:has(.dense-original-details) .summary-row{
+    min-height:7mm;padding:1mm 2.7mm;font-size:8.7pt
+  }
+  #paper.billing-document:has(.matrix tbody tr:nth-child(11)) .sign,
+  #paper.invoice-group-document:has(.dense-original-details) .sign{
+    margin-top:1.1mm
+  }
+  #paper.billing-document:has(.matrix tbody tr:nth-child(11)) .seal-wrap,
+  #paper.invoice-group-document:has(.dense-original-details) .seal-wrap{
+    height:18mm
+  }
+  #paper.billing-document:has(.matrix tbody tr:nth-child(11)) .seal,
+  #paper.invoice-group-document:has(.dense-original-details) .seal{
+    max-height:17mm
+  }
+  #paper.billing-document:has(.matrix tbody tr:nth-child(11)) .client-sign,
+  #paper.invoice-group-document:has(.dense-original-details) .client-sign{
+    padding-top:4mm
+  }
+}
+
+/* P40-16CF stress safety: for 25+ saved original detail rows compact
+   only cell vertical padding; do NOT reduce official seals, remove rows,
+   modify values or apply this to normal invoices/quotes. */
+@media print {
+  #paper.invoice-group-document:has(.dense-line-table tbody tr:nth-child(25))
+  .dense-line-table th,
+  #paper.invoice-group-document:has(.dense-line-table tbody tr:nth-child(25))
+  .dense-line-table td{
+    padding:.30mm .8mm;font-size:7.6pt;line-height:1.04
+  }
+  #paper.invoice-group-document:has(.dense-line-table tbody tr:nth-child(25))
+  .dense-line-table td.item{
+    padding:.30mm .8mm;font-size:7.8pt;line-height:1.04
+  }
+  #paper.invoice-group-document:has(.dense-line-table tbody tr:nth-child(25))
+  .grouped-item-summary-table th,
+  #paper.invoice-group-document:has(.dense-line-table tbody tr:nth-child(25))
+  .grouped-item-summary-table td{
+    padding:.4mm .9mm;font-size:7.6pt;line-height:1.05
+  }
+}
