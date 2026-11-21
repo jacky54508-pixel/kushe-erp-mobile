@@ -145,3 +145,18 @@
     padding:.4mm .9mm;font-size:7.6pt;line-height:1.05
   }
 }
+
+/* P40-16CJ | Preserve the approved mint/blue/teal colors when the user clicks
+   the browser's native "Export PDF / Print" button. Chrome commonly omits
+   CSS backgrounds when "Background graphics" is off (the default).
+   Print-color-adjust is an inherited, print-only paint preference and does
+   not alter the billing/quotation data, arithmetic, layout, logos or seals. */
+@media print {
+  #paper.billing-document,
+  #paper.billing-document *,
+  #paper.quotation-document,
+  #paper.quotation-document * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
