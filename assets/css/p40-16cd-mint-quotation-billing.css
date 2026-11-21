@@ -123,3 +123,25 @@
     padding-top:4mm
   }
 }
+
+/* P40-16CF stress safety: for 25+ saved original detail rows compact
+   only cell vertical padding; do NOT reduce official seals, remove rows,
+   modify values or apply this to normal invoices/quotes. */
+@media print {
+  #paper.invoice-group-document:has(.dense-line-table tbody tr:nth-child(25))
+  .dense-line-table th,
+  #paper.invoice-group-document:has(.dense-line-table tbody tr:nth-child(25))
+  .dense-line-table td{
+    padding:.30mm .8mm;font-size:7.6pt;line-height:1.04
+  }
+  #paper.invoice-group-document:has(.dense-line-table tbody tr:nth-child(25))
+  .dense-line-table td.item{
+    padding:.30mm .8mm;font-size:7.8pt;line-height:1.04
+  }
+  #paper.invoice-group-document:has(.dense-line-table tbody tr:nth-child(25))
+  .grouped-item-summary-table th,
+  #paper.invoice-group-document:has(.dense-line-table tbody tr:nth-child(25))
+  .grouped-item-summary-table td{
+    padding:.4mm .9mm;font-size:7.6pt;line-height:1.05
+  }
+}
