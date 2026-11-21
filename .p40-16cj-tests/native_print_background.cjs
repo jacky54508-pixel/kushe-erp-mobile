@@ -19,11 +19,11 @@ function server(req,res){try{const u=new URL(req.url,'http://127.0.0.1');if(!ALL
  const f=path.resolve(ROOT,'.'+u.pathname);if(!f.startsWith(ROOT+path.sep)){res.writeHead(403);return res.end('DENIED');}
  const ext=path.extname(f);res.writeHead(200,{'Cache-Control':'no-store','Content-Type':ext==='.html'?'text/html; charset=utf-8':ext==='.css'?'text/css; charset=utf-8':'application/javascript; charset=utf-8'});return fs.createReadStream(f).pipe(res)}
  catch(e){res.writeHead(404);res.end('INVALID')}}
-function pdfCheck(f,c){const info=execFileSync('pdfinfo',[f],{encoding:'utf8'}),text=execFileSync('pdftotext',['-layout',f,'-'],{encoding:'utf8'});assert.match(info,/Page size:\s+595.*842.*A4/);assert.match(info,/Pages:\s+1\b/);
+function pdfCheck(f,c){const info=execFileSync('pdfinfo',[f],{encoding:'utf8'}),text=execFileSync('pdftotext',['-layout',f,'-'],{encoding:'utf8'});assert.match(info,/Page size:[^\n]*A4/);assert.match(info,/Pages:\s+1\b/);
  for(const word of ['酷舍企業有限公司','公司大小章','客戶簽章',...c.required])assert.ok(text.includes(word),c.id+': MISSING '+word);
  assert.ok(!text.includes('其他區發票號')&&!text.includes('BANK_SECRET'),c.id+': LEAK');}
 function render(f){const ppm=f.replace(/\.pdf$/,'');
- execFileSync('pdftoppm',['-f','1','-l','1','-r','72','-singlefile','-ppm',f,ppm]);
+ execFileSync('pdftoppm',['-f','1','-l','1','-r','72','-singlefile',f,ppm]);
  const buffer=fs.readFileSync(ppm+'.ppm'),match=buffer.subarray(0,140).toString('latin1').match(/^P6\s+(?:#[^\n]*\n\s*)?(\d+)\s+(\d+)\s+255\s/);
  assert.ok(match,'INVALID_PPM_HEADER');const width=+match[1],height=+match[2],start=match[0].length;
  const pixels=buffer.subarray(start,start+width*height*3);assert.equal(pixels.length,width*height*3);
