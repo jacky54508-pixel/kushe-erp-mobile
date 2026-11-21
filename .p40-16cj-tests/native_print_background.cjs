@@ -28,7 +28,7 @@ function render(f){const ppm=f.replace(/\.pdf$/,'');
  assert.ok(match,'INVALID_PPM_HEADER');const width=+match[1],height=+match[2],start=match[0].length;
  const pixels=buffer.subarray(start,start+width*height*3);assert.equal(pixels.length,width*height*3);
  return {width,height,pixels};}
-function difference(a,b){assert.equal(a.width,b.width);assert.equal(a.height,b.height);let differing=0,score=0;
+function difference(a,b){assert.equal(a.width,b.width);assert.equal(a.height,b.height);let differring=0,score=0;
  for(let j=0;j<a.pixels.length;j+=3){const dr=Math.abs(a.pixels[j]-b.pixels[j]),dg=Math.abs(a.pixels[j+1]-b.pixels[j+1]),db=Math.abs(a.pixels[j+2]-b.pixels[j+2]);if(Math.max(dr,dg,db)>=35)differring++;score+=dr+dg+db;}
  return {diff_pixels:differring,total_rgb_delta:score};}
 async function run(browser,origin,c){
