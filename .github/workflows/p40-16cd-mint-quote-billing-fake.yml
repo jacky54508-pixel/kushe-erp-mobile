@@ -1,0 +1,112 @@
+name: P40-16CD owner-approved mint quote + billing A4 FAKE gate (NO DEPLOY)
+on:
+  push:
+    branches: [p40-16cd-mint-quote-billing-isolated-20261121]
+    paths:
+      - 'billing-print.html'
+      - 'assets/css/p40-16cd-mint-quotation-billing.css'
+      - '.p40-16cd-tests/**'
+      - '.p40-16cd-review/**'
+      - '.github/workflows/p40-16cd-mint-quote-billing-fake.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pure-visual-fake-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fail-closed formal branches, parent SHA, exact CSS-only changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16cd-mint-quote-billing-isolated-20261121
+          git fetch --no-tags origin main beta p40-16cb-clean-print-candidate-20261121
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git rev-parse origin/p40-16cb-clean-print-candidate-20261121)" = 36fb2cdf14bed7aa11358e4515acb77b336dd793
+          test "$(git merge-base origin/p40-16cb-clean-print-candidate-20261121 HEAD)" = 36fb2cdf14bed7aa11358e4515acb77b336dd793
+          git diff --name-status origin/p40-16cb-clean-print-candidate-20261121...HEAD > /tmp/p40cd-diff
+          cat /tmp/p40cd-diff
+          node <<'NODE'
+          const fs=require('node:fs'),assert=require('node:assert/strict'),{execFileSync}=require('node:child_process');
+          const expected=[
+            'M\tbilling-print.html',
+            'A\tassets/css/p40-16cd-mint-quotation-billing.css',
+            'A\t.p40-16cd-tests/real_mint_quote_and_billing.cjs',
+            'A\t.p40-16cd-review/README.md',
+            'A\t.p40-16cd-review/decision.json',
+            'A\t.github/workflows/p40-16cd-mint-quote-billing-fake.yml'
+          ].sort();
+          assert.deepEqual(fs.readFileSync('/tmp/p40cd-diff','utf8').trim().split('\n').sort(),expected,'STOP changed unsupported files');
+          const src=execFileSync('git',['show','origin/p40-16cb-clean-print-candidate-20261121:billing-print.html'],{encoding:'utf8'});
+          const after=fs.readFileSync('billing-print.html','utf8');
+          const anchor='  </style>\n</head>',insert='  </style>\n  <!-- P40-16CD style only: owner-approved mint design shared by quotation + billing. -->\n  <link rel="stylesheet" href="assets/css/p40-16cd-mint-quotation-billing.css?v=p40-16cd-1">\n</head>';
+          assert.equal(src.split(anchor).length,2,'STOP original HTML drift');
+          assert.equal(after,src.replace(anchor,insert),'STOP HTML/JS invoice or quote data logic changed');
+          const css=fs.readFileSync('assets/css/p40-16cd-mint-quotation-billing.css','utf8');
+          assert.match(css,/#e2faf5/i);assert.match(css,/#paper\.quotation-document/);assert.match(css,/#paper\.billing-document/);
+          assert.doesNotMatch(css,/@import|url\(\s*['"]?https?:|\.erp-store|\.cloud-sync|\.auth-gate/i);
+          const d=require('./.p40-16cd-review/decision.json');
+          assert.equal(d.production_release,'BLOCKED');
+          assert.equal(d.owner_formal_deploy_authorized,false);
+          assert.equal(d.no_real_backup_in_repo,true);
+          assert.equal(d.quote_calculations_unchanged,true);
+          assert.equal(d.billing_amounts_unchanged,true);
+          NODE
+          git diff --exit-code origin/p40-16cb-clean-print-candidate-20261121 -- assets/js/erp-store.js assets/js/billing-groups.js assets/js/external-billing-print.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/legacy-adapter.js index.html enterprise/index.html
+          test ! -e '清新薄荷色台灣請款單(1).png'
+          test ! -e 'KusheERP_safe_backup_20261121_000502.json'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Source syntax and existing 14 safe print transport tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check .p40-16cd-tests/real_mint_quote_and_billing.cjs
+          node --check assets/js/external-billing-print.js
+          node --test .p40-16cb-tests/test_one_time_handoff.cjs | tee /tmp/p40cd-safe
+          grep -Eq '^# pass 14$' /tmp/p40cd-safe
+          grep -Eq '^# fail 0$' /tmp/p40cd-safe
+      - name: Setup real Chromium and CJK PDF reader
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq poppler-utils fonts-noto-cjk fontconfig
+          sudo fc-cache -f >/dev/null
+          mkdir -p /tmp/p40bv /tmp/p40bz
+          npm install --prefix /tmp/p40bv --no-audit --no-fund --silent playwright-core@1.56.0
+          ln -s /tmp/p40bv/node_modules /tmp/p40bz/node_modules
+          if command -v google-chrome >/dev/null; then echo "CHROME_BIN=$(command -v google-chrome)" >> "$GITHUB_ENV";else echo "CHROME_BIN=$(command -v google-chrome-stable)" >> "$GITHUB_ENV";fi
+      - name: Real Chromium A4 quote, billing, actual pricing, retention, customer merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16cd-tests/real_mint_quote_and_billing.cjs
+          test -s p40cd-artifacts/billing_desktop.pdf
+          test -s p40cd-artifacts/quote_desktop.pdf
+          test -s p40cd-artifacts/quote_actual.pdf
+          test -s p40cd-artifacts/merged_desktop.pdf
+          node -e "const r=require('./p40cd-artifacts/RESULT.json');if(r.production_release!=='BLOCKED'||r.cases?.length!==8||!r.cases.every(c=>c.pages===1&&c.hasLogo&&c.hasSeal)||r.no_supabase_or_external_network!==true)process.exit(1)"
+      - name: Original ERP Store 28 fake finance regression cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16cb-tests/real_full_workflow.cjs
+          node -e "const r=require('./p40ca-artifacts/RESULT.json');if(r.production_release!=='BLOCKED'||r.passed?.length<28||!r.passed.every(c=>c.status==='PASS')||r.productionDataUsed||r.realSupabaseTouched)process.exit(1)"
+          echo 'P40-16CD FAKE_ONLY PASS; NO MERGE, NO DEPLOY'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: success()
+        with:
+          name: p40cd-owner-approved-mint-quote-billing-A4-fake
+          path: |
+            p40cd-artifacts/
+            p40ca-artifacts/RESULT.json
+          if-no-files-found: error
+          retention-days: 7
