@@ -98,7 +98,9 @@ jobs:
           node .p40-16cb-tests/real_chrome_reference.cjs
           test -s p40bw-artifacts/FAKE_desktop_A4.pdf
           test -s p40bw-artifacts/FAKE_mobile390_A4.pdf
-          node -e "const r=require('./p40bw-artifacts/RESULT.json');if(r.production_release!=='BLOCKED'||r.cases?.length!==2||!r.cases.every(x=>x.pages===1&&x.has_real_browser_popup)||!r.negative_cases.reject_old_snapshot_url||!r.negative_cases.reject_missing_ticket)process.exit(1)"
+          test -s p40bw-artifacts/FAKE_desktop_current_A4.pdf
+          test -s p40bw-artifacts/FAKE_mobile390_current_A4.pdf
+          node -e "const r=require('./p40bw-artifacts/RESULT.json');if(r.production_release!=='BLOCKED'||r.cases?.length!==4||!r.cases.every(x=>x.pages===1&&x.has_real_browser_popup)||!r.cases.some(x=>x.label==='desktop_current')||!r.cases.some(x=>x.label==='mobile390_current')||!r.negative_cases.reject_old_snapshot_url||!r.negative_cases.reject_missing_ticket)process.exit(1)"
       - name: Real ERP Store 28 fake financial and recovery flows
         shell: bash
         run: |
