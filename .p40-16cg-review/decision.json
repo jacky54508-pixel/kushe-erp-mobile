@@ -1,0 +1,40 @@
+{
+  "phase": "P40-16CG",
+  "date": "2026-11-21",
+  "type": "Main-based minimal clean draft to integrate previously isolated approved mint quotation+billing PDF",
+  "formal_main_sha": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "formal_beta_sha": "62669539053a15174081ba8670b18248195c6f8c",
+  "reviewed_source_pr": 84,
+  "reviewed_source_sha": "55d05f7f01e63bf450aeaef3e1648392fb1a7487",
+  "production_file_allowlist": {
+    "assets/js/billing-groups.js": "a91e4d555b39922087ed927a1a2fc37cc23e7163",
+    "assets/js/external-billing-print.js": "62e7f0840000bb43849b587b331e268ac5ee14c7",
+    "billing-print.html": "5e7f4906b2ecea04189c9eb37e55242273880fc4",
+    "assets/css/p40-16cd-mint-quotation-billing.css": "ed358d6ee2ebdb7dd5b8491e3501fd79d63cbc99"
+  },
+  "synthetic_test_file_allowlist": [
+    ".p40-16cb-tests/test_one_time_handoff.cjs",
+    ".p40-16cb-tests/real_chrome_reference.cjs",
+    ".p40-16cb-tests/real_full_workflow.cjs",
+    ".p40-16cd-tests/real_mint_quote_and_billing.cjs",
+    ".p40-16ce-tests/real_dense_pagination.cjs"
+  ],
+  "visible_owner_mint_design_approved": true,
+  "actual_owner_template_image_on_github": false,
+  "real_business_backup_on_github": false,
+  "formal_erp_data_read_or_modified": false,
+  "formal_cloud_sync_or_supabase_changes": false,
+  "financial_calculation_changed": false,
+  "discount_posting_changed": false,
+  "any_real_customer_record_changed": false,
+  "quotation_and_billing_fields_preserved": true,
+  "original_house_lines_and_item_summary_preserved": true,
+  "specific_synthetic_tests": "14 safe one-time transfer; 4 historic/current public A4; 8 mint quotation/billing A4; 6 dense A4 up to 32 merged lines/36 quotation items; 28 fake ERP finance/IndexedDB",
+  "owner_real_device_acceptance": false,
+  "owner_current_synced_recheck": false,
+  "owner_backup_restoration_verified": false,
+  "final_release_authorization": false,
+  "production_release": "BLOCKED",
+  "deployment_allowed": false,
+  "merge_allowed": false
+}
