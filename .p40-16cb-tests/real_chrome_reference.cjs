@@ -12,7 +12,7 @@ const st=id=>({billingId:id,received:0,outstanding:100,retentionReceived:0,reten
 const doc={schema:'kushe-external-billing-group-v2',id:'FAKE_DOC',status:'active',revision:3,documentDate:'2026-11-20',updatedAt:'2026-11-20T11:00:00+08:00',targetBillingId:'B-M',displayProjectName:'測試M區',customerName:'測試建商',sourceIds:['B-M','B-L'],sourceSnapshots:[src('B-M','測試M區'),src('B-L','FAKE_OTHER_AREA_L')],settlementSnapshots:[st('B-M'),st('B-L')],note:'僅供虛構測試',totals:{untaxed:200,tax:10,grossTotal:210,retention:10,receivable:200,received:0,outstanding:200,retentionReceived:0,retentionOutstanding:10,pendingCheque:0,availableToCollect:200},detailMode:'unified',unified:{taxMode:'未稅',reason:'測試施工合併',lines:[{house:'1F',item:'櫃台美容',unit:'座',qty:1,price:100,amount:100},{house:'2F',item:'櫃台美容',unit:'座',qty:1,price:100,amount:100}],total:200,target:200}};
 const secrets=['FAKE_PRIVATE_INV_7738','FAKE_OTHER_AREA_L','FAKE_PRIVATE_BANK','sourceSnapshots','settlementSnapshots'];
 function fakeParent(){
- const s='<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>FAKE ERP isolated browser fixture</title><body><button id="preview" type="button">合併請款預覽</button><script>const d='+JSON.stringify(doc).replace(/<\//g,'<\\/')+'; const st={billings:[{id:"B-M"}]};window.KuSheERPStore={getState(){return st},externalBillingDocumentIndex(){return {documents:[{document:d,issues:[],termsChanged:false,settlementChanged:false}]}}};window.KusheBillingPrint={buildExternalView(){return {company:{name:"酷舍企業有限公司",englishName:"Cool Sir Limited Company",taxId:"82980636",address:"測試地址"},publicNote:"",lines:[]}}};</script><script src="/assets/js/billing-groups.js"></script><script>document.getElementById("preview").onclick=()=>window.KusheBillingGroups.printSaved("FAKE_DOC",0,true);</script></body></html>';
+ const s='<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>FAKE ERP isolated browser fixture</title><body><button id="preview" type="button">歷史保存對外請款預覽</button><button id="preview-current" type="button">本次對外請款預覽</button><script>const d='+JSON.stringify(doc).replace(/<\//g,'<\\/')+'; const st={billings:[{id:"B-M"}]};window.KuSheERPStore={getState(){return st},externalBillingDocumentIndex(){return {documents:[{document:d,issues:[],termsChanged:false,settlementChanged:false}]}}};window.KusheBillingPrint={buildExternalView(){return {company:{name:"酷舍企業有限公司",englishName:"Cool Sir Limited Company",taxId:"82980636",address:"測試地址"},publicNote:"",lines:[]}}};</script><script src="/assets/js/billing-groups.js"></script><script>document.getElementById("preview").onclick=()=>window.KusheBillingGroups.printSaved("FAKE_DOC",0,true);document.getElementById("preview-current").onclick=()=>window.KusheBillingGroups.printSaved("FAKE_DOC",0,false);</script></body></html>';
  fs.writeFileSync(PARENT,s);
 }
 const required=['酷舍企業有限公司','請款單','戶別施工統計','施工項目彙總','客戶簽章','公司大小章','測試M區','櫃台美容'];
@@ -37,19 +37,25 @@ function serve(req,res){
   fs.createReadStream(f).pipe(res);
  }catch(_){res.writeHead(404);res.end('not found');}
 }
-async function checkCase(browser,base,label,viewport,mobile){
+async function checkCase(browser,base,label,viewport,mobile,historical=true){
  const context=await browser.newContext({viewport,deviceScaleFactor:mobile?2:1,isMobile:mobile,hasTouch:mobile,locale:'zh-TW',serviceWorkers:'block'});
  const requests=[];context.on('request',r=>requests.push(r.url()));
  const page=await context.newPage();await page.goto(base+'/p40bw-fake-parent.html',{waitUntil:'load'});
  await page.waitForFunction('window.KusheBillingGroups&&window.KusheBillingGroups.printSaved');
  assert.equal(await page.evaluate('typeof crypto.randomUUID'),'function');
  assert.equal(await page.evaluate('typeof BroadcastChannel'),'function');
- const event=context.waitForEvent('page',{timeout:20000});await page.locator('#preview').click();const popup=await event;
+ const event=context.waitForEvent('page',{timeout:20000});await page.locator(historical?'#preview':'#preview-current').click();const popup=await event;
  await popup.waitForURL(/billing-print\.html\?/, {timeout:25000});
  await popup.waitForFunction('window.__billingPrintReady===true',{timeout:25000});
  assert.ok(!popup.url().includes('ksprint'),label+' ticket should be cleared in final route');
  for(const word of secrets)assert.ok(!popup.url().includes(word),label+' raw snapshot in URL');
  const html=await popup.locator('#paper').innerHTML();
+ const printedMode=await popup.evaluate(()=>({
+  historicalNote:document.querySelector('#paper').textContent.includes('歷史保存版本'),
+  mergedClass:document.querySelector('#paper').classList.contains('invoice-group-document')
+ }));
+ assert.equal(printedMode.historicalNote,historical,label+' HISTORIC_NOTE_MISMATCH');
+ assert.equal(printedMode.mergedClass,!historical,label+' CURRENT_MERGED_VIEW_MISMATCH');
 
  const audit=await popup.evaluate(()=>{
    const paper=document.querySelector('#paper');
@@ -79,6 +85,8 @@ async function checkCase(browser,base,label,viewport,mobile){
  const pdf=path.join(OUT,'FAKE_'+label+'_A4.pdf');
  await popup.pdf({path:pdf,format:'A4',preferCSSPageSize:true,printBackground:true,displayHeaderFooter:false});
  const pages=checkPDF(pdf,label);
+ const extracted=fs.readFileSync(path.join(OUT,label+'_extracted.txt'),'utf8');
+ assert.equal(extracted.includes('歷史保存版本'),historical,label+' unexpected historical disclaimer in customer PDF');
  await popup.screenshot({path:path.join(OUT,'FAKE_'+label+'_preview.png'),fullPage:true});
  for(const u of requests)assert.ok(u.startsWith(base)||u.startsWith('data:'),label+' unexpected external network '+u);
  await context.close();
@@ -102,10 +110,12 @@ async function checkBadUrls(browser,base){
   browser=await chromium.launch({executablePath:exe,headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
   const desktop=await checkCase(browser,base,'desktop',{width:1280,height:900},false);
   const mobile=await checkCase(browser,base,'mobile390',{width:390,height:844},true);
+  const desktopCurrent=await checkCase(browser,base,'desktop_current',{width:1280,height:900},false,false);
+  const mobileCurrent=await checkCase(browser,base,'mobile390_current',{width:390,height:844},true,false);
   const rejected=await checkBadUrls(browser,base);
-  const result={phase:'P40-16BW',mode:'FAKE_REAL_CHROMIUM_TWO_TABS',cases:[desktop,mobile],negative_cases:rejected,production_release:'BLOCKED',real_business_data_used:false,main_beta_supabase_untouched:true};
+  const result={phase:'P40-16CC',mode:'FAKE_REAL_CHROMIUM_TWO_TABS_CURRENT_AND_HISTORICAL',cases:[desktop,mobile,desktopCurrent,mobileCurrent],negative_cases:rejected,production_release:'BLOCKED',real_business_data_used:false,main_beta_supabase_untouched:true};
   fs.writeFileSync(path.join(OUT,'RESULT.json'),JSON.stringify(result,null,2));
-  console.log('PASS P40-16BW_REAL_CHROMIUM_FAKE_A4 '+JSON.stringify(result));
+  console.log('PASS P40-16CC_CURRENT_AND_HISTORICAL_A4 '+JSON.stringify(result));
  }catch(e){console.error('FAIL P40-16BW REAL BROWSER '+e.stack);process.exitCode=1}
  finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));try{fs.unlinkSync(PARENT)}catch(_){}}
 })().catch(e=>{console.error(e);process.exitCode=1});
