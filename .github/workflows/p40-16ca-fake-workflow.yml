@@ -1,0 +1,64 @@
+name: P40-16CA real ERP FAKE-only workflow regression (NO DEPLOY)
+on:
+  push:
+    branches: [p40-16ca-fake-workflow-regression-20261121]
+    paths:
+      - '.p40-16ca-tests/**'
+      - '.p40-16ca-review/**'
+      - '.github/workflows/p40-16ca-fake-workflow.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fake-business-workflow:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fail-closed exact add-only scoped files and immutable formal branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16ca-fake-workflow-regression-20261121
+          git fetch --no-tags origin main beta p40-16bz-isolated-real-store-fake-20261121
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git rev-parse origin/p40-16bz-isolated-real-store-fake-20261121)" = 2868c000f250590ec5c2cb5283282998df12dec4
+          test "$(git merge-base origin/p40-16bz-isolated-real-store-fake-20261121 HEAD)" = 2868c000f250590ec5c2cb5283282998df12dec4
+          git diff --name-status origin/p40-16bz-isolated-real-store-fake-20261121...HEAD >/tmp/p40ca-diff
+          cat /tmp/p40ca-diff
+          test "$(wc -l </tmp/p40ca-diff)" -eq 4
+          if grep -Ev '^A[[:space:]]+(\.p40-16ca-(tests|review)/.+|\.github/workflows/p40-16ca-fake-workflow\.yml)$' /tmp/p40ca-diff;then echo 'STOP_SCOPE_EXCEEDED';exit 1;fi
+          git diff --exit-code origin/p40-16bz-isolated-real-store-fake-20261121 -- assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/billing-groups.js assets/js/external-billing-print.js billing-print.html index.html
+          test ! -e KusheERP_safe_backup_20261121_000502.json
+          node -e "const d=require('./.p40-16ca-review/decision.json');if(d.production_release!=='BLOCKED'||d.owner_backup_in_repo||d.real_business_data_used||d.real_supabase_touched||d.production_files_modified||d.formal_main_release_approved)process.exit(1)"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Install chromium test driver only on temporary runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x /usr/bin/google-chrome || command -v google-chrome-stable
+          mkdir -p /tmp/p40bz
+          npm install --prefix /tmp/p40bz --silent --no-audit --no-fund playwright-core@1.56.0
+          node --check .p40-16ca-tests/real_full_workflow.cjs
+      - name: Real browser tests against existing ERP Store and fake business data
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v google-chrome >/dev/null;then export CHROME_BIN="$(command -v google-chrome)";else export CHROME_BIN="$(command -v google-chrome-stable)";fi
+          node .p40-16ca-tests/real_full_workflow.cjs
+          test -s p40ca-artifacts/RESULT.json
+          node -e "const d=require('./p40ca-artifacts/RESULT.json');if(d.production_release!=='BLOCKED'||d.passed.length<28||!d.passed.every(x=>x.status==='PASS')||d.productionDataUsed||d.realSupabaseTouched)process.exit(1)"
+          echo 'P40-16CA FAKE BUSINESS CASES PASS; REAL ERP RELEASE BLOCKED'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: success()
+        with:
+          name: p40ca-fake-real-business-workflow-regression
+          path: p40ca-artifacts/RESULT.json
+          if-no-files-found: error
+          retention-days: 7
