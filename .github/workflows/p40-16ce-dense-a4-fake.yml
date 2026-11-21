@@ -1,0 +1,101 @@
+name: P40-16CE dense quote and billing A4 fake-only gate (NO DEPLOY)
+on:
+  push:
+    branches: [p40-16ce-dense-a4-isolated-20261121]
+    paths:
+      - '.p40-16ce-tests/**'
+      - '.p40-16ce-review/**'
+      - '.github/workflows/p40-16ce-dense-a4-fake.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  high-density-fake-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Confirm locked main/beta and no production-code changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = p40-16ce-dense-a4-isolated-20261121
+          git fetch --no-tags origin main beta p40-16cd-mint-quote-billing-isolated-20261121
+          test "$(git rev-parse origin/main)" = 2ab9c9d5944b1360ba3eebf49695713168caca8a
+          test "$(git rev-parse origin/beta)" = 62669539053a15174081ba8670b18248195c6f8c
+          test "$(git rev-parse origin/p40-16cd-mint-quote-billing-isolated-20261121)" = f4ce5f9c9c730c4af9924c7ad2162f8404e4ccec
+          test "$(git merge-base origin/p40-16cd-mint-quote-billing-isolated-20261121 HEAD)" = f4ce5f9c9c730c4af9924c7ad2162f8404e4ccec
+          git diff --name-status origin/p40-16cd-mint-quote-billing-isolated-20261121...HEAD | tee /tmp/p40ce-diff
+          node <<'NODE'
+          const assert=require('node:assert/strict'),fs=require('node:fs');
+          const expected=[
+            'A\t.p40-16ce-tests/real_dense_pagination.cjs',
+            'A\t.p40-16ce-review/README.md',
+            'A\t.p40-16ce-review/decision.json',
+            'A\t.github/workflows/p40-16ce-dense-a4-fake.yml'
+          ].sort();
+          assert.deepEqual(fs.readFileSync('/tmp/p40ce-diff','utf8').trim().split('\n').sort(),expected);
+          const d=require('./.p40-16ce-review/decision.json');
+          assert.equal(d.production_release,'BLOCKED');
+          assert.equal(d.formal_deploy_authorized,false);
+          assert.equal(d.real_business_data_used,false);
+          assert.equal(d.real_json_backup_in_repo,false);
+          NODE
+          git diff --exit-code origin/p40-16cd-mint-quote-billing-isolated-20261121 -- billing-print.html assets/css assets/js enterprise/index.html index.html
+          test ! -e '清新薄荷色台灣請款單(1).png'
+          test ! -e 'KusheERP_safe_backup_20261121_000502.json'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Existing print safety, 14 mock tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check .p40-16ce-tests/real_dense_pagination.cjs
+          node --test .p40-16cb-tests/test_one_time_handoff.cjs | tee /tmp/p40ce-safe
+          grep -Eq '^# pass 14$' /tmp/p40ce-safe
+          grep -Eq '^# fail 0$' /tmp/p40ce-safe
+      - name: Setup actual Chromium, Chinese fonts and PDF inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq poppler-utils fonts-noto-cjk fontconfig
+          sudo fc-cache -f >/dev/null
+          mkdir -p /tmp/p40bv /tmp/p40bz
+          npm install --prefix /tmp/p40bv --no-audit --no-fund --silent playwright-core@1.56.0
+          ln -s /tmp/p40bv/node_modules /tmp/p40bz/node_modules
+          if command -v google-chrome >/dev/null; then echo "CHROME_BIN=$(command -v google-chrome)" >> "$GITHUB_ENV";else echo "CHROME_BIN=$(command -v google-chrome-stable)" >> "$GITHUB_ENV";fi
+      - name: Current small PDF regression with 8 invoice and quotation cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16cd-tests/real_mint_quote_and_billing.cjs
+          node -e "const d=require('./p40cd-artifacts/RESULT.json');if(d.production_release!=='BLOCKED'||d.cases?.length!==8||!d.cases.every(c=>c.pages===1))process.exit(1)"
+      - name: Stress test dense original rows, quote and billing pagination
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16ce-tests/real_dense_pagination.cjs
+          test -s p40ce-artifacts/RESULT.json
+          node -e "const d=require('./p40ce-artifacts/RESULT.json');if(d.production_release!=='BLOCKED'||d.cases?.length!==6||!d.one_page_supported_cases_pass||d.cases.some(x=>x.blankPages!==0||!x.renderedTotalsUnchanged))process.exit(1)"
+          echo 'P40-16CE FAKE_HIGH_DENSITY_GATE_PASS; STRESS OVERFLOW MUST BE REVIEWED BEFORE RELEASE'
+      - name: Existing fake financial ERP Store regressions (28 cases)
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p40-16cb-tests/real_full_workflow.cjs
+          node -e "const d=require('./p40ca-artifacts/RESULT.json');if(d.production_release!=='BLOCKED'||d.passed?.length<28||!d.passed.every(r=>r.status==='PASS'))process.exit(1)"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: success()
+        with:
+          name: p40ce-mint-dense-quote-billing-fake-a4
+          path: |
+            p40ce-artifacts/
+            p40cd-artifacts/RESULT.json
+            p40ca-artifacts/RESULT.json
+          if-no-files-found: error
+          retention-days: 7
