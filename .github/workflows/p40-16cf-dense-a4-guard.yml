@@ -18,7 +18,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Fail closed: only appended CSS, pinned PR83/main/beta
+      - name: "Fail closed: only appended CSS, pinned PR83/main/beta"
         shell: bash
         run: |
           set -euo pipefail
