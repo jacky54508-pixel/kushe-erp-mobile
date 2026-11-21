@@ -1,0 +1,46 @@
+{
+  "phase": "P40-16CB",
+  "date": "2026-11-21",
+  "purpose": "Minimal clean print candidate from CURRENT formal main; no release",
+  "production_release": "BLOCKED",
+  "owner_formal_release_authorized": false,
+  "owner_template_accepted": false,
+  "main_base_sha": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "beta_observed_sha": "62669539053a15174081ba8670b18248195c6f8c",
+  "reviewed_source_head_sha": "1a192f08fe47ad7d9cb740c5bcf2cfcd1da94782",
+  "approved_code_file_allowlist": [
+    "assets/js/billing-groups.js",
+    "assets/js/external-billing-print.js",
+    "billing-print.html"
+  ],
+  "tests_using_synthetic_data_only": true,
+  "original_backup_upload_to_github": false,
+  "formal_erp_data_read_or_modified": false,
+  "supabase_changes": false,
+  "cloudflare_deploy": false,
+  "real_smartphone_print_accepted": false,
+  "financial_full_regression_accepted": false,
+  "main_beta_changed": false,
+  "code_blob_sha": {
+    "assets/js/billing-groups.js": "a91e4d555b39922087ed927a1a2fc37cc23e7163",
+    "assets/js/external-billing-print.js": "62e7f0840000bb43849b587b331e268ac5ee14c7",
+    "billing-print.html": "acb3aa836e71ca15a2d79fd2f627c62b3ebbcddb"
+  },
+  "staged_prs_not_merged": [
+    74,
+    76,
+    77,
+    78,
+    79,
+    80
+  ],
+  "excluded": [
+    "discount accounting posting",
+    "invoice creation/change",
+    "employee commission recalculation",
+    "ERP Store/Supabase/Cloudflare code",
+    "payroll/banking/receipts/daily construction changes",
+    "sourceSnapshots disclosure",
+    "all other stacked CI and test branches"
+  ]
+}
