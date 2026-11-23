@@ -1,0 +1,22 @@
+{
+  "phase":"P40-16BL",
+  "date_tw":"2026-11-19",
+  "formal_main_sha":"2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "formal_beta_sha":"62669539053a15174081ba8670b18248195c6f8c",
+  "scope":"NODE_SQLITE_FAKE_ONLY",
+  "production_release":"BLOCKED",
+  "formal_code_modified":false,
+  "production_database_access":false,
+  "business_rows_read":0,
+  "real_jwt_verified":false,
+  "real_postgresql_rls_verified_this_phase":false,
+  "real_single_document_source_approved":false,
+  "real_erp_cas_projection_atomicity_proven":false,
+  "actual_pdf_bytes_verified":false,
+  "trusted_ingestion_hypothetical":true,
+  "local_tests_passed":29,
+  "local_tests_failed":0,
+  "local_subtests_skipped":1,
+  "github_ci_verified":false,
+  "owner_authorized_production_change":false
+}
