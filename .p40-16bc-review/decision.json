@@ -1,0 +1,94 @@
+{
+  "phase": "P40-16BC",
+  "date": "2026-11-19",
+  "status": "REVIEWER_EXCEPTION_POLICY_NOT_APPROVED",
+  "formal_main": "2ab9c9d5944b1360ba3eebf49695713168caca8a",
+  "formal_beta": "62669539053a15174081ba8670b18248195c6f8c",
+  "real_data_accessed": false,
+  "production_code_modified": false,
+  "supabase_modified": false,
+  "formal_release": "BLOCKED",
+  "candidate_policies": {
+    "owner_or_admin_independent": {
+      "role_policy": "NOT APPROVED",
+      "permitted_reviewers": [
+        "owner",
+        "admin"
+      ],
+      "cannot_review": [
+        "last_editor",
+        "submitter",
+        "wrong_company",
+        "no_doc_acl",
+        "employee",
+        "AAL1",
+        "inactive"
+      ],
+      "single_owner_edits": "HOLD_NEW_REVIEW",
+      "if_independent_admin_available": "NOMINATE_ADMIN",
+      "existing_untouched_confirmed": "KEEP_LEGACY_PRINT_PATH",
+      "on_new_revision": "NEW_INDEPENDENT_REVIEW_REQUIRED"
+    },
+    "owner_only_independent": {
+      "role_policy": "NOT APPROVED",
+      "permitted_reviewers": [
+        "owner"
+      ],
+      "cannot_review": [
+        "last_editor",
+        "submitter",
+        "wrong_company",
+        "no_doc_acl",
+        "employee",
+        "AAL1",
+        "inactive"
+      ],
+      "owner_edits_with_only_admin_available": "HOLD_NEW_REVIEW",
+      "existing_untouched_confirmed": "KEEP_LEGACY_PRINT_PATH",
+      "on_new_revision": "NEW_INDEPENDENT_REVIEW_REQUIRED"
+    }
+  },
+  "exception_cases": {
+    "one_person_editor_owner": {
+      "candidate_default": "SAFE_HOLD_NO_REVIEWER",
+      "never": "AUTO_SELF_APPROVE_OR_INFER_APPROVAL_FROM_MFA",
+      "remedy": "Owner must explicitly approve organizational exception policy and independent authorized reviewer/approver availability before implementation"
+    },
+    "reviewer_revoked_before_approval": {
+      "candidate_default": "REASSIGN_REVIEWER_REQUIRED",
+      "consequence": "No silent role elevation, signature or approval"
+    },
+    "reviewer_revoked_after_approval_before_delivery": {
+      "candidate_default": "HOLD_FOR_GOVERNANCE_DECISION",
+      "note": "Legally continuing past approvals after reviewer departure is an OPEN decision, test-only conservative hold is not company policy"
+    },
+    "previously_confirmed_unchanged": {
+      "candidate_default": "PRESERVE_EXISTING_LEGACY_PRINT",
+      "note": "Subject to existing historical/current print source and settlement gates, never bypass current permissions"
+    },
+    "changed_existing_bill": {
+      "candidate_default": "NEW_VERSION_NEW_REVIEW",
+      "note": "Keep prior original read-only historic version, do not alter true billing/receivables/receipt/invoices/bank"
+    }
+  },
+  "owner_decisions_required": [
+    "Which candidate policy is appropriate: independent owner or admin, or independent owner only?",
+    "What happens in genuine one-person operations without another reviewer? No automatic self approval.",
+    "What is the legal/control meaning of an existing approval after reviewer departure/role revoke?",
+    "Should already confirmed/issued/paid old billing retain legacy print, and what is cutover event?",
+    "For price changes or discounts, use separate finance approval; do not conflate construction-revision approval with ledger posting."
+  ],
+  "technical_blockers": [
+    "No verified server-side JWT/session/AAL2 and current company membership/document ACL authority",
+    "No proven approved per-document source from current ERP JSONB state",
+    "No signed durable independently authorized audit or policy approval",
+    "No actual PDF byte-verified customer delivery nor native print bypass mitigation",
+    "No latest SYNCED, independently restorable backup, true customer privacy and all bill/invoice/retention/bank/payroll regressions",
+    "No separately signed owner release authorization"
+  ],
+  "test_scope": "P40-16BB policy evaluator reused unchanged, fake roster and fake versions only",
+  "production_database_sql": "NONE",
+  "production_app_js_changes": "NONE",
+  "trusted_jwt_auth": "NOT_IMPLEMENTED",
+  "verified_pdf_download": "NOT_IMPLEMENTED"
+}
