@@ -190,7 +190,19 @@
     button.onclick=()=>{if(expand.has(key))expand.delete(key);else expand.add(key);update()};update();
     $('[data-bg-edit]',box).onclick=()=>openEditor(g.document.sourceIds,g.document.id);
     $('[data-bg-pdf]',box).onclick=()=>printSaved(g.document.id);
-    $('[data-bg-discount]',box)?.addEventListener('click',()=>{try{if(!window.KusheBillingGroupDiscountPreview)throw Error('合併議價試算元件尚未載入');window.KusheBillingGroupDiscountPreview.open(g.document.id)}catch(error){notifyError(error.message||String(error))}});
+    $('[data-bg-discount]',box)?.addEventListener('click',()=>{
+      try{
+        const candidate=window.KusheP4138EntryCandidate;
+        if(candidate?.openGroup){
+          candidate.openGroup(g,{store,groups:window.KusheBillingGroups,
+            singlePreview:window.KusheBillingDiscountPreview,
+            groupPreview:window.KusheBillingGroupDiscountPreview});
+        }else{
+          if(!window.KusheBillingGroupDiscountPreview)throw Error('合併議價試算元件尚未載入');
+          window.KusheBillingGroupDiscountPreview.open(g.document.id);
+        }
+      }catch(error){notifyError(error.message||String(error))}
+    });
     $$('[data-bg-history]',box).forEach(button=>button.onclick=()=>openDocumentHistory(g.document.id));
   }
   function mountList(root,kind,context){

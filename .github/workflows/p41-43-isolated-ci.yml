@@ -1,0 +1,96 @@
+name: P41-43 isolated read-only entry and A4 PDF regression
+on:
+  push:
+    branches:
+      - p41-43-isolated-readonly-a4-20261123
+permissions:
+  contents: read
+jobs:
+  source-and-safety:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Exact main parent and only approved candidate files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "p41-43-isolated-readonly-a4-20261123"
+          test "$(git rev-parse HEAD^)" = "edf1c1886aac09958caa9e4b304502cca44f6937"
+          cat > /tmp/allowed <<'EOF'
+          .github/workflows/p41-43-isolated-ci.yml
+          .p41-43-tests/router.test.cjs
+          assets/css/p40-16cd-mint-quotation-billing.css
+          assets/js/billing-groups.js
+          assets/js/billing.js
+          assets/js/p41-38-entry-candidate.js
+          index.html
+          EOF
+          git diff --name-only edf1c1886aac09958caa9e4b304502cca44f6937 HEAD | sort > /tmp/actual
+          diff -u /tmp/allowed /tmp/actual
+          git diff --exit-code edf1c1886aac09958caa9e4b304502cca44f6937 HEAD -- assets/js/erp-store.js assets/js/cloud-sync.js assets/js/auth-gate.js assets/js/invoices.js assets/js/commissions.js assets/js/banks.js assets/js/billing-print.js billing-print.html assets/js/external-billing-print.js
+      - name: All ERP JavaScript syntax
+        run: |
+          set -euo pipefail
+          for file in assets/js/*.js; do node --check "$file"; done
+      - name: Read-only route and P39 financial models
+        run: |
+          set -euo pipefail
+          node --test .p41-43-tests/router.test.cjs
+          node --test .p39-inv1-tests/projection.test.js
+          node --test .p39-inv1a-tests/print_model.test.js
+  finance-and-auth:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 32
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install isolated Chromium
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Start loopback synthetic fixtures
+        run: |
+          set -euo pipefail
+          for port in 8774 8784 8795 8796; do
+            python -m http.server "$port" --bind 127.0.0.1 >"/tmp/p41-43-$port.log" 2>&1 &
+          done
+      - name: P33 accounting and history
+        run: python .p33-4-tests/regression.py
+      - name: P34 commission and rollback
+        run: python .p34-tests/test.py
+      - name: P35 salary and backup
+        run: python .p35-tests/test_ui.py
+      - name: P36 authentication and permissions
+        run: python .p36-tests/test_permissions.py
+  invoice-pdf-mobile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 32
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install isolated Chromium and PDF parser
+        run: |
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
+          python -m playwright install --with-deps chromium
+      - name: Start loopback PDF fixture
+        run: python -m http.server 8797 --bind 127.0.0.1 >/tmp/p41-43-pdf.log 2>&1 &
+      - name: P39 actual invoice editor and PDF
+        run: python .p39-inv1-tests/test_ui.py
+      - name: P39 real Store on synthetic data
+        run: python .p39-inv1-tests/test_store.py
+      - name: A4 one page and 390px mobile plus readable font
+        run: python .p39-inv1-tests/layout_preflight.test.py
+      - name: Public PDF and original billing regression
+        run: python .p39-inv1a-tests/pdf_display.test.py

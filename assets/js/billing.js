@@ -155,6 +155,15 @@
   // document once; never recalculate a constituent bill as a separate concession.
   function openBillingDiscountReadOnly(id){
     try{
+      // P41-38 isolated proposal: only delegate when the reviewed module loaded.
+      // Existing P40 read-only routing remains the compatibility fallback.
+      const candidate=window.KusheP4138EntryCandidate;
+      if(candidate?.open){
+        candidate.open(id,{store,groups:window.KusheBillingGroups,
+          singlePreview:window.KusheBillingDiscountPreview,
+          groupPreview:window.KusheBillingGroupDiscountPreview});
+        return;
+      }
       // P40-15B fail closed: never silently fall back to standalone discount if
       // the original belongs to an ACTIVE combined document whose index is stale.
       const docs=store.getState()?.meta?.externalBillingDocuments;

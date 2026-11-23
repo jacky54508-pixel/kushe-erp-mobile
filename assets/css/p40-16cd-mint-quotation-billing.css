@@ -85,17 +85,17 @@
   }
   #paper.invoice-group-document:has(.dense-original-details) .dense-line-table th,
   #paper.invoice-group-document:has(.dense-original-details) .dense-line-table td{
-    padding:.55mm 1mm;font-size:7.7pt;line-height:1.10
+    padding:.55mm 1mm;font-size:8.4pt;line-height:1.10
   }
   #paper.invoice-group-document:has(.dense-original-details) .dense-line-table td.item{
-    padding:.55mm 1mm;font-size:7.9pt;line-height:1.12
+    padding:.55mm 1mm;font-size:8.6pt;line-height:1.12
   }
   #paper.invoice-group-document:has(.dense-original-details) .grouped-item-summary-table th,
   #paper.invoice-group-document:has(.dense-original-details) .grouped-item-summary-table td{
-    padding:.55mm 1mm;font-size:7.7pt;line-height:1.12
+    padding:.55mm 1mm;font-size:8.4pt;line-height:1.12
   }
   #paper.invoice-group-document:has(.dense-original-details) .grouped-item-summary-table td.item{
-    font-size:7.9pt;line-height:1.12
+    font-size:8.6pt;line-height:1.12
   }
   /* Two saved totals and the real company chops must remain fully visible. */
   #paper.billing-document:has(.matrix tbody tr:nth-child(11)) .summary,
