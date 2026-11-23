@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>P40-16BA 核准操作流程｜僅限虛構資料示意</title>
+<style>
+:root{font-family:system-ui,"Noto Sans TC","Microsoft JhengHei",sans-serif;color:#1b2b30;background:#f4f6f5}
+*{box-sizing:border-box}body{margin:0}header{background:#183d37;color:white;padding:22px max(20px,calc((100vw - 1040px)/2))}header strong{font-size:20px;letter-spacing:.04em}header small{display:block;margin-top:6px;opacity:.84}
+main{max-width:1040px;margin:auto;padding:24px 18px 50px}.warning{border:1px solid #dfb880;background:#fff7e8;color:#754b19;padding:13px 16px;border-radius:10px;line-height:1.65;margin-bottom:17px}
+.layout{display:grid;grid-template-columns:minmax(0,2fr) minmax(270px,1fr);gap:16px}.panel{background:white;border:1px solid #dfe7e3;border-radius:14px;padding:22px;box-shadow:0 5px 24px #183d3708;margin-bottom:16px}
+h1,h2{margin:0 0 16px;font-size:17px}p{line-height:1.65}.meta{display:grid;grid-template-columns:repeat(3,1fr);gap:13px}.meta label{display:block;font-size:12px;color:#677772;margin-bottom:6px}.meta strong{font-size:17px}
+select{width:100%;padding:12px;border:1px solid #becbc5;border-radius:9px;background:white;font:inherit;color:inherit}
+.stages{display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap}.stages span{padding:7px 12px;border-radius:8px;background:#edf2ef;color:#64756c;font-size:13px}.stages span.current{color:white;background:#1e6655}
+.buttons{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}.buttons button{border:1px solid #bad3c7;border-radius:9px;padding:12px 8px;background:#f0f7f3;color:#205d48;font:inherit;font-weight:650;cursor:pointer}.buttons button.primary{background:#1e6655;color:white;border-color:#1e6655}.buttons button:disabled{background:#eff1ef;color:#a0aaa4;border-color:#e5e9e7;cursor:not-allowed}
+.note{font-size:12px;color:#6f7d75}ul{padding-left:19px;line-height:1.8}.history{border-top:1px solid #e4eae6;margin-top:16px;padding-top:14px}.history div{border-bottom:1px solid #edf0ee;padding:7px 0}.timeline{max-height:340px;overflow:auto}#events{list-style:none;padding:0;margin:0}#events li{padding:9px 0;border-bottom:1px solid #e9eeeb;font-size:13px}#events time{color:#768681;display:block;font-size:11px}#feedback{font-weight:600;color:#205e4e;font-size:13px}footer{color:#7a8982;text-align:center;font-size:12px;padding-top:14px}
+@media(max-width:720px){.layout{grid-template-columns:1fr}.meta{grid-template-columns:repeat(2,1fr)}.buttons{grid-template-columns:repeat(2,1fr)}.panel{padding:17px}}
+</style>
+</head>
+<body>
+<header><strong>酷舍 ERP · 核准作業流程原型</strong><small>P40-16BA / 完全虛構資料 / 未連接正式 ERP</small></header>
+<main>
+<div class="warning"><b>僅供介面操作驗證，禁止當作正式請款或核准。</b> 所有案場、金額、角色及操作紀錄都是瀏覽器暫時產生的 FAKE 資料；此示意介面沒有真正登入、資料庫、PDF、上傳、保存或發布功能。</div>
+<div class="layout"><section>
+<div class="panel">
+<h1>跨區合併請款 · 對外明細核准</h1>
+<div class="meta">
+<div><label>目前文件</label><strong>FAKE-M 區</strong></div>
+<div><label>文件版次</label><strong id="version">v3</strong></div>
+<div><label>處理狀態</label><strong id="state">既有已確認</strong></div>
+<div><label>假建商</label><strong>測試建商 A</strong></div>
+<div><label>含稅總額（虛構）</label><strong>NT$ 10,500</strong></div>
+<div><label>模擬檢查</label><strong id="gate">既有版相容</strong></div>
+</div>
+</div>
+<div class="panel">
+<h2>文件核准進度</h2>
+<div class="stages" id="stages"><span>編輯</span><span>待審核</span><span>已核准／退回</span><span>歷史版本</span></div>
+<div class="buttons">
+<button id="edit">編輯新版本</button>
+<button id="submit" class="primary">送審</button>
+<button id="approve" class="primary">核准</button>
+<button id="return">退回修改</button>
+<button id="historyButton">查看歷史</button>
+<button id="reset">重設虛構範例</button>
+</div>
+<p id="feedback" role="status" aria-live="polite"></p>
+<div id="historyPanel" class="history" hidden><h2>歷史版本（虛構）</h2><div id="historyRows"></div><p class="note">只示範原版可查看，沒有開啟或修改真實 PDF。</p></div>
+</div>
+</section>
+<aside>
+<div class="panel"><h2>切換模擬操作身分</h2>
+<label for="who" class="note">測試角色（不是真實登入）</label>
+<select id="who">
+<option value="editor">會計｜FAKE 編輯者</option>
+<option value="reviewer">負責人｜FAKE 獨立核准者</option>
+<option value="admin">管理者｜FAKE 審查者</option>
+<option value="employee">員工｜FAKE 無請款權限</option>
+</select>
+<p class="note">核准與送審必須由不同模擬人員操作。正式公司核准權限尚未定案。</p></div>
+<div class="panel"><h2>操作紀錄（暫存）</h2><div class="timeline"><ul id="events"></ul></div></div>
+</aside></div>
+<footer>隔離介面示意 · 無正式帳務、無 Supabase、無 PDF 下載服務 · 關閉頁面後測試狀態不保留</footer>
+</main>
+<script>
+(function(){
+'use strict';
+const $=id=>document.getElementById(id);
+let state;
+function reset(){
+state={revision:3,mode:'legacy',status:'legacy_unchanged',
+history:[1,2],editor:'editor',submittedBy:null,approvedFor:null,
+events:[]};
+log('示例：已確認舊版 v3，維持既有列印方式');
+paint();
+}
+function role(){return $('who').value}
+function log(msg){
+state.events.unshift({msg,clock:'虛構測試事件 #'+(state.events.length+1)});
+$('events').replaceChildren(...state.events.map(e=>{
+const li=document.createElement('li');
+const time=document.createElement('time');time.textContent=e.clock;
+li.append(time,document.createTextNode(e.msg));return li;
+}));
+$('feedback').textContent=msg;
+}
+function paint(){
+const r=role(),canEdit=['editor','reviewer','admin'].includes(r),
+canApprove=['reviewer','admin'].includes(r)&&r!==state.editor&&r!==state.submittedBy;
+$('version').textContent='v'+state.revision;
+const labels={legacy_unchanged:'既有已確認',editing:'編輯中',pending_review:'待審核',
+approved:'已核准',returned:'已退回'};
+$('state').textContent=labels[state.status];
+$('gate').textContent=state.mode==='legacy'?'既有版相容':
+ state.status==='approved'?'新版核准符合':state.status==='pending_review'?'待核准':
+ state.status==='returned'?'待修改':'尚不可交付';
+$('edit').disabled=!canEdit||state.status==='pending_review';
+$('submit').disabled=!canEdit||r!==state.editor||state.status!=='editing';
+$('approve').disabled=!canApprove||state.status!=='pending_review';
+$('return').disabled=!canApprove||state.status!=='pending_review';
+$('historyButton').disabled=r==='employee';
+const order={legacy_unchanged:0,editing:0,pending_review:1,approved:2,returned:2};
+[...$('stages').children].forEach((x,i)=>x.classList.toggle('current',i===order[state.status]));
+$('historyRows').replaceChildren(...state.history.map(v=>{
+const row=document.createElement('div');
+row.textContent='v'+v+'　保留歷史（唯讀示意）';return row;
+}));
+}
+$('who').addEventListener('change',paint);
+$('edit').onclick=()=>{if($('edit').disabled)return;
+state.history.push(state.revision);state.revision++;
+state.mode='enforced';state.status='editing';state.editor=role();
+state.submittedBy=null;state.approvedFor=null;
+log('已建立虛構 v'+state.revision+'；不沿用舊版核准');paint()};
+$('submit').onclick=()=>{if($('submit').disabled)return;
+state.status='pending_review';state.submittedBy=role();
+log('v'+state.revision+' 已送審；需另一位模擬人員核准');paint()};
+$('approve').onclick=()=>{if($('approve').disabled)return;
+state.status='approved';state.approvedFor=state.revision;
+log('另一位模擬核准者已核准 v'+state.revision+'（沒有正式簽章）');paint()};
+$('return').onclick=()=>{if($('return').disabled)return;
+state.status='returned';state.submittedBy=null;state.approvedFor=null;
+log('v'+state.revision+' 已退回；需編輯新版本後才能重新送審');paint()};
+$('historyButton').onclick=()=>{if($('historyButton').disabled)return;
+$('historyPanel').hidden=!$('historyPanel').hidden;
+log($('historyPanel').hidden?'收起虛構歷史':'查看虛構唯讀歷史');paint()};
+$('reset').onclick=reset;
+reset();
+})();
+</script>
+</body></html>
