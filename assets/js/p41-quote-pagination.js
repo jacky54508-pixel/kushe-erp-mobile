@@ -5,6 +5,7 @@
   // quantity, price, total and company image. No Store or storage APIs are used.
   const jobs = new WeakMap();
   const finished = new WeakMap();
+  const previews = new WeakMap();
   const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
 
   function fail(code, message) {
@@ -47,11 +48,45 @@
     return Array.from(text);
   }
 
+  function attachPreview(paper) {
+    let preview = previews.get(paper);
+    if (!preview) {
+      preview = document.createElement('div');
+      preview.className = 'p41-quote-preview';
+      paper.before(preview);
+      preview.appendChild(paper);
+      previews.set(paper, preview);
+    }
+    return preview;
+  }
+
   function fitPreview(paper) {
-    // Only the on-screen sheet preview adapts to a narrow viewport. Its internal
-    // A4 dimensions and all print font sizes remain unchanged.
+    const preview = previews.get(paper);
+    if (!preview || !paper.isConnected) return;
+    // Transform the finished sheets as a single visual preview. Unlike CSS
+    // zoom, this never changes table borders, line boxes or page-break layout.
+    // The wrapper removes only the untransformed scroll footprint; its bounds
+    // include every transformed sheet, including all notes and the final seal.
     const available = Math.max(1, document.documentElement.clientWidth - 24);
-    paper.style.setProperty('--p41-preview-scale', String(Math.min(1, available / (210 * 96 / 25.4))));
+    const style = getComputedStyle(paper);
+    const width = Math.max(parseFloat(style.width) || 0, paper.scrollWidth, paper.offsetWidth);
+    const height = Math.max(parseFloat(style.height) || 0, paper.scrollHeight, paper.offsetHeight);
+    if (!width || !height) throw fail('QUOTATION_PREVIEW_SIZE_UNAVAILABLE', '無法確認報價預覽尺寸，請重新開啟預覽。');
+    const scale = Math.min(1, available / width);
+    preview.style.width = `${Math.ceil(width * scale)}px`;
+    preview.style.height = `${Math.ceil(height * scale)}px`;
+    paper.style.setProperty('--p41-preview-scale', String(scale));
+  }
+
+  function previewContainsSheets(paper) {
+    const preview = previews.get(paper);
+    if (!preview) return false;
+    const outer = preview.getBoundingClientRect();
+    return Array.from(paper.querySelectorAll('.p41-quote-page')).every(sheet => {
+      const rect = sheet.getBoundingClientRect();
+      return rect.left >= outer.left - 0.5 && rect.right <= outer.right + 0.5 &&
+        rect.top >= outer.top - 0.5 && rect.bottom <= outer.bottom + 0.5;
+    });
   }
 
   async function build({ paper, noteText }) {
@@ -78,17 +113,16 @@
     content.style.removeProperty('transform');
     paper.dataset.quotationScale = '1.0000';
     window.__quotationPrintScale = 1;
-    // Paginate at the physical print scale. CSS zoom can round line boxes
-    // differently on a narrow preview; it must never choose our page breaks.
+    // Paginate at the physical print scale. The eventual screen transform
+    // changes only the preview's painted size, never its layout dimensions.
     paper.style.setProperty('--p41-preview-scale', '1');
     content.replaceChildren();
 
     function fits(page = current) {
       // The inner flow has its natural height, unlike a fixed-height body's
       // scrollHeight (which is at least clientHeight even for short content).
-      // Keep 4 mm of actual unused space for fractional line-box rounding when
-      // the on-screen sheet is zoomed. All content remains visible and the
-      // public A4 body is still checked at its original full height.
+      // Keep 4 mm of breathing space inside the printable body. Screen preview
+      // transforms leave these dimensions unchanged at every viewport width.
       const reserve = 4 * 96 / 25.4;
       return page.body.scrollHeight <= page.frame.clientHeight - reserve &&
         page.body.scrollWidth <= page.frame.clientWidth + 1;
@@ -279,6 +313,7 @@
         page.counter.textContent = `第 ${index + 1} 頁 / 共 ${pages.length} 頁`;
         if (!fits(page)) throw fail('QUOTATION_PAGE_OVERFLOW', '分頁後內容超出 A4 範圍，已停止列印。');
       }
+      attachPreview(paper);
       fitPreview(paper);
       await nextFrame();
       for (const page of pages) {
@@ -286,10 +321,14 @@
           throw fail('QUOTATION_PREVIEW_OVERFLOW', '報價預覽超出 A4 範圍，已停止列印。');
         }
       }
+      if (!previewContainsSheets(paper)) {
+        throw fail('QUOTATION_PREVIEW_CLIPPED', '報價預覽未完整顯示所有頁面，已停止列印。');
+      }
       paper.dataset.quotationPages = String(pages.length);
       if (!paper.dataset.p41ResizeBound) {
         paper.dataset.p41ResizeBound = 'true';
         window.addEventListener('resize', () => fitPreview(paper), { passive: true });
+        window.addEventListener('afterprint', () => fitPreview(paper));
       }
       const result = { applied: true, pageCount: pages.length, scale: 1, noteTextPreserved: true, rowsPreserved: originalRows.length };
       finished.set(paper, { noteText: rawNote, result });
@@ -300,6 +339,12 @@
       // existing print-ready gate closed when pagination rejects.
       content.replaceChildren(...Array.from(backup.childNodes));
       paper.classList.remove('p41-quote-paginated');
+      paper.style.removeProperty('--p41-preview-scale');
+      const preview = previews.get(paper);
+      if (preview) {
+        preview.replaceWith(paper);
+        previews.delete(paper);
+      }
       throw error;
     }
   }

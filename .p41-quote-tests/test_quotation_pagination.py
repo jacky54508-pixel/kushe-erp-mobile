@@ -147,7 +147,8 @@ class Reporter:
         self.output = output
         output.mkdir(parents=True, exist_ok=True)
         self.result = {'status': 'RUNNING', 'baselineCommit': BASE, 'syntheticOnly': True,
-                       'tests': [], 'cases': [], 'failure': None, 'externalRequests': [],
+                       'tests': [], 'cases': [], 'caseOutcomes': [], 'caseFailures': [],
+                       'failure': None, 'externalRequests': [],
                        'productionDataTouched': False, 'deploymentAuthorized': False, 'publishGate': 'BLOCKED'}
         self.flush()
 
@@ -163,6 +164,35 @@ class Reporter:
         print(f"[{row['result']}] {len(self.result['tests']):03d} {name}", flush=True)
         if not condition:
             raise AssertionError(name + (': ' + json.dumps(detail, ensure_ascii=False)[:2500] if detail is not None else ''))
+
+
+def independent_case(report, name, operation):
+    """Keep every strict assertion; collect independent fresh-context failures.
+
+    Each operation closes its own context in finally. A failing operation stops
+    immediately, while another independent synthetic document can still produce
+    useful evidence. Any failure makes the overall run fail with a nonzero exit.
+    """
+    first_assertion = len(report.result['tests']) + 1
+    outcome = {'name': name, 'status': 'VERIFIED'}
+    try:
+        operation()
+    except Exception as error:
+        failure = {'case': name, 'type': type(error).__name__, 'message': str(error),
+                   'traceback': traceback.format_exc()}
+        outcome['status'] = 'FAILED'
+        report.result['caseFailures'].append(failure)
+        if report.result['failure'] is None:
+            report.result['failure'] = failure
+        report.result['status'] = 'BLOCKED'
+        print('[CASE FAILED] ' + name + ': ' + str(error), flush=True)
+    else:
+        print('[CASE VERIFIED] ' + name, flush=True)
+    finally:
+        outcome['firstAssertion'] = first_assertion
+        outcome['assertionsRecorded'] = len(report.result['tests']) - first_assertion + 1
+        report.result['caseOutcomes'].append(outcome)
+        report.flush()
 
 
 class FixtureServer:
@@ -258,6 +288,7 @@ METRICS = """() => {
  const rect=e=>{const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}};
  const scale=e=>{let value=1;for(let n=e;n&&n!==document.documentElement;n=n.parentElement){const s=getComputedStyle(n);value*=Number.parseFloat(s.zoom)||1;if(s.transform!=='none'){const m=new DOMMatrix(s.transform);value*=Math.hypot(m.a,m.b)}}return value};
  return {viewport:document.documentElement.clientWidth,documentWidth:document.documentElement.scrollWidth,
+   preview:document.querySelector('.p41-quote-preview')?rect(document.querySelector('.p41-quote-preview')):null,
    windowScale:window.__quotationPrintScale??null,
    pages:pages.map((p,index)=>{const body=p.querySelector('.p41-quote-page-body'),r=p.getBoundingClientRect();
      const children=[...p.querySelectorAll('.head,.info,.detail,.detail td,.note,[data-quote-note-fragment],.summary,.sign')];
@@ -271,10 +302,17 @@ METRICS = """() => {
 
 def check_layout(report, name, metrics, printing=False):
     report.check(name + ': no document horizontal overflow', metrics['documentWidth'] <= metrics['viewport'] + 1, metrics)
+    if not printing:
+        report.check(name + ': sized preview wrapper exists', metrics['preview'] is not None)
     for item in metrics['pages']:
         key = f"{name}: page {item['index'] + 1}"
         if not printing:
             report.check(key + ' fits viewport', item['rect']['left'] >= -1.5 and item['rect']['right'] <= metrics['viewport'] + 1.5, item['rect'])
+            wrapper, rect = metrics['preview'], item['rect']
+            report.check(key + ' stays completely inside preview wrapper',
+                         rect['left'] >= wrapper['left'] - 1.5 and rect['right'] <= wrapper['right'] + 1.5 and
+                         rect['top'] >= wrapper['top'] - 1.5 and rect['bottom'] <= wrapper['bottom'] + 1.5,
+                         {'page': rect, 'wrapper': wrapper})
         else:
             report.check(key + ' has unscaled A4 dimensions', 792 <= item['rect']['width'] <= 796 and 1121 <= item['rect']['height'] <= 1125, item['rect'])
         report.check(key + ' contains all visible content', not item['outside'], item['outside'])
@@ -426,6 +464,7 @@ def offline_import(browser, server, report, root):
     rendered = report.output / 'OFFLINE_SYNTHETIC_RENDERED.html'
     context = fresh_context(browser,server,report,allowed_file_urls=(target.as_uri(),rendered.as_uri()),allow_loopback=False)
     page = context.new_page()
+    external_at_start = len(report.result['externalRequests'])
     requests, errors = [], []
     page.on('request',lambda request: requests.append(request.url))
     page.on('pageerror',lambda error: errors.append(str(error)))
@@ -444,7 +483,7 @@ def offline_import(browser, server, report, root):
         check_values(report,'offline importer',frame,document)
         report.check('offline importer: script terminators and hostile markup remain plain text', frame.evaluate('()=>window.__quoteXss===false') and frame.locator('#paper img[data-hostile], #paper script').count() == 0 and page.evaluate('()=>window.__quoteXss===false'))
         report.check('offline importer: all renderer resources are inlined', not server.requests[request_count:] and all(url == target.as_uri() or url.startswith(('data:','about:')) for url in requests),requests)
-        report.check('offline importer: no external requests or parent storage writes', not report.result['externalRequests'] and page.evaluate('()=>window.__p41WriteAttempts') == [])
+        report.check('offline importer: no external requests or parent storage writes', not report.result['externalRequests'][external_at_start:] and page.evaluate('()=>window.__p41WriteAttempts') == [])
         page.screenshot(path=str(report.output/'offline-import-desktop.png'),full_page=True,animations='disabled')
         # Print the exact generated iframe document as its own file. Printing the
         # wrapper would exercise iframe clipping instead of its own print button.
@@ -461,7 +500,7 @@ def offline_import(browser, server, report, root):
         metrics = printable.evaluate(METRICS)
         check_layout(report,'offline printable file',metrics,printing=True)
         count = check_pdf(report,'offline-file-long11',printable,metrics,report.output,minimum_pages=2)
-        report.check('offline importer and printable file: no browser errors or network access', not errors and not report.result['externalRequests'] and not server.requests[request_count:], {'errors':errors,'external':report.result['externalRequests']})
+        report.check('offline importer and printable file: no browser errors or network access', not errors and not report.result['externalRequests'][external_at_start:] and not server.requests[request_count:], {'errors':errors,'external':report.result['externalRequests'][external_at_start:]})
         report.result['cases'].append({'name':'offline-file-import','sourceRows':len(document['lines']),
                                       'sourceNoteCharacters':len(document['publicNote']),
                                       'pdfPages':count,'originType':'file','print':metrics})
@@ -482,27 +521,37 @@ def main():
         with FixtureServer(root,output) as server, sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True,channel='chrome') if os.environ.get('P41_USE_SYSTEM_CHROME') == '1' else pw.chromium.launch(headless=True)
             try:
-                quote_case(browser,server,report,'actual-long11',quote_document(11,'actual',long_note()),minimum_pages=2)
-                quote_case(browser,server,report,'actual-short',quote_document(3,'actual','SYN-SHORT-001 虛構短備註，原文保留。'),maximum_pages=1)
-                quote_case(browser,server,report,'normal-long40',quote_document(40,'lump_sum','SYN-NORMAL-NOTE-84517 虛構一般報價內容保留。'),minimum_pages=2)
-                quote_case(browser,server,report,'mixed-long38',quote_document(38,'mixed','SYN-MIXED-NOTE-57319 虛構混合報價內容保留。'),minimum_pages=2)
                 all_actual = quote_document(3,'actual','SYN-MIXED-ALL-ACTUAL-54913'); all_actual['pricingMode']='mixed'
-                quote_case(browser,server,report,'mixed-all-actual',all_actual,maximum_pages=1)
                 hostile = '<img data-hostile="yes" src=x onerror="window.__quoteXss=true">\n<script>window.__quoteXss=true</script>\n& < > " \' SYN-LITERAL-39157\n  保留前後空白  \n末行'
-                quote_case(browser,server,report,'hostile-note',quote_document(3,'actual',hostile),maximum_pages=1)
-                quote_case(browser,server,report,'oversized-paragraph-tail',quote_document(3,'actual',('SYN-LONG-TERM 原文保留，單一長段落按實際版面接續。' * 120) + '\n\n'),minimum_pages=2)
-                billing_comparison(browser,server,report,merged=False)
-                billing_comparison(browser,server,report,merged=True)
-                offline_import(browser,server,report,root)
-                report.check('all fixtures: no external browser requests',not report.result['externalRequests'],report.result['externalRequests'])
-                report.check('all fixtures: no unexpected local assets requested',not server.unknown,server.unknown)
+                operations = [
+                    ('actual-long11',lambda: quote_case(browser,server,report,'actual-long11',quote_document(11,'actual',long_note()),minimum_pages=2)),
+                    ('actual-short',lambda: quote_case(browser,server,report,'actual-short',quote_document(3,'actual','SYN-SHORT-001 虛構短備註，原文保留。'),maximum_pages=1)),
+                    ('normal-long40',lambda: quote_case(browser,server,report,'normal-long40',quote_document(40,'lump_sum','SYN-NORMAL-NOTE-84517 虛構一般報價內容保留。'),minimum_pages=2)),
+                    ('mixed-long38',lambda: quote_case(browser,server,report,'mixed-long38',quote_document(38,'mixed','SYN-MIXED-NOTE-57319 虛構混合報價內容保留。'),minimum_pages=2)),
+                    ('mixed-all-actual',lambda: quote_case(browser,server,report,'mixed-all-actual',all_actual,maximum_pages=1)),
+                    ('hostile-note',lambda: quote_case(browser,server,report,'hostile-note',quote_document(3,'actual',hostile),maximum_pages=1)),
+                    ('oversized-paragraph-tail',lambda: quote_case(browser,server,report,'oversized-paragraph-tail',quote_document(3,'actual',('SYN-LONG-TERM 原文保留，單一長段落按實際版面接續。' * 120) + '\n\n'),minimum_pages=2)),
+                    ('billing-single',lambda: billing_comparison(browser,server,report,merged=False)),
+                    ('billing-merged',lambda: billing_comparison(browser,server,report,merged=True)),
+                    ('offline-file-import',lambda: offline_import(browser,server,report,root)),
+                ]
+                for name, operation in operations:
+                    independent_case(report,name,operation)
+                independent_case(report,'external-request-gate',lambda: report.check('all fixtures: no external browser requests',not report.result['externalRequests'],report.result['externalRequests']))
+                independent_case(report,'local-asset-gate',lambda: report.check('all fixtures: no unexpected local assets requested',not server.unknown,server.unknown))
             finally:
                 browser.close()
+        if report.result['caseFailures']:
+            raise AssertionError('Independent cases failed: ' + ', '.join(row['case'] for row in report.result['caseFailures']))
         report.result['status']='QUOTATION_A4_PAGINATION_AND_BILLING_NONREGRESSION_VERIFIED'
         print('P41_QUOTATION_PAGINATION_VERIFIED__PUBLISH_BLOCKED',flush=True)
     except Exception as error:
         report.result['status']='BLOCKED'
-        report.result['failure']={'type':type(error).__name__,'message':str(error),'traceback':traceback.format_exc()}
+        failure={'type':type(error).__name__,'message':str(error),'traceback':traceback.format_exc()}
+        if report.result['failure'] is None:
+            report.result['failure']=failure
+        else:
+            report.result['completionFailure']=failure
         raise
     finally:
         report.flush()

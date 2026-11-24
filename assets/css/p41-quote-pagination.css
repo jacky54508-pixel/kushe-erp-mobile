@@ -1,22 +1,23 @@
 /* P41: quotation-only A4 pagination. Billing styling and financial values are
-   intentionally outside this scope. Screen zoom fits a sheet to the viewport;
+   intentionally outside this scope. A screen transform fits the preview;
    print content is always full size and never shrunk to force one page. */
 #paper.quotation-document.p41-quote-paginated{
   width:210mm!important;max-width:none!important;min-height:0!important;height:auto;
   padding:0!important;margin:16px auto!important;left:auto!important;translate:none!important;
   transform:none!important;background:transparent;box-shadow:none;overflow:visible!important;
-  zoom:var(--p41-preview-scale,1)
+  zoom:1!important
 }
 #paper.quotation-document.p41-quote-paginated::before,
 #paper.quotation-document.p41-quote-paginated::after{display:none!important}
 #paper.quotation-document.p41-quote-paginated>#quotationContent{
-  width:210mm!important;max-width:210mm!important;zoom:1!important;transform:none!important
+  display:flow-root;width:210mm!important;max-width:210mm!important;zoom:1!important;transform:none!important
 }
 #paper.quotation-document.p41-quote-paginated .p41-quote-page{
   position:relative;isolation:isolate;box-sizing:border-box;width:210mm;height:297mm;
   padding:10mm 13.5mm 16mm;margin:0 0 16px;background:#fff;color:#112d51;
   box-shadow:0 8px 28px rgba(20,39,65,.15);break-inside:avoid;page-break-inside:avoid
 }
+#paper.quotation-document.p41-quote-paginated .p41-quote-page:last-child{margin-bottom:0}
 #paper.quotation-document.p41-quote-paginated .p41-quote-page::after{
   content:"";position:absolute;inset:auto 0 0;height:11mm;z-index:-1;pointer-events:none;
   background:linear-gradient(105deg,#f2fbfb,#c4eae5 67%,#7ccac3);
@@ -82,8 +83,20 @@
   gap:4mm;min-width:0;font-size:8pt;line-height:1.3;color:#41546c
 }
 #paper.quotation-document.p41-quote-paginated .p41-quote-page-number{white-space:nowrap;font-variant-numeric:tabular-nums}
+@media screen{
+  /* A transform keeps the unscaled layout footprint in scrollable overflow.
+     This wrapper is sized to the entire transformed document; every sheet is
+     checked inside it. Clipping removes that blank footprint, not page data. */
+  .p41-quote-preview{position:relative;display:flow-root;margin:16px auto;overflow:clip}
+  .p41-quote-preview>#paper.quotation-document.p41-quote-paginated{
+    margin:0!important;transform:scale(var(--p41-preview-scale,1))!important;
+    transform-origin:top left!important
+  }
+}
 @media print{
-  #paper.quotation-document.p41-quote-paginated{margin:0!important;zoom:1!important;min-height:0!important;background:#fff}
+  .p41-quote-preview{display:contents!important;width:auto!important;height:auto!important;overflow:visible!important}
+  #paper.quotation-document.p41-quote-paginated{margin:0!important;zoom:1!important;transform:none!important;min-height:0!important;background:#fff}
+  #paper.quotation-document.p41-quote-paginated>#quotationContent{display:block}
   #paper.quotation-document.p41-quote-paginated .p41-quote-page{
     margin:0;box-shadow:none;break-after:page;page-break-after:always;
     -webkit-print-color-adjust:exact;print-color-adjust:exact
