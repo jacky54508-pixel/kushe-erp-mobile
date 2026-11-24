@@ -39,6 +39,23 @@ def normalized(text):
     return re.sub(r'\s+', '', str(text))
 
 
+def extract_layout_pages(pdf_path, page_count):
+    """Read painted page text using Poppler's layout-aware Unicode mapping.
+
+    pypdf remains the page-box reader, but its extraction of the CI Chrome/Noto
+    PDF maps some Chinese ideographs to different Kangxi radical code points.
+    Do not normalize those characters away: require exact source characters
+    from an independent PDF text extractor instead.
+    """
+    result = []
+    for number in range(1, page_count + 1):
+        output = subprocess.check_output(
+            ['pdftotext', '-f', str(number), '-l', str(number), '-layout',
+             '-enc', 'UTF-8', str(pdf_path), '-'], timeout=30)
+        result.append(output.decode('utf-8'))
+    return result
+
+
 def number(value):
     if value is None or value == '':
         return '—'
@@ -299,23 +316,25 @@ def check_values(report, name, page, document):
 def check_pdf(report, name, page, metrics, output, minimum_pages=1, maximum_pages=None):
     pdf = page.pdf(format='A4', print_background=True, prefer_css_page_size=True,
                    margin={'top':'0','bottom':'0','left':'0','right':'0'})
-    (output / (name + '.pdf')).write_bytes(pdf)
+    pdf_path = output / (name + '.pdf')
+    pdf_path.write_bytes(pdf)
     reader = PdfReader(BytesIO(pdf))
     count = len(reader.pages)
     report.check(name + ': actual PDF page count matches visible pages', count == len(metrics['pages']) and count >= minimum_pages and (maximum_pages is None or count <= maximum_pages), {'pdfPages':count, 'visiblePages':len(metrics['pages']), 'minimum':minimum_pages, 'maximum':maximum_pages})
-    texts = []
+    texts = extract_layout_pages(pdf_path, count)
+    pypdf_texts = [p.extract_text() or '' for p in reader.pages]
+    (output / (name + '-pdf-text.txt')).write_text('\n\f\n'.join(texts), encoding='utf-8')
+    (output / (name + '-pypdf-diagnostic-text.txt')).write_text('\n\f\n'.join(pypdf_texts), encoding='utf-8')
     for index, pdf_page in enumerate(reader.pages):
         width, height = float(pdf_page.mediabox.width), float(pdf_page.mediabox.height)
         report.check(f'{name}: PDF page {index + 1} is portrait A4', 594 <= width <= 596 and 841 <= height <= 843, [width,height])
-        text = pdf_page.extract_text() or ''
-        texts.append(text)
+        text = texts[index]
         compact = normalized(text)
         expected = metrics['pages'][index]
         missing_notes = [note['text'][:100] for note in expected['notes'] if normalized(note['text']) and normalized(note['text']) not in compact]
         report.check(f'{name}: PDF page {index + 1} contains its complete note fragments', not missing_notes, missing_notes)
         missing_values = [value for row in expected['rows'] for value in row['cells'] if normalized(value) and normalized(value) not in compact]
         report.check(f'{name}: PDF page {index + 1} contains every displayed row value', not missing_values, missing_values)
-    (output / (name + '-pdf-text.txt')).write_text('\n\f\n'.join(texts), encoding='utf-8')
     return count
 
 
@@ -387,9 +406,12 @@ def billing_comparison(browser, server, report, merged=False):
         for version, page in [('before',before),('after',after)]:
             page.set_viewport_size({'width':1366,'height':950}); page.emulate_media(media='print')
             pdf = page.pdf(format='A4',print_background=True,prefer_css_page_size=True)
-            (report.output / f'{name}-{version}.pdf').write_bytes(pdf)
+            path = report.output / f'{name}-{version}.pdf'
+            path.write_bytes(pdf)
             reader = PdfReader(BytesIO(pdf))
-            pdf_pages.append(len(reader.pages)); pdf_text.append([p.extract_text() for p in reader.pages])
+            extracted = extract_layout_pages(path,len(reader.pages))
+            (report.output / f'{name}-{version}-pdf-text.txt').write_text('\n\f\n'.join(extracted),encoding='utf-8')
+            pdf_pages.append(len(reader.pages)); pdf_text.append(extracted)
         report.check(name + ': PDF pages and complete extracted text unchanged', pdf_pages[0] == pdf_pages[1] and pdf_text[0] == pdf_text[1], {'pdfPageCounts':pdf_pages})
         report.check(name + ': original billing payload unchanged', after.evaluate('()=>d') == document and after.evaluate('()=>window.__p41WriteAttempts') == [])
     finally:
