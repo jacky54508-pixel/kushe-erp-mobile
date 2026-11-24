@@ -14,6 +14,7 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 import traceback
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,7 +22,7 @@ from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Error as PlaywrightError, sync_playwright
 from pypdf import PdfReader
 
 BASE = 'edf1c1886aac09958caa9e4b304502cca44f6937'
@@ -39,21 +40,26 @@ def normalized(text):
     return re.sub(r'\s+', '', str(text))
 
 
-def extract_layout_pages(pdf_path, page_count):
-    """Read painted page text using Poppler's layout-aware Unicode mapping.
+def extract_pdf_pages(pdf_path, page_count, mode='layout'):
+    """Read painted page text with Poppler and preserve its exact Unicode.
 
     pypdf remains the page-box reader, but its extraction of the CI Chrome/Noto
     PDF maps some Chinese ideographs to different Kangxi radical code points.
     Do not normalize those characters away: require exact source characters
     from an independent PDF text extractor instead.
     """
+    assert mode in ('layout', 'raw')
     result = []
     for number in range(1, page_count + 1):
         output = subprocess.check_output(
-            ['pdftotext', '-f', str(number), '-l', str(number), '-layout',
+            ['pdftotext', '-f', str(number), '-l', str(number), '-' + mode,
              '-enc', 'UTF-8', str(pdf_path), '-'], timeout=30)
         result.append(output.decode('utf-8'))
     return result
+
+
+def extract_layout_pages(pdf_path, page_count):
+    return extract_pdf_pages(pdf_path, page_count, 'layout')
 
 
 def number(value):
@@ -277,8 +283,23 @@ def fresh_context(browser, server, report, width=1366, allowed_file_urls=(), all
 
 
 def ready(page):
-    page.wait_for_function('window.__billingPrintReady===true || Boolean(window.__billingPrintError)', timeout=25000)
-    info = page.evaluate('() => ({ready:window.__billingPrintReady,error:window.__billingPrintError})')
+    # Observe readiness through DevTools directly. wait_for_function evaluates
+    # its polling expression inside the page and conflicts with the offline
+    # document's intentional CSP restriction on unsafe-eval.
+    deadline = time.monotonic() + 25
+    info = {'ready': False, 'error': None}
+    while time.monotonic() < deadline:
+        try:
+            info = page.evaluate('() => ({ready:window.__billingPrintReady===true,error:window.__billingPrintError || null})')
+        except PlaywrightError as error:
+            if 'Execution context was destroyed' not in str(error):
+                raise
+            # A newly assigned srcdoc may still be replacing about:blank.
+            time.sleep(0.05)
+            continue
+        if info['ready'] or info['error']:
+            break
+        time.sleep(0.05)
     assert info['ready'] is True, info
     page.evaluate('async()=>{if(document.fonts)await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))}')
 
@@ -360,8 +381,10 @@ def check_pdf(report, name, page, metrics, output, minimum_pages=1, maximum_page
     count = len(reader.pages)
     report.check(name + ': actual PDF page count matches visible pages', count == len(metrics['pages']) and count >= minimum_pages and (maximum_pages is None or count <= maximum_pages), {'pdfPages':count, 'visiblePages':len(metrics['pages']), 'minimum':minimum_pages, 'maximum':maximum_pages})
     texts = extract_layout_pages(pdf_path, count)
+    raw_texts = extract_pdf_pages(pdf_path, count, 'raw')
     pypdf_texts = [p.extract_text() or '' for p in reader.pages]
     (output / (name + '-pdf-text.txt')).write_text('\n\f\n'.join(texts), encoding='utf-8')
+    (output / (name + '-pdf-raw-text.txt')).write_text('\n\f\n'.join(raw_texts), encoding='utf-8')
     (output / (name + '-pypdf-diagnostic-text.txt')).write_text('\n\f\n'.join(pypdf_texts), encoding='utf-8')
     for index, pdf_page in enumerate(reader.pages):
         width, height = float(pdf_page.mediabox.width), float(pdf_page.mediabox.height)
@@ -371,7 +394,12 @@ def check_pdf(report, name, page, metrics, output, minimum_pages=1, maximum_page
         expected = metrics['pages'][index]
         missing_notes = [note['text'][:100] for note in expected['notes'] if normalized(note['text']) and normalized(note['text']) not in compact]
         report.check(f'{name}: PDF page {index + 1} contains its complete note fragments', not missing_notes, missing_notes)
-        missing_values = [value for row in expected['rows'] for value in row['cells'] if normalized(value) and normalized(value) not in compact]
+        # Content-stream order keeps a multiline table cell together. Layout
+        # order can interleave adjacent numeric cells between a label and its
+        # second-line pricing badge. Require every complete, unchanged cell on
+        # this same PDF page; use layout order above for complete note paragraphs.
+        raw_compact = normalized(raw_texts[index])
+        missing_values = [value for row in expected['rows'] for value in row['cells'] if normalized(value) and normalized(value) not in raw_compact]
         report.check(f'{name}: PDF page {index + 1} contains every displayed row value', not missing_values, missing_values)
     return count
 
