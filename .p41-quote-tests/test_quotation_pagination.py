@@ -214,12 +214,13 @@ WRITE_GUARDS = """() => {
 }"""
 
 
-def fresh_context(browser, server, report, width=1366):
+def fresh_context(browser, server, report, width=1366, allowed_file_urls=(), allow_loopback=True):
     ctx = browser.new_context(viewport={'width': width, 'height': 950}, device_scale_factor=1,
                               locale='zh-TW', timezone_id='Asia/Taipei', reduced_motion='reduce')
     ctx.add_init_script('(' + WRITE_GUARDS + ')()')
+    exact_files = set(allowed_file_urls)
     def route(request):
-        if request.request.url.startswith(server.origin + '/'):
+        if request.request.url in exact_files or allow_loopback and request.request.url.startswith(server.origin + '/'):
             request.continue_()
         else:
             report.result['externalRequests'].append(request.request.url)
@@ -400,25 +401,49 @@ def offline_import(browser, server, report, root):
     target = report.output / 'KUSHE_QUOTE_PAGINATED_EXPORT.html'
     assert builder.is_file(), 'Offline utility builder missing'
     subprocess.run([sys.executable,str(builder),'--root',str(root),'--output',str(target),'--synthetic-assets'],check=True)
-    context = fresh_context(browser,server,report)
+    rendered = report.output / 'OFFLINE_SYNTHETIC_RENDERED.html'
+    context = fresh_context(browser,server,report,allowed_file_urls=(target.as_uri(),rendered.as_uri()),allow_loopback=False)
     page = context.new_page()
+    requests, errors = [], []
+    page.on('request',lambda request: requests.append(request.url))
+    page.on('pageerror',lambda error: errors.append(str(error)))
     try:
         hostile_tail = '\n</script><script>window.__quoteXss=true</script>\n<img data-hostile="yes" src=x onerror="window.__quoteXss=true">\nSYN-OFFLINE-LITERAL-72361'
         document = quote_document(11,'actual',long_note()+hostile_tail,'SYNTHETIC-OFFLINE-IMPORT')
         request_count = len(server.requests)
-        page.goto(server.origin+'/offline-export.html')
+        page.goto(target.as_uri())
         page.locator('#quotationUrl').fill(url_for(server.origin,'candidate',document))
         page.locator('#renderQuotation').click()
         frame = page.locator('#quotationPreview').element_handle().content_frame()
         assert frame is not None, 'Offline preview iframe missing'
         ready(frame)
+        report.check('offline importer: actual local file origin is exercised', page.url == target.as_uri())
         report.check('offline importer: long quote paginates', frame.locator(PAGE).count() >= 2)
         check_values(report,'offline importer',frame,document)
         report.check('offline importer: script terminators and hostile markup remain plain text', frame.evaluate('()=>window.__quoteXss===false') and frame.locator('#paper img[data-hostile], #paper script').count() == 0 and page.evaluate('()=>window.__quoteXss===false'))
-        requests = server.requests[request_count:]
-        report.check('offline importer: all renderer resources are inlined', requests == ['/offline-export.html'] or requests == ['/offline-export.html','/favicon.ico'],requests)
+        report.check('offline importer: all renderer resources are inlined', not server.requests[request_count:] and all(url == target.as_uri() or url.startswith(('data:','about:')) for url in requests),requests)
         report.check('offline importer: no external requests or parent storage writes', not report.result['externalRequests'] and page.evaluate('()=>window.__p41WriteAttempts') == [])
         page.screenshot(path=str(report.output/'offline-import-desktop.png'),full_page=True,animations='disabled')
+        # Print the exact generated iframe document as its own file. Printing the
+        # wrapper would exercise iframe clipping instead of its own print button.
+        inner_html = page.locator('#quotationPreview').get_attribute('srcdoc')
+        assert inner_html, 'Generated offline renderer document missing'
+        rendered.write_text(inner_html,encoding='utf-8')
+        printable = context.new_page()
+        printable.on('pageerror',lambda error: errors.append(str(error)))
+        printable.goto(rendered.as_uri())
+        ready(printable)
+        check_values(report,'offline printable file',printable,document)
+        printable.emulate_media(media='print')
+        printable.evaluate('()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
+        metrics = printable.evaluate(METRICS)
+        check_layout(report,'offline printable file',metrics,printing=True)
+        count = check_pdf(report,'offline-file-long11',printable,metrics,report.output,minimum_pages=2)
+        report.check('offline importer and printable file: no browser errors or network access', not errors and not report.result['externalRequests'] and not server.requests[request_count:], {'errors':errors,'external':report.result['externalRequests']})
+        report.result['cases'].append({'name':'offline-file-import','sourceRows':len(document['lines']),
+                                      'sourceNoteCharacters':len(document['publicNote']),
+                                      'pdfPages':count,'originType':'file','print':metrics})
+        report.flush()
     finally:
         context.close()
 

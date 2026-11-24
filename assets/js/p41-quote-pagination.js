@@ -78,18 +78,29 @@
     content.style.removeProperty('transform');
     paper.dataset.quotationScale = '1.0000';
     window.__quotationPrintScale = 1;
-    fitPreview(paper);
+    // Paginate at the physical print scale. CSS zoom can round line boxes
+    // differently on a narrow preview; it must never choose our page breaks.
+    paper.style.setProperty('--p41-preview-scale', '1');
     content.replaceChildren();
 
     function fits(page = current) {
-      return page.body.scrollHeight <= page.body.clientHeight + 1 && page.body.scrollWidth <= page.body.clientWidth + 1;
+      // The inner flow has its natural height, unlike a fixed-height body's
+      // scrollHeight (which is at least clientHeight even for short content).
+      // Keep 4 mm of actual unused space for fractional line-box rounding when
+      // the on-screen sheet is zoomed. All content remains visible and the
+      // public A4 body is still checked at its original full height.
+      const reserve = 4 * 96 / 25.4;
+      return page.body.scrollHeight <= page.frame.clientHeight - reserve &&
+        page.body.scrollWidth <= page.frame.clientWidth + 1;
     }
 
     function newPage(first = false) {
       const sheet = document.createElement('article');
       sheet.className = 'p41-quote-page';
+      const frame = document.createElement('div');
+      frame.className = 'p41-quote-page-body';
       const body = document.createElement('div');
-      body.className = 'p41-quote-page-body';
+      body.className = 'p41-quote-page-flow';
       const pageHead = first ? head : removeCloneIds(headTemplate.cloneNode(true));
       if (!first) pageHead.classList.add('p41-quote-continuation-head');
       body.appendChild(pageHead);
@@ -101,11 +112,12 @@
       const counter = document.createElement('span');
       counter.className = 'p41-quote-page-number';
       footer.append(context, counter);
-      sheet.append(body, footer);
+      frame.appendChild(body);
+      sheet.append(frame, footer);
       content.appendChild(sheet);
-      current = { sheet, body, context, counter };
+      current = { sheet, body, frame, context, counter };
       pages.push(current);
-      if (body.clientHeight < 100 || body.clientWidth < 100) throw fail('QUOTATION_MEASUREMENT_UNAVAILABLE', '無法確認 A4 版面尺寸，請重新開啟預覽。');
+      if (frame.clientHeight < 100 || frame.clientWidth < 100) throw fail('QUOTATION_MEASUREMENT_UNAVAILABLE', '無法確認 A4 版面尺寸，請重新開啟預覽。');
       if (!fits()) throw fail('QUOTATION_HEADER_TOO_LARGE', '公司頁首超過 A4 可列印範圍，請檢查頁首文字。');
       return current;
     }
@@ -266,6 +278,13 @@
         page.sheet.setAttribute('aria-label', `報價單第 ${index + 1} 頁，共 ${pages.length} 頁`);
         page.counter.textContent = `第 ${index + 1} 頁 / 共 ${pages.length} 頁`;
         if (!fits(page)) throw fail('QUOTATION_PAGE_OVERFLOW', '分頁後內容超出 A4 範圍，已停止列印。');
+      }
+      fitPreview(paper);
+      await nextFrame();
+      for (const page of pages) {
+        if (page.frame.scrollHeight > page.frame.clientHeight + 1 || page.frame.scrollWidth > page.frame.clientWidth + 1) {
+          throw fail('QUOTATION_PREVIEW_OVERFLOW', '報價預覽超出 A4 範圍，已停止列印。');
+        }
       }
       paper.dataset.quotationPages = String(pages.length);
       if (!paper.dataset.p41ResizeBound) {

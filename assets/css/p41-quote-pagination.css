@@ -26,6 +26,10 @@
   display:flow-root;box-sizing:border-box;width:100%;height:271mm;min-width:0;
   overflow:visible;zoom:1!important;transform:none!important
 }
+#paper.quotation-document.p41-quote-paginated .p41-quote-page-flow{
+  display:flow-root;width:100%;height:auto;min-width:0;overflow:visible;
+  zoom:1!important;transform:none!important
+}
 #paper.quotation-document.p41-quote-paginated .head{
   grid-template-columns:minmax(0,1fr) minmax(0,48mm);gap:5mm;max-width:100%;min-width:0
 }
