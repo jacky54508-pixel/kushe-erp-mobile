@@ -126,12 +126,15 @@
   </style>
   <!-- P40-16CD style only: owner-approved mint design shared by quotation + billing. -->
   <link rel="stylesheet" href="assets/css/p40-16cd-mint-quotation-billing.css?v=p40-16cd-1">
+  <!-- P41 quotation-only: readable A4 pages and complete paragraph notes. -->
+  <link rel="stylesheet" href="assets/css/p41-quote-pagination.css?v=p41-quote-pagination-1">
 </head>
 <body>
   <div class="toolbar"><button id="safePrintButton" onclick="printDocument()" disabled>載入公司 LOGO／大小章中…</button><button class="close" onclick="closePrintView()">關閉</button></div>
   <main class="paper" id="paper"></main>
   <script src="assets/js/display-sort.js?v=20260913-p17-3-house-sort1"></script>
   <script src="assets/js/external-billing-invoice.js?v=p39-inv1-source1"></script>
+  <script src="assets/js/p41-quote-pagination.js?v=p41-quote-pagination-1"></script>
   <script>
     const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const n=v=>Number(v)||0;
@@ -278,8 +281,18 @@
     const assetTimeout=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
     async function waitForStableImage(image){if(!image||!image.src)return;for(let attempt=0;attempt<4;attempt+=1){const source=image.currentSrc||image.src;if(!image.complete)await Promise.race([new Promise(resolve=>{image.addEventListener('load',resolve,{once:true});image.addEventListener('error',resolve,{once:true})}),assetTimeout(2000)]);try{if(image.decode)await Promise.race([image.decode(),assetTimeout(2000)])}catch(e){}await nextFrame();if(image.complete&&(image.currentSrc||image.src)===source)return}}
     function millimetersToPixels(mm){const ruler=document.createElement('div');ruler.style.cssText=`position:absolute;visibility:hidden;pointer-events:none;height:${mm}mm`;document.body.appendChild(ruler);const pixels=ruler.getBoundingClientRect().height;ruler.remove();return pixels}
-    async function fitQuotationToA4(){const content=document.getElementById('quotationContent');if(!content)return 1;const targetHeight=millimetersToPixels(277.5);content.style.zoom='1';content.style.width='100%';await nextFrame();await nextFrame();const naturalHeight=content.getBoundingClientRect().height;let scale=naturalHeight>targetHeight?Math.min(1,targetHeight/naturalHeight*.995):1;for(let attempt=0;attempt<4;attempt+=1){content.style.zoom=String(scale);content.style.width=`${100/scale}%`;await nextFrame();await nextFrame();const height=content.getBoundingClientRect().height;if(height<=targetHeight+.5)break;scale=Math.max(.7,scale*(targetHeight/height)*.995)}paper.dataset.quotationScale=scale.toFixed(4);window.__quotationPrintScale=scale;return scale}
-    async function prepareQuotationPrint(){await loadAssets();try{if(document.fonts&&document.fonts.ready)await document.fonts.ready}catch(e){}await Promise.all([...document.querySelectorAll('#quotationContent img')].map(waitForStableImage));await nextFrame();await nextFrame();return fitQuotationToA4()}
+    async function paginateQuotationToA4(){
+      try{
+        if(!window.KusheQuotePagination)throw new Error('QUOTATION_PAGINATOR_UNAVAILABLE');
+        await window.KusheQuotePagination.paginate({paper,noteText:String(d.publicNote||'')});
+        await Promise.all([...document.querySelectorAll('#quotationContent img')].map(waitForStableImage));
+        if([...document.querySelectorAll('#quotationContent img')].some(image=>!image.complete||!image.naturalWidth))throw new Error('QUOTATION_PAGE_IMAGE_NOT_READY');
+        paper.dataset.quotationScale='1.0000';
+        window.__quotationPrintScale=1;
+        return 1;
+      }catch(error){error.quotationLayoutFailed=true;throw error}
+    }
+    async function prepareQuotationPrint(){await loadAssets();try{if(document.fonts&&document.fonts.ready)await document.fonts.ready}catch(e){}await Promise.all([...document.querySelectorAll('#quotationContent img')].map(waitForStableImage));await nextFrame();await nextFrame();return paginateQuotationToA4()}
     const autoPrint=new URLSearchParams(location.search).get('print')==='1';
     const safePrintButton=document.getElementById('safePrintButton');
     window.__billingPrintReady=false;
@@ -294,6 +307,20 @@
         notice.id='sealLoadError';
         notice.setAttribute('role','alert');
         notice.textContent='公司 LOGO／大小章載入失敗，請重新開啟單據，勿使用缺章 PDF。';
+        notice.style.cssText='color:#fff;font-size:12px;font-weight:700;padding:0 8px';
+        document.querySelector('.toolbar').appendChild(notice);
+      }
+    }
+    function handleQuotationPrintError(error){
+      if(!error?.quotationLayoutFailed){blockPrintForMissingSeals();return;}
+      window.__billingPrintReady=false;
+      window.__billingPrintError='QUOTATION_PAGINATION_FAILED';
+      safePrintButton.disabled=true;
+      safePrintButton.textContent='報價分頁未完成，請重新開啟';
+      if(!document.getElementById('quotationLayoutError')){
+        const notice=document.createElement('span');
+        notice.id='quotationLayoutError';notice.setAttribute('role','alert');
+        notice.textContent='報價內容尚未完整排入 A4，請重新開啟或保留此頁回報，避免寄出不完整單據。';
         notice.style.cssText='color:#fff;font-size:12px;font-weight:700;padding:0 8px';
         document.querySelector('.toolbar').appendChild(notice);
       }
@@ -319,7 +346,7 @@
       window.print();
     }
     if(isQuote){
-      prepareQuotationPrint().then(allowPrintWhenVerified).catch(blockPrintForMissingSeals);
+      prepareQuotationPrint().then(allowPrintWhenVerified).catch(handleQuotationPrintError);
     }else{
       loadAssets().then(allowPrintWhenVerified).catch(blockPrintForMissingSeals);
     }
