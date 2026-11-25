@@ -1,0 +1,89 @@
+name: P41 K23 isolated Journal checkpoint recovery
+
+on:
+  push:
+    branches: [p41-k23-recovery-preview-20261125]
+    paths:
+      - '.p41-k23-tests/**'
+      - '.github/workflows/p41-k23-recovery-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p41-k23-recovery-preview-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  synthetic-recovery:
+    name: Exact Store synthetic checkpoint recovery and refusal gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Verify isolated branch and pinned production source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/p41-k23-recovery
+          test "$GITHUB_REF_NAME" = 'p41-k23-recovery-preview-20261125'
+          python - <<'PY' 2>&1 | tee artifacts/p41-k23-recovery/source-scope.log
+          from pathlib import Path
+          import hashlib,json,subprocess
+          base='09939153538416cfdc3a532b3ec0cd2af5e19238'
+          subprocess.check_call(['git','merge-base','--is-ancestor',base,'HEAD'])
+          changed=subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines()
+          assert changed and all(p.startswith('.p41-k23-tests/') or p=='.github/workflows/p41-k23-recovery-preview.yml' for p in changed),changed
+          source=Path('assets/js/erp-store.js').read_bytes()
+          sha=hashlib.sha256(source).hexdigest()
+          blob=hashlib.sha1(b'blob '+str(len(source)).encode()+b'\0'+source).hexdigest()
+          assert sha=='316829fa8d9418a901c9f849e792516604a02d1f686924db8c377f661464097e',sha
+          assert blob=='95773d5264d54fe1e1d1cfe54b37a2a2656a9fab',blob
+          manifest=json.loads(Path('.p41-k23-tests/FIXTURE_MANIFEST.json').read_text())
+          assert len(manifest)==3
+          for entry in manifest:
+              path=Path('.p41-k23-tests')/entry['file']
+              raw=path.read_bytes()
+              assert len(raw)==entry['bytes'] and hashlib.sha256(raw).hexdigest()==entry['sha256'],str(path)
+              baseline=(Path('.p41-k23-tests')/entry['baselineFile']).read_bytes()
+              assert len(baseline)==entry['baselineBytes'] and hashlib.sha256(baseline).hexdigest()==entry['baselineSha256']
+              data=json.loads(raw.decode('utf-8-sig'))
+              assert data['idb']['main']['meta']['k21Synthetic'] is True
+              assert data['idb']['store:transaction:journal:v1']['before']['state']['meta']['k21Synthetic'] is True
+          print(json.dumps({'changedTestFiles':changed,'storeSha256':sha,'storeGitBlob':blob,'syntheticFixturesVerified':len(manifest)},indent=2))
+          PY
+          python -m py_compile .p41-k23-tests/k23_browser_recovery.py
+      - name: Verify readonly preview and independent baseline oracles
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .p41-k23-tests/preview/run_preview.cjs .p41-k23-tests/fixtures assets/js/erp-store.js > artifacts/p41-k23-recovery/K23_CANDIDATES.json
+          node .p41-k23-tests/preview/test_preview.cjs .p41-k23-tests/fixtures assets/js/erp-store.js artifacts/p41-k23-recovery
+      - name: Prepare browser test dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+      - name: Exercise copied synthetic evidence with exact Store API
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .p41-k23-tests/k23_browser_recovery.py --store assets/js/erp-store.js --evidence .p41-k23-tests/fixtures --output artifacts/p41-k23-recovery 2>&1 | tee artifacts/p41-k23-recovery/browser-acceptance.log
+      - name: Retain independent recovery evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p41-k23-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/p41-k23-recovery/
+          if-no-files-found: error
+          retention-days: 14
