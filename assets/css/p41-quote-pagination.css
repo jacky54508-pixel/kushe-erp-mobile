@@ -93,7 +93,7 @@
 #paper.quotation-document.p41-quote-paginated .detail{width:100%;max-width:100%;table-layout:fixed}
 #paper.quotation-document.p41-quote-paginated .detail th,
 #paper.quotation-document.p41-quote-paginated .detail td{
-  min-width:0;border:.18mm solid var(--p41-quote-rule);padding:1.35mm 2mm;
+  min-width:0;border:.18mm solid var(--p41-quote-rule);padding:1mm 2mm;
   font-size:10.5pt;line-height:1.4;white-space:normal!important;overflow-wrap:anywhere;
   word-break:normal;break-inside:avoid;page-break-inside:avoid;color:var(--p41-quote-ink)
 }
