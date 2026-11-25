@@ -249,7 +249,7 @@
       if (sectionTitle) {
         const label = document.createElement('span');
         label.className = 'p41-quote-section-label';
-        label.textContent = sectionTitle.textContent.trim() === '施工明細' ? '一、施工明細' : sectionTitle.textContent;
+        label.textContent = sectionTitle.textContent;
         sectionTitle.replaceChildren(label);
         if (originalPricing) sectionTitle.appendChild(originalPricing);
       }
@@ -380,7 +380,7 @@
       if (role !== 'terms' || continued) {
         const title = document.createElement('div');
         title.className = 'p41-quote-notes-heading';
-        title.textContent = role === 'scope' ? `二、施工範圍與補充說明${continued ? '（續）' : ''}` :
+        title.textContent = role === 'scope' ? `施工範圍與補充說明${continued ? '（續）' : ''}` :
           role === 'terms' ? `${noteModel.titleText}（續）` : continued ? '備註（續）：' : '備註：';
         box.appendChild(title);
       }
@@ -530,7 +530,12 @@
       if (noteModel.mode === 'contract') {
         appendNoteChunks([...noteModel.scope, ...noteModel.supplements], 'scope');
         pages[0].context.textContent = '付款約定及簽章詳續頁';
-        appendNoteChunks(noteModel.terms, 'terms', true, true);
+        // A scope continuation is already a new sheet. Let payment clauses use
+        // its remaining space instead of stranding two short supplements on a
+        // mostly empty sheet. The grouped title + first clause body must still
+        // fit intact; a scope on the details sheet keeps a separate terms page.
+        const shareScopeContinuation = pages.length > 1 && current.sheet.dataset.quoteSection === 'scope';
+        appendNoteChunks(noteModel.terms, 'terms', true, !shareScopeContinuation);
       } else {
         appendNoteChunks(noteModel.generic, 'generic', true);
         if (pages.length > 1) pages[0].context.textContent = '完整內容與簽章見續頁';
@@ -546,6 +551,10 @@
         else appendBlock(node);
       }
       appendNotesAndSignature();
+      for (const page of pages) {
+        page.sheet.classList.toggle('p41-quote-terms-page',
+          Boolean(page.body.querySelector('.p41-quote-terms [data-quote-note-fragment]')));
+      }
       const renderedRows = Array.from(content.querySelectorAll('.detail tbody tr'));
       if (renderedRows.length !== originalRows.length || renderedRows.some((row, index) => row !== originalRows[index])) {
         throw fail('QUOTATION_ROW_PRESERVATION_FAILED', '報價明細分頁核對失敗，已停止列印。');
