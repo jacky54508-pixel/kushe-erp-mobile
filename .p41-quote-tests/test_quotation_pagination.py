@@ -25,7 +25,7 @@ from urllib.parse import quote, unquote, urlsplit
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
 from pypdf import PdfReader
 
-BASE = 'f2f5d0b0d232e7a7ac9f948af9b643e15df948ff'
+BASE = '49edb30257707a786329d19207b92fec951d3906'
 PAGE = '.p41-quote-page'
 BODY = '.p41-quote-page-body'
 NOTE = '[data-quote-note-fragment]'
@@ -200,6 +200,27 @@ def quote_document(count=11, mode='actual', note='', name='SYNTHETIC-QUOTE'):
             'receivableAmount': total + tax,
             'company': {'name': '虛構工程企業', 'englishName': 'Synthetic Company',
                         'taxId': 'SYNTHETIC', 'address': '虛構測試地址', 'phone': 'SYN-0000'}}
+
+
+def spacing_document(constrained=False):
+    """Reproduce the label/spacing boundary using newly written synthetic text."""
+    scope = ('本範圍為虛構甲棟測試門窗與模擬施工區域，全部名稱和條件均為合成資料，僅供報價版面驗收使用。'
+             '請保留原始項目、完整數量、單位及單價，範圍說明需自然換行，並將末尾補充與付款條款合理接續，不得留下只有兩行文字的獨立續頁。')
+    scope = (scope + '虛構測試範圍內容保留。')[:110]
+    assert len(scope) == 110
+    if constrained:
+        scope += ('虛構延伸範圍僅用於頁面邊界驗收，全部句子須完整保留，後續付款條款應接續本頁可用空間。' * 16)
+    note = contract_note().replace(CONTRACT_SCOPE, scope, 1)
+    doc = quote_document(11, 'actual', note, 'SYNTHETIC-CONSTRAINED-SCOPE' if constrained else 'SYNTHETIC-ALL-BACKUP11')
+    for row in doc['lines']:
+        row['isBackupPrice'] = True
+    if constrained:
+        doc['company'].update(name='虛構邊界測試工程企業股份有限公司',
+                              englishName='Synthetic Boundary Layout Verification Company',
+                              address='虛構測試地址，僅為字型及頁面寬度驗收資料；不代表任何真實公司、客戶、工程地點或聯絡資料。')
+        doc['customer'] = '虛構版面邊界測試客戶暨合成資料確認單位'
+        doc['project'] = '虛構甲棟門窗及附屬測試區域之完整工程名稱與範圍識別'
+    return doc
 
 
 def billing_document(merged=False):
@@ -523,6 +544,12 @@ def check_values(report, name, page, document):
     report.check(name + ': every item quantity unit price and amount unchanged', rows == expected, {'expected': expected, 'actual': rows})
     check_source_notes(report, name, page, document['publicNote'])
     report.check(name + ': source payload remains unchanged', page.evaluate('()=>d') == document)
+    detail_labels = page.locator('#paper .p41-quote-section-label').all_text_contents()
+    scope_labels = page.locator('#paper .p41-quote-scope .p41-quote-notes-heading').all_text_contents()
+    report.check(name + ': generated section headings are unnumbered and original clause numbers stay separate',
+                 bool(detail_labels) and all(label.strip().removesuffix('（續）') == '施工明細' for label in detail_labels) and
+                 all(label.strip().removesuffix('（續）') == '施工範圍與補充說明' for label in scope_labels),
+                 {'detail': detail_labels, 'scope': scope_labels})
     report.check(name + ': original logo and seal IDs remain unique', page.locator('#formalCompanyLogo').count() == 1 and page.locator('#formalCompanySeal').count() == 1)
     logo = page.evaluate("""() => {
       const image=document.querySelector('#formalCompanyLogo'),frame=image.closest('.company-logo-frame');
@@ -591,7 +618,70 @@ def capture_failure_artifacts(page, report, name):
         (report.output / (name + '-capture-errors.json')).write_text(json.dumps(failures, indent=2), encoding='utf-8')
 
 
-def quote_case(browser, server, report, name, document, minimum_pages=1, maximum_pages=None, contract_structure=None):
+def contract_page_flow(page):
+    return page.evaluate("""() => [...document.querySelectorAll('.p41-quote-page')].map((p,index)=>{
+      const frame=p.querySelector('.p41-quote-page-body'),flow=p.querySelector('.p41-quote-page-flow');
+      const fragments=[...p.querySelectorAll('[data-quote-note-fragment]')];
+      const chars=role=>fragments.filter(e=>role.includes(e.dataset.quoteNoteRole)).reduce((n,e)=>n+e.textContent.replace(/\\s/g,'').length,0);
+      return {page:index+1,rows:p.querySelectorAll('.detail tbody tr:not(.line-total)').length,
+        scopeCharacters:chars(['scope','supplement']),termsCharacters:chars(['terms']),
+        hasScopeBox:Boolean(p.querySelector('.p41-quote-scope')),hasTermsBox:Boolean(p.querySelector('.p41-quote-terms')),
+        termsPage:p.classList.contains('p41-quote-terms-page'),roles:[...new Set(fragments.map(e=>e.dataset.quoteNoteRole))],
+        contentHeight:flow.scrollHeight,bodyHeight:frame.clientHeight,remainingHeight:frame.clientHeight-flow.scrollHeight};
+    })""")
+
+
+def check_contract_packing(report, name, page, require_shared=False, exact_two=False):
+    flow = contract_page_flow(page)
+    (report.output / (name + '-page-flow.json')).write_text(json.dumps(flow, indent=2), encoding='utf-8')
+    report.check(name + ': all eleven rows retain backup-price labels',
+                 page.locator('#paper .detail tbody tr:not(.line-total)').count() == 11 and page.locator('#paper .detail .actual-note').count() == 11)
+    if exact_two:
+        report.check(name + ': eleven backup-price rows and wrapped scope use exactly two pages', len(flow) == 2, flow)
+    orphan = [item for item in flow[:-1] if item['page'] > 1 and item['scopeCharacters'] > 0 and
+              item['termsCharacters'] == 0 and item['rows'] == 0]
+    report.check(name + ': no intermediate page contains only scope or supplements before the terms', not orphan, orphan)
+    if require_shared:
+        shared = [item for item in flow if item['hasScopeBox'] and item['hasTermsBox'] and
+                  item['scopeCharacters'] > 0 and item['termsCharacters'] > 0 and item['termsPage']]
+        report.check(name + ': constrained scope continuation shares a page with substantive terms', bool(shared), flow)
+    headings = [value.strip() for value in page.locator('.p41-quote-clause-heading').all_text_contents()]
+    report.check(name + ': all seven original numbered clause headings remain unchanged', headings == CONTRACT_HEADINGS, headings)
+    report.check(name + ': original signature and both date fields remain on the final page',
+                 page.locator(PAGE).last.locator('.sign').count() == 1 and
+                 page.locator('.sign').count() == 1 and page.locator(PAGE).last.locator('.p41-quote-sign-date').count() == 2)
+    return flow
+
+
+def baseline_spacing_reproduction(browser, server, report, constrained=True):
+    name = 'baseline-constrained-scope' if constrained else 'baseline-all-backup11'
+    document = spacing_document(constrained)
+    context = fresh_context(browser, server, report)
+    page = context.new_page()
+    try:
+        page.goto(url_for(server.origin, 'baseline', document), wait_until='load')
+        ready(page)
+        flow = contract_page_flow(page)
+        isolated = [item for item in flow[:-1] if item['page'] > 1 and item['scopeCharacters'] > 0 and
+                    item['termsCharacters'] == 0 and item['rows'] == 0]
+        record = {'baselineCommit': BASE, 'fixture': document, 'pages': flow,
+                  'scopeOnlyIntermediatePages': isolated, 'layoutRegressionObserved': bool(isolated)}
+        report.result.setdefault('baselineReproductions', []).append(record)
+        (report.output / (name + '.json')).write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding='utf-8')
+        page.screenshot(path=str(report.output / (name + '.png')), full_page=True)
+        page.pdf(path=str(report.output / (name + '.pdf')), format='A4', print_background=True, prefer_css_page_size=True)
+        if constrained:
+            report.check(name + ': released baseline reproduces the isolated scope continuation', bool(isolated), flow)
+        report.flush()
+        return record
+    except Exception:
+        capture_failure_artifacts(page, report, name)
+        raise
+    finally:
+        context.close()
+
+
+def quote_case(browser, server, report, name, document, minimum_pages=1, maximum_pages=None, contract_structure=None, spacing_check=False, require_shared=False):
     context = fresh_context(browser, server, report)
     page = context.new_page()
     errors = []
@@ -603,6 +693,8 @@ def quote_case(browser, server, report, name, document, minimum_pages=1, maximum
         check_values(report, name, page, document)
         if contract_structure is not None:
             check_contract_structure(report, name, page, expected_contract=contract_structure)
+        if spacing_check:
+            check_contract_packing(report, name, page, require_shared=require_shared, exact_two=maximum_pages == 2)
         if document.get('publicNote', '').strip():
             final_note = page.locator(PAGE).last.locator('[data-quote-note-fragment]').all_text_contents()
             report.check(name + ': final signature page retains meaningful note text', bool(''.join(final_note).strip()))
@@ -753,6 +845,9 @@ def main():
                              '**跨行\r\n不可加粗**\r單獨換行也保留\n** 前後空白保留 **\n'
                              '\\**跳脫標記保留**\n\\\\**偶數跳脫可粗體**\n最後保留未配對 **')
                 operations = [
+                    ('baseline-constrained-scope',lambda: baseline_spacing_reproduction(browser,server,report)),
+                    ('contract-all-backup11',lambda: quote_case(browser,server,report,'contract-all-backup11',spacing_document(),minimum_pages=2,maximum_pages=2,spacing_check=True)),
+                    ('contract-constrained-scope',lambda: quote_case(browser,server,report,'contract-constrained-scope',spacing_document(True),minimum_pages=2,spacing_check=True,require_shared=True)),
                     ('contract-seven-clauses11',lambda: quote_case(browser,server,report,'contract-seven-clauses11',quote_document(11,'actual',contract_note(),'SYNTHETIC-CONTRACT-SEVEN'),minimum_pages=2,maximum_pages=2,contract_structure=True)),
                     ('actual-long11',lambda: quote_case(browser,server,report,'actual-long11',quote_document(11,'actual',long_note()),minimum_pages=2)),
                     ('actual-short',lambda: quote_case(browser,server,report,'actual-short',quote_document(3,'actual','SYN-SHORT-001 虛構短備註，原文保留。'),maximum_pages=1)),

@@ -32,7 +32,7 @@
   display:block;max-width:100%;min-width:0;padding:0;border:0;color:var(--p41-quote-ink)
 }
 #paper.quotation-document.p41-quote-paginated .company-block{
-  display:block;position:relative;min-width:0;padding:0 17mm 4mm;border-bottom:.25mm solid var(--p41-quote-rule)
+  display:block;position:relative;min-width:0;padding:0 17mm 3mm;border-bottom:.25mm solid var(--p41-quote-rule)
 }
 #paper.quotation-document.p41-quote-paginated .company{min-width:0;text-align:center}
 #paper.quotation-document.p41-quote-paginated .company-logo-frame{
@@ -54,7 +54,7 @@
 }
 #paper.quotation-document.p41-quote-paginated .company .sub span{min-width:0;max-width:100%;overflow-wrap:anywhere}
 #paper.quotation-document.p41-quote-paginated .doc-title{
-  min-width:0;max-width:100%;padding:0;margin:6mm 0 0;overflow:visible;
+  min-width:0;max-width:100%;padding:0;margin:4mm 0 0;overflow:visible;
   background:transparent;border:0;border-radius:0;text-align:center
 }
 #paper.quotation-document.p41-quote-paginated .doc-title::after{display:none}
@@ -63,14 +63,14 @@
   white-space:normal;overflow-wrap:anywhere;line-height:1.25
 }
 #paper.quotation-document.p41-quote-paginated .p41-quote-contract-subtitle{
-  margin-top:1.6mm;font-family:var(--p41-quote-sans);font-size:9.5pt;line-height:1.35;color:var(--p41-quote-muted)
+  margin-top:1mm;font-family:var(--p41-quote-sans);font-size:9.5pt;line-height:1.35;color:var(--p41-quote-muted)
 }
 #paper.quotation-document.p41-quote-paginated .info{
-  grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:1mm 6mm;
-  margin:5mm 0 3mm;padding:0 0 3mm;background:transparent;border:0;border-bottom:.2mm solid var(--p41-quote-rule);border-radius:0
+  grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:.6mm 6mm;
+  margin:4mm 0 2.5mm;padding:0 0 2.5mm;background:transparent;border:0;border-bottom:.2mm solid var(--p41-quote-rule);border-radius:0
 }
 #paper.quotation-document.p41-quote-paginated .info>div{
-  min-width:0;min-height:8mm;padding:1mm 0;background:transparent;border:0;border-radius:0;
+  min-width:0;min-height:7.2mm;padding:.6mm 0;background:transparent;border:0;border-radius:0;
   font-size:11pt;font-weight:700;color:var(--p41-quote-ink);line-height:1.4;overflow-wrap:anywhere;white-space:normal
 }
 #paper.quotation-document.p41-quote-paginated .info>div:nth-child(2){grid-column:1;grid-row:2}
@@ -82,18 +82,18 @@
   color:var(--p41-quote-muted);background:transparent;border:0;border-radius:0
 }
 #paper.quotation-document.p41-quote-paginated .section{
-  margin-top:3mm;min-width:0;overflow:visible;border:0;border-radius:0;background:transparent
+  margin-top:2.5mm;min-width:0;overflow:visible;border:0;border-radius:0;background:transparent
 }
 #paper.quotation-document.p41-quote-paginated .section-title{
   display:flex;justify-content:space-between;gap:3mm;align-items:baseline;
-  padding:0 0 3mm;border:0;background:transparent;color:var(--p41-quote-ink);
+  padding:0 0 2.2mm;border:0;background:transparent;color:var(--p41-quote-ink);
   font-size:12pt;font-weight:700;line-height:1.4;letter-spacing:0
 }
 #paper.quotation-document.p41-quote-paginated .section-title::before{display:none}
 #paper.quotation-document.p41-quote-paginated .detail{width:100%;max-width:100%;table-layout:fixed}
 #paper.quotation-document.p41-quote-paginated .detail th,
 #paper.quotation-document.p41-quote-paginated .detail td{
-  min-width:0;border:.18mm solid var(--p41-quote-rule);padding:1.7mm 2mm;
+  min-width:0;border:.18mm solid var(--p41-quote-rule);padding:1mm 2mm;
   font-size:10.5pt;line-height:1.4;white-space:normal!important;overflow-wrap:anywhere;
   word-break:normal;break-inside:avoid;page-break-inside:avoid;color:var(--p41-quote-ink)
 }
@@ -123,11 +123,11 @@
 #paper.quotation-document.p41-quote-paginated .summary-row.receivable{background:#f1f2f3;color:var(--p41-quote-ink)}
 #paper.quotation-document.p41-quote-paginated .summary-row.total strong{font-size:12pt}
 #paper.quotation-document.p41-quote-paginated .p41-quote-notes{
-  width:100%;max-width:100%;margin-top:6mm;padding:0;border:0;border-radius:0;background:transparent;
+  width:100%;max-width:100%;margin-top:4mm;padding:0;border:0;border-radius:0;background:transparent;
   font-size:10.5pt;line-height:1.4;white-space:normal;overflow:visible;break-inside:auto
 }
 #paper.quotation-document.p41-quote-paginated .p41-quote-notes-heading{
-  margin:0 0 3mm;font-size:12pt;font-weight:700;line-height:1.4;break-after:avoid;color:var(--p41-quote-ink)
+  margin:0 0 2mm;font-size:12pt;font-weight:700;line-height:1.4;break-after:avoid;color:var(--p41-quote-ink)
 }
 #paper.quotation-document.p41-quote-paginated .p41-quote-note-text{
   margin:0 0 .8mm;padding:0;font-size:10.5pt;line-height:1.4;white-space:normal;

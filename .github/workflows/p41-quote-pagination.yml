@@ -1,8 +1,8 @@
-name: P41 contract quotation A4 and unchanged billing (synthetic only)
+name: P41 contract spacing Linux and Windows (synthetic only)
 
 on:
   push:
-    branches: [p41-quote-contract-20261125]
+    branches: [p41-quote-contract-spacing-20261125]
     paths:
       - billing-print.html
       - assets/js/p41-quote-pagination.js
@@ -46,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           node --check assets/js/p41-quote-pagination.js
-          python -m py_compile .p41-quote-tests/source_guard.py .p41-quote-tests/test_quotation_pagination.py .p41-quote-tests/build_offline_quote.py
+          python -m py_compile .p41-quote-tests/source_guard.py .p41-quote-tests/test_quotation_pagination.py .p41-quote-tests/test_contract_windows.py .p41-quote-tests/build_offline_quote.py
       - name: Prepare isolated browser and PDF reader
         shell: bash
         run: |
@@ -66,5 +66,47 @@ jobs:
         with:
           name: p41-quote-pagination-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/p41-quote-pagination/
+          if-no-files-found: warn
+          retention-days: 14
+
+  windows-contract-spacing:
+    name: Native Windows fonts, all backup labels and scope continuation
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      P41_BRANCH_CONTEXT: ${{ github.head_ref || github.ref_name }}
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Check pinned print-only scope and prepare isolated Chromium
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force artifacts/p41-contract-windows | Out-Null
+          python .p41-quote-tests/source_guard.py 2>&1 | Tee-Object -FilePath artifacts/p41-contract-windows/source-scope.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m playwright install chromium
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Reproduce baseline and verify native Windows pagination
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python .p41-quote-tests/test_contract_windows.py --root . --output artifacts/p41-contract-windows 2>&1 | Tee-Object -FilePath artifacts/p41-contract-windows/browser-acceptance.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Retain Windows fonts, baseline and candidate PDFs and screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p41-contract-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/p41-contract-windows/
           if-no-files-found: warn
           retention-days: 14
