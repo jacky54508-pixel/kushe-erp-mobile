@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
@@ -20,6 +21,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      PAGES_ARTIFACT_NAME: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -84,7 +87,45 @@ jobs:
         uses: actions/upload-pages-artifact@v4
         with:
           path: site
+          name: ${{ env.PAGES_ARTIFACT_NAME }}
+
+      - name: Confirm this attempt's uploaded artifact is discoverable
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import json, os, time, urllib.error, urllib.request
+          name = os.environ['PAGES_ARTIFACT_NAME']
+          endpoint = (os.environ['GITHUB_API_URL'] + '/repos/' + os.environ['GITHUB_REPOSITORY'] +
+                      '/actions/runs/' + os.environ['GITHUB_RUN_ID'] + '/artifacts?per_page=100')
+          headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                     'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}
+          for attempt in range(1, 13):
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(endpoint, headers=headers), timeout=10) as response:
+                      items = json.load(response).get('artifacts', [])
+              except urllib.error.HTTPError as error:
+                  if error.code not in (404, 429, 500, 502, 503, 504):
+                      raise SystemExit('Artifact lookup rejected with HTTP ' + str(error.code))
+                  items = []
+              except (urllib.error.URLError, TimeoutError):
+                  items = []
+              matches = [item for item in items if item.get('name') == name and not item.get('expired')]
+              if len(matches) == 1:
+                  print('Verified one uploaded artifact for this deployment attempt:', name)
+                  break
+              if len(matches) > 1:
+                  raise SystemExit('Duplicate artifact for this deployment attempt; deployment blocked')
+              if attempt == 12:
+                  raise SystemExit('Uploaded artifact not discoverable within bounded retries; deployment blocked')
+              print('Waiting for uploaded artifact metadata:', attempt)
+              time.sleep(2)
+          PYCODE
 
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: ${{ env.PAGES_ARTIFACT_NAME }}
