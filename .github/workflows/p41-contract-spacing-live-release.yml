@@ -1,0 +1,70 @@
+name: P41 live contract spacing hotfix smoke (read-only synthetic)
+
+on:
+  push:
+    branches: [p41-contract-spacing-livecheck-20261125]
+    paths:
+      - '.p41-quote-tests/live_spacing_release_smoke.py'
+      - '.github/workflows/p41-contract-spacing-live-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p41-contract-spacing-live-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  live-print-smoke:
+    name: Deployed contract files and synthetic desktop mobile A4 PDFs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Confirm dedicated verification branch and no product edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/p41-contract-spacing-live-release
+          test "$GITHUB_REF_NAME" = 'p41-contract-spacing-livecheck-20261125'
+          release_commit='09939153538416cfdc3a532b3ec0cd2af5e19238'
+          [[ "$release_commit" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$release_commit" HEAD
+          python - <<'PY' 2>&1 | tee artifacts/p41-contract-spacing-live-release/source-scope.log
+          import subprocess
+          allowed={'.p41-quote-tests/live_spacing_release_smoke.py','.github/workflows/p41-contract-spacing-live-release.yml'}
+          changed=set(subprocess.check_output(['git','diff','--name-only','origin/main...HEAD'],text=True).splitlines())
+          print('Verification-only changes:',sorted(changed))
+          assert changed and changed <= allowed, changed
+          PY
+          python -m py_compile .p41-quote-tests/live_spacing_release_smoke.py .p41-quote-tests/test_quotation_pagination.py
+      - name: Prepare fresh Chrome and exact PDF text checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-noto-cjk poppler-utils
+      - name: Verify live deployed hashes and synthetic quotations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .p41-quote-tests/live_spacing_release_smoke.py --root . --output artifacts/p41-contract-spacing-live-release 2>&1 | tee artifacts/p41-contract-spacing-live-release/live-browser.log
+      - name: Retain result screenshots PDFs and diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p41-contract-spacing-live-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/p41-contract-spacing-live-release/
+          if-no-files-found: warn
+          retention-days: 14
