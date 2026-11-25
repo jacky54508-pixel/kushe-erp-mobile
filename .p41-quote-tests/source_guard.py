@@ -4,10 +4,12 @@ import os
 import subprocess
 from pathlib import Path
 
-BASE = 'edf1c1886aac09958caa9e4b304502cca44f6937'
-BRANCH = 'p41-quote-pagination-20261124'
+BASE = 'f2f5d0b0d232e7a7ac9f948af9b643e15df948ff'
+BRANCH = 'p41-quote-contract-20261125'
 EXACT = {'billing-print.html', 'assets/js/p41-quote-pagination.js',
-         'assets/css/p41-quote-pagination.css', '.github/workflows/p41-quote-pagination.yml'}
+         'assets/css/p41-quote-pagination.css', '.github/workflows/p41-quote-pagination.yml',
+         '.p41-quote-tests/source_guard.py', '.p41-quote-tests/test_quotation_pagination.py',
+         '.p41-quote-tests/build_offline_quote.py', '.p41-quote-tests/ISSUE_RECORD.md'}
 
 
 def git(*args):
@@ -29,7 +31,7 @@ def main():
         changed = git('diff', '--name-only', BASE + '...HEAD').splitlines()
         result['changedFiles'] = changed
         assert changed, 'Empty candidate'
-        forbidden = [p for p in changed if p not in EXACT and not p.startswith('.p41-quote-tests/')]
+        forbidden = [p for p in changed if p not in EXACT]
         assert not forbidden, f'Out-of-scope changes: {forbidden}'
         result['status'] = 'PRINT_ONLY_SOURCE_SCOPE_VERIFIED'
     except Exception as error:

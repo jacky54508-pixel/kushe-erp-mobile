@@ -1,11 +1,14 @@
-/* P41: quotation-only A4 pagination. Billing styling and financial values are
-   intentionally outside this scope. A screen transform fits the preview;
-   print content is always full size and never shrunk to force one page. */
+/* P41 quotation-only formal print presentation. Physical A4 pages and a
+   restrained document hierarchy; original financial rows and images remain
+   the source. Billing selectors and financial calculations are untouched. */
 #paper.quotation-document.p41-quote-paginated{
+  --p41-quote-serif:"PMingLiU","Songti TC","Noto Serif CJK TC","Noto Serif TC",serif;
+  --p41-quote-sans:"Microsoft JhengHei","Noto Sans CJK TC","Noto Sans TC",Arial,sans-serif;
+  --p41-quote-ink:#1a1e23;--p41-quote-muted:#565d64;--p41-quote-rule:#a2a7ac;
   width:210mm!important;max-width:none!important;min-height:0!important;height:auto;
   padding:0!important;margin:16px auto!important;left:auto!important;translate:none!important;
   transform:none!important;background:transparent;box-shadow:none;overflow:visible!important;
-  zoom:1!important
+  zoom:1!important;font-family:var(--p41-quote-serif);color:var(--p41-quote-ink)
 }
 #paper.quotation-document.p41-quote-paginated::before,
 #paper.quotation-document.p41-quote-paginated::after{display:none!important}
@@ -14,83 +17,186 @@
 }
 #paper.quotation-document.p41-quote-paginated .p41-quote-page{
   position:relative;isolation:isolate;box-sizing:border-box;width:210mm;height:297mm;
-  padding:10mm 13.5mm 16mm;margin:0 0 16px;background:#fff;color:#112d51;
+  padding:12mm 16mm 18mm;margin:0 0 16px;background:#fff;color:var(--p41-quote-ink);
   box-shadow:0 8px 28px rgba(20,39,65,.15);break-inside:avoid;page-break-inside:avoid
 }
 #paper.quotation-document.p41-quote-paginated .p41-quote-page:last-child{margin-bottom:0}
-#paper.quotation-document.p41-quote-paginated .p41-quote-page::after{
-  content:"";position:absolute;inset:auto 0 0;height:11mm;z-index:-1;pointer-events:none;
-  background:linear-gradient(105deg,#f2fbfb,#c4eae5 67%,#7ccac3);
-  clip-path:polygon(0 42%,22% 72%,48% 90%,70% 62%,100% 15%,100% 100%,0 100%)
-}
 #paper.quotation-document.p41-quote-paginated .p41-quote-page-body{
-  display:flow-root;box-sizing:border-box;width:100%;height:271mm;min-width:0;
+  display:flow-root;box-sizing:border-box;width:100%;height:267mm;min-width:0;
   overflow:visible;zoom:1!important;transform:none!important
 }
 #paper.quotation-document.p41-quote-paginated .p41-quote-page-flow{
-  display:flow-root;width:100%;height:auto;min-width:0;overflow:visible;
-  zoom:1!important;transform:none!important
+  display:flow-root;width:100%;height:auto;min-width:0;overflow:visible;zoom:1!important;transform:none!important
 }
 #paper.quotation-document.p41-quote-paginated .head{
-  grid-template-columns:minmax(0,1fr) minmax(0,48mm);gap:5mm;max-width:100%;min-width:0
+  display:block;max-width:100%;min-width:0;padding:0;border:0;color:var(--p41-quote-ink)
 }
-#paper.quotation-document.p41-quote-paginated .company-block{min-width:0;gap:3mm}
+#paper.quotation-document.p41-quote-paginated .company-block{
+  display:block;position:relative;min-width:0;padding:0 17mm 4mm;border-bottom:.25mm solid var(--p41-quote-rule)
+}
+#paper.quotation-document.p41-quote-paginated .company{min-width:0;text-align:center}
+#paper.quotation-document.p41-quote-paginated .company-logo-frame{
+  position:absolute;right:0;top:1mm;width:15mm;height:11mm;overflow:hidden
+}
+#paper.quotation-document.p41-quote-paginated .company-logo{width:15mm;height:11mm;object-fit:contain}
 #paper.quotation-document.p41-quote-paginated .company h1{
-  font-size:18pt;letter-spacing:.4pt;white-space:normal;overflow-wrap:anywhere;line-height:1.2
+  margin:0;color:var(--p41-quote-ink);font-size:19pt;font-weight:700;letter-spacing:.3pt;
+  white-space:normal;overflow-wrap:anywhere;line-height:1.2
 }
-#paper.quotation-document.p41-quote-paginated .company .en{font-size:9pt;white-space:normal;overflow-wrap:anywhere}
-#paper.quotation-document.p41-quote-paginated .company .sub{flex-wrap:wrap;white-space:normal;overflow-wrap:anywhere;row-gap:.5mm}
+#paper.quotation-document.p41-quote-paginated .company .en{
+  margin-top:1.4mm;color:var(--p41-quote-muted);font-family:var(--p41-quote-sans);font-size:8pt;
+  font-weight:400;line-height:1.3;white-space:normal;overflow-wrap:anywhere
+}
+#paper.quotation-document.p41-quote-paginated .company .sub{
+  justify-content:center;flex-wrap:wrap;margin-top:2mm;color:var(--p41-quote-muted);
+  font-family:var(--p41-quote-sans);font-size:8pt;line-height:1.4;
+  white-space:normal;overflow-wrap:anywhere;row-gap:.6mm
+}
 #paper.quotation-document.p41-quote-paginated .company .sub span{min-width:0;max-width:100%;overflow-wrap:anywhere}
-#paper.quotation-document.p41-quote-paginated .doc-title{min-width:0;max-width:100%;padding:4mm 7mm 4mm 3mm}
-#paper.quotation-document.p41-quote-paginated .doc-title h2{font-size:18pt;letter-spacing:2pt;white-space:normal;overflow-wrap:anywhere;line-height:1.25}
-#paper.quotation-document.p41-quote-paginated .info{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
-#paper.quotation-document.p41-quote-paginated .info>div{min-width:0;overflow-wrap:anywhere;white-space:normal}
-#paper.quotation-document.p41-quote-paginated .section{min-width:0;overflow:visible}
+#paper.quotation-document.p41-quote-paginated .doc-title{
+  min-width:0;max-width:100%;padding:0;margin:6mm 0 0;overflow:visible;
+  background:transparent;border:0;border-radius:0;text-align:center
+}
+#paper.quotation-document.p41-quote-paginated .doc-title::after{display:none}
+#paper.quotation-document.p41-quote-paginated .doc-title h2{
+  color:var(--p41-quote-ink);font-size:23pt;font-weight:700;letter-spacing:1pt;
+  white-space:normal;overflow-wrap:anywhere;line-height:1.25
+}
+#paper.quotation-document.p41-quote-paginated .p41-quote-contract-subtitle{
+  margin-top:1.6mm;font-family:var(--p41-quote-sans);font-size:9.5pt;line-height:1.35;color:var(--p41-quote-muted)
+}
+#paper.quotation-document.p41-quote-paginated .info{
+  grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:1mm 6mm;
+  margin:5mm 0 3mm;padding:0 0 3mm;background:transparent;border:0;border-bottom:.2mm solid var(--p41-quote-rule);border-radius:0
+}
+#paper.quotation-document.p41-quote-paginated .info>div{
+  min-width:0;min-height:8mm;padding:1mm 0;background:transparent;border:0;border-radius:0;
+  font-size:11pt;font-weight:700;color:var(--p41-quote-ink);line-height:1.4;overflow-wrap:anywhere;white-space:normal
+}
+#paper.quotation-document.p41-quote-paginated .info>div:nth-child(2){grid-column:1;grid-row:2}
+#paper.quotation-document.p41-quote-paginated .info>div:nth-child(3){grid-column:2;grid-row:1}
+#paper.quotation-document.p41-quote-paginated .info>div:nth-child(4){grid-column:2;grid-row:2}
+#paper.quotation-document.p41-quote-paginated .info .label{
+  width:auto;min-width:12mm;justify-content:flex-start;margin-right:2mm;padding:0;
+  font-family:var(--p41-quote-sans);font-size:9.5pt;font-weight:400;line-height:1.4;
+  color:var(--p41-quote-muted);background:transparent;border:0;border-radius:0
+}
+#paper.quotation-document.p41-quote-paginated .section{
+  margin-top:3mm;min-width:0;overflow:visible;border:0;border-radius:0;background:transparent
+}
+#paper.quotation-document.p41-quote-paginated .section-title{
+  display:flex;justify-content:space-between;gap:3mm;align-items:baseline;
+  padding:0 0 3mm;border:0;background:transparent;color:var(--p41-quote-ink);
+  font-size:12pt;font-weight:700;line-height:1.4;letter-spacing:0
+}
+#paper.quotation-document.p41-quote-paginated .section-title::before{display:none}
 #paper.quotation-document.p41-quote-paginated .detail{width:100%;max-width:100%;table-layout:fixed}
 #paper.quotation-document.p41-quote-paginated .detail th,
 #paper.quotation-document.p41-quote-paginated .detail td{
-  min-width:0;font-size:8.8pt;line-height:1.35;white-space:normal!important;overflow-wrap:anywhere;
-  word-break:normal;break-inside:avoid;page-break-inside:avoid
+  min-width:0;border:.18mm solid var(--p41-quote-rule);padding:1.7mm 2mm;
+  font-size:10.5pt;line-height:1.4;white-space:normal!important;overflow-wrap:anywhere;
+  word-break:normal;break-inside:avoid;page-break-inside:avoid;color:var(--p41-quote-ink)
 }
-#paper.quotation-document.p41-quote-paginated .detail td.item{font-size:10.2pt;line-height:1.3}
+#paper.quotation-document.p41-quote-paginated .detail th,
+#paper.quotation-document.p41-quote-paginated .detail th:first-child{
+  background:#f1f2f3;color:var(--p41-quote-ink);font-family:var(--p41-quote-sans);font-size:10pt;font-weight:700
+}
+#paper.quotation-document.p41-quote-paginated .detail tbody tr:not(.line-total) td.item,
+#paper.quotation-document.p41-quote-paginated .detail td.item{
+  padding-left:3mm;padding-right:3mm;background:#fff;color:var(--p41-quote-ink);font-size:11pt;font-weight:400;line-height:1.4
+}
+#paper.quotation-document.p41-quote-paginated .detail td.num{font-family:var(--p41-quote-sans);font-size:10.5pt}
 #paper.quotation-document.p41-quote-paginated .detail tr{break-inside:avoid;page-break-inside:avoid}
-#paper.quotation-document.p41-quote-paginated .actual-note{white-space:normal;overflow-wrap:anywhere}
-#paper.quotation-document.p41-quote-paginated .summary{min-width:0;max-width:100%}
-#paper.quotation-document.p41-quote-paginated .summary-row{grid-template-columns:minmax(0,1fr) auto;gap:2mm}
-#paper.quotation-document.p41-quote-paginated .summary-row strong{min-width:0;overflow-wrap:anywhere}
+#paper.quotation-document.p41-quote-paginated .detail .line-total td{background:#f1f2f3;color:var(--p41-quote-ink);font-weight:700}
+#paper.quotation-document.p41-quote-paginated .actual-note{
+  white-space:normal;overflow-wrap:anywhere;color:var(--p41-quote-muted);font-family:var(--p41-quote-sans);font-size:8.5pt;font-weight:400
+}
+#paper.quotation-document.p41-quote-paginated .actual-pricing-label{
+  margin:3mm 0 0;padding:0;border:0;border-radius:0;background:transparent;color:var(--p41-quote-ink);
+  font-family:var(--p41-quote-sans);font-size:10.5pt;line-height:1.4;font-weight:700;letter-spacing:0
+}
+#paper.quotation-document.p41-quote-paginated .section-title .actual-pricing-label{margin:0;font-size:10pt;flex-shrink:0}
+#paper.quotation-document.p41-quote-paginated .summary{min-width:0;max-width:100%;border:.2mm solid var(--p41-quote-rule);border-radius:0}
+#paper.quotation-document.p41-quote-paginated .summary-row{grid-template-columns:minmax(0,1fr) auto;gap:2mm;color:var(--p41-quote-ink);border-bottom-color:var(--p41-quote-rule)}
+#paper.quotation-document.p41-quote-paginated .summary-row strong{min-width:0;overflow-wrap:anywhere;font-family:var(--p41-quote-sans)}
+#paper.quotation-document.p41-quote-paginated .summary-row.total,
+#paper.quotation-document.p41-quote-paginated .summary-row.receivable{background:#f1f2f3;color:var(--p41-quote-ink)}
+#paper.quotation-document.p41-quote-paginated .summary-row.total strong{font-size:12pt}
 #paper.quotation-document.p41-quote-paginated .p41-quote-notes{
-  width:100%;max-width:100%;margin-top:4mm;padding:3mm 3.5mm;
-  font-size:9.2pt;line-height:1.55;white-space:normal;overflow:visible;break-inside:auto
+  width:100%;max-width:100%;margin-top:6mm;padding:0;border:0;border-radius:0;background:transparent;
+  font-size:10.5pt;line-height:1.4;white-space:normal;overflow:visible;break-inside:auto
 }
 #paper.quotation-document.p41-quote-paginated .p41-quote-notes-heading{
-  margin:0 0 1.5mm;font-size:9.2pt;font-weight:800;line-height:1.4;break-after:avoid
+  margin:0 0 3mm;font-size:12pt;font-weight:700;line-height:1.4;break-after:avoid;color:var(--p41-quote-ink)
 }
 #paper.quotation-document.p41-quote-paginated .p41-quote-note-text{
-  margin:0;padding:0;font-size:9.2pt;line-height:1.55;white-space:pre-wrap;
+  margin:0 0 .8mm;padding:0;font-size:10.5pt;line-height:1.4;white-space:normal;
   overflow-wrap:anywhere;word-break:normal;break-inside:avoid
 }
-#paper.quotation-document.p41-quote-paginated .sign{margin-top:5mm;break-inside:avoid;page-break-inside:avoid}
-#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head{padding-bottom:2mm;gap:4mm}
-#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head .company h1{font-size:14pt}
-#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head .company .en{font-size:8pt}
-#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head .company .sub{display:none}
-#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head .company-logo-frame{width:12mm;height:10mm}
-#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head .company-logo{width:12mm;height:12mm}
-#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head .doc-title{padding:2mm 7mm 2mm 3mm}
-#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head .doc-title h2{font-size:15pt}
-#paper.quotation-document.p41-quote-paginated .p41-quote-page-footer{
-  position:absolute;left:13.5mm;right:13.5mm;bottom:5mm;display:flex;justify-content:space-between;
-  gap:4mm;min-width:0;font-size:8pt;line-height:1.3;color:#41546c
+#paper.quotation-document.p41-quote-paginated .p41-quote-note-line{display:block;white-space:pre-wrap}
+#paper.quotation-document.p41-quote-paginated .p41-quote-whitespace{display:none}
+#paper.quotation-document.p41-quote-paginated .p41-quote-note-text strong{font-weight:700}
+#paper.quotation-document.p41-quote-paginated .p41-quote-clause-heading{
+  display:block;margin:2.1mm 0 1mm;font-size:11.4pt;font-weight:700;line-height:1.4;break-after:avoid
 }
+#paper.quotation-document.p41-quote-paginated .p41-quote-terms{margin-top:4mm}
+#paper.quotation-document.p41-quote-paginated .p41-quote-contract-title{
+  margin:0 0 3mm;font-size:17pt;font-weight:700;line-height:1.3;text-align:center;white-space:normal
+}
+#paper.quotation-document.p41-quote-paginated .p41-quote-contract-context{
+  display:flex;justify-content:space-between;gap:5mm;margin:0 0 4mm;
+  color:var(--p41-quote-muted);font-family:var(--p41-quote-sans);font-size:9pt;line-height:1.4
+}
+#paper.quotation-document.p41-quote-paginated .p41-quote-contract-context>div{min-width:0;overflow-wrap:anywhere}
+#paper.quotation-document.p41-quote-paginated .p41-quote-contract-context .label{
+  display:inline;min-width:0;width:auto;margin:0 2mm 0 0;padding:0;border:0;background:none;
+  color:inherit;font:inherit
+}
+#paper.quotation-document.p41-quote-paginated .p41-quote-sign-date{
+  font-size:9.5pt;line-height:1.4;font-weight:400;color:var(--p41-quote-ink);white-space:pre-wrap
+}
+#paper.quotation-document.p41-quote-paginated .sign{
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8mm;align-items:stretch;
+  margin-top:6mm;padding-top:3mm;border-top:.2mm solid var(--p41-quote-rule);break-inside:avoid;page-break-inside:avoid
+}
+#paper.quotation-document.p41-quote-paginated .sign>div{align-self:stretch;min-width:0}
+#paper.quotation-document.p41-quote-paginated .client-sign{
+  display:flex;flex-direction:column;justify-content:space-between;width:100%;margin:0;padding:0 3mm;
+  border:0;text-align:left;font-size:10.5pt;font-weight:700;color:var(--p41-quote-ink)
+}
+#paper.quotation-document.p41-quote-paginated .company-seals{
+  display:flex;flex-direction:column;justify-content:space-between;padding-left:6mm;border-left:.15mm solid #bdc1c5;
+  text-align:left;font-size:10.5pt;font-weight:700;color:var(--p41-quote-ink)
+}
+#paper.quotation-document.p41-quote-paginated .seal-wrap{height:25mm;justify-content:flex-end;padding-right:3mm}
+#paper.quotation-document.p41-quote-paginated .seal{max-height:24mm;max-width:45mm}
+#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head{
+  display:flex;align-items:center;justify-content:space-between;gap:4mm;padding-bottom:3mm;border-bottom:.2mm solid var(--p41-quote-rule)
+}
+#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head .company-block{flex:1;min-width:0;padding:0;border:0}
+#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head .company{text-align:left}
+#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head .company h1{font-size:12pt;letter-spacing:0}
+#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head .company .en,
+#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head .company .sub,
+#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head .company-logo-frame{display:none}
+#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head .doc-title{flex:0 1 auto;margin:0;text-align:right;padding:0}
+#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head .doc-title h2{
+  color:var(--p41-quote-muted);font-family:var(--p41-quote-sans);font-size:9.5pt;line-height:1.4;letter-spacing:0;font-weight:400
+}
+#paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head .p41-quote-contract-subtitle{display:none}
+#paper.quotation-document.p41-quote-paginated .p41-quote-page-footer{
+  position:absolute;left:16mm;right:16mm;bottom:10mm;display:flex;justify-content:space-between;
+  padding-top:3mm;border-top:.15mm solid var(--p41-quote-rule);gap:4mm;min-width:0;
+  font-family:var(--p41-quote-sans);font-size:8pt;line-height:1.3;color:var(--p41-quote-muted)
+}
+#paper.quotation-document.p41-quote-paginated .p41-quote-footer-context{min-width:0;overflow-wrap:anywhere}
 #paper.quotation-document.p41-quote-paginated .p41-quote-page-number{white-space:nowrap;font-variant-numeric:tabular-nums}
 @media screen{
-  /* A transform keeps the unscaled layout footprint in scrollable overflow.
-     This wrapper is sized to the entire transformed document; every sheet is
-     checked inside it. Clipping removes that blank footprint, not page data. */
+  /* Wrapper includes all scaled sheets; only the unscaled blank footprint is
+     clipped. Pagination and body typography remain physical print size. */
   .p41-quote-preview{position:relative;display:flow-root;margin:16px auto;overflow:clip}
   .p41-quote-preview>#paper.quotation-document.p41-quote-paginated{
-    margin:0!important;transform:scale(var(--p41-preview-scale,1))!important;
-    transform-origin:top left!important
+    margin:0!important;transform:scale(var(--p41-preview-scale,1))!important;transform-origin:top left!important
   }
 }
 @media print{
@@ -98,8 +204,7 @@
   #paper.quotation-document.p41-quote-paginated{margin:0!important;zoom:1!important;transform:none!important;min-height:0!important;background:#fff}
   #paper.quotation-document.p41-quote-paginated>#quotationContent{display:block}
   #paper.quotation-document.p41-quote-paginated .p41-quote-page{
-    margin:0;box-shadow:none;break-after:page;page-break-after:always;
-    -webkit-print-color-adjust:exact;print-color-adjust:exact
+    margin:0;box-shadow:none;break-after:page;page-break-after:always;-webkit-print-color-adjust:exact;print-color-adjust:exact
   }
   #paper.quotation-document.p41-quote-paginated .p41-quote-page:last-child{break-after:auto;page-break-after:auto}
 }
