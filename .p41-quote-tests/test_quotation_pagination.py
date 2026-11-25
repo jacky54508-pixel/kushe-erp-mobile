@@ -25,7 +25,7 @@ from urllib.parse import quote, unquote, urlsplit
 from playwright.sync_api import Error as PlaywrightError, sync_playwright
 from pypdf import PdfReader
 
-BASE = 'edf1c1886aac09958caa9e4b304502cca44f6937'
+BASE = 'f2f5d0b0d232e7a7ac9f948af9b643e15df948ff'
 PAGE = '.p41-quote-page'
 BODY = '.p41-quote-page-body'
 NOTE = '[data-quote-note-fragment]'
@@ -33,11 +33,40 @@ ASSETS = {'billing-print.html', 'assets/js/display-sort.js',
           'assets/js/external-billing-invoice.js',
           'assets/css/p40-16cd-mint-quotation-billing.css',
           'assets/js/p41-quote-pagination.js', 'assets/css/p41-quote-pagination.css'}
-NEW_ASSETS = {'assets/js/p41-quote-pagination.js', 'assets/css/p41-quote-pagination.css'}
+BOLD = re.compile(r'(?<!\*)\*\*([^*\r\n]+)\*\*(?!\*)')
 
 
 def normalized(text):
     return re.sub(r'\s+', '', str(text))
+
+
+def bold_matches(text):
+    """Independent display grammar; unmatched or cross-line markers stay literal."""
+    def escaped(index):
+        count = 0
+        while index > 0 and text[index - 1] == '\\':
+            count += 1
+            index -= 1
+        return count % 2 == 1
+    return [match for match in BOLD.finditer(text)
+            if match.group(1) == match.group(1).strip() and match.group(1).strip()
+            and not escaped(match.start()) and not escaped(match.end() - 2)]
+
+
+def source_utf16(text):
+    return text.encode('utf-16-le')
+
+
+def source_visible_span(text, start, end):
+    """Apply only original, valid marker offsets, even across page splits."""
+    raw = source_utf16(text)
+    hidden = set()
+    for match in bold_matches(text):
+        for offset in (match.start(), match.end() - 2):
+            unit = len(source_utf16(text[:offset])) // 2
+            hidden.update((unit, unit + 1))
+    return b''.join(raw[index * 2:index * 2 + 2] for index in range(start, end)
+                    if index not in hidden).decode('utf-16-le')
 
 
 def extract_pdf_pages(pdf_path, page_count, mode='layout'):
@@ -108,6 +137,48 @@ def long_note():
     return '\n\n'.join(sections) + '\nEND-ALL-FOUR-SECTIONS-93651'
 
 
+CONTRACT_HEADINGS = [
+    '一、虛構計價說明', '二、虛構資料核對方式', '三、虛構進場安排',
+    '四、虛構完工確認原則', '五、虛構異動處理流程', '六、虛構文件留存方式',
+    '七、虛構聯絡確認事項',
+]
+CONTRACT_SCOPE = 'SYN-SCOPE 本測試範圍為虛構甲棟門窗樣品及模擬安裝區域，數量依測試表列項目，僅供版面驗收。'
+CONTRACT_EXCLUSION = '測試不含虛構區外項目'
+CONTRACT_SUPPLEMENTS = ['特殊品項依虛構規格另議', '非人為測試因素保固2年']
+
+
+def contract_note():
+    """New fictional wording; only structural paragraph counts resemble the reference."""
+    paragraphs = [
+        [
+            'C1A 本文件為合約版面驗收用虛構案例，所有項目與條件僅供顯示測試，不代表真實工程。',
+            'C1B 測試資料依**原始欄位內容**完整顯示。',
+            'C1C 每筆單價與數量皆應保留，不任意合併。',
+            'C1D 本段末尾檢查碼為**SYN-731**。',
+        ],
+        ['C2A 虛構雙方於測試前核對項目名稱、單位與數量，若畫面換頁，仍須保留全部文字與符號；本段所有描述僅用於測量行高及段落間距，不建立任何付款義務。'],
+        ['C3A 虛構進場日期由測試人員填入示例資料，場地、材料與人員均為合成設定。所有安排皆只用來檢查頁面閱讀順序，並以書面樣例逐項呈現，確保後半段內容不因排版而遺漏。'],
+        [
+            'C4A 虛構完工確認依測試清單逐項核對，若文字超過一行應自然接續，保持原來順序及標點，不得縮成難以閱讀的小字。',
+            'C4B 測試照片與附件僅作欄位說明，本案例沒有真實照片、住址、電話或任何客戶紀錄。',
+        ],
+        [
+            'C5A 虛構異動必須保留原始名稱及測試註記，增加說明時應以獨立段落展示。這段文字刻意較長，用來驗證頁面能夠合理分配空間，同時完整呈現句首、句中與句尾；不應刪減說明、不應改寫數字，也不應將後段內容藏在頁面邊界之外。',
+            'C5B **SYN-8462** 為虛構追蹤碼，僅供確認粗體標記的顯示效果；未加標記的文字仍依原文保留。',
+        ],
+        [
+            'C6A 虛構文件以本頁列印成果作為顯示樣本，每次檢查皆使用全新測試環境，不讀取實際業務資料。',
+            'C6B 同一條文字若跨頁，前後段必須完整連接；頁首及頁尾標示不能取代任何原始文字。',
+            'C6C 測試紀錄只保留合成內容及驗收畫面，資料不寫回任何正式資料庫。',
+            'C6D 此為虛構紀錄末行。',
+        ],
+        ['C7A 虛構聯絡資訊僅用來展示簽章與日期欄位，閱讀本頁不會送出表單或訊息。所有測試敘述至此完整結束，末尾識別碼為 SYN-END-59327。'],
+    ]
+    sections = ['\n'.join([heading] + body) for heading, body in zip(CONTRACT_HEADINGS, paragraphs)]
+    return '\n'.join([CONTRACT_SCOPE, CONTRACT_EXCLUSION, '', '**工程請款及付款約定條款**', ''] +
+                     ['\n\n'.join(sections), '', *CONTRACT_SUPPLEMENTS])
+
+
 def quote_document(count=11, mode='actual', note='', name='SYNTHETIC-QUOTE'):
     lines = []
     for index in range(count):
@@ -122,7 +193,7 @@ def quote_document(count=11, mode='actual', note='', name='SYNTHETIC-QUOTE'):
     tax = round(total * 0.05)
     return {'schema': 'kushe-external-document-v1', 'documentType': 'quotation',
             'title': '報價單', 'fileName': name, 'customer': '虛構建商測試客戶',
-            'project': '虛構甲棟門窗修繕工程', 'date': '2026-11-24',
+            'project': '虛構甲棟門窗修繕工程', 'date': '2026-11-25',
             'pricingMode': mode, 'taxMode': '未稅', 'publicNote': note,
             'lines': lines, 'salesAmount': total, 'taxAmount': tax,
             'totalAmount': total + tax, 'retentionAmount': 0,
@@ -207,7 +278,9 @@ class FixtureServer:
         self.requests = []
         self.unknown = []
         self.baseline = {}
-        for path in ASSETS - NEW_ASSETS:
+        # Released main already includes both paginator assets. Billing must
+        # load that exact baseline CSS/JS before the unchanged-image comparison.
+        for path in ASSETS:
             self.baseline[path] = subprocess.check_output(['git', '-C', str(root), 'show', BASE + ':' + path])
         self.enterprise = enterprise_fixture()
         parent = self
@@ -312,11 +385,12 @@ METRICS = """() => {
    preview:document.querySelector('.p41-quote-preview')?rect(document.querySelector('.p41-quote-preview')):null,
    windowScale:window.__quotationPrintScale??null,
    pages:pages.map((p,index)=>{const body=p.querySelector('.p41-quote-page-body'),r=p.getBoundingClientRect();
-     const children=[...p.querySelectorAll('.head,.info,.detail,.detail td,.note,[data-quote-note-fragment],.summary,.sign')];
+     const children=[...p.querySelectorAll('.head,.info,.detail,.detail td,.note,[data-quote-note-fragment],.summary,.sign,.p41-quote-scope,.p41-quote-terms,.p41-quote-contract-title,.p41-quote-clause-heading,.p41-quote-sign-date')];
      const outside=children.filter(e=>{const x=e.getBoundingClientRect();return x.width>0&&(x.left<r.left-1.5||x.right>r.right+1.5||x.bottom>r.bottom+1.5||x.top<r.top-1.5)}).map(e=>({tag:e.tagName,cls:e.className,text:e.textContent.slice(0,80),rect:rect(e)}));
      return {index,rect:rect(p),bodyWidth:body?.clientWidth,bodyScrollWidth:body?.scrollWidth,
        bodyHeight:body?.clientHeight,bodyScrollHeight:body?.scrollHeight,outside,
-       notes:[...p.querySelectorAll('[data-quote-note-fragment]')].map(e=>({text:e.textContent,fontPt:parseFloat(getComputedStyle(e).fontSize)*72/96,scale:scale(e)})),
+       notes:[...p.querySelectorAll('[data-quote-note-fragment]')].map(e=>({text:e.textContent,fontPt:Math.min(...[e,...e.querySelectorAll('*')].map(n=>parseFloat(getComputedStyle(n).fontSize)*72/96)),scale:scale(e)})),
+       tableHeaderFontPts:[...p.querySelectorAll('.detail th')].map(e=>parseFloat(getComputedStyle(e).fontSize)*72/96),
        rows:[...p.querySelectorAll('.detail tbody tr:not(.line-total)')].map(e=>({cells:[...e.cells].map(c=>c.innerText),fontPt:Math.min(...[...e.cells].map(c=>parseFloat(getComputedStyle(c).fontSize)*72/96)),scale:scale(e)}))};})};
 }"""
 
@@ -341,8 +415,94 @@ def check_layout(report, name, metrics, printing=False):
                      item['bodyWidth'] is not None and item['bodyScrollWidth'] <= item['bodyWidth'] + 2 and item['bodyScrollHeight'] <= item['bodyHeight'] + 2,
                      {k: item[k] for k in ['bodyWidth','bodyScrollWidth','bodyHeight','bodyScrollHeight']})
         if printing:
-            report.check(key + ' keeps readable table type without scaling', all(r['fontPt'] >= 8.5 - 0.01 and 0.99 <= r['scale'] <= 1.01 for r in item['rows']), item['rows'])
-            report.check(key + ' keeps readable notes without scaling', all(n['fontPt'] >= 9 - 0.01 and 0.99 <= n['scale'] <= 1.01 for n in item['notes']), [{'fontPt': n['fontPt'], 'scale': n['scale']} for n in item['notes']])
+            report.check(key + ' keeps 10.5pt table text without scaling', all(r['fontPt'] >= 10.5 - 0.01 and 0.99 <= r['scale'] <= 1.01 for r in item['rows']), item['rows'])
+            report.check(key + ' keeps 10pt table headings', all(size >= 10 - 0.01 for size in item['tableHeaderFontPts']), item['tableHeaderFontPts'])
+            report.check(key + ' keeps 10.5pt notes without scaling', all(n['fontPt'] >= 10.5 - 0.01 and 0.99 <= n['scale'] <= 1.01 for n in item['notes']), [{'fontPt': n['fontPt'], 'scale': n['scale']} for n in item['notes']])
+
+
+def check_source_notes(report, name, page, source):
+    facts = page.evaluate("""() => {
+      const paper=document.querySelector('#paper');
+      const fragments=[...paper.querySelectorAll('[data-quote-note-fragment]')];
+      return {records:typeof window.KusheQuotePagination?.getSourceNotes==='function'
+        ?window.KusheQuotePagination.getSourceNotes(paper):null,
+        fragments:fragments.map(e=>({start:Number(e.dataset.quoteSourceStart),end:Number(e.dataset.quoteSourceEnd),
+          role:e.dataset.quoteNoteRole,text:e.textContent,
+          inlineBold:[...e.querySelectorAll('strong:not(.p41-quote-clause-heading):not(.p41-quote-contract-title)')].map(n=>n.textContent)}))};
+    }""")
+    records, fragments = facts['records'], facts['fragments']
+    (report.output / (re.sub(r'[^A-Za-z0-9_-]', '-', name) + '-source-notes.json')).write_text(
+        json.dumps({'source': source, 'sourceSha256': hashlib.sha256(source.encode()).hexdigest(), **facts},
+                   ensure_ascii=False, indent=2), encoding='utf-8')
+    report.check(name + ': source-offset evidence is available for every visible note fragment',
+                 isinstance(records, list) and len(records) == len(fragments),
+                 {'sourceRecords': None if records is None else len(records), 'visibleFragments': len(fragments)})
+    raw = source_utf16(source)
+    ordered = sorted(records, key=lambda item: item['start'])
+    cursor = 0
+    source_errors = []
+    for record in ordered:
+        start, end = record['start'], record['end']
+        if type(start) is not int or type(end) is not int or start != cursor or end <= start or end * 2 > len(raw):
+            source_errors.append({'start': start, 'end': end, 'expectedStart': cursor})
+            continue
+        expected_raw = raw[start * 2:end * 2].decode('utf-16-le')
+        if record['rawText'] != expected_raw:
+            source_errors.append({'start': start, 'end': end, 'rawMismatch': True})
+        cursor = end
+    report.check(name + ': raw source offsets cover original note exactly once without gaps or overlaps',
+                 not source_errors and cursor * 2 == len(raw) and ''.join(r['rawText'] for r in ordered) == source,
+                 {'sourceUtf16Units': len(raw) // 2, 'coveredUtf16Units': cursor, 'errors': source_errors})
+    display_errors = []
+    for record, fragment in zip(records, fragments):
+        expected_visible = source_visible_span(source, record['start'], record['end'])
+        if ((record['start'], record['end'], record['role']) != (fragment['start'], fragment['end'], fragment['role'])
+                or record['visibleText'] != fragment['text'] or fragment['text'] != expected_visible):
+            display_errors.append({'start': record['start'], 'end': record['end'], 'expected': expected_visible,
+                                   'apiText': record['visibleText'], 'domText': fragment['text']})
+    report.check(name + ': visible notes change only recognized bold delimiters and preserve CRLF and emoji',
+                 not display_errors, display_errors)
+    fragment_order = sorted(zip(records, fragments), key=lambda pair: pair[0]['start'])
+    bold_text = ''.join(text for _, fragment in fragment_order for text in fragment['inlineBold'])
+    expected_bold = ''.join(match.group(1) for match in bold_matches(source))
+    report.check(name + ': every valid bold run is rendered as strong text without inventing markup',
+                 bold_text == expected_bold, {'expectedBold': expected_bold, 'renderedBold': bold_text})
+    if not bold_matches(source) and [r['start'] for r in records] == [r['start'] for r in ordered]:
+        report.check(name + ': plain-note direct text remains byte-for-byte unchanged',
+                     ''.join(fragment['text'] for fragment in fragments) == source)
+    return facts
+
+
+def check_contract_structure(report, name, page, expected_contract=False):
+    facts = page.evaluate("""() => {
+      const pages=[...document.querySelectorAll('.p41-quote-page')];
+      const number=e=>pages.indexOf(e.closest('.p41-quote-page'));
+      const locate=selector=>[...document.querySelectorAll(selector)].map(e=>({text:e.textContent.trim(),page:number(e)}));
+      return {pages:pages.length,titles:locate('.p41-quote-contract-title'),headings:locate('.p41-quote-clause-heading'),
+        termsPages:document.querySelectorAll('.p41-quote-terms-page').length,
+        signatures:locate('#paper .sign'),dates:[...document.querySelectorAll('.p41-quote-sign-date')].map(e=>({text:e.textContent.trim(),page:number(e),
+          party:e.closest('.client-sign')?'client':e.closest('.company-seals')?'company':null})),
+        notes:[...document.querySelectorAll('[data-quote-note-fragment]')].map(e=>({text:e.textContent,page:number(e),
+          scope:Boolean(e.closest('.p41-quote-scope')),terms:Boolean(e.closest('.p41-quote-terms'))}))};
+    }""")
+    if not expected_contract:
+        report.check(name + ': unknown headings remain generic notes without a contract section',
+                     not facts['titles'] and facts['termsPages'] == 0, facts)
+        return
+    report.check(name + ': recognized seven-clause quotation has exactly two visible pages', facts['pages'] == 2, facts['pages'])
+    report.check(name + ': contract title is separate and appears once on page two',
+                 facts['titles'] == [{'text': '工程請款及付款約定條款', 'page': 1}] and facts['termsPages'] == 1, facts['titles'])
+    report.check(name + ': all seven original clause headings are separate and in order on page two',
+                 facts['headings'] == [{'text': text, 'page': 1} for text in CONTRACT_HEADINGS], facts['headings'])
+    for text in [CONTRACT_SCOPE, CONTRACT_EXCLUSION, *CONTRACT_SUPPLEMENTS]:
+        locations = [fragment for fragment in facts['notes'] if text in fragment['text']]
+        report.check(name + ': scope or trailing callout stays separate on page one: ' + text[:22],
+                     len(locations) == 1 and locations[0]['page'] == 0 and locations[0]['scope'] and not locations[0]['terms'], locations)
+    report.check(name + ': original signature region and one date per party stay on the last page',
+                 len(facts['signatures']) == 1 and facts['signatures'][0]['page'] == 1 and
+                 len(facts['dates']) == 2 and all(item['page'] == 1 and item['text'] for item in facts['dates']) and
+                 {item['party'] for item in facts['dates']} == {'client', 'company'},
+                 {'signatures': facts['signatures'], 'dates': facts['dates']})
 
 
 def check_values(report, name, page, document):
@@ -361,10 +521,18 @@ def check_values(report, name, page, document):
             values.append(money(row['amount']))
         expected.append(values)
     report.check(name + ': every item quantity unit price and amount unchanged', rows == expected, {'expected': expected, 'actual': rows})
-    notes = page.locator(NOTE).evaluate_all('(nodes)=>nodes.map(n=>n.textContent).join("")')
-    report.check(name + ': complete note text retained character for character', notes.replace('\r\n','\n') == document['publicNote'].replace('\r\n','\n'), {'sourceCharacters': len(document['publicNote']), 'renderedCharacters': len(notes)})
+    check_source_notes(report, name, page, document['publicNote'])
     report.check(name + ': source payload remains unchanged', page.evaluate('()=>d') == document)
     report.check(name + ': original logo and seal IDs remain unique', page.locator('#formalCompanyLogo').count() == 1 and page.locator('#formalCompanySeal').count() == 1)
+    logo = page.evaluate("""() => {
+      const image=document.querySelector('#formalCompanyLogo'),frame=image.closest('.company-logo-frame');
+      const r=image.getBoundingClientRect(),f=frame.getBoundingClientRect();
+      return {loaded:image.complete&&image.naturalWidth>0&&image.naturalHeight>0,
+        objectFit:getComputedStyle(image).objectFit,width:r.width,height:r.height,
+        inside:r.left>=f.left-.5&&r.top>=f.top-.5&&r.right<=f.right+.5&&r.bottom<=f.bottom+.5};
+    }""")
+    report.check(name + ': original logo is loaded at positive size and contained without clipping',
+                 logo['loaded'] and logo['objectFit'] == 'contain' and logo['width'] > 0 and logo['height'] > 0 and logo['inside'], logo)
     if actual:
         report.check(name + ': actual quote retains four columns and no financial total', all(len(r) == 4 for r in rows) and page.locator('#paper .summary').count() == 0 and page.locator('#paper .line-total').count() == 0)
     else:
@@ -404,7 +572,26 @@ def check_pdf(report, name, page, metrics, output, minimum_pages=1, maximum_page
     return count
 
 
-def quote_case(browser, server, report, name, document, minimum_pages=1, maximum_pages=None):
+def capture_failure_artifacts(page, report, name):
+    """Keep a reviewable screen, DOM and PDF even when readiness/structure fails."""
+    failures = []
+    actions = [
+        ('screenshot', lambda: page.screenshot(path=str(report.output / (name + '-FAIL.png')), full_page=True)),
+        ('DOM', lambda: (report.output / (name + '-FAIL-dom.html')).write_text(page.content(), encoding='utf-8')),
+        ('PDF', lambda: page.pdf(path=str(report.output / (name + '-FAIL.pdf')), format='A4',
+                                print_background=True, prefer_css_page_size=True,
+                                margin={'top': '0', 'bottom': '0', 'left': '0', 'right': '0'})),
+    ]
+    for kind, action in actions:
+        try:
+            action()
+        except Exception as error:
+            failures.append({'artifact': kind, 'error': str(error)})
+    if failures:
+        (report.output / (name + '-capture-errors.json')).write_text(json.dumps(failures, indent=2), encoding='utf-8')
+
+
+def quote_case(browser, server, report, name, document, minimum_pages=1, maximum_pages=None, contract_structure=None):
     context = fresh_context(browser, server, report)
     page = context.new_page()
     errors = []
@@ -414,6 +601,8 @@ def quote_case(browser, server, report, name, document, minimum_pages=1, maximum
         ready(page)
         report.check(name + ': paginator created pages', page.locator(PAGE).count() > 0)
         check_values(report, name, page, document)
+        if contract_structure is not None:
+            check_contract_structure(report, name, page, expected_contract=contract_structure)
         if document.get('publicNote', '').strip():
             final_note = page.locator(PAGE).last.locator('[data-quote-note-fragment]').all_text_contents()
             report.check(name + ': final signature page retains meaningful note text', bool(''.join(final_note).strip()))
@@ -440,11 +629,7 @@ def quote_case(browser, server, report, name, document, minimum_pages=1, maximum
         report.result['cases'].append(record)
         report.flush()
     except Exception:
-        try:
-            page.screenshot(path=str(report.output / (name + '-FAIL.png')), full_page=True)
-            (report.output / (name + '-FAIL-dom.html')).write_text(page.content(), encoding='utf-8')
-        except Exception:
-            pass
+        capture_failure_artifacts(page, report, name)
         raise
     finally:
         context.close()
@@ -498,7 +683,7 @@ def offline_import(browser, server, report, root):
     page.on('pageerror',lambda error: errors.append(str(error)))
     try:
         hostile_tail = '\n</script><script>window.__quoteXss=true</script>\n<img data-hostile="yes" src=x onerror="window.__quoteXss=true">\nSYN-OFFLINE-LITERAL-72361'
-        document = quote_document(11,'actual',long_note()+hostile_tail,'SYNTHETIC-OFFLINE-IMPORT')
+        document = quote_document(11,'actual',hostile_tail+'\n'+contract_note(),'SYNTHETIC-OFFLINE-IMPORT')
         request_count = len(server.requests)
         page.goto(target.as_uri())
         page.locator('#quotationUrl').fill(url_for(server.origin,'candidate',document))
@@ -508,6 +693,7 @@ def offline_import(browser, server, report, root):
         ready(frame)
         report.check('offline importer: actual local file origin is exercised', page.url == target.as_uri())
         report.check('offline importer: long quote paginates', frame.locator(PAGE).count() >= 2)
+        report.check('offline importer: contract title is recognized from its original bold-marked source', frame.locator('.p41-quote-contract-title').count() == 1)
         check_values(report,'offline importer',frame,document)
         report.check('offline importer: script terminators and hostile markup remain plain text', frame.evaluate('()=>window.__quoteXss===false') and frame.locator('#paper img[data-hostile], #paper script').count() == 0 and page.evaluate('()=>window.__quoteXss===false'))
         report.check('offline importer: all renderer resources are inlined', not server.requests[request_count:] and all(url == target.as_uri() or url.startswith(('data:','about:')) for url in requests),requests)
@@ -533,6 +719,14 @@ def offline_import(browser, server, report, root):
                                       'sourceNoteCharacters':len(document['publicNote']),
                                       'pdfPages':count,'originType':'file','print':metrics})
         report.flush()
+    except Exception:
+        capture_failure_artifacts(page, report, 'offline-import')
+        try:
+            if 'frame' in locals() and frame is not None:
+                (report.output/'offline-import-FAIL-frame.html').write_text(frame.content(),encoding='utf-8')
+        except Exception:
+            pass
+        raise
     finally:
         context.close()
 
@@ -551,14 +745,26 @@ def main():
             try:
                 all_actual = quote_document(3,'actual','SYN-MIXED-ALL-ACTUAL-54913'); all_actual['pricingMode']='mixed'
                 hostile = '<img data-hostile="yes" src=x onerror="window.__quoteXss=true">\n<script>window.__quoteXss=true</script>\n& < > " \' SYN-LITERAL-39157\n  保留前後空白  \n末行'
+                unknown = ('SYN-UNKNOWN-54318 自訂說明\n工程請款及付款約定條款（草稿）\n'
+                           '以下只是提及「工程請款及付款約定條款」，不是獨立條款標題。\n'
+                           '甲類／任意標題：保留原來的排列。\n**SYN-BOLD-490 粗體原文**\n'
+                           '未知附註不應自動改成正式合約內容。')
+                edge_note = ('  SYN-EDGE-🙂\r\n**粗體A🙂B**\r\n****\r\n** **\r\n***相鄰星號保留***\r\n'
+                             '**跨行\r\n不可加粗**\r單獨換行也保留\n** 前後空白保留 **\n'
+                             '\\**跳脫標記保留**\n\\\\**偶數跳脫可粗體**\n最後保留未配對 **')
                 operations = [
+                    ('contract-seven-clauses11',lambda: quote_case(browser,server,report,'contract-seven-clauses11',quote_document(11,'actual',contract_note(),'SYNTHETIC-CONTRACT-SEVEN'),minimum_pages=2,maximum_pages=2,contract_structure=True)),
                     ('actual-long11',lambda: quote_case(browser,server,report,'actual-long11',quote_document(11,'actual',long_note()),minimum_pages=2)),
                     ('actual-short',lambda: quote_case(browser,server,report,'actual-short',quote_document(3,'actual','SYN-SHORT-001 虛構短備註，原文保留。'),maximum_pages=1)),
+                    ('actual-blank',lambda: quote_case(browser,server,report,'actual-blank',quote_document(3,'actual',''),maximum_pages=1,contract_structure=False)),
+                    ('actual-whitespace-note',lambda: quote_case(browser,server,report,'actual-whitespace-note',quote_document(3,'actual','\r\n \t\n'),maximum_pages=1,contract_structure=False)),
+                    ('generic-unknown-headings',lambda: quote_case(browser,server,report,'generic-unknown-headings',quote_document(3,'actual',unknown),maximum_pages=1,contract_structure=False)),
+                    ('note-bold-crlf-emoji',lambda: quote_case(browser,server,report,'note-bold-crlf-emoji',quote_document(3,'actual',edge_note),maximum_pages=1,contract_structure=False)),
                     ('normal-long40',lambda: quote_case(browser,server,report,'normal-long40',quote_document(40,'lump_sum','SYN-NORMAL-NOTE-84517 虛構一般報價內容保留。'),minimum_pages=2)),
                     ('mixed-long38',lambda: quote_case(browser,server,report,'mixed-long38',quote_document(38,'mixed','SYN-MIXED-NOTE-57319 虛構混合報價內容保留。'),minimum_pages=2)),
                     ('mixed-all-actual',lambda: quote_case(browser,server,report,'mixed-all-actual',all_actual,maximum_pages=1)),
                     ('hostile-note',lambda: quote_case(browser,server,report,'hostile-note',quote_document(3,'actual',hostile),maximum_pages=1)),
-                    ('oversized-paragraph-tail',lambda: quote_case(browser,server,report,'oversized-paragraph-tail',quote_document(3,'actual',('SYN-LONG-TERM 原文保留，單一長段落按實際版面接續。' * 120) + '\n\n'),minimum_pages=2)),
+                    ('oversized-paragraph-tail',lambda: quote_case(browser,server,report,'oversized-paragraph-tail',quote_document(3,'actual','**' + ('SYN-LONG-TERM 原文保留，單一長段落按實際版面接續。' * 120) + '**\n\n'),minimum_pages=2)),
                     ('billing-single',lambda: billing_comparison(browser,server,report,merged=False)),
                     ('billing-merged',lambda: billing_comparison(browser,server,report,merged=True)),
                     ('offline-file-import',lambda: offline_import(browser,server,report,root)),
@@ -571,8 +777,8 @@ def main():
                 browser.close()
         if report.result['caseFailures']:
             raise AssertionError('Independent cases failed: ' + ', '.join(row['case'] for row in report.result['caseFailures']))
-        report.result['status']='QUOTATION_A4_PAGINATION_AND_BILLING_NONREGRESSION_VERIFIED'
-        print('P41_QUOTATION_PAGINATION_VERIFIED__PUBLISH_BLOCKED',flush=True)
+        report.result['status']='CONTRACT_QUOTATION_A4_AND_BILLING_NONREGRESSION_VERIFIED'
+        print('P41_CONTRACT_QUOTATION_VERIFIED__PUBLISH_BLOCKED',flush=True)
     except Exception as error:
         report.result['status']='BLOCKED'
         failure={'type':type(error).__name__,'message':str(error),'traceback':traceback.format_exc()}
