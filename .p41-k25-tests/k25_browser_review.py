@@ -433,9 +433,13 @@ def ui_case(browser,server,report,viewport,label):
         check_protected(report,name,before['idb']['main'],after['idb']['main'])
         report.check(name+': successful UI shows saved records and explicit pending financial state',page.locator('#k25-ledger-panel').is_visible() and '實際抽成與薪資金額尚未調整' in page.locator('[data-k25-feedback]').inner_text())
         layout.append(assert_ui_layout(page,report,name+'-saved'))
+        saved_badges=[]
+        if label=='mobile':
+            saved_badges=page.locator('.k25-record header>.k25-badge').evaluate_all("nodes=>nodes.map(node=>{const r=node.getBoundingClientRect();return {text:node.textContent,width:r.width,height:r.height,left:r.left,right:r.right,viewportWidth:innerWidth}})")
+            report.check(name+': saved badges stay horizontal and within the mobile viewport',len(saved_badges)==6 and all(b['width']>b['height'] and b['left']>=-1 and b['right']<=b['viewportWidth']+1 for b in saved_badges),saved_badges)
         page.screenshot(path=str(qa/(label+'-saved-records.png')),full_page=True)
         page.keyboard.press('Escape');report.check(name+': escape closes dialog and returns focus to entry',page.locator('#k25CommissionReview').count()==0 and page.evaluate("()=>document.activeElement.id")=='openCommissionCorrectionReview')
-        report.save(name+'.json',{'viewport':viewport,'layout':layout,'savedCount':6,'sourceTextEscaped':True,'exportReadOnly':True});report.case(name,'actual-ui')
+        report.save(name+'.json',{'viewport':viewport,'layout':layout,'savedCount':6,'sourceTextEscaped':True,'exportReadOnly':True,'mobileSavedBadges':saved_badges});report.case(name,'actual-ui')
     finally:ctx.close()
 
 

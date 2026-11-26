@@ -12,3 +12,5 @@
 .k25-tax-evidence{padding:10px 12px;border:1px solid #d9e4eb;border-radius:8px;background:#f7fafc;margin-bottom:16px}.k25-tax-evidence>summary{font-size:12px;font-weight:600;color:#365f75;cursor:pointer}.k25-tax-evidence p,.k25-basis{font-size:12px;line-height:1.7;color:#778897;margin:9px 0 4px}.k25-tax-evidence .k25-table-scroll{margin-top:10px}
 
 .k25-evidence-status{display:flex;flex-wrap:wrap;gap:5px;font-size:11px;line-height:1.5}.k25-evidence-status>span{padding:3px 7px;background:#edf3f6;border-radius:5px;color:#607e8e}@media(max-height:600px){.k25-stats,.k25-notice{display:none}.k25-header p{display:none}.k25-content{min-height:70px}.k25-header{padding-top:10px;padding-bottom:10px}.k25-tabs{padding-top:8px}}
+.k25-record header>div{min-width:0;flex:1}.k25-record h3{overflow-wrap:anywhere}.k25-record header>.k25-badge{flex-shrink:0}
+@media(max-width:700px){.k25-record header{flex-direction:column}.k25-record header>.k25-badge{align-self:flex-start;max-width:100%}}
