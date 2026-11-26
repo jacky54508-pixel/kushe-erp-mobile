@@ -2356,10 +2356,10 @@
   }
   function makeStoreJournal(checkpoint,phase,extra={}) {
     const now=new Date().toISOString();
-    return {schema:STORE_JOURNAL_SCHEMA,operationId:checkpoint.operationId,operationType:checkpoint.operationType,phase,startedAt:checkpoint.startedAt||now,updatedAt:now,before:{businessSnapshotRevision:checkpoint.revision,persistentHadValue:checkpoint.persistentHadValue,persistentFingerprint:storeFingerprintDigest(checkpoint.persistentFingerprint),state:checkpoint.persistentHadValue?checkpoint.persistent:storeStateClone(checkpoint.published),emergencyRaw:checkpoint.emergencyRaw,localCommitTokenRaw:checkpoint.commitRaw,receiptCommitTokenRaw:checkpoint.receiptCommitRaw},...(checkpoint.recoveryEvidence?{recoveryEvidence:checkpoint.recoveryEvidence}:{}),...extra};
+    return {schema:STORE_JOURNAL_SCHEMA,operationId:checkpoint.operationId,operationType:checkpoint.operationType,phase,startedAt:checkpoint.startedAt||now,updatedAt:now,before:{businessSnapshotRevision:checkpoint.revision,persistentHadValue:checkpoint.persistentHadValue,persistentFingerprint:storeFingerprintDigest(checkpoint.persistentFingerprint),state:checkpoint.persistentHadValue?checkpoint.persistent:storeStateClone(checkpoint.published),emergencyRaw:checkpoint.emergencyRaw,localCommitTokenRaw:checkpoint.commitRaw,receiptCommitTokenRaw:checkpoint.receiptCommitRaw},...(checkpoint.recoveryEvidence?{recoveryEvidence:checkpoint.recoveryEvidence}:{}),...(checkpoint.recoveryOf?{recoveryOf:checkpoint.recoveryOf}:{}),...extra};
   }
   async function markStoreRecoveryRequired(checkpoint,primaryError,recoveryErrors,journal) {
-    const marker={schema:STORE_JOURNAL_SCHEMA,status:'RECOVERY_REQUIRED',operationId:checkpoint.operationId,operationType:checkpoint.operationType,time:new Date().toISOString(),primaryError:String(primaryError?.message||primaryError),primaryCode:String(primaryError?.code||''),recoveryErrors:recoveryErrors.map((error)=>({message:String(error?.message||error),code:String(error?.code||'')})),beforeVersion:checkpoint.revision,afterVersion:journal?.after?.businessSnapshotRevision||null};
+    const marker={schema:STORE_JOURNAL_SCHEMA,status:'RECOVERY_REQUIRED',operationId:checkpoint.recoveryOf||checkpoint.operationId,...(checkpoint.recoveryOf?{recoveryOperationId:checkpoint.operationId}:{}),operationType:checkpoint.operationType,time:new Date().toISOString(),primaryError:String(primaryError?.message||primaryError),primaryCode:String(primaryError?.code||''),recoveryErrors:recoveryErrors.map((error)=>({message:String(error?.message||error),code:String(error?.code||'')})),beforeVersion:checkpoint.revision,afterVersion:journal?.after?.businessSnapshotRevision||null};
     storeRecoveryBlocked=marker;const markerErrors=[];
     try{sessionStorage.setItem(STORE_RECOVERY_KEY,JSON.stringify(marker))}catch(error){markerErrors.push(error)}
     try{localStorage.setItem(STORE_RECOVERY_KEY,JSON.stringify(marker))}catch(error){markerErrors.push(error)}
@@ -2376,7 +2376,7 @@
   async function restoreStoreCheckpoint(checkpoint,afterFingerprint,primaryError,journal,expectedMirrors) {
     const errors=[];let primaryLayerRestorable=false;
     try{
-      const restoring=makeStoreJournal(checkpoint,'ROLLBACK_PRIMARY_RESTORED');
+      const restoring=makeStoreJournal(checkpoint,'ROLLBACK_PRIMARY_RESTORED',checkpoint.recoveryOf?{after:journal.after}:{});
       await dbRestoreStoreCheckpointCas(checkpoint,afterFingerprint,restoring);
       const restored=await dbGetCommitted(STATE_KEY);
       if(storeStateFingerprint(restored)!==checkpoint.persistentFingerprint)throw storeError('IndexedDB 復原驗證失敗','STORE_RECOVERY_VERIFY_FAILED');
@@ -2395,7 +2395,11 @@
         mirrors.forEach((entry)=>{if(localStorage.getItem(entry.key)!==entry.before)throw storeError(`${entry.label} 復原驗證失敗`,'STORE_RECOVERY_VERIFY_FAILED')});
       }catch(error){errors.push(error)}
     }
-    const rolledBack={schema:STORE_JOURNAL_SCHEMA,operationId:checkpoint.operationId,operationType:checkpoint.operationType,phase:'ROLLED_BACK',startedAt:journal.startedAt,updatedAt:new Date().toISOString(),beforeVersion:storeRevisionOf(checkpoint.persistent),beforeFingerprint:storeFingerprintDigest(checkpoint.persistentFingerprint),primaryError:{message:String(primaryError?.message||primaryError),code:String(primaryError?.code||'')}};
+    let rolledBack={schema:STORE_JOURNAL_SCHEMA,operationId:checkpoint.operationId,operationType:checkpoint.operationType,phase:'ROLLED_BACK',startedAt:journal.startedAt,updatedAt:new Date().toISOString(),beforeVersion:storeRevisionOf(checkpoint.persistent),beforeFingerprint:storeFingerprintDigest(checkpoint.persistentFingerprint),primaryError:{message:String(primaryError?.message||primaryError),code:String(primaryError?.code||'')}};
+    // A recovery rollback returns to its interrupted input, not to a completed
+    // business commit. Keep the original checkpoint chain and root gate owner.
+    // Ordinary writer rollbacks retain their existing compact terminal shape.
+    if(checkpoint.recoveryOf)rolledBack={...makeStoreJournal(checkpoint,'ROLLED_BACK'),...rolledBack,after:journal.after};
     if(!errors.length)try{await dbAdvanceStoreJournal(checkpoint.persistentFingerprint,checkpoint.operationId,'ROLLBACK_PRIMARY_RESTORED',rolledBack)}catch(error){errors.push(error)}
     if(errors.length){const marker=await markStoreRecoveryRequired(checkpoint,primaryError,errors,journal);recordStoreTransaction('RECOVERY_REQUIRED',{operationId:checkpoint.operationId,operationType:checkpoint.operationType,code:'RECOVERY_FAILED',message:'無法證明已完整復原'});const failure=storeError(`RECOVERY_FAILED：操作 ${checkpoint.operationId} 無法證明已完整復原`,'RECOVERY_FAILED',{operationId:checkpoint.operationId,cause:primaryError,recoveryErrors:errors,recoveryMarker:marker,rollbackVerified:false,transactionStatus:'RECOVERY_REQUIRED'});throw failure}
     state=publishedState;recordStoreTransaction('ROLLED_BACK',{operationId:checkpoint.operationId,code:primaryError?.code||'',message:String(primaryError?.message||primaryError)});
@@ -2431,6 +2435,9 @@
       await dbAdvanceStoreJournal(afterFingerprint,checkpoint.operationId,'TOKENS_WRITTEN',compact);
       const finalEmergencyRaw=localStorage.getItem(EMERGENCY_KEY),finalEmergency=parseStoreJson(finalEmergencyRaw,'Emergency backup'),finalStoreTokenRaw=localStorage.getItem(STORE_COMMIT_KEY),finalReceiptTokenRaw=localStorage.getItem(RECEIPT_COMMIT_KEY);
       if(finalEmergencyRaw!==emergencyRaw||storeStateFingerprint(finalEmergency)!==afterFingerprint||finalStoreTokenRaw!==storeTokenRaw||finalReceiptTokenRaw!==revision.id)throw storeError('提交完成時本機備份或版本已由其他操作變更','STORE_FINAL_MIRROR_CONFLICT');
+      // Controlled recovery publishes only after its load and marker CAS pass.
+      // Other writers and snapshot replacement keep their existing publication.
+      if(transaction.deferPublication)return {notificationWarnings:[],revision};
       publishedState=freezeStoreState(durableSnapshot);state=publishedState;settledStateFingerprint=afterFingerprint;lastSettledMemoryFingerprint=receiptStateFingerprint(publishedState);
       loadedPersistentHadValue=true;loadedPersistentFingerprint=afterFingerprint;loadedEmergencyRaw=emergencyRaw;storeCommitTokenSeen=storeTokenRaw;receiptCommitVersionSeen=revision.id;
       if(transaction.deferNotification)return {notificationWarnings:[],revision};
@@ -6737,10 +6744,15 @@
     let evidence=journal,depth=0;
     while(evidence.recoveryEvidence){
       const prior=evidence.recoveryEvidence;
-      if(++depth>8||prior.schema!==STORE_JOURNAL_SCHEMA||!prior.before?.persistentHadValue||!prior.before.state||storeFingerprintDigest(storeStateFingerprint(prior.before.state))!==prior.before.persistentFingerprint)throw new Error('多次恢復的 checkpoint 鏈不足或損壞，保持停止');
+      if(++depth>8||prior.schema!==STORE_JOURNAL_SCHEMA||!prior.operationId||!prior.before?.persistentHadValue||!prior.before.state||storeFingerprintDigest(storeStateFingerprint(prior.before.state))!==prior.before.persistentFingerprint)throw new Error('多次恢復的 checkpoint 鏈不足或損壞，保持停止');
+      if(evidence.operationType!=='controlledRecovery'||String(evidence.recoveryOf||'')!==owner||String(prior.recoveryOf||prior.operationId)!==owner)throw new Error('恢復 checkpoint 鏈的操作歸屬不一致，保持停止');
+      if(!sameStoreRevision(storeRevisionOf(prior.before.state),storeRevisionOf({meta:{businessSnapshotRevision:prior.before.businessSnapshotRevision}})))throw new Error('恢復 checkpoint 鏈的版本與內容不一致，保持停止');
       if(![prior.before.persistentFingerprint,prior.after?.stateFingerprint].includes(evidence.before?.persistentFingerprint))throw new Error('恢復 checkpoint 鏈有未核對的版本，保持停止');
       evidence=prior;
     }
+    if(evidence.recoveryOf||String(evidence.operationId)!==owner)throw new Error('恢復 checkpoint 鏈缺少原始操作證據，保持停止');
+    // Refuse before adding a ninth checkpoint link that could not be retried.
+    if(depth>=8)throw new Error('恢復 checkpoint 鏈已達安全上限，需另行核對');
     return {owner,kind:'restore-before-checkpoint',state:evidence.before.state,journal};
   }
   async function recoveryPreview() {
@@ -6753,7 +6765,7 @@
         const token=crypto.randomUUID(),expiresAt=Date.now()+300000;
         await requireRecoveryAuth(principal);
         recoveryPreviews.clear();if(candidate)recoveryPreviews.set(token,{fingerprint,expiresAt,owner:candidate.owner,principal});
-        return freezeStoreState({allowed:Boolean(candidate),token:candidate?token:'',expiresAt,operationId:candidate?.owner||journal?.operationId||'',phase:journal?.phase||'missing',beforeRevision:journal?.before?.businessSnapshotRevision||null,afterRevision:journal?.after?.businessSnapshotRevision||null,candidate:candidate?.kind||null,checkpointAvailable:Boolean(journal?.before?.state),idbFingerprint:storeFingerprintDigest(storeStateFingerprint(observation.values[STATE_KEY])),emergencyFingerprint:storeFingerprintDigest(storeStateFingerprint(parseStoreJson(observation.local[EMERGENCY_KEY],'Emergency'))),observationFingerprint:fingerprint,reason});
+        return freezeStoreState({allowed:Boolean(candidate),token:candidate?token:'',expiresAt,operationId:candidate?.owner||journal?.operationId||'',phase:journal?.phase||'missing',beforeRevision:candidate?.kind==='restore-before-checkpoint'?storeRevisionOf(candidate.state):journal?.before?.businessSnapshotRevision||null,attemptBeforeRevision:journal?.before?.businessSnapshotRevision||null,afterRevision:journal?.after?.businessSnapshotRevision||null,candidate:candidate?.kind||null,checkpointAvailable:Boolean(journal?.before?.state),idbFingerprint:storeFingerprintDigest(storeStateFingerprint(observation.values[STATE_KEY])),emergencyFingerprint:storeFingerprintDigest(storeStateFingerprint(parseStoreJson(observation.local[EMERGENCY_KEY],'Emergency'))),observationFingerprint:fingerprint,reason});
       }catch(error){return {allowed:false,reason:String(error.message||error),code:error.code||'RECOVERY_EVIDENCE_UNAVAILABLE'}}
     };
     return navigator.locks?.request?coordinatedStorage('recoveryPreview',inspect,{readOnly:true}):inspect();
@@ -6806,11 +6818,15 @@
       // must first be preserved in IDB, with the same observation CAS.
       await retainRecoveryGate(observation,candidate.owner);
       recoveryPreviews.delete(confirmation.token);
+      // A durable gate now owns this recovery. No prior or newly committed
+      // snapshot is public until the complete recovery has been verified.
+      storeRecoveryBlocked={operationId:candidate.owner,status:'RECOVERY_REQUIRED'};
+      publishedState=null;state=null;settledStateFingerprint='';lastSettledMemoryFingerprint='';
       try{
         let revision=storeRevisionOf(current);
         if(candidate.kind!=='resume-verified-recovery'){
-          const checkpoint={operationId,operationType:'controlledRecovery',persistentHadValue:true,persistent:storeStateClone(current),persistentFingerprint:storeStateFingerprint(current),journal:observation.values[STORE_JOURNAL_KEY],journalFingerprint:storeStateFingerprint(observation.values[STORE_JOURNAL_KEY]),emergencyRaw:observation.local[EMERGENCY_KEY],commitRaw:observation.local[STORE_COMMIT_KEY],receiptCommitRaw:observation.local[RECEIPT_COMMIT_KEY],published:publishedState||current,revision:storeRevisionOf(current),recoveryEvidence:observation.values[STORE_JOURNAL_KEY]};
-          const result=await commitStoreDraft(checkpoint,storeStateClone(candidate.state),{startedAt:new Date().toISOString(),action:'使用者確認恢復操作前快照',auditDetails:{recoveredOperationId:candidate.owner},recoveryOf:candidate.owner,deferNotification:true});revision=result.revision;
+          const checkpoint={operationId,operationType:'controlledRecovery',persistentHadValue:true,persistent:storeStateClone(current),persistentFingerprint:storeStateFingerprint(current),journal:observation.values[STORE_JOURNAL_KEY],journalFingerprint:storeStateFingerprint(observation.values[STORE_JOURNAL_KEY]),emergencyRaw:observation.local[EMERGENCY_KEY],commitRaw:observation.local[STORE_COMMIT_KEY],receiptCommitRaw:observation.local[RECEIPT_COMMIT_KEY],published:publishedState||current,revision:storeRevisionOf(current),recoveryOf:candidate.owner,recoveryEvidence:observation.values[STORE_JOURNAL_KEY]};
+          const result=await commitStoreDraft(checkpoint,storeStateClone(candidate.state),{startedAt:new Date().toISOString(),action:'使用者確認恢復操作前快照',auditDetails:{recoveredOperationId:candidate.owner},recoveryOf:candidate.owner,deferNotification:true,deferPublication:true});revision=result.revision;
         }
         const verified=await readStorageObservation({existingOnly:true});
         const verifiedCandidate=recoveryCandidate(verified);if(verifiedCandidate.kind!=='resume-verified-recovery')throw storeError('恢復後資料未完整提交','RECOVERY_VERIFY_FAILED');
@@ -6818,11 +6834,13 @@
         // is still present. There is no public bypass and no fallible load
         // after the final marker CAS has opened normal access.
         const verifiedState=await loadState({operationId:candidate.owner,persistentFingerprint:storeStateFingerprint(verified.values[STATE_KEY])});
+        state=null;
         await clearRecoveryMarkers(verified,candidate.owner,storeStateFingerprint(verified.values[STATE_KEY]));
         storeRecoveryBlocked=null;receiptWritesBlocked=null;
         publishedState=verifiedState;state=publishedState;settledStateFingerprint=storeStateFingerprint(state);lastSettledMemoryFingerprint=receiptStateFingerprint(state);
         return publishReplacementResult(operationId,'controlledRecovery',revision);
       }catch(error){
+        publishedState=null;state=null;settledStateFingerprint='';lastSettledMemoryFingerprint='';
         storeRecoveryBlocked={operationId:candidate.owner,status:'RECOVERY_REQUIRED'};
         throwStoreTransaction(error,'RECOVERY_REQUIRED',operationId,{recoveryOf:candidate.owner});
       }
