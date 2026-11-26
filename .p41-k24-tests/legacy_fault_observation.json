@@ -1,0 +1,146 @@
+{
+  "source": "K23 actual Chromium run45531255171 fault diagnostic",
+  "originalOperationId": "store-mwuqwofbbhbfqy",
+  "afterFaultObservation": {
+    "dbExists": true,
+    "storeExists": true,
+    "idb": {
+      "main": {
+        "meta": {
+          "version": "5.0.0",
+          "updatedAt": "2026-11-24T13:43:44.817Z",
+          "k21Synthetic": true,
+          "businessSnapshotRevision": {
+            "sequence": 3,
+            "id": "store-mwuqwofl19wlih",
+            "parentId": "store-mwuqwnanlez70m",
+            "operationId": "store-mwuqwofbbhbfqy",
+            "committedAt": "2026-11-24T13:43:44.817Z"
+          },
+          "receiptCommitVersion": "store-mwuqwofl19wlih"
+        },
+        "settings": {
+          "defaultTax": 5,
+          "quotationUnitPresets": [
+            "式"
+          ]
+        },
+        "customers": [
+          {
+            "id": "mwuqwofkfircej",
+            "createdAt": "2026-11-24T13:43:44.816Z",
+            "name": "SYN-K21-CRASH-PRIMARY_WRITTEN_before_emergency",
+            "taxId": "",
+            "contact": "",
+            "phone": "",
+            "email": "",
+            "address": "",
+            "note": "",
+            "updatedAt": "2026-11-24T13:43:44.816Z"
+          },
+          {
+            "id": "mwuqwnamj9nz5c",
+            "createdAt": "2026-11-24T13:43:43.342Z",
+            "name": "SYN-K21-BASELINE",
+            "taxId": "",
+            "contact": "",
+            "phone": "",
+            "email": "",
+            "address": "",
+            "note": "",
+            "updatedAt": "2026-11-24T13:43:43.342Z"
+          },
+          {
+            "id": "SYN-K21-CUSTOMER-0",
+            "name": "SYN-K21-Seed-Builder"
+          }
+        ],
+        "projects": [],
+        "employees": [],
+        "dailyLogs": [],
+        "commissions": [],
+        "attendance": [],
+        "payroll": [],
+        "billings": [],
+        "receivables": [],
+        "invoices": [],
+        "receipts": [],
+        "retentionReceipts": [],
+        "salaryPayments": [],
+        "commissionSettlements": [],
+        "bankTransactions": [],
+        "banks": [
+          {
+            "id": "SYN-K21-BANK-0",
+            "name": "SYN-K21-Only-Bank",
+            "openingBalance": 250000,
+            "income": 0,
+            "expense": 0,
+            "balance": 250000
+          }
+        ],
+        "payables": [],
+        "payments": [],
+        "vendors": [],
+        "materials": [],
+        "materialUsages": [],
+        "inventoryReceipts": [],
+        "projectCosts": [],
+        "dailyItemPresets": [],
+        "quotations": [],
+        "quotationPrices": [],
+        "quotationTemplates": [],
+        "audit": [
+          {
+            "id": "mwuqwofljpnjn2",
+            "time": "2026-11-24T13:43:44.817Z",
+            "action": "新增客戶 SYN-K21-CRASH-PRIMARY_WRITTEN_before_emergency"
+          },
+          {
+            "id": "mwuqwnan0ikf9y",
+            "time": "2026-11-24T13:43:43.343Z",
+            "action": "新增客戶 SYN-K21-BASELINE"
+          }
+        ]
+      },
+      "store:transaction:journal:v1": {
+        "schema": "kushe-store-transaction-v1",
+        "operationId": "recovery-mwvhnptreic6e7",
+        "operationType": "controlledRecovery",
+        "phase": "ROLLED_BACK",
+        "startedAt": "2026-11-25T02:12:36.353Z",
+        "updatedAt": "2026-11-25T02:12:36.357Z",
+        "beforeVersion": {
+          "sequence": 3,
+          "id": "store-mwuqwofl19wlih",
+          "parentId": "store-mwuqwnanlez70m",
+          "operationId": "store-mwuqwofbbhbfqy",
+          "committedAt": "2026-11-24T13:43:44.817Z"
+        },
+        "beforeFingerprint": "724bb60e19d99637:2826",
+        "primaryError": {
+          "message": "SYN-K23-INJECTED-EMERGENCY-WRITE-FAILURE",
+          "code": "SYN_K23_INJECTED_WRITE_FAILURE"
+        }
+      },
+      "KuSheERP25_STORE_RECOVERY_REQUIRED": {
+        "operationId": "store-mwuqwofbbhbfqy",
+        "status": "RECOVERY_REQUIRED",
+        "phase": "RECOVERY_VERIFICATION_PENDING"
+      },
+      "KuSheERP25_RECEIPT_RECOVERY_REQUIRED": null
+    },
+    "local": {
+      "KuSheERP25_EMERGENCY": "{\"meta\":{\"version\":\"5.0.0\",\"updatedAt\":\"2026-11-24T13:43:43.343Z\",\"k21Synthetic\":true,\"businessSnapshotRevision\":{\"sequence\":2,\"id\":\"store-mwuqwnanlez70m\",\"parentId\":\"store-mwuqwn9x4gnccp\",\"operationId\":\"store-mwuqwnahraohfm\",\"committedAt\":\"2026-11-24T13:43:43.343Z\"},\"receiptCommitVersion\":\"store-mwuqwnanlez70m\"},\"settings\":{\"defaultTax\":5,\"quotationUnitPresets\":[\"式\"]},\"customers\":[{\"id\":\"mwuqwnamj9nz5c\",\"createdAt\":\"2026-11-24T13:43:43.342Z\",\"name\":\"SYN-K21-BASELINE\",\"taxId\":\"\",\"contact\":\"\",\"phone\":\"\",\"email\":\"\",\"address\":\"\",\"note\":\"\",\"updatedAt\":\"2026-11-24T13:43:43.342Z\"},{\"id\":\"SYN-K21-CUSTOMER-0\",\"name\":\"SYN-K21-Seed-Builder\"}],\"projects\":[],\"employees\":[],\"dailyLogs\":[],\"commissions\":[],\"attendance\":[],\"payroll\":[],\"billings\":[],\"receivables\":[],\"invoices\":[],\"receipts\":[],\"retentionReceipts\":[],\"salaryPayments\":[],\"commissionSettlements\":[],\"bankTransactions\":[],\"banks\":[{\"id\":\"SYN-K21-BANK-0\",\"name\":\"SYN-K21-Only-Bank\",\"openingBalance\":250000,\"income\":0,\"expense\":0,\"balance\":250000}],\"payables\":[],\"payments\":[],\"vendors\":[],\"materials\":[],\"materialUsages\":[],\"inventoryReceipts\":[],\"projectCosts\":[],\"dailyItemPresets\":[],\"quotations\":[],\"quotationPrices\":[],\"quotationTemplates\":[],\"audit\":[{\"id\":\"mwuqwnan0ikf9y\",\"time\":\"2026-11-24T13:43:43.343Z\",\"action\":\"新增客戶 SYN-K21-BASELINE\"}]}",
+      "KuSheERP25_LOCAL_COMMIT_TOKEN": "{\"schema\":\"kushe-store-transaction-v1\",\"revisionId\":\"store-mwuqwnanlez70m\",\"sequence\":2,\"stateFingerprint\":\"1faa9d386cd4377e:2281\",\"committedAt\":\"2026-11-24T13:43:43.343Z\"}",
+      "KuSheERP25_RECEIPT_COMMIT_VERSION": "store-mwuqwnanlez70m",
+      "KuSheERP25_STORE_RECOVERY_REQUIRED": null,
+      "KuSheERP25_RECEIPT_RECOVERY_REQUIRED": null,
+      "KuSheERP25_RECEIPT_TRANSACTION_ACTIVE": null
+    },
+    "session": {
+      "KuSheERP25_STORE_RECOVERY_REQUIRED": null,
+      "KuSheERP25_RECEIPT_RECOVERY_REQUIRED": null
+    }
+  }
+}

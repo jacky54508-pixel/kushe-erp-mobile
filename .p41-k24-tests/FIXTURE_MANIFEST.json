@@ -1,0 +1,29 @@
+[
+  {
+    "case": "PRIMARY_WRITTEN_before_emergency",
+    "file": "fixtures/PRIMARY_WRITTEN_before_emergency/evidence/08_raw_after_crash_before_any_store_script.json",
+    "bytes": 10608,
+    "sha256": "9a7d5dec2307668fb230f57d63b2103b09646c2258483aa618711882684a423f",
+    "baselineFile": "fixtures/PRIMARY_WRITTEN_before_emergency/evidence/05_baseline_ready_for_crash.json",
+    "baselineSha256": "49b7f9d3abad5ff6697cc00e2fd53d7931fc2cafce10cf929970fc2405f421da",
+    "baselineBytes": 5642
+  },
+  {
+    "case": "EMERGENCY_WRITTEN_before_store_token",
+    "file": "fixtures/EMERGENCY_WRITTEN_before_store_token/evidence/08_raw_after_crash_before_any_store_script.json",
+    "bytes": 10617,
+    "sha256": "d10571f3c2b4ee045eebe3e5b8aa705a83da75ff2b4d99cb13a6bc27a030f5e3",
+    "baselineFile": "fixtures/EMERGENCY_WRITTEN_before_store_token/evidence/05_baseline_ready_for_crash.json",
+    "baselineSha256": "b3ffd3d0dca85d9325013ceddc259bc2bbf04916b13618445b3c19648edd403b",
+    "baselineBytes": 5642
+  },
+  {
+    "case": "EMERGENCY_WRITTEN_before_receipt_token",
+    "file": "fixtures/EMERGENCY_WRITTEN_before_receipt_token/evidence/08_raw_after_crash_before_any_store_script.json",
+    "bytes": 10621,
+    "sha256": "b67dbd5bcc60554302f55844c85868163741a6aff8a11d47f751b4f3e252b39e",
+    "baselineFile": "fixtures/EMERGENCY_WRITTEN_before_receipt_token/evidence/05_baseline_ready_for_crash.json",
+    "baselineSha256": "79306b8834d3245bfa4cfa2c68c123fe6bbbe1e923cf86b7acbe58b4cea38e11",
+    "baselineBytes": 5642
+  }
+]

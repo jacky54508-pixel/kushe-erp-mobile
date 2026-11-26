@@ -1,0 +1,136 @@
+{
+  "dbExists": true,
+  "storeExists": true,
+  "idb": {
+    "main": {
+      "meta": {
+        "version": "5.0.0",
+        "updatedAt": "2026-11-24T13:43:55.478Z",
+        "k21Synthetic": true,
+        "businessSnapshotRevision": {
+          "sequence": 2,
+          "id": "store-mwuqwwnqe7nogw",
+          "parentId": "store-mwuqwwmzizkzqv",
+          "operationId": "store-mwuqwwnil6xsvz",
+          "committedAt": "2026-11-24T13:43:55.478Z"
+        },
+        "receiptCommitVersion": "store-mwuqwwnqe7nogw"
+      },
+      "settings": {
+        "defaultTax": 5,
+        "quotationUnitPresets": [
+          "式"
+        ]
+      },
+      "customers": [
+        {
+          "id": "mwuqwwnpmw35gb",
+          "createdAt": "2026-11-24T13:43:55.477Z",
+          "name": "SYN-K21-BASELINE",
+          "taxId": "",
+          "contact": "",
+          "phone": "",
+          "email": "",
+          "address": "",
+          "note": "",
+          "updatedAt": "2026-11-24T13:43:55.477Z"
+        },
+        {
+          "id": "SYN-K21-CUSTOMER-0",
+          "name": "SYN-K21-Seed-Builder"
+        }
+      ],
+      "projects": [],
+      "employees": [],
+      "dailyLogs": [],
+      "commissions": [],
+      "attendance": [],
+      "payroll": [],
+      "billings": [],
+      "receivables": [],
+      "invoices": [],
+      "receipts": [],
+      "retentionReceipts": [],
+      "salaryPayments": [],
+      "commissionSettlements": [],
+      "bankTransactions": [],
+      "banks": [
+        {
+          "id": "SYN-K21-BANK-0",
+          "name": "SYN-K21-Only-Bank",
+          "openingBalance": 250000,
+          "income": 0,
+          "expense": 0,
+          "balance": 250000
+        }
+      ],
+      "payables": [],
+      "payments": [],
+      "vendors": [],
+      "materials": [],
+      "materialUsages": [],
+      "inventoryReceipts": [],
+      "projectCosts": [],
+      "dailyItemPresets": [],
+      "quotations": [],
+      "quotationPrices": [],
+      "quotationTemplates": [],
+      "audit": [
+        {
+          "id": "mwuqwwnq6r4g93",
+          "time": "2026-11-24T13:43:55.478Z",
+          "action": "新增客戶 SYN-K21-BASELINE"
+        }
+      ]
+    },
+    "store:transaction:journal:v1": {
+      "schema": "kushe-store-transaction-v1",
+      "operationId": "store-mwuqwwnil6xsvz",
+      "operationType": "saveCustomer",
+      "phase": "COMMIT_VERIFIED",
+      "startedAt": "2026-11-24T13:43:55.471Z",
+      "updatedAt": "2026-11-24T13:43:55.483Z",
+      "before": {
+        "businessSnapshotRevision": {
+          "sequence": 1,
+          "id": "store-mwuqwwmzizkzqv",
+          "parentId": "",
+          "operationId": "bootstrap-mwuqwwmzfrrfta",
+          "committedAt": "2026-11-24T13:43:55.451Z"
+        },
+        "stateFingerprint": "1828c5fb8102d5fb:1781"
+      },
+      "after": {
+        "businessSnapshotRevision": {
+          "sequence": 2,
+          "id": "store-mwuqwwnqe7nogw",
+          "parentId": "store-mwuqwwmzizkzqv",
+          "operationId": "store-mwuqwwnil6xsvz",
+          "committedAt": "2026-11-24T13:43:55.478Z"
+        },
+        "stateFingerprint": "0d10fd3ff2bd4b53:2281"
+      },
+      "steps": {
+        "journalPrepared": true,
+        "primaryWritten": true,
+        "emergencyWritten": true,
+        "versionWritten": true,
+        "verified": true
+      }
+    },
+    "KuSheERP25_STORE_RECOVERY_REQUIRED": null,
+    "KuSheERP25_RECEIPT_RECOVERY_REQUIRED": null
+  },
+  "local": {
+    "KuSheERP25_EMERGENCY": "{\"meta\":{\"version\":\"5.0.0\",\"updatedAt\":\"2026-11-24T13:43:55.478Z\",\"k21Synthetic\":true,\"businessSnapshotRevision\":{\"sequence\":2,\"id\":\"store-mwuqwwnqe7nogw\",\"parentId\":\"store-mwuqwwmzizkzqv\",\"operationId\":\"store-mwuqwwnil6xsvz\",\"committedAt\":\"2026-11-24T13:43:55.478Z\"},\"receiptCommitVersion\":\"store-mwuqwwnqe7nogw\"},\"settings\":{\"defaultTax\":5,\"quotationUnitPresets\":[\"式\"]},\"customers\":[{\"id\":\"mwuqwwnpmw35gb\",\"createdAt\":\"2026-11-24T13:43:55.477Z\",\"name\":\"SYN-K21-BASELINE\",\"taxId\":\"\",\"contact\":\"\",\"phone\":\"\",\"email\":\"\",\"address\":\"\",\"note\":\"\",\"updatedAt\":\"2026-11-24T13:43:55.477Z\"},{\"id\":\"SYN-K21-CUSTOMER-0\",\"name\":\"SYN-K21-Seed-Builder\"}],\"projects\":[],\"employees\":[],\"dailyLogs\":[],\"commissions\":[],\"attendance\":[],\"payroll\":[],\"billings\":[],\"receivables\":[],\"invoices\":[],\"receipts\":[],\"retentionReceipts\":[],\"salaryPayments\":[],\"commissionSettlements\":[],\"bankTransactions\":[],\"banks\":[{\"id\":\"SYN-K21-BANK-0\",\"name\":\"SYN-K21-Only-Bank\",\"openingBalance\":250000,\"income\":0,\"expense\":0,\"balance\":250000}],\"payables\":[],\"payments\":[],\"vendors\":[],\"materials\":[],\"materialUsages\":[],\"inventoryReceipts\":[],\"projectCosts\":[],\"dailyItemPresets\":[],\"quotations\":[],\"quotationPrices\":[],\"quotationTemplates\":[],\"audit\":[{\"id\":\"mwuqwwnq6r4g93\",\"time\":\"2026-11-24T13:43:55.478Z\",\"action\":\"新增客戶 SYN-K21-BASELINE\"}]}",
+    "KuSheERP25_LOCAL_COMMIT_TOKEN": "{\"schema\":\"kushe-store-transaction-v1\",\"revisionId\":\"store-mwuqwwnqe7nogw\",\"sequence\":2,\"stateFingerprint\":\"0d10fd3ff2bd4b53:2281\",\"committedAt\":\"2026-11-24T13:43:55.478Z\"}",
+    "KuSheERP25_RECEIPT_COMMIT_VERSION": "store-mwuqwwnqe7nogw",
+    "KuSheERP25_STORE_RECOVERY_REQUIRED": null,
+    "KuSheERP25_RECEIPT_RECOVERY_REQUIRED": null,
+    "KuSheERP25_RECEIPT_TRANSACTION_ACTIVE": null
+  },
+  "session": {
+    "KuSheERP25_STORE_RECOVERY_REQUIRED": null,
+    "KuSheERP25_RECEIPT_RECOVERY_REQUIRED": null
+  }
+}
