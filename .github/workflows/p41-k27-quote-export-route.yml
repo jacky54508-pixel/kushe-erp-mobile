@@ -1,0 +1,80 @@
+name: P41 K27 quotation export route and backup-price labels
+
+on:
+  push:
+    branches: [p41-k27-quote-export-route-20261127]
+    paths:
+      - index.html
+      - billing-print.html
+      - assets/js/billing-print.js
+      - '.p41-k27-tests/**'
+      - '.github/workflows/p41-k27-quote-export-route.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p41-k27-quote-export-route-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  quotation-export-route:
+    name: Synthetic quotation UI export and actual PDF (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - name: Preserve repository byte endings on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Check exact source scope and quotation projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/k27-${{ runner.os }}/route
+          python .p41-k27-tests/source_guard.py > artifacts/k27-${{ runner.os }}/SOURCE_SCOPE.json
+          node --check assets/js/billing-print.js
+          node --check .p41-k27-tests/test_backup_projection.cjs
+          node .p41-k27-tests/test_backup_projection.cjs --root . 2>&1 | tee artifacts/k27-${{ runner.os }}/PROJECTION.log
+          python -m py_compile .p41-k27-tests/test_quote_export_route.py .p41-k27-tests/source_guard.py
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
+      - name: Prepare Linux Chrome, Chinese fonts and exact PDF text reader
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-noto-cjk poppler-utils
+      - name: Prepare a fresh Windows test Chromium
+        if: runner.os == 'Windows'
+        shell: bash
+        run: python -m playwright install chromium
+      - name: Exercise quotation detail export, backup labels and PDF regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .p41-k27-tests/test_quote_export_route.py --root . --output artifacts/k27-${{ runner.os }}/route 2>&1 | tee artifacts/k27-${{ runner.os }}/BROWSER.log
+      - name: Retain PDFs, decoded payloads, route evidence and diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p41-k27-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/k27-${{ runner.os }}/
+          if-no-files-found: warn
+          retention-days: 14
