@@ -557,7 +557,7 @@
     $('#commissionsApp').innerHTML = `
       <section class="commissions-heading workforce-heading">
         <div><h1>出勤／業績管理</h1><p>整合每日作業、點工薪資、員工業績與抽成結算</p></div>
-        <div class="workforce-heading-actions"><button class="commission-secondary" id="openCommissionAudit" type="button">歷史抽成查核（唯讀）</button><button class="commission-secondary" id="manualCommission" type="button">新增手動抽成</button><button class="commission-primary" id="addCommission" type="button">＋ 新增每日作業</button></div>
+        <div class="workforce-heading-actions">${window.KusheAuthGate?.companyContext?.()?.role==='owner'?'<button class="commission-secondary" id="openCommissionCorrectionReview" type="button" data-k25-open>歷史抽成更正核對</button>':''}<button class="commission-secondary" id="openCommissionAudit" type="button">歷史抽成查核（唯讀）</button><button class="commission-secondary" id="manualCommission" type="button">新增手動抽成</button><button class="commission-primary" id="addCommission" type="button">＋ 新增每日作業</button></div>
       </section>
       ${workforceKpis(view)}
       <section class="commission-panel commission-filters workforce-filters" aria-label="共用搜尋與篩選">

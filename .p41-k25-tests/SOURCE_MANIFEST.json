@@ -1,0 +1,46 @@
+{
+  "schema": "k25-reviewed-source-manifest-v1",
+  "baseCommit": "75938e04b8f2db6b382dc3399a3a46d845684773",
+  "files": {
+    "assets/js/erp-store.js": {
+      "sha256": "6689c5cd746bc9360d54fcf7e7bbe3a4af4dacdd76a108263b9540fbd85b758b",
+      "gitBlob": "498d1c26e8fa1090500cdfa07e4a5e2fa154d839",
+      "bytes": 955977
+    },
+    "assets/js/commissions.js": {
+      "sha256": "aa9e8fa69b81df739ca44371ce6271203a327e17d0c55d6abc6145570ff0bd8e",
+      "gitBlob": "79792e2a54246f385a81b9480472addefbcfc35e",
+      "bytes": 184018
+    },
+    "index.html": {
+      "sha256": "c3c358bf695c28a45da2be0c42cfc874bdfda5770ae948626679124c5a8bd3b7",
+      "gitBlob": "01694f984d1e069678c918d3eafbaf297176e45c",
+      "bytes": 33973
+    },
+    "assets/js/p41-commission-correction-ui.js": {
+      "sha256": "eb738673a574426463063b3e1f5593a5ba613fd3a77caa11744fd79f65520fb9",
+      "gitBlob": "32cde933f4a045123d6985fc57e74e9b88f5c38c",
+      "bytes": 23492
+    },
+    "assets/css/p41-commission-correction.css": {
+      "sha256": "bd3bc1c25347534abae155aa026196836ae4875356e8009c3a1c6bb4cd0c38b4",
+      "gitBlob": "0dddeb98cb0d02924d7621d01dfcd26c33476da5",
+      "bytes": 12824
+    },
+    ".p41-k25-tests/k25_fixture.py": {
+      "sha256": "1533bf1ba06b9d9f477ac84900feb6d0ea980b8524ef1a4e2ed8b0ab016448b4",
+      "gitBlob": "62a47f13d9d0aecdfa32decc36ed11b4a1f19e4b",
+      "bytes": 15349
+    },
+    ".p41-k25-tests/k25_browser_review.py": {
+      "sha256": "32283080d5f3953de76ec3031a3ccdbce641002953a36ff83e50eee68fe95df8",
+      "gitBlob": "1be3efd43161ec91ddbda565cb3e57bb06c7628b",
+      "bytes": 47446
+    },
+    ".p41-k25-tests/source_guard.py": {
+      "sha256": "5fd3c5afba4314eef10155b10bfd3b48734e214a58113659926e6d112c37b55c",
+      "gitBlob": "330790f3696b39eff3c6fcfe509741637c4018e9",
+      "bytes": 4897
+    }
+  }
+}

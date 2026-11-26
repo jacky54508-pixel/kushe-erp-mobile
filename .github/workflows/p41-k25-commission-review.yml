@@ -1,0 +1,198 @@
+name: P41 K25 historical commission review candidate
+
+on:
+  push:
+    branches: [p41-k25-commission-review-20261126]
+    paths:
+      - 'assets/js/erp-store.js'
+      - 'assets/js/commissions.js'
+      - 'assets/js/p41-commission-correction-ui.js'
+      - 'assets/css/p41-commission-correction.css'
+      - 'index.html'
+      - '.p41-k25-tests/**'
+      - '.github/workflows/p41-k25-commission-review.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p41-k25-commission-review-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  review-candidate:
+    name: Synthetic review storage and UI on ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+          - os: windows-2022
+            platform: windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 22
+    env:
+      PYTHONUTF8: '1'
+      ARTIFACT_DIR: artifacts/p41-k25-${{ matrix.platform }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Preserve reviewed bytes
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Verify exact candidate scope and unchanged Store kernel
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACT_DIR"
+          python .p41-k25-tests/source_guard.py --output "$ARTIFACT_DIR" 2>&1 | tee "$ARTIFACT_DIR/source-scope.log"
+          node --check assets/js/erp-store.js
+          node --check assets/js/commissions.js
+          node --check assets/js/p41-commission-correction-ui.js
+          python -m py_compile .p41-k25-tests/k25_fixture.py .p41-k25-tests/k25_browser_review.py .p41-k25-tests/source_guard.py
+      - name: Prepare pinned isolated browser dependency
+        run: |
+          set -euo pipefail
+          python -m pip install playwright==1.57.0
+          python - <<'PY'
+          import json,os,shutil,subprocess,sys
+          from pathlib import Path
+          executable=shutil.which('google-chrome') or shutil.which('google-chrome-stable') or shutil.which('chromium') or shutil.which('chrome')
+          if not executable and os.name=='nt':
+              for key in ('ProgramFiles','ProgramFiles(x86)'):
+                  if os.environ.get(key):
+                      candidate=Path(os.environ[key])/'Google/Chrome/Application/chrome.exe'
+                      if candidate.is_file():
+                          executable=str(candidate)
+                          break
+          if not executable:
+              subprocess.check_call([sys.executable,'-m','playwright','install','chromium'])
+          result={'systemExecutable':executable,'fallbackInstalled':not bool(executable)}
+          (Path(os.environ['ARTIFACT_DIR'])/'BROWSER_SELECTION.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')
+          print(json.dumps(result,indent=2))
+          PY
+      - name: Verify actual Store preview ledger failures restart and responsive UI
+        run: |
+          python - <<'PY'
+          import json,os,subprocess,sys
+          from pathlib import Path
+          output=Path(os.environ['ARTIFACT_DIR'])
+          manifest=json.loads(Path('.p41-k25-tests/SOURCE_MANIFEST.json').read_text(encoding='utf-8'))
+          command=[sys.executable,'.p41-k25-tests/k25_browser_review.py','--store','assets/js/erp-store.js','--root','.',
+                   '--store-sha256',manifest['files']['assets/js/erp-store.js']['sha256'],'--output',str(output)]
+          with (output/'browser-acceptance.log').open('w',encoding='utf-8') as log:
+              process=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf-8',errors='replace',bufsize=1)
+              for line in process.stdout:
+                  log.write(line);log.flush();print(line,end='',flush=True)
+              code=process.wait()
+          (output/'EXIT_CODE.json').write_text(json.dumps({'exitCode':code},indent=2)+'\n',encoding='utf-8')
+          raise SystemExit(code)
+          PY
+      - name: Retain review and failure evidence without screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p41-k25-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/p41-k25-${{ matrix.platform }}/
+            !artifacts/p41-k25-${{ matrix.platform }}/internal-qa/**
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain synthetic UI screenshots for internal review only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p41-k25-internal-qa-${{ matrix.platform }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/p41-k25-${{ matrix.platform }}/internal-qa/
+          if-no-files-found: ignore
+          retention-days: 3
+
+  existing-regressions:
+    name: Unchanged historical commission and invoice suites
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    env:
+      PYTHONUTF8: '1'
+      P39_INV_USE_SYSTEM_CHROME: '1'
+      ARTIFACT_DIR: artifacts/p41-k25-legacy
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Preserve reviewed bytes
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Verify unchanged original regression files and exact candidate
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACT_DIR"
+          python .p41-k25-tests/source_guard.py --output "$ARTIFACT_DIR" 2>&1 | tee "$ARTIFACT_DIR/source-scope.log"
+          command -v google-chrome || command -v google-chrome-stable
+          python -m pip install playwright==1.57.0
+      - name: Run four unmodified original suites and preserve all outcomes
+        run: |
+          python - <<'PY'
+          import json,os,socket,subprocess,sys,time,traceback
+          from pathlib import Path
+          output=Path(os.environ['ARTIFACT_DIR']);root=Path.cwd()
+          tests=[('p33-4',[sys.executable,'.p39-inv1-tests/chrome_legacy.py','.p33-4-tests/regression.py']),
+                 ('p34',[sys.executable,'.p39-inv1-tests/chrome_legacy.py','.p34-tests/test.py']),
+                 ('p35-ui',[sys.executable,'.p39-inv1-tests/chrome_legacy.py','.p35-tests/test_ui.py']),
+                 ('p39-inv1-store',[sys.executable,'.p39-inv1-tests/test_store.py'])]
+          servers=[];handles=[];results=[];errors=[]
+          try:
+              for port in (8774,8784,8795,8797):
+                  handle=(output/('http-'+str(port)+'.log')).open('w',encoding='utf-8');handles.append(handle)
+                  server=subprocess.Popen([sys.executable,'-m','http.server',str(port),'--bind','127.0.0.1','--directory',str(root)],stdout=handle,stderr=subprocess.STDOUT);servers.append(server)
+                  deadline=time.monotonic()+10
+                  while True:
+                      if server.poll() is not None:raise RuntimeError('Owned loopback server failed: '+str(port))
+                      try:
+                          with socket.create_connection(('127.0.0.1',port),timeout=0.2):break
+                      except OSError:
+                          if time.monotonic()>=deadline:raise RuntimeError('Owned loopback server not ready: '+str(port))
+                          time.sleep(0.05)
+              for name,command in tests:
+                  print('RUN',name,flush=True)
+                  try:
+                      result=subprocess.run(command,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf-8',errors='replace',timeout=300);text=result.stdout;code=result.returncode
+                  except subprocess.TimeoutExpired as error:
+                      text=error.stdout or ''
+                      if isinstance(text,bytes):text=text.decode('utf-8',errors='replace')
+                      text+='\nTIMEOUT after 300 seconds\n';code=124
+                  (output/(name+'.log')).write_text(text,encoding='utf-8');print(text,end='',flush=True);results.append({'name':name,'exitCode':code,'passed':code==0})
+          except Exception as error:errors.append({'type':type(error).__name__,'message':str(error),'traceback':traceback.format_exc()})
+          finally:
+              for server in servers:
+                  if server.poll() is None:
+                      server.terminate()
+                      try:server.wait(timeout=5)
+                      except subprocess.TimeoutExpired:server.kill();server.wait(timeout=5)
+              for handle in handles:handle.close()
+              passed=len(results)==len(tests) and all(item['passed'] for item in results) and not errors
+              report={'schema':'k25-unchanged-legacy-regressions-v1','status':'PASS' if passed else 'BLOCKED','tests':results,'errors':errors,'productionDataTouched':False,'publishGate':'BLOCKED'}
+              (output/'LEGACY_RESULT.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8');print(json.dumps(report,ensure_ascii=False,indent=2),flush=True)
+          raise SystemExit(0 if passed else 1)
+          PY
+      - name: Retain all original regression results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p41-k25-legacy-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/p41-k25-legacy/
+          if-no-files-found: error
+          retention-days: 14
