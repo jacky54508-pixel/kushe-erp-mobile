@@ -111,6 +111,10 @@
 #paper.quotation-document.p41-quote-paginated .actual-note{
   white-space:normal;overflow-wrap:anywhere;color:var(--p41-quote-muted);font-family:var(--p41-quote-sans);font-size:8.5pt;font-weight:400
 }
+#paper.quotation-document.p41-quote-paginated .p41-quote-line-note{
+  display:block;margin-top:.8mm;color:var(--p41-quote-muted);font-family:var(--p41-quote-sans);
+  font-size:9.5pt;font-weight:400;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal
+}
 #paper.quotation-document.p41-quote-paginated .actual-pricing-label{
   margin:3mm 0 0;padding:0;border:0;border-radius:0;background:transparent;color:var(--p41-quote-ink);
   font-family:var(--p41-quote-sans);font-size:10.5pt;line-height:1.4;font-weight:700;letter-spacing:0
@@ -170,6 +174,9 @@
 }
 #paper.quotation-document.p41-quote-paginated .seal-wrap{height:25mm;justify-content:flex-end;padding-right:3mm}
 #paper.quotation-document.p41-quote-paginated .seal{max-height:24mm;max-width:45mm}
+#paper.quotation-document.p41-quote-paginated .sign.p41-quote-inline-sign{margin-top:4mm;padding-top:2.5mm}
+#paper.quotation-document.p41-quote-paginated .p41-quote-inline-sign .seal-wrap{height:22mm}
+#paper.quotation-document.p41-quote-paginated .p41-quote-inline-sign .seal{max-height:21mm}
 #paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head{
   display:flex;align-items:center;justify-content:space-between;gap:4mm;padding-bottom:3mm;border-bottom:.2mm solid var(--p41-quote-rule)
 }
