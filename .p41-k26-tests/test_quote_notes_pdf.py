@@ -202,6 +202,47 @@ def font_evidence(checks, report, name, page):
         session.detach()
 
 
+def check_signature_geometry(report, name, page):
+    facts = page.evaluate('''() => {
+      const signature=document.querySelector('#paper .sign');
+      if(!signature)return null;
+      const rect=node=>{const r=node.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}};
+      const textRect=node=>{const range=document.createRange();range.selectNodeContents(node);return rect(range)};
+      const textFacts=node=>({text:node.textContent.trim(),rect:textRect(node),fontPt:parseFloat(getComputedStyle(node).fontSize)*72/96});
+      const seal=signature.querySelector('#formalCompanySeal');
+      return {signature:rect(signature),body:rect(signature.closest('.p41-quote-page').querySelector('.p41-quote-page-body')),
+        footer:rect(signature.closest('.p41-quote-page').querySelector('.p41-quote-page-footer')),
+        parties:[...signature.querySelectorAll(':scope > .client-sign,:scope > .company-seals')].map(node=>({
+          type:node.classList.contains('client-sign')?'client':'company',rect:rect(node),
+          labels:[...node.querySelectorAll('.p41-quote-sign-label')].map(textFacts),
+          dates:[...node.querySelectorAll('.p41-quote-sign-date')].map(textFacts)})),
+        seal:{rect:rect(seal),loaded:seal.complete&&seal.naturalWidth>0&&seal.naturalHeight>0,
+              objectFit:getComputedStyle(seal).objectFit}};
+    }''')
+    report.check(name + ': closing area contains two readable party labels and date fields',
+                 bool(facts) and len(facts['parties']) == 2 and
+                 all(len(party['labels']) == len(party['dates']) == 1 and
+                     party['labels'][0]['text'] == ('客戶簽章' if party['type'] == 'client' else '公司大小章') and
+                     party['labels'][0]['fontPt'] >= 10.5 - .01 and party['dates'][0]['fontPt'] >= 9.5 - .01
+                     for party in facts['parties']), facts)
+    def inside(inner, outer, tolerance=.8):
+        return inner['width'] > 0 and inner['height'] > 0 and inner['left'] >= outer['left'] - tolerance and inner['right'] <= outer['right'] + tolerance and inner['top'] >= outer['top'] - tolerance and inner['bottom'] <= outer['bottom'] + tolerance
+    def overlap(a, b):
+        return min(a['right'], b['right']) - max(a['left'], b['left']) > .5 and min(a['bottom'], b['bottom']) - max(a['top'], b['top']) > .5
+    labels_and_dates = [node['rect'] for party in facts['parties'] for node in [*party['labels'], *party['dates']]]
+    company = next(party for party in facts['parties'] if party['type'] == 'company')
+    clipped = [party['type'] for party in facts['parties'] if any(not inside(node['rect'], party['rect']) for node in [*party['labels'], *party['dates']])]
+    report.check(name + ': labels, dates and loaded company seal stay inside their own signing columns',
+                 not clipped and facts['seal']['loaded'] and facts['seal']['objectFit'] == 'contain' and
+                 inside(facts['seal']['rect'], company['rect']), {'clipped': clipped, 'geometry': facts})
+    collisions = [(i, j) for i, a in enumerate(labels_and_dates) for j, b in enumerate(labels_and_dates) if i < j and overlap(a, b)]
+    report.check(name + ': signing text does not overlap the company seal, other text or page footer',
+                 not collisions and not any(overlap(box, facts['seal']['rect']) for box in labels_and_dates) and
+                 inside(facts['signature'], facts['body']) and facts['signature']['bottom'] <= facts['footer']['top'] + .8,
+                 {'textCollisions': collisions, 'geometry': facts})
+    report.result.setdefault('signatureGeometry', []).append({'name': name, **facts})
+
+
 def baseline_reproduction(checks, browser, server, report, root):
     name = 'baseline-missing-line-note'
     record = fixture(sample=True, count=11)
@@ -239,17 +280,20 @@ def public_case(checks, browser, server, report, root, name, record, maximum_pag
         font_evidence(checks, report, name, page)
         desktop = page.evaluate(checks.METRICS)
         checks.check_layout(report, name + ' desktop', desktop)
+        check_signature_geometry(report, name + ' desktop', page)
         page.screenshot(path=str(report.output / (name + '-desktop.png')), full_page=True)
         page.set_viewport_size({'width': 390, 'height': 844})
         page.evaluate('()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
         checks.check_layout(report, name + ' mobile', page.evaluate(checks.METRICS))
         check_item_notes(checks, report, name + ' mobile', page, view)
+        check_signature_geometry(report, name + ' mobile', page)
         page.screenshot(path=str(report.output / (name + '-mobile.png')), full_page=True)
         page.set_viewport_size({'width': 1366, 'height': 950})
         page.emulate_media(media='print')
         page.evaluate('()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
         metrics = page.evaluate(checks.METRICS)
         checks.check_layout(report, name + ' print', metrics, printing=True)
+        check_signature_geometry(report, name + ' print', page)
         count = checks.check_pdf(report, name, page, metrics, report.output, maximum_pages=maximum_pages)
         signatures = page.locator(checks.PAGE).last.locator('.sign').count()
         final_notes = page.locator(checks.PAGE).last.locator(checks.NOTE).all_text_contents()
@@ -301,7 +345,7 @@ def main():
                     row['note'] = f'LINE-LONG-{i+1:03d} 合成施工範圍與限制條件必須完整顯示，品項名稱重複時仍須保留各自說明。\n此為該品項第二行，不得截斷。'
                 operations = [
                     ('baseline-missing-line-note', lambda: baseline_reproduction(checks, browser, server, report, root)),
-                    ('actual-public-notes', lambda: public_case(checks, browser, server, report, root, 'actual-public-notes', fixture(11, sample=True))),
+                    ('actual-public-notes', lambda: public_case(checks, browser, server, report, root, 'actual-public-notes', fixture(11, sample=True), maximum_pages=1)),
                     ('actual-escaped-notes', lambda: public_case(checks, browser, server, report, root, 'actual-escaped-notes', fixture(), maximum_pages=1)),
                     ('total-price-notes', lambda: public_case(checks, browser, server, report, root, 'total-price-notes', fixture(mode='lump_sum'))),
                     ('mixed-price-notes', lambda: public_case(checks, browser, server, report, root, 'mixed-price-notes', fixture(mode='mixed'))),

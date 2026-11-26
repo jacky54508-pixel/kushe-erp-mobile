@@ -259,6 +259,18 @@
       // larger spacing used on a dedicated payment-terms sheet.
       signature.classList.toggle('p41-quote-inline-sign', noteModel.mode === 'generic');
       for (const node of signature.querySelectorAll(':scope > .client-sign, :scope > .company-seals')) {
+        if (noteModel.mode === 'generic') {
+          let label = node.firstElementChild;
+          if (node.classList.contains('client-sign')) {
+            const text = Array.from(node.childNodes).find(child => child.nodeType === Node.TEXT_NODE && /\S/.test(child.textContent));
+            if (text) {
+              label = document.createElement('span');
+              text.replaceWith(label);
+              label.appendChild(text);
+            }
+          }
+          label?.classList.add('p41-quote-sign-label');
+        }
         const date = document.createElement('div');
         date.className = 'p41-quote-sign-date';
         date.textContent = '簽署日期：　　年　　月　　日';
