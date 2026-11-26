@@ -254,7 +254,23 @@
         if (originalPricing) sectionTitle.appendChild(originalPricing);
       }
       signature.classList.add('p41-quote-contract-sign');
+      // Ordinary quotation notes share the detail sheet where space permits.
+      // Their closing block needs a comfortable signing area, but not the
+      // larger spacing used on a dedicated payment-terms sheet.
+      signature.classList.toggle('p41-quote-inline-sign', noteModel.mode === 'generic');
       for (const node of signature.querySelectorAll(':scope > .client-sign, :scope > .company-seals')) {
+        if (noteModel.mode === 'generic') {
+          let label = node.firstElementChild;
+          if (node.classList.contains('client-sign')) {
+            const text = Array.from(node.childNodes).find(child => child.nodeType === Node.TEXT_NODE && /\S/.test(child.textContent));
+            if (text) {
+              label = document.createElement('span');
+              text.replaceWith(label);
+              label.appendChild(text);
+            }
+          }
+          label?.classList.add('p41-quote-sign-label');
+        }
         const date = document.createElement('div');
         date.className = 'p41-quote-sign-date';
         date.textContent = '簽署日期：　　年　　月　　日';
@@ -369,7 +385,7 @@
         newPage();
         startFragment();
         tbody.appendChild(row);
-        if (!fitsFinalBlock(section, index === rows.length - 1)) throw fail('QUOTATION_ROW_TOO_LARGE', '單一施工明細列超過一頁，請縮短該列品名或分成多列後再匯出。');
+        if (!fitsFinalBlock(section, index === rows.length - 1)) throw fail('QUOTATION_ROW_TOO_LARGE', '單一施工明細列超過一頁，請縮短該列品名或備註，或分成多列後再匯出。');
       }
       if (!rows.length && !fits()) throw fail('QUOTATION_TABLE_TOO_LARGE', '報價明細表超過 A4 版面。');
     }
@@ -463,7 +479,11 @@
         box = makeNoteBox(role, notePageCount++ > 0);
         current.body.appendChild(box);
       }
-      startNotePage(forceNew || role === 'generic');
+      // A complete note + signature group may be too tall even when several
+      // intact paragraphs still fit below the table. Use that available space
+      // before continuing. The final paragraph is still measured together
+      // with the signature, so a signature-only continuation is not created.
+      startNotePage(forceNew);
       const pending = chunks.map(chunk => ({ ...chunk }));
       while (pending.length) {
         const chunk = pending[0];

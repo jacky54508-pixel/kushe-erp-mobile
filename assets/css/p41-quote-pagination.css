@@ -81,6 +81,12 @@
   font-family:var(--p41-quote-sans);font-size:9.5pt;font-weight:400;line-height:1.4;
   color:var(--p41-quote-muted);background:transparent;border:0;border-radius:0
 }
+/* Short-form quotation sheets keep the same type sizes and formal hierarchy
+   with tighter header spacing, reserving room for notes and actual signing. */
+#paper.quotation-document.p41-quote-paginated[data-quotation-note-mode="generic"] .p41-quote-first-page .company-block{padding-bottom:2mm}
+#paper.quotation-document.p41-quote-paginated[data-quotation-note-mode="generic"] .p41-quote-first-page .doc-title{margin-top:2.5mm}
+#paper.quotation-document.p41-quote-paginated[data-quotation-note-mode="generic"] .p41-quote-first-page .p41-quote-contract-subtitle{margin-top:.5mm}
+#paper.quotation-document.p41-quote-paginated[data-quotation-note-mode="generic"] .p41-quote-first-page .info{margin-top:3mm;margin-bottom:2mm;padding-bottom:2mm}
 #paper.quotation-document.p41-quote-paginated .section{
   margin-top:2.5mm;min-width:0;overflow:visible;border:0;border-radius:0;background:transparent
 }
@@ -110,6 +116,10 @@
 #paper.quotation-document.p41-quote-paginated .detail .line-total td{background:#f1f2f3;color:var(--p41-quote-ink);font-weight:700}
 #paper.quotation-document.p41-quote-paginated .actual-note{
   white-space:normal;overflow-wrap:anywhere;color:var(--p41-quote-muted);font-family:var(--p41-quote-sans);font-size:8.5pt;font-weight:400
+}
+#paper.quotation-document.p41-quote-paginated .p41-quote-line-note{
+  display:block;margin-top:.8mm;color:var(--p41-quote-muted);font-family:var(--p41-quote-sans);
+  font-size:9.5pt;font-weight:400;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal
 }
 #paper.quotation-document.p41-quote-paginated .actual-pricing-label{
   margin:3mm 0 0;padding:0;border:0;border-radius:0;background:transparent;color:var(--p41-quote-ink);
@@ -170,6 +180,15 @@
 }
 #paper.quotation-document.p41-quote-paginated .seal-wrap{height:25mm;justify-content:flex-end;padding-right:3mm}
 #paper.quotation-document.p41-quote-paginated .seal{max-height:24mm;max-width:45mm}
+#paper.quotation-document.p41-quote-paginated .sign.p41-quote-inline-sign{margin-top:4mm;padding-top:2.5mm}
+#paper.quotation-document.p41-quote-paginated .p41-quote-inline-sign .company-seals{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:minmax(22mm,auto) auto;column-gap:3mm;row-gap:0
+}
+#paper.quotation-document.p41-quote-paginated .p41-quote-inline-sign .company-seals>.p41-quote-sign-label{grid-column:1;grid-row:1;align-self:start}
+#paper.quotation-document.p41-quote-paginated .p41-quote-inline-sign .company-seals>.p41-quote-sign-date{grid-column:1 / -1;grid-row:2}
+#paper.quotation-document.p41-quote-paginated .p41-quote-inline-sign .seal-wrap{height:22mm}
+#paper.quotation-document.p41-quote-paginated .p41-quote-inline-sign .company-seals>.seal-wrap{grid-column:2;grid-row:1;min-width:0;padding-right:0}
+#paper.quotation-document.p41-quote-paginated .p41-quote-inline-sign .seal{max-height:21mm}
 #paper.quotation-document.p41-quote-paginated .p41-quote-continuation-head{
   display:flex;align-items:center;justify-content:space-between;gap:4mm;padding-bottom:3mm;border-bottom:.2mm solid var(--p41-quote-rule)
 }

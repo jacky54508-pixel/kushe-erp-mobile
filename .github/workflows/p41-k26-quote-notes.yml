@@ -1,0 +1,82 @@
+name: P41 K26 quotation outward notes and A4 flow
+
+on:
+  push:
+    branches: [p41-k26-quote-notes-20261127]
+    paths:
+      - index.html
+      - billing-print.html
+      - assets/js/billing-print.js
+      - assets/js/p41-quote-pagination.js
+      - assets/css/p41-quote-pagination.css
+      - '.p41-k26-tests/**'
+      - '.github/workflows/p41-k26-quote-notes.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p41-k26-quote-notes-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  quotation-pdf:
+    name: Synthetic quotation producer, outward notes, PDF and layout (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - name: Preserve repository byte endings on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Check exact change scope, producer projection and syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/k26-${{ runner.os }}
+          python .p41-k26-tests/source_guard.py > artifacts/k26-${{ runner.os }}/SOURCE_SCOPE.json
+          node --check assets/js/billing-print.js
+          node --check assets/js/p41-quote-pagination.js
+          node .p41-k26-tests/test_public_notes_projection.cjs --root . > artifacts/k26-${{ runner.os }}/PROJECTION.log
+          python -m py_compile .p41-k26-tests/test_quote_notes_pdf.py .p41-k26-tests/source_guard.py
+          python -m pip install playwright==1.57.0 pypdf==5.9.0
+      - name: Prepare Linux Chrome, Chinese fonts and PDF text reader
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v google-chrome || command -v google-chrome-stable
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-noto-cjk poppler-utils
+      - name: Prepare a fresh Windows test Chromium
+        if: runner.os == 'Windows'
+        shell: bash
+        run: python -m playwright install chromium
+      - name: Exercise real producer and isolated A4 PDFs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .p41-k26-tests/test_quote_notes_pdf.py --root . --output artifacts/k26-${{ runner.os }} 2>&1 | tee artifacts/k26-${{ runner.os }}/BROWSER.log
+      - name: Retain actual PDFs, page flow, screenshots and diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p41-k26-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/k26-${{ runner.os }}/
+          if-no-files-found: warn
+          retention-days: 14
