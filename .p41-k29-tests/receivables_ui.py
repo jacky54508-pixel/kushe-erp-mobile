@@ -78,7 +78,10 @@ def run_case(browser, server, report, version, device):
             report.check(name + ': original version-history action still opens both saved versions', page.locator('.bg-history-entry').count() == 2 and '2026/11/25' in page.locator('.bg-history-list').inner_text() and '2026/11/26' in page.locator('.bg-history-list').inner_text())
             page.screenshot(path=str(report.qa / (name + '-history.png')), full_page=False)
             page.locator('[data-bg-history-close]').click()
-        original = originals.first
+        # The real renderer sorts source rows by date; B can precede A.
+        # Select the source whose identity and 60,000 balance we verify below.
+        source_attribute = 'data-mobile-receivable' if device == 'mobile' else 'data-expand-receivable'
+        original = details.locator(original_selector + '[' + source_attribute + '="' + IDS[0] + '-AR"]')
         original.scroll_into_view_if_needed()
         page.screenshot(path=str(report.qa / (name + '-original.png')), full_page=False)
         if device == 'mobile':
@@ -91,7 +94,8 @@ def run_case(browser, server, report, version, device):
             collect = menu.locator('[data-receive]')
         collect.click()
         page.locator('#receiptEditorForm').wait_for()
-        report.check(name + ': preserved receipt action opens its actual original source', 'SYN-K29-NO-A' in page.locator('.receipt-card').inner_text() and '$60,000' in page.locator('.receipt-card').inner_text())
+        receipt_text = page.locator('.receipt-card').inner_text()
+        report.check(name + ': preserved receipt action opens its actual original source', 'SYN-K29-NO-A' in receipt_text and '$60,000' in receipt_text, {'sourceId': IDS[0] + '-AR', 'receiptText': receipt_text})
         page.locator('.receipt-card [data-close-detail]').first.click()
         after = {'raw': page.evaluate('()=>__k29Raw()'), 'state': page.evaluate('()=>KuSheERPStore.getState()')}
         report.check(name + ': render, expand, history and receipt-open change no stored business data', before == after)

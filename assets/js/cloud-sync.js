@@ -469,8 +469,12 @@
   function isBusinessEditorEvent(event) {
     const shell = document.getElementById('appShell');
     const target = event?.target;
-    return Boolean(shell && !shell.hidden && observedPrincipal()
-      && target instanceof Node && shell.contains(target));
+    if (!shell || shell.hidden || !observedPrincipal() || !(target instanceof Node)) return false;
+    // Receipt, payable, material, payroll and cheque editors are mounted on
+    // document.body. They are business drafts too; auth/cloud dialogs are not.
+    if (target.closest?.('#cloudSyncModal,.auth-view,.auth-modal-layer')) return false;
+    const overlay=target.closest?.('.erp-detail-overlay,.cheque-overlay');
+    return Boolean(shell.contains(target) || overlay?.isConnected && !overlay.hidden);
   }
   function noteEditorEvent(event) {
     if (!isBusinessEditorEvent(event)) return;
@@ -568,9 +572,9 @@
     window.setTimeout(async () => {
       pending.scheduled=false;
       if (editorPendingCommit !== pending) return;
-      const {detail,generation,principal}=pending;
+      const {detail,generation,principal,lifecycle}=pending;
       if (syncOrigin === 'REMOTE_APPLY' || observedPrincipal() !== principal
-        || generation !== editorGeneration) { discardEditorCommit(pending); return; }
+        || lifecycle !== syncGeneration || generation !== editorGeneration) { discardEditorCommit(pending); return; }
       if (pending.verified && !editorSurfaceSafe()) return;
       pending.verifying=true;
       try {
@@ -578,7 +582,7 @@
         const verified=temporaryCommit ? await isTemporaryUserCloudCommit(detail) : await isTrustedUserDurableCommit(detail);
         if (editorPendingCommit !== pending) return;
         if (!verified || syncOrigin === 'REMOTE_APPLY'
-          || observedPrincipal() !== principal || generation !== editorGeneration) {
+          || observedPrincipal() !== principal || lifecycle !== syncGeneration || generation !== editorGeneration) {
           discardEditorCommit(pending); return;
         }
         pending.verified=true;
@@ -596,7 +600,7 @@
     discardEditorCommit();
     const detail={...event?.detail},generation=editorGeneration,principal=observedPrincipal();
     if (!principal) return;
-    const pending={detail,generation,principal,verified:false,scheduled:false,verifying:false};
+    const pending={detail,generation,principal,lifecycle:syncGeneration,verified:false,scheduled:false,verifying:false};
     editorPendingCommit=pending;
     // Store records the completed transaction after synchronous notifications.
     queueEditorCommit(pending);
@@ -2317,6 +2321,7 @@
   function stopAutoBackup() {
     stopCloudEvents();
     syncGeneration += 1;
+    discardEditorCommit();
     // Stopping a session does not forget its verified, principal-bound baseline.
     principalId = null;
     requestControllers.forEach(controller => controller.abort());

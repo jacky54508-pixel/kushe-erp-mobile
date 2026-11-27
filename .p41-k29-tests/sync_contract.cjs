@@ -38,6 +38,8 @@ async function run(operationType,variant='valid'){
   const target=new SyntheticNode(),shell={hidden:false,inert:false,contains:node=>node===target};
   const form={id:'SYN-K29-FORM',hidden:false,closest:()=>null,getClientRects:()=>[{}]};
   const detailOverlay={id:'SYN-K29-CHEQUE-DETAIL',hidden:false,isConnected:true,closest:()=>null,getClientRects:()=>[{}],querySelector:()=>detailHasInput?form:null};
+  const outsideTarget=new SyntheticNode();outsideTarget.closest=selector=>selector==='.erp-detail-overlay,.cheque-overlay'?detailOverlay:null;
+  const excludedTarget=new SyntheticNode();excludedTarget.closest=selector=>selector==='#cloudSyncModal,.auth-view,.auth-modal-layer'?detailOverlay:selector==='.erp-detail-overlay,.cheque-overlay'?detailOverlay:null;
   const closeButton={closest:selector=>selector==='.cheque-overlay'?detailOverlay:closeButton};
   const otherButton={closest:selector=>selector==='[data-module],[data-route],button,a'?otherButton:null};
   class SyntheticObserver{constructor(fn){this.fn=fn;this.active=false;observers.push(this)}observe(){this.active=true}disconnect(){this.active=false}}
@@ -56,6 +58,8 @@ async function run(operationType,variant='valid'){
     if(variant==='principal-during-verification')principal='SYN-K29-OTHER';
     if(variant==='new-input-during-verification')dispatch('document','input',{type:'input',target});
     if(variant==='new-operation-during-verification')lastResult={...lastResult,operationId:'SYN-K29-NEWER'};
+    if(variant==='session-reset-during-verification'||variant==='session-reset-during-recheck'&&reads===2)context.KusheCloudSync.stopAutoBackup();
+    if(variant==='outside-overlay-input-during-verification')dispatch('document','input',{type:'input',target:outsideTarget});
     if(variant==='readiness-throws')throw Error('SYN-K29 read blocked');
     return ready;
   }};
@@ -75,7 +79,7 @@ async function run(operationType,variant='valid'){
   if(variant==='durable-operation-mismatch')ready.revision.operationId='SYN-K29-OTHER';
   if(variant==='durable-audit-mismatch')ready.data.audit[0].action='SYN-K29-OTHER';
   if(variant==='durable-not-ready')ready.safe=false;
-  const delayed=['delayed-form-close','temporary-delayed-close','new-input-after-verified','principal-after-verified','durable-revision-after-verified','new-operation-after-verified','failed-after-verified','invalid-delayed-close','editable-dialog-close','readonly-detail-close','readonly-detail-navigation','focusout-after-verified'].includes(variant);
+  const delayed=['delayed-form-close','temporary-delayed-close','new-input-after-verified','principal-after-verified','durable-revision-after-verified','new-operation-after-verified','failed-after-verified','invalid-delayed-close','editable-dialog-close','readonly-detail-close','readonly-detail-navigation','focusout-after-verified','session-reset-after-verified','session-reset-during-recheck','outside-overlay-input-after-verified','excluded-modal-input-after-verified'].includes(variant);
   if(variant==='form-remains-open'||delayed)openForm=true;
   if(['readonly-detail-close','readonly-detail-navigation','editable-dialog-close'].includes(variant)){openForm=false;openDetail=true;detailHasInput=variant==='editable-dialog-close';}
   if(variant==='focusout-after-verified'){openForm=false;focused=true;}
@@ -89,6 +93,7 @@ async function run(operationType,variant='valid'){
   dispatch('window','kushe:data-updated',{detail});
   if(variant==='principal-before-verification')principal='SYN-K29-OTHER';
   if(variant==='new-input-before-verification')dispatch('document','input',{type:'input',target});
+  if(variant==='session-reset-before-verification')context.KusheCloudSync.stopAutoBackup();
   while(timers.length)await timers.shift()();
   const afterFirstCallback=context.KusheCloudSync.editorReadiness(),firstReads=reads;
   if(delayed){
@@ -102,6 +107,9 @@ async function run(operationType,variant='valid'){
     if(variant==='durable-revision-after-verified')ready.revision.id='SYN-K29-STALE';
     if(variant==='new-operation-after-verified')lastResult={...lastResult,operationId:'SYN-K29-NEWER'};
     if(variant==='failed-after-verified')lastResult={...lastResult,status:'ROLLED_BACK'};
+    if(variant==='session-reset-after-verified')context.KusheCloudSync.stopAutoBackup();
+    if(variant==='outside-overlay-input-after-verified')dispatch('document','input',{type:'input',target:outsideTarget});
+    if(variant==='excluded-modal-input-after-verified')dispatch('document','input',{type:'input',target:excludedTarget});
     if(['readonly-detail-close','editable-dialog-close'].includes(variant))dispatch('document','click',{target:closeButton});
     if(variant==='readonly-detail-navigation')dispatch('document','click',{target:otherButton});
     openForm=false;openDetail=false;focused=false;detailOverlay.isConnected=false;
@@ -135,14 +143,14 @@ async function run(operationType,variant='valid'){
       check(name+': remains outside normal writer whitelist',!actual.has(name));
       const result=await run(name);check(name+': cannot release editor',!result.after.safe,result);report.cases.push(result);
     }
-    for(const variant of ['valid','principal-before-verification','principal-during-verification','no-event-principal']){
+    for(const variant of ['valid','principal-before-verification','principal-during-verification','no-event-principal','session-reset-before-verification','session-reset-during-verification','outside-overlay-input-during-verification']){
       const result=await run('saveQuotation',variant),expected=variant==='valid'||mode==='baseline';
       check('existing writer/'+variant+': baseline race is reproduced or candidate refuses stale principal',result.after.safe===expected,result);report.cases.push(result);
     }
     const temporary=await run('saveQuotation','temporary-valid');check('temporary verified cloud commit retains previous behavior',temporary.after.safe,temporary);report.cases.push(temporary);
     for(const name of ['saveQuotation','saveDailyUnbilledItems']){
-      for(const variant of ['delayed-form-close','readonly-detail-close','focusout-after-verified','new-input-after-verified','principal-after-verified','durable-revision-after-verified','new-operation-after-verified','failed-after-verified','invalid-delayed-close','editable-dialog-close','readonly-detail-navigation']){
-        const result=await run(name,variant),expected=mode==='candidate'&&['delayed-form-close','readonly-detail-close','focusout-after-verified'].includes(variant);
+      for(const variant of ['delayed-form-close','readonly-detail-close','focusout-after-verified','new-input-after-verified','principal-after-verified','durable-revision-after-verified','new-operation-after-verified','failed-after-verified','invalid-delayed-close','editable-dialog-close','readonly-detail-navigation','session-reset-after-verified','session-reset-during-recheck','outside-overlay-input-after-verified','excluded-modal-input-after-verified']){
+        const result=await run(name,variant),expected=mode==='candidate'&&['delayed-form-close','readonly-detail-close','focusout-after-verified','excluded-modal-input-after-verified'].includes(variant);
         check(name+'/'+variant+': a delayed close still needs original principal generation and fresh durable evidence',result.after.safe===expected,result);
         check(name+'/'+variant+': terminal decision releases its observer',result.activeObservers===0,result);report.cases.push(result);
       }

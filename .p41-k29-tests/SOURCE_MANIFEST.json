@@ -14,16 +14,16 @@
       "sha256": "dadac589d2fe4a4a73b2c285f9fb1b2e0f5176c7f20903ab3cee26eb83ba7576"
     },
     ".p41-k29-tests/SYNC_README.md": {
-      "bytes": 9397,
-      "sha256": "d55e43c580899bf73731e77093b4392f64562a9f26798a154196306fe28563c8"
+      "bytes": 11390,
+      "sha256": "b4e9dcf5ec6423a91341244378a73c3c2d37182d60912c3562678997a4cd3a45"
     },
     ".p41-k29-tests/commission_README.md": {
       "bytes": 3242,
       "sha256": "dcf73dd6a820967e9e572078e0c38ea1a639330bba37f936c819dc37bb7b991f"
     },
     ".p41-k29-tests/commission_browser.py": {
-      "bytes": 26658,
-      "sha256": "510dd5ce0a7b0d6c5eb86b1d815deeb9af2ec913c4ad1bebfd9030b586eda766"
+      "bytes": 26915,
+      "sha256": "5f400a175660c3ce7b09bf3755766d1bdc07e1202924ab9be16d99b7851b747a"
     },
     ".p41-k29-tests/commission_fixture.py": {
       "bytes": 7330,
@@ -38,16 +38,16 @@
       "sha256": "0d1893f6d3e06867ec319a1ddbeadbbb00dec3241ee1aba8cb14591321922675"
     },
     ".p41-k29-tests/pdf_support.py": {
-      "bytes": 5673,
-      "sha256": "391ebe09614b4d62b3b99e487f806401e67e727b3f7ae959d48912a8f6f66aa5"
+      "bytes": 5998,
+      "sha256": "6693ceb92812867fb39ce73e413d3e680210339aa66026c17b0cadf1e8656e8f"
     },
     ".p41-k29-tests/receivables_fixture.py": {
       "bytes": 5763,
       "sha256": "c5b704c9e23cad0778e1a2fd1564e062ab66d2fcb4369f3f6e6285dd33075cb3"
     },
     ".p41-k29-tests/receivables_ui.py": {
-      "bytes": 11728,
-      "sha256": "102fa3a97edb192202ae5edc620a6bc0c5f21ffe49d5ddd1cfd96093e41f1d07"
+      "bytes": 12118,
+      "sha256": "9bb817472f3ab57f9210ec8719eaa9eaddaa8b855b722de346a958752272821f"
     },
     ".p41-k29-tests/run_acceptance.py": {
       "bytes": 6913,
@@ -58,12 +58,12 @@
       "sha256": "32d1f09c7b808e2059f410be1df4349847a8a6e3cf759c31650a92166572bf73"
     },
     ".p41-k29-tests/sync_browser.py": {
-      "bytes": 17814,
-      "sha256": "0a163ca71efa23ab1fc1ba3961fbaf1faa03a11a7ba4aba557fb932d17545e39"
+      "bytes": 23808,
+      "sha256": "327f6610def1ddd94b9a8e000d2f92d4eb4cad69c352b871181d47ab0e8291d0"
     },
     ".p41-k29-tests/sync_contract.cjs": {
-      "bytes": 15136,
-      "sha256": "212c7aaeea527c7495c4fa0b600d9d5bc06a44ff1374c7de4f2f3d04845a14d3"
+      "bytes": 16627,
+      "sha256": "02c1b6fc599d21930494bfc436a6b3b9d415e151f4696115e8d66e266a2faf4c"
     },
     "assets/css/receivables-scoped.css": {
       "bytes": 14541,
@@ -86,8 +86,8 @@
       "sha256": "72d9166b3ca47a5bb3028b6116b534bb6db1408b85df8b6b95a77492b779c5b8"
     },
     "assets/js/cloud-sync.js": {
-      "bytes": 130668,
-      "sha256": "8fc5c47ff451ecb976dd8c0d5904eebd3f0fc9cb6813c45c1a497a80f9febc7b"
+      "bytes": 131175,
+      "sha256": "a3dd8f248e1d249ad4bc56782cb7bdc309495982a15c74a31291cba6bec0c860"
     },
     "assets/js/commissions.js": {
       "bytes": 188591,

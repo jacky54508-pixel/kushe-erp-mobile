@@ -112,13 +112,17 @@ def browser_options(explicit=None):
 
 
 def synthetic_assets():
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, PngImagePlugin
     image = Image.new('RGB', (180, 90), 'white')
     draw = ImageDraw.Draw(image)
     for i in range(25):
         draw.rectangle((i * 3, i, 170 - i, 80 - i), outline=(160 + i, 20 + i, 40))
+    metadata = PngImagePlugin.PngInfo()
+    # An uncompressed, fixed tEXt chunk makes the valid synthetic image larger
+    # than the production threshold on every platform, independent of zlib.
+    metadata.add_text('K29-Synthetic-Only', 'SYN-K29-OWNED-LOGO-SEAL-FIXTURE-' * 64, zip=False)
     raw = io.BytesIO()
-    image.save(raw, format='PNG')
+    image.save(raw, format='PNG', pnginfo=metadata)
     data = 'data:image/png;base64,' + base64.b64encode(raw.getvalue()).decode()
     assert len(data) > 1024
     return ("const companyLogoAsset='" + data + "';\nconst companySealAsset='" + data + "';\n").encode()

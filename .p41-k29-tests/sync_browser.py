@@ -26,17 +26,27 @@ PROTECTED = ('salaryPayments', 'banks', 'bankTransactions', 'billings', 'receiva
 UI_RESOURCES = ('assets/js/commissions.js', 'assets/css/app.css', 'assets/css/commissions-scoped.css')
 
 
-def prepare_values(page, report, name, operation):
+def prepare_values(page, report, name, operation, partially_billed=False):
     arguments = None
     if operation == 'saveDailyUnbilledItems':
         values = draft()
         values['date'] = '2026-05-19'
+        if partially_billed:
+            values['lines'].append({**values['lines'][0], 'house': 'SYN-K29-UNBILLED-HOUSE', 'item': 'SYN-K29-UNBILLED-WORK', 'itemName': 'SYN-K29-UNBILLED-WORK', 'inputPrice': 1200, 'unitPrice': 1200})
         saved = call(page, 'saveDailyBatch', values, '', options(page, values))
         report.check(name + ': initial unbilled synthetic work is actually committed', saved['ok'], saved)
+        if partially_billed:
+            log = next(row for row in public(page)['dailyLogs'] if row.get('batchId') == saved['result'])
+            item = log['items'][0]
+            ref = {'sourceType': 'daily-log', 'sourceGroupKey': log['groupId'], 'workItemId': item['workItemId']}
+            billing = call(page, 'createBilling', {'date': values['date'], 'project': NEW_PROJECT, 'customer': CUSTOMER, 'taxMode': '未稅', 'invoiceStatus': 'invoice_pending', 'retentionMode': 'none', 'sourceItemRefs': [ref], 'sourceContractRefs': [], 'lines': [{'house': item['house'], 'item': item['item'], 'unit': item['unit'], 'qty': item['qty'], 'price': item['inputPrice'], 'sourceRefs': [ref]}]})
+            report.check(name + ': actual billing writer bills only the first synthetic work item', billing['ok'], billing)
         preview = call(page, 'dailyUnbilledEditPreview', saved['result'])
         report.check(name + ': actual unbilled preview is eligible', preview['ok'] and preview['result']['safe'], preview)
         group = preview['result']['groups'][0]
         row = next(r for r in group['rows'] if r['editable'])
+        if partially_billed:
+            report.check(name + ': real UI fixture contains both billed and editable sources', sum(r['editable'] for r in group['rows']) == 1 and sum(bool(r['item'].get('billingId')) for r in group['rows']) == 1)
         arguments = [saved['result'], {'expectedFingerprint': preview['result']['fingerprint'], 'changes': [{'groupId': group['groupId'], 'workItemId': row['workItemId'], 'qty': 2}], 'additions': []}]
     else:
         arguments = [{'customer': CUSTOMER, 'project': NEW_PROJECT, 'date': '2026-05-19', 'pricingMode': 'actual', 'taxMode': '未稅', 'status': '草稿', 'publicNote': 'SYN-K29 saved outward note', 'lines': [{'house': 'SYN-K29-HOUSE', 'item': 'SYN-K29-WORK', 'unit': '式', 'qty': 1, 'price': 1100, 'pricingType': 'actual', 'priceSource': 'manual'}]}, '', {}]
@@ -47,7 +57,7 @@ def mount_cloud(page, server, report, name):
     page.evaluate('''() => {
       const shell=document.createElement('main');shell.id='appShell';shell.hidden=false;shell.inert=false;
       document.body.append(shell);
-      window.__k29Events=[];window.__k29ZeroScheduled=0;window.__k29ZeroCompleted=0;
+      window.__k29Events=[];window.__k29EditorTrace=[];window.__k29ZeroScheduled=0;window.__k29ZeroCompleted=0;
       const timer=window.setTimeout.bind(window);
       window.setTimeout=(fn,delay,...args)=>{
         if(delay===0&&typeof fn==='function'){
@@ -56,7 +66,9 @@ def mount_cloud(page, server, report, name):
         }
         return timer(fn,delay,...args);
       };
-      window.addEventListener('kushe:data-updated',event=>window.__k29Events.push({...event.detail}));
+      const trace=event=>__k29EditorTrace.push({type:event.type,target:event.target?.id||event.target?.tagName||'',insideShell:shell.contains(event.target),generationBeforeHandler:window.KusheCloudSync?.editorReadiness().generation??null});
+      for(const type of ['beforeinput','input','change','submit','focusout'])document.addEventListener(type,trace,true);
+      window.addEventListener('kushe:data-updated',event=>{window.__k29Events.push({...event.detail});__k29EditorTrace.push({type:'durable-event',operationId:event.detail?.operationId,generation:KusheCloudSync.editorReadiness().generation})});
     }''')
     page.add_script_tag(url=server.origin + '/' + CLOUD)
     report.check(name + ': new editor starts ready', page.evaluate('()=>KusheCloudSync.editorReadiness().safe'))
@@ -73,10 +85,29 @@ def prepare(page, server, report, name, operation):
     return arguments
 
 
+def diagnostics(page):
+    return page.evaluate('''async()=>{
+      let readiness;
+      try{const ready=await KuSheERPStore.remoteApplyReadiness();readiness={safe:ready.safe,code:ready.code,revision:ready.revision,auditAction:ready.data?.audit?.[0]?.action}}
+      catch(error){readiness={error:String(error.message||error),code:error.code||''}}
+      return {editor:KusheCloudSync.editorReadiness(),durableReadiness:readiness,transaction:KuSheERPStore.getLastStoreTransactionResult(),events:__k29Events,editorTrace:__k29EditorTrace,activeElement:{id:document.activeElement?.id,tag:document.activeElement?.tagName},surfaces:[...document.querySelectorAll('form,[role="dialog"],.erp-detail-overlay,.commission-drawer-layer')].map(node=>({id:node.id,tag:node.tagName,className:node.className,hidden:node.hidden,rects:node.getClientRects().length})),bodyText:document.body.innerText.slice(0,18000)};
+    }''')
+
+
+def save_failure(report,name,page):
+    if page is None:return
+    try:
+        report.save(name+'-failure.json',{'raw':raw(page),'diagnostics':diagnostics(page)})
+        page.screenshot(path=str(report.output/(name+'-failure.png')),full_page=True)
+    except Exception as error:
+        report.save(name+'-diagnostic-error.json',{'error':str(error)})
+
+
 def scenario(browser, server, report, operation, variant, mode):
     name = operation + '-' + variant
     print('RUN', name, flush=True)
     context = browser.new_context(service_workers='block')
+    page = None
     try:
         page, _ = boot(context, server, report, name)
         arguments = prepare(page, server, report, name, operation)
@@ -87,9 +118,13 @@ def scenario(browser, server, report, operation, variant, mode):
             else:
                 arguments[1]['expectedFingerprint'] = 'SYN-K29-stale-preview'
         outcome = page.evaluate('''async ({operation,args,variant})=>{
-          const result=await window.__k28Call({name:operation,args});
+          // A real submit button blurs the edited input before its writer runs.
+          // Preserve that event order; a post-commit change must invalidate it.
           document.activeElement?.blur?.();
-          const delayed=['delayed-form-close','late-new-input','late-principal','late-invalid-durable'].includes(variant);
+          __k29EditorTrace.push({type:'writer-call',operation,generation:KusheCloudSync.editorReadiness().generation});
+          const result=await window.__k28Call({name:operation,args});
+          __k29EditorTrace.push({type:'writer-resolved',operation,generation:KusheCloudSync.editorReadiness().generation});
+          const delayed=['delayed-form-close','late-new-input','late-change','late-principal','late-invalid-durable','late-stop-sync','late-outside-overlay-input'].includes(variant);
           if(variant!=='open-form'&&!delayed)document.querySelector('#k29Form').remove();
           if(['readonly-detail-close','editable-detail-close'].includes(variant)){
             const overlay=document.createElement('div');overlay.className='erp-detail-overlay cheque-overlay';overlay.id='k29ChequeDetail';
@@ -112,11 +147,16 @@ def scenario(browser, server, report, operation, variant, mode):
             page.wait_for_function('()=>__k29ZeroScheduled>0&&__k29ZeroCompleted===__k29ZeroScheduled')
         first_editor = page.evaluate('()=>KusheCloudSync.editorReadiness()')
         first_zero = page.evaluate('()=>({scheduled:__k29ZeroScheduled,completed:__k29ZeroCompleted})')
-        delayed = variant in ('delayed-form-close', 'late-new-input', 'late-principal', 'late-invalid-durable')
+        report.save(name+'-first-callback.json',{'before':before,'writer':outcome,'diagnostics':diagnostics(page),'callbacks':first_zero})
+        delayed = variant in ('delayed-form-close', 'late-new-input', 'late-change', 'late-principal', 'late-invalid-durable', 'late-stop-sync', 'late-outside-overlay-input')
         detail = variant in ('readonly-detail-close', 'editable-detail-close')
         if delayed or detail:
             report.check(name + ': verified commit keeps an open form or detail dirty', not first_editor['safe'], first_editor)
             if delayed:
+                if variant == 'late-outside-overlay-input':
+                    page.evaluate('''()=>{const overlay=document.createElement('div');overlay.id='k29OutsideEditor';overlay.className='erp-detail-overlay cheque-overlay';overlay.innerHTML='<section role="dialog"><form><input id="k29OutsideInput"></form></section>';document.body.append(overlay)}''')
+                    report.check(name + ': body-mounted business input is outside the app shell', page.evaluate('()=>!document.querySelector("#appShell").contains(document.querySelector("#k29OutsideInput"))'))
+                    page.locator('#k29OutsideInput').fill('SYN-K29 later body-overlay draft')
                 page.evaluate('''variant=>new Promise(resolve=>setTimeout(()=>{
                   if(variant==='late-new-input'){
                     const input=document.querySelector('#k29Input');input.value='SYN-K29 newer unsaved content';input.dispatchEvent(new Event('input',{bubbles:true}));
@@ -124,12 +164,14 @@ def scenario(browser, server, report, operation, variant, mode):
                   if(variant==='late-principal'){
                     __k28Auth.principal='SYN-K29-OTHER-OWNER';__k28Auth.contextUser='SYN-K29-OTHER-OWNER';
                   }
+                  if(variant==='late-change')document.querySelector('#k29Input').dispatchEvent(new Event('change',{bubbles:true}));
+                  if(variant==='late-stop-sync')KusheCloudSync.stopAutoBackup();
                   if(variant==='late-invalid-durable'){
                     // Deliberate fault in this owned synthetic profile only.
                     // Actual Store readiness must refuse the new recovery gate.
                     localStorage.setItem('KuSheERP25_STORE_RECOVERY_REQUIRED',JSON.stringify({schema:'SYN-K29-invalid-durable-evidence'}));
                   }
-                  document.querySelector('#k29Form').remove();resolve();
+                  document.querySelector('#k29OutsideEditor')?.remove();document.querySelector('#k29Form').remove();resolve();
                 },180))''', variant)
             else:
                 page.locator('#k29ChequeDetail [data-cheque-close]').click()
@@ -140,6 +182,7 @@ def scenario(browser, server, report, operation, variant, mode):
         after = raw(page)
         transaction = page.evaluate('()=>KuSheERPStore.getLastStoreTransactionResult()')
         events = page.evaluate('()=>__k29Events')
+        report.save(name + '.json', {'mode': mode, 'operation': operation, 'variant': variant, 'before': before, 'writer': outcome, 'transaction': transaction, 'events': events, 'firstEditor': first_editor, 'firstCallbacks': first_zero, 'editor': editor, 'after': after, 'diagnostics':diagnostics(page)})
         if variant == 'failed-writer':
             report.check(name + ': actual writer rejects and storage stays exact', not outcome['ok'] and after == before, outcome)
             report.check(name + ': failed writer emits no data commit event', events == [], events)
@@ -160,8 +203,10 @@ def scenario(browser, server, report, operation, variant, mode):
         report.check(name + ': inspecting editor readiness has no storage effects', raw(page) == after)
         if mode == 'candidate' and variant in ('delayed-form-close', 'readonly-detail-close', 'late-invalid-durable'):
             report.check(name + ': the later close causes a second actual verification callback', page.evaluate('()=>__k29ZeroCompleted') > first_zero['completed'])
-        report.save(name + '.json', {'mode': mode, 'operation': operation, 'variant': variant, 'before': before, 'writer': outcome, 'transaction': transaction, 'events': events, 'firstEditor': first_editor, 'firstCallbacks': first_zero, 'editor': editor, 'after': after})
         report.case(name)
+    except Exception:
+        save_failure(report,name,page)
+        raise
     finally:
         context.close()
 
@@ -170,11 +215,15 @@ def actual_unbilled_ui(browser, server, report, mode):
     name='actual-unbilled-ui-delayed-close'
     print('RUN',name,flush=True)
     context=browser.new_context(viewport={'width':1440,'height':1000},service_workers='block')
+    page=None
     try:
         page,_=boot(context,server,report,name)
-        arguments=prepare_values(page,report,name,'saveDailyUnbilledItems')
+        arguments=prepare_values(page,report,name,'saveDailyUnbilledItems',partially_billed=True)
+        unbilled_id=arguments[1]['changes'][0]['workItemId']
         mount_cloud(page,server,report,name)
         before=raw(page)
+        before_log=next(row for row in before['idb']['main']['dailyLogs'] if row.get('batchId')==arguments[0])
+        billed_before={item['workItemId']:item for item in before_log['items'] if item.get('billingId')}
         page.evaluate('''()=>{
           document.body.dataset.route='commissions';
           const section=document.createElement('section');section.id='commissionsView';section.className='view';
@@ -187,6 +236,8 @@ def actual_unbilled_ui(browser, server, report, mode):
         page.evaluate('()=>KusheCommissions.activate()')
         page.locator('#commissionMonthFilter').fill('2026-05')
         page.locator('#commissionMonthFilter').dispatch_event('change')
+        page.locator('[data-workforce-tab="daily"]').click()
+        report.save(name+'-before-open.json',{'before':before,'batchId':arguments[0],'unbilledWorkItemId':unbilled_id,'billedItems':billed_before,'diagnostics':diagnostics(page)})
         page.locator('[data-daily-unbilled="'+arguments[0]+'"]:visible').first.click()
         page.locator('#dailyWorkForm [data-unbilled-qty]').first.fill('2')
         page.locator('#dailyWorkForm button[type=submit]').click()
@@ -200,12 +251,18 @@ def actual_unbilled_ui(browser, server, report, mode):
         editor=page.evaluate('()=>KusheCloudSync.editorReadiness()');events=page.evaluate('()=>__k29Events')
         transaction=page.evaluate('()=>KuSheERPStore.getLastStoreTransactionResult()')
         changed=[r for r in a['dailyLogs'] if r.get('batchId')==arguments[0]]
-        report.check(name+': real UI commits one requested unbilled edit',a['meta']['businessSnapshotRevision']['sequence']==b['meta']['businessSnapshotRevision']['sequence']+1 and len(a['dailyLogs'])==len(b['dailyLogs']) and len(changed)==1 and changed[0]['items'][0]['qty']==2)
+        edited=[item for log in changed for item in log['items'] if item['workItemId']==unbilled_id]
+        after_items={item['workItemId']:item for log in changed for item in log['items']}
+        report.save(name+'.json',{'mode':mode,'before':before,'after':after,'unbilledWorkItemId':unbilled_id,'billedItemsBefore':billed_before,'events':events,'transaction':transaction,'editor':editor,'diagnostics':diagnostics(page)})
+        report.check(name+': real UI commits exactly the requested unbilled item ID',a['meta']['businessSnapshotRevision']['sequence']==b['meta']['businessSnapshotRevision']['sequence']+1 and len(a['dailyLogs'])==len(b['dailyLogs']) and len(changed)==1 and len(edited)==1 and edited[0]['qty']==2)
+        report.check(name+': the separately billed item stays exact',bool(billed_before) and all(after_items.get(key)==value for key,value in billed_before.items()))
         report.check(name+': actual Store event identifies the successful UI writer',transaction['operationType']=='saveDailyUnbilledItems' and transaction['status'] in ('COMMITTED','COMMITTED_WITH_NOTIFICATION_WARNING') and len(events)==1 and events[0]['operationId']==transaction['operationId'])
         report.check(name+': real UI and source preserve paid records and durable mirrors',public(page)==a and json.loads(after['local'][EMERGENCY])==a and after['idb'][JOURNAL]['phase']=='COMMIT_VERIFIED' and all(a.get(key)==b.get(key) for key in PROTECTED))
         report.check(name+': real UI closing animation releases only verified candidate',editor['safe']==(mode=='candidate'),editor)
-        report.save(name+'.json',{'mode':mode,'before':before,'after':after,'events':events,'transaction':transaction,'editor':editor})
         report.case(name)
+    except Exception:
+        save_failure(report,name,page)
+        raise
     finally:context.close()
 
 
@@ -232,7 +289,7 @@ def main():
             report.data['browserVersion'] = browser.version
             try:
                 for operation in ('saveQuotationBundle', 'saveDailyUnbilledItems'):
-                    for variant in ('closed-form', 'open-form', 'failed-writer', 'changed-principal', 'new-input', 'delayed-form-close', 'late-new-input', 'late-principal', 'late-invalid-durable', 'readonly-detail-close', 'editable-detail-close'):
+                    for variant in ('closed-form', 'open-form', 'failed-writer', 'changed-principal', 'new-input', 'delayed-form-close', 'late-new-input', 'late-change', 'late-principal', 'late-invalid-durable', 'late-stop-sync', 'late-outside-overlay-input', 'readonly-detail-close', 'editable-detail-close'):
                         scenario(browser, server, report, operation, variant, args.mode)
                 actual_unbilled_ui(browser,server,report,args.mode)
             finally:

@@ -55,7 +55,11 @@ def fields(page):
 
 
 def open_existing(page):
-    page.locator('[data-edit="'+COMMISSION+'"]').click();page.locator('#commissionForm').wait_for(state='visible')
+    # Desktop and mobile render separate buttons for the same record. CSS
+    # chooses the active presentation at this viewport; keep strict clicking
+    # so a missing or duplicate visible control still fails the real UI test.
+    page.locator('#commissionsApp [data-edit="'+COMMISSION+'"]:visible').click()
+    page.locator('#commissionForm').wait_for(state='visible')
 
 
 def open_new(page,kind='retention'):

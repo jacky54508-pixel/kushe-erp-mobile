@@ -40,6 +40,19 @@ It only dismisses an already read-only detail; actual removal and all commit
 checks are still required. Closing an editable cheque surface invalidates the
 candidate instead.
 
+Pending commits also bind the existing `syncGeneration` lifecycle epoch. The
+epoch is checked before and after each awaited verification, and
+`stopAutoBackup()` immediately discards the pending commit and observer. A
+stop/reset cannot later revive the old commit for the same principal.
+
+Business input includes the existing connected `.erp-detail-overlay` and
+`.cheque-overlay` surfaces mounted outside `#appShell` by receipt, payable,
+material, payroll and cheque UIs. Such input invalidates the pending commit and
+marks a new editing generation just like input inside the shell. The shell must
+still be visible and the principal nonempty. `#cloudSyncModal`, `.auth-view` and
+`.auth-modal-layer` are explicitly excluded, even if nested markup also carries
+a business-overlay class; this is not a blanket listener for all body inputs.
+
 ## Reviewed additions
 
 Each name is present in `STORE_WRITER_NAMES` in `assets/js/erp-store.js` and is
@@ -99,8 +112,11 @@ revision, changed operation, failed result, an initially invalid notification,
 editable-dialog dismissal or other navigation. Unknown writers cannot become
 trusted by closing a form. Fifty synthetic mutations while an editor is open
 must cause no additional durable reads. Finished/rejected pending commits must
-disconnect their observer. Each mode currently contains 292 cases and 983
-assertions; these are event-contract results, not browser acceptance.
+disconnect their observer. The suite also checks stop/reset
+before, during and after verification, reset during the later recheck,
+body-mounted overlay input during/after verification, and explicit auth/cloud
+input exclusion. Each mode now has 303 cases and 1,040 assertions. These are
+event-contract results, not browser acceptance.
 
 The baseline success status means the omissions/race were reproduced; it never
 means the original implementation was fixed.
@@ -123,18 +139,32 @@ It runs actual `saveQuotationBundle` and `saveDailyUnbilledItems` transactions,
 then lets the actual CloudSync listener process their real commit events. For
 each writer it checks immediate and 180 ms delayed closure, a still-open form,
 a rejected writer, account changes and new input before the initial callback
-and after its first successful verification. A recovery marker is deliberately
+and after its first successful verification. A post-commit `change` event is
+also rejected. Stop/reset after verification and actual browser typing in a
+body-mounted business overlay must keep the editor dirty after all surfaces
+close. A recovery marker is deliberately
 injected only into an owned synthetic profile to prove the later real Store
 readiness check refuses invalid durable evidence. Read-only cheque-shaped
 details may close later; an editable one must invalidate the pending commit.
-The two writers provide 22 cases. One additional case drives the real
+The two writers provide 28 cases. One additional case drives the real
 `KusheCommissions` unbilled-work drawer, review and submit handlers through its
-actual 180 ms closing path. Raw before/after
+actual 180 ms closing path. That UI only exposes its dedicated amendment entry
+when a batch is partly billed: setup therefore uses actual `saveDailyBatch`
+and `createBilling` writers to create two source items and bill only one.
+Assertions identify the edited item by its exact `workItemId` and require the
+separately billed item to stay exact; they do not assume an array position.
+Raw before/after
 snapshots, actual transaction results and events are retained. Old paid and
 banking collections must stay unchanged. Reader inspection must not write.
 
-The 22 general input surfaces are synthetic; the final case uses the real
+The 28 general input surfaces are synthetic; the final case uses the real
 unbilled-work UI. It does not claim the full quotation or cheque UI was driven.
+Controlled inputs lose focus before calling the writer, as on a real submit
+button click. Blurring only after a committed write would generate a new
+`change` and correctly invalidate that commit; the dedicated post-commit input
+and change negatives retain that gate. Event-order traces and real read-only
+Store readiness are saved before the release assertions, with raw/DOM failure
+diagnostics also retained on errors.
 Baseline mode uses the released main CloudSync with the same candidate Store,
 UI and fixtures to isolate the CloudSync behavior. Exact loopback resources are allowed;
 every other request is blocked and treated as a failure. Cloud auto-backup is
