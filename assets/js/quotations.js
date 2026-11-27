@@ -99,8 +99,64 @@
     $('#addQuoteLine',node).onclick=()=>{body.insertAdjacentHTML('beforeend',lineMarkup({unit:'',qty:null,price:0,pricingType:mode()==='lump_sum'?'lump_sum':'actual',priceSource:'manual'},mode()));bindLines();syncLumpSumFromLines()};form.elements.customer.onchange=()=>{form.elements.project.innerHTML=projectsFor(form.elements.customer.value,'');renderPublicNotePresets();$$('.quotation-line',body).forEach(applyPrice)};form.elements.project.onchange=()=>{const selected=state().projects.find(p=>String(p.id)===String(form.elements.project.value)),next=selected?.defaultPricingMode;if(!pricingModeTouched&&next&&form.elements.pricingMode.value!==next){form.elements.pricingMode.value=next;syncMode()}$$('.quotation-line',body).forEach(applyPrice)};form.elements.date.onchange=()=>$$('.quotation-line',body).forEach(applyPrice);form.elements.taxMode.onchange=calc;form.elements.lumpSumTotal.oninput=calc;$$('[name="pricingMode"]',form).forEach(input=>{input.onclick=()=>{pricingModeTouched=true};input.onchange=()=>syncMode(true)});
     form.onsubmit=async(e)=>{e.preventDefault();const button=$('button[type="submit"]',form);if(button.disabled)return;button.disabled=true;let saved;try{const values={...Object.fromEntries(new FormData(form)),lines:collect(),sourceType:row?.sourceType||'manual',importTemplateId:row?.importTemplateId||''},projectPrices=form.elements.saveProjectPrice?.value==='yes'?values.lines.filter(x=>x.pricingType==='actual'&&x.priceSource==='manual'&&x.item&&x.price>0).map(line=>({scope:'project',item:line.item,unit:line.unit,price:line.price})):[],result=await store.saveQuotationBundle(values,editingId,{projectPrices,priceSourcePrefix:'quotation'});saved=result.quotation}catch(error){button.disabled=false;window.KushePhase1.toast(error.message);return}try{closeLayer();render();const result=store.getLastStoreTransactionResult?.();if(result?.status==='COMMITTED_WITH_NOTIFICATION_WARNING')committedQuotationWarning();else window.KushePhase1.toast(`報價單 ${saved.number} 已儲存`)}catch(error){committedQuotationWarning(error)}};bindLines();refreshQuotationUnits();renderPublicNotePresets();syncMode();window.KusheTableScroll?.refresh();
   }
+  // K27 quotation export integrity start.
+  const quotationPrintVersion='p41-k27-quote-export-20261127-3';
+  let quotationPrintReload=null,quotationExportPending=false;
+  function quotationPrintNotes(record){
+    const text=value=>String(value??'').trim();
+    const lines=(Array.isArray(record.lines)?record.lines:[]).filter(line=>line&&text(line.note)).map(line=>{
+      const qty=line.qty??line.quantity,price=line.price??line.unitPrice;
+      return JSON.stringify([text(line.house||line.unitName||line.building),text(line.item||line.name||line.description),
+        text(line.unit),num(qty)>0?num(qty):null,price===null||price===undefined?null:num(price),text(line.note)]);
+    }).sort();
+    return {publicNote:text(record.publicNote||record.note||''),lines};
+  }
+  function checkedQuotationPrint(printer,source,expected){
+    if(printer?.version!==quotationPrintVersion||typeof printer.prepare!=='function')return null;
+    const prepared=printer.prepare(source),view=prepared?.view;
+    if(!view||view.documentType!=='quotation'||!Array.isArray(view.lines)||typeof prepared.export!=='function'||typeof prepared.print!=='function')return null;
+    const actual=quotationPrintNotes(view);
+    if(expected.publicNote!==actual.publicNote||JSON.stringify(expected.lines)!==JSON.stringify(actual.lines))return null;
+    return prepared;
+  }
+  function reloadQuotationPrint(){
+    if(quotationPrintReload)return quotationPrintReload;
+    quotationPrintReload=new Promise((resolve,reject)=>{
+      const script=document.createElement('script'),url=new URL('assets/js/billing-print.js',document.baseURI);
+      url.searchParams.set('v',quotationPrintVersion);url.searchParams.set('_reload',String(Date.now()));
+      let finished=false;
+      const finish=error=>{if(finished)return;finished=true;clearTimeout(timer);script.remove();error?reject(error):resolve(window.KusheQuotationPrint)};
+      const timer=setTimeout(()=>finish(new Error('報價匯出程式載入逾時，請稍後再試。')),15000);
+      script.onload=()=>finish();script.onerror=()=>finish(new Error('報價匯出程式載入失敗，請稍後再試。'));
+      script.src=url.href;document.head.appendChild(script);
+    }).finally(()=>{quotationPrintReload=null});
+    return quotationPrintReload;
+  }
+  async function exportQuotation(source,autoPrint,node){
+    if(quotationExportPending)return;
+    quotationExportPending=true;
+    const buttons=$$('#exportQuotation,#printQuotation',node),original=buttons.map(button=>({button,disabled:button.disabled,text:button.textContent}));
+    const activeButton=$(autoPrint?'#exportQuotation':'#printQuotation',node),oldBusy=node.getAttribute('aria-busy');
+    buttons.forEach(button=>{button.disabled=true});node.setAttribute('aria-busy','true');
+    if(activeButton)activeButton.textContent=autoPrint?'正在準備 PDF…':'正在準備列印…';
+    try{
+      const expected=quotationPrintNotes(source);
+      let prepared=null;
+      try{prepared=checkedQuotationPrint(window.KusheQuotationPrint,source,expected)}catch(_){}
+      if(!prepared)prepared=checkedQuotationPrint(await reloadQuotationPrint(),source,expected);
+      if(node.hidden||!activeButton?.isConnected||!node.classList.contains('is-open'))return;
+      if(!prepared)throw new Error('報價備註未完整帶入，已停止匯出，請重新整理後再試。');
+      autoPrint?prepared.export():prepared.print();
+    }catch(error){window.KushePhase1?.toast(error.message||'報價內容尚未準備完整，請稍後再試。')}
+    finally{
+      original.forEach(({button,disabled,text})=>{button.disabled=disabled;button.textContent=text});
+      if(oldBusy===null)node.removeAttribute('aria-busy');else node.setAttribute('aria-busy',oldBusy);
+      quotationExportPending=false;
+    }
+  }
+  // K27 quotation export integrity end.
   function openDetail(id){const source=state().quotations.find(x=>x.id===id);if(!source)return;const base=buildQuotePresentation(source),r={...base,lines:window.KusheDisplaySort?.sortWorkRows?window.KusheDisplaySort.sortWorkRows(base.lines||[]):base.lines||[]},totals=`<section class="quotation-totals compact"><div><span>未稅金額</span><b>${money(r.amount)}</b></div><div><span>稅額</span><b>${money(r.tax)}</b></div><div><span>報價總額</span><strong>${money(r.total)}</strong></div></section>`;detailId=id;const node=layer(`<header><div><small>${esc(r.number)}</small><h2>報價單內容</h2></div><button class="commission-drawer-close quotation-close" type="button">×</button></header><div class="commission-drawer-body quotation-detail"><section class="quotation-detail-head"><div><span>客戶／建設公司</span><b>${esc(r.customerText)}</b></div><div><span>案場</span><b>${esc(r.projectText)}</b></div><div><span>計價方式</span>${pricingBadge(r.pricingType)}</div><div><span>日期</span><b>${esc(r.date)}</b></div><div><span>有效期限</span><b>${esc(r.dueDate||'—')}</b></div><div><span>狀態</span>${statusBadge(r.statusText)}</div></section><div class="commission-table-wrap quotation-desktop-detail"><table class="commission-table quotation-detail-table"><thead><tr><th>項目計價</th><th>戶別</th><th>施工項目</th><th>單位</th><th class="num">預估數量</th><th class="num">單價</th><th class="num">總價／預估金額</th><th>備註</th></tr></thead><tbody>${r.lines.map(x=>`<tr><td>${pricingBadge(x.pricingType)}</td><td>${esc(x.house||'—')}</td><td><b>${esc(x.item)}</b></td><td>${esc(x.unit)}</td><td class="num">${x.qty===null||x.qty===undefined?'—':num(x.qty)}</td><td class="num">${x.price===null||x.price===undefined?'—':money(x.price)}</td><td class="num">${money(x.subtotal)}</td><td>${esc(x.note||'—')}</td></tr>`).join('')}</tbody></table></div><div class="mobile-quotation-detail">${r.lines.map(mobileQuoteLine).join('')||'<p class="mobile-quotation-empty">尚無報價明細。</p>'}${r.showAmountSummary&&r.showTaxSummary&&r.showTotalSummary?totals:''}</div><section class="quotation-detail-notes"><div><span>內部備註</span><p>${esc(r.internalNote||'—')}</p></div><div><span>對外備註</span><p>${esc(r.publicNote||r.note||'—')}</p></div></section><div class="quotation-desktop-totals">${totals}</div></div><footer><div class="quotation-status-actions">${r.statusText==='草稿'?'<button class="commission-secondary" data-status="已送出" type="button">標記已送出</button>':''}${r.statusText==='已送出'?'<button class="commission-secondary" data-status="已確認" type="button">確認報價</button>':''}${r.statusText!=='作廢'&&r.statusText!=='已確認'?'<button class="commission-secondary danger" data-status="作廢" type="button">作廢</button>':''}</div><button class="commission-secondary" id="printQuotation" type="button">列印</button><button class="commission-primary" id="exportQuotation" type="button">匯出 PDF</button></footer>`,true);
-    $('#exportQuotation',node).onclick=()=>window.KusheQuotationPrint?.export(source);$('#printQuotation',node).onclick=()=>window.KusheQuotationPrint?.print(source);$$('[data-status]',node).forEach(b=>b.onclick=async()=>{await store.setQuotationStatus(id,b.dataset.status);closeLayer();render();window.KushePhase1.toast('報價狀態已更新')});window.KusheTableScroll?.refresh();
+    $('#exportQuotation',node).onclick=()=>exportQuotation(source,true,node);$('#printQuotation',node).onclick=()=>exportQuotation(source,false,node);$$('[data-status]',node).forEach(b=>b.onclick=async()=>{await store.setQuotationStatus(id,b.dataset.status);closeLayer();render();window.KushePhase1.toast('報價狀態已更新')});window.KusheTableScroll?.refresh();
   }
   function priceRows(){return [...state().quotationPrices].sort((a,b)=>String(b.effectiveDate||'').localeCompare(String(a.effectiveDate||'')))}
   function openPrices(){const data=state(),node=layer(`<header><div><small>不覆蓋歷史價格</small><h2>多層級施工價格庫</h2></div><button class="commission-drawer-close quotation-close" type="button">×</button></header><div class="commission-drawer-body"><form id="priceForm" class="quotation-price-form"><label><span>價格層級</span><select name="scope"><option value="company">公司標準價格</option><option value="customer">建設公司預設價格</option><option value="project">案場專屬價格</option></select></label><label><span>客戶／建設公司</span><select name="customerId">${option(data.customers,'','請選擇客戶')}</select></label><label><span>案場</span><select name="projectId"><option value="">請先選客戶</option></select></label><label><span>品名／施工項目</span><input name="item" list="priceItems" required></label><label><span>單位</span><input name="unit" value="式" required></label><label><span>單價</span><input name="price" type="number" min="0" step="0.01" required></label><label><span>備用單價</span><select name="isBackupPrice"><option value="false" selected>否</option><option value="true">是</option></select></label><label><span>生效日期</span><input name="effectiveDate" type="date" value="${today()}" required></label><button class="commission-primary" type="submit">新增價格歷史</button><datalist id="priceItems">${knownItems().map(x=>`<option value="${esc(x)}"></option>`).join('')}</datalist></form><section class="quotation-copy-box" id="quotationCopyBox" hidden><strong>建立案場價格表</strong><label><input type="radio" name="priceSeed" value="new" checked> 全新建立</label><label><input type="radio" name="priceSeed" value="customer"> 使用建設公司預設價格</label><label><input type="radio" name="priceSeed" value="project"> 複製其他案場價格</label><select id="copyProject">${option(data.projects,'','選擇來源案場')}</select><button class="commission-secondary" id="copyPrices" type="button">建立獨立案場價格表</button></section><section class="quotation-price-history"><div class="quotation-section-head"><div><h3>價格歷史</h3><p>依生效日保留每次調價，歷史報價不會改變。</p></div></div><div class="commission-table-wrap"><table class="commission-table quotation-price-table"><thead><tr><th>生效日</th><th>層級</th><th>客戶</th><th>案場</th><th>項目</th><th>單位</th><th class="num">單價</th><th>備用單價</th><th>建立來源</th></tr></thead><tbody>${priceRows().map(r=>`<tr><td>${esc(r.effectiveDate)}</td><td>${esc(sourceLabel[r.scope]||r.scope)}</td><td>${esc(customerName(r.customerId,'—'))}</td><td>${esc(projectName(r.projectId,'—'))}</td><td><b>${esc(r.item)}</b></td><td>${esc(r.unit||'—')}</td><td class="num">${money(r.price)}</td><td>${r.isBackupPrice===true?'是':'—'}</td><td>${esc(r.createdSource||'manual')}</td></tr>`).join('')||'<tr><td colspan="9" class="commission-empty">尚無價格歷史。</td></tr>'}</tbody></table></div></section></div>`,true),form=$('#priceForm',node);

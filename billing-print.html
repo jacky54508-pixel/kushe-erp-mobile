@@ -134,7 +134,7 @@
   <main class="paper" id="paper"></main>
   <script src="assets/js/display-sort.js?v=20260913-p17-3-house-sort1"></script>
   <script src="assets/js/external-billing-invoice.js?v=p39-inv1-source1"></script>
-  <script src="assets/js/p41-quote-pagination.js?v=p41-k26-quote-notes-20261127-1"></script>
+  <script src="assets/js/p41-quote-pagination.js?v=p41-k27-quote-export-20261127-3"></script>
   <script>
     const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const n=v=>Number(v)||0;
@@ -147,9 +147,9 @@
     const matrixQuantity=value=>lines.some(line=>['historical-supplement','external-document'].includes(line.sourcePricingType))?new Intl.NumberFormat('zh-TW',{maximumFractionDigits:4}).format(n(value)):q(value);
     const matrix=!isQuote&&houses.length?`<section class="section"><div class="section-title">戶別施工統計</div><table class="matrix"><thead><tr><th>戶別</th>${items.map(item=>`<th>${esc(item)}</th>`).join('')}<th>統計</th></tr></thead><tbody>${houses.map(house=>{const rows=lines.filter(row=>row.house===house);return`<tr><td>${esc(house)}</td>${items.map(item=>`<td>${matrixQuantity(sum(rows.filter(row=>row.item===item),'qty'))}</td>`).join('')}<td>${matrixQuantity(sum(rows,'qty'))}</td></tr>`}).join('')}<tr class="grand"><td>合計</td>${items.map(item=>`<td>${matrixQuantity(sum(lines.filter(row=>row.item===item),'qty'))}</td>`).join('')}<td>${matrixQuantity(sum(lines,'qty'))}</td></tr></tbody></table></section>`:'';
     // Render only the explicitly projected quotation work-scope note.
-    // The exact backup-price note is already shown by its existing label.
-    const quoteLineNote=x=>{const note=String(x.note??'');return !note.trim()||isActual&&x.isBackupPrice===true&&note.trim()==='備用單價'?'':`<span class="p41-quote-line-note">${esc(note)}</span>`};
-    const quoteRows=lines.map(x=>isActual?`<tr><td class="item">${esc(x.item||'—')}${x.isBackupPrice===true?'<span class="actual-note">備用單價</span>':''}${quoteLineNote(x)}</td><td class="center">${esc(x.unit||'—')}</td><td class="num">${q(x.qty)}</td><td class="num">${x.price===null||x.price===undefined?'—':m(x.price)}</td></tr>`:`<tr><td class="item">${esc(x.item||'—')}${x.pricingType==='actual'?'<span class="actual-note">實做實算</span>':''}${quoteLineNote(x)}</td><td class="center">${esc(x.unit||'—')}</td><td class="num">${q(x.qty)}</td><td class="num">${x.price===null||x.price===undefined?'—':m(x.price)}</td><td class="num">${m(x.amount)}</td></tr>`).join('');
+    // Backup-price labels and work-scope notes remain separate in every quotation mode.
+    const quoteLineNote=x=>{const note=String(x.note??'');return !note.trim()||x.isBackupPrice===true&&note.trim()==='備用單價'?'':`<span class="p41-quote-line-note">${esc(note)}</span>`};
+    const quoteRows=lines.map(x=>isActual?`<tr><td class="item">${esc(x.item||'—')}${x.isBackupPrice===true?'<span class="actual-note">備用單價</span>':''}${quoteLineNote(x)}</td><td class="center">${esc(x.unit||'—')}</td><td class="num">${q(x.qty)}</td><td class="num">${x.price===null||x.price===undefined?'—':m(x.price)}</td></tr>`:`<tr><td class="item">${esc(x.item||'—')}${x.pricingType==='actual'?'<span class="actual-note">實做實算</span>':''}${x.isBackupPrice===true?'<span class="actual-note">備用單價</span>':''}${quoteLineNote(x)}</td><td class="center">${esc(x.unit||'—')}</td><td class="num">${q(x.qty)}</td><td class="num">${x.price===null||x.price===undefined?'—':m(x.price)}</td><td class="num">${m(x.amount)}</td></tr>`).join('');
     // PDF display grouping only: keep the published line amounts and pricing behavior intact.
     const billingGroups=new Map();
     if(!isQuote)lines.forEach(line=>{const key=JSON.stringify([line.item,line.unit,line.price,line.sourcePricingType||'',line.sourcePricingType==='historical-supplement'?line.house:'']);let group=billingGroups.get(key);if(!group){group={...line,qty:0,amount:0};billingGroups.set(key,group)}group.qty+=n(line.qty);group.amount+=n(line.amount)});
@@ -284,12 +284,30 @@
     const assetTimeout=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
     async function waitForStableImage(image){if(!image||!image.src)return;for(let attempt=0;attempt<4;attempt+=1){const source=image.currentSrc||image.src;if(!image.complete)await Promise.race([new Promise(resolve=>{image.addEventListener('load',resolve,{once:true});image.addEventListener('error',resolve,{once:true})}),assetTimeout(2000)]);try{if(image.decode)await Promise.race([image.decode(),assetTimeout(2000)])}catch(e){}await nextFrame();if(image.complete&&(image.currentSrc||image.src)===source)return}}
     function millimetersToPixels(mm){const ruler=document.createElement('div');ruler.style.cssText=`position:absolute;visibility:hidden;pointer-events:none;height:${mm}mm`;document.body.appendChild(ruler);const pixels=ruler.getBoundingClientRect().height;ruler.remove();return pixels}
+    function verifyQuotationPublicNotes(){
+      if(!isQuote)return;
+      const rows=[...paper.querySelectorAll('.detail tbody tr:not(.line-total)')];
+      const fail=()=>{const error=new Error('QUOTATION_PUBLIC_NOTES_INCOMPLETE');error.publicNotesFailed=true;error.quotationLayoutFailed=true;throw error};
+      const visible=node=>{const style=getComputedStyle(node),box=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&Number(style.opacity)!==0&&box.width>0&&box.height>0};
+      if(rows.length!==lines.length)fail();
+      rows.forEach((row,index)=>{
+        const source=lines[index],cell=row.cells[0],note=String(source.note??'').replace(/\r\n?/g,'\n');
+        const expected=!note.trim()||source.isBackupPrice===true&&note.trim()==='備用單價'?'':note;
+        const notes=[...cell.querySelectorAll('.p41-quote-line-note')];
+        const backups=[...cell.querySelectorAll('.actual-note')].filter(node=>node.textContent==='備用單價');
+        const label=cell.cloneNode(true);label.querySelectorAll('.p41-quote-line-note,.actual-note').forEach(node=>node.remove());
+        if(label.textContent!==String(source.item||'—')||notes.length!==(expected?1:0)||
+          expected&&(notes[0].textContent!==expected||!visible(notes[0]))||
+          backups.length!==(source.isBackupPrice===true?1:0)||backups.some(node=>!visible(node)))fail();
+      });
+    }
     async function paginateQuotationToA4(){
       try{
         if(!window.KusheQuotePagination)throw new Error('QUOTATION_PAGINATOR_UNAVAILABLE');
-        await window.KusheQuotePagination.paginate({paper,noteText:String(d.publicNote||'')});
+        await window.KusheQuotePagination.paginate({paper,noteText:String(d.publicNote||''),quotationDate:d.date});
         await Promise.all([...document.querySelectorAll('#quotationContent img')].map(waitForStableImage));
         if([...document.querySelectorAll('#quotationContent img')].some(image=>!image.complete||!image.naturalWidth))throw new Error('QUOTATION_PAGE_IMAGE_NOT_READY');
+        verifyQuotationPublicNotes();
         paper.dataset.quotationScale='1.0000';
         window.__quotationPrintScale=1;
         return 1;
@@ -317,13 +335,14 @@
     function handleQuotationPrintError(error){
       if(!error?.quotationLayoutFailed){blockPrintForMissingSeals();return;}
       window.__billingPrintReady=false;
-      window.__billingPrintError='QUOTATION_PAGINATION_FAILED';
+      const notesFailed=error?.publicNotesFailed===true;
+      window.__billingPrintError=notesFailed?'QUOTATION_PUBLIC_NOTES_INCOMPLETE':'QUOTATION_PAGINATION_FAILED';
       safePrintButton.disabled=true;
-      safePrintButton.textContent='報價分頁未完成，請重新開啟';
+      safePrintButton.textContent=notesFailed?'報價備註未完整顯示，請重新匯出':'報價分頁未完成，請重新開啟';
       if(!document.getElementById('quotationLayoutError')){
         const notice=document.createElement('span');
         notice.id='quotationLayoutError';notice.setAttribute('role','alert');
-        notice.textContent='報價內容尚未完整排入 A4，請重新開啟或保留此頁回報，避免寄出不完整單據。';
+        notice.textContent=notesFailed?'部分施工備註或備用單價標示未完整顯示，請返回報價單重新匯出。':'報價內容尚未完整排入 A4，請重新開啟或保留此頁回報，避免寄出不完整單據。';
         notice.style.cssText='color:#fff;font-size:12px;font-weight:700;padding:0 8px';
         document.querySelector('.toolbar').appendChild(notice);
       }
@@ -343,6 +362,7 @@
     }
     function printDocument(){
       if(!window.__billingPrintReady||safePrintButton.disabled)return;
+      if(isQuote){try{verifyQuotationPublicNotes()}catch(error){handleQuotationPrintError(error);return;}}
       const logo=document.getElementById('formalCompanyLogo');
       const seal=document.getElementById('formalCompanySeal');
       if(!logo?.naturalWidth||!seal?.naturalWidth){blockPrintForMissingSeals();return;}
