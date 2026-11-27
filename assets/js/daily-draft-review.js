@@ -69,8 +69,13 @@
       // No automatic submit, no accounting mutation.
     }
     function onError(e){
-      if(!present()||e?.transactionStatus==='RECOVERY_REQUIRED'||form.dataset.submitLocked==='true'||!staleCodes.has(e?.code))return false;
-      phase='stale';latest=null;notice('其他 ERP 分頁或同步已更新本機資料。請先保留草稿並核對最新版本，再自行儲存。');return true;
+      const paidMonthUnverified=e?.code==='DAILY_PAID_MONTH_UNVERIFIED',paidMonthChanged=e?.code==='DAILY_PAID_MONTH_CHANGED';
+      if(!present()||e?.transactionStatus==='RECOVERY_REQUIRED'||form.dataset.submitLocked==='true'||!staleCodes.has(e?.code)&&!paidMonthUnverified&&!paidMonthChanged)return false;
+      phase='stale';latest=null;
+      if(paidMonthUnverified)notice('此月份的薪資付款來源尚未核對通過。'+String(e.message||'')+' 草稿已保留，請先核對來源；關閉前可匯出草稿。');
+      else if(paidMonthChanged)notice('此月份的薪資或付款來源已更新。請保留草稿，重新核對最新資料，再自行儲存。');
+      else notice('其他 ERP 分頁或同步已更新本機資料。請先保留草稿並核對最新版本，再自行儲存。');
+      return true;
     }
     function beforeSubmit(){
       if(!store.dailyDraftSnapshot||!store.dailyDraftReview){phase='stale';notice('程式版本未完整載入；請先匯出草稿，再重新整理。');throw error('程式版本未完整載入，請先保留草稿。')}

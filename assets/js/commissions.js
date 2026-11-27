@@ -529,12 +529,13 @@
     const attendanceRows = attendanceRowsFor(state);
     const totalWork = attendanceRows.reduce((sum,row)=>sum+number(row.amount),0);
     const totalCommission = rows.reduce((sum,row)=>sum+number(row.commission),0);
-    const payrollRows=(state.payroll||[]).filter((row)=>String(row.month||'').slice(0,7)===filters.month&&(!filters.employee||employeeIdOf(row)===filters.employee));
-    const unpaidPayrollRows=payrollRows.filter((row)=>row.status!=='已付款');
+    const payrollGroups=typeof store.monthlyPayrollGroups==='function'?store.monthlyPayrollGroups():null;
+    const payrollRows=(payrollGroups||state.payroll||[]).filter((row)=>String(row.month||'').slice(0,7)===filters.month&&(!filters.employee||employeeIdOf(row)===filters.employee));
+    const unpaidPayrollRows=payrollRows.filter((row)=>payrollGroups?number(row.outstanding)>0:row.status!=='已付款').map(row=>({...row,unpaidAmount:payrollGroups?Math.max(0,number(row.outstanding)):number(row.total)}));
     const unpaidPayrollEmployees=new Set(unpaidPayrollRows.map(employeeIdOf).filter(Boolean));
     const todayEmployees = new Set([...(state.dailyLogs||[]),...(state.attendance||[])].filter((row)=>String(row.date||'')===today()&&(!filters.employee||employeeIdOf(row)===filters.employee)&&(!filters.project||projectIdOf(row)===filters.project)).map(employeeIdOf).filter(Boolean));
     const monthProjects = new Set([...batches.flatMap((batch)=>batch.logs),...attendanceRows].map(projectIdOf).filter(Boolean));
-    return {state, rows, batches, attendanceRows, totalWork, totalCommission, unpaidPayrollRows, unpaidPayrollEmployees, todayEmployees, monthProjects};
+    return {state, rows, batches, attendanceRows, totalWork, totalCommission, unpaidPayrollRows, unpaidPayrollEmployees, payrollGrouped:Boolean(payrollGroups), todayEmployees, monthProjects};
   }
   function workforceKpis(view) {
     const {totalWork, totalCommission, unpaidPayrollRows, unpaidPayrollEmployees, todayEmployees, monthProjects} = view;
@@ -1453,7 +1454,7 @@
     const v=workforceSnapshot(),name=id=>v.state.employees.find(e=>String(e.id)===String(id))?.name||id,project=id=>v.state.projects.find(p=>String(p.id)===String(id))?.name||id;
     if(action==='today')return {title:'今日作業員工',scope:today()+'；與字卡相同，依員工／案場篩選並去重。',columns:['日期','員工'],rows:[...v.todayEmployees].map(id=>({id,cells:[today(),name(id)]}))};
     if(action==='projects')return {title:'本月作業案場',scope:'沿用目前月份與員工／案場篩選；每日作業與點工來源去重。',columns:['案場'],rows:[...v.monthProjects].map(id=>({id,cells:[project(id)]}))};
-    if(action==='unpaid')return {title:'未付款薪資來源',scope:'沿用字卡的月份／員工範圍；一位員工可能有多筆薪資来源，不執行付款。',columns:['月份','員工','金額','狀態'],rows:v.unpaidPayrollRows.map(r=>({id:r.id,cells:[r.month,name(employeeIdOf(r)),money(r.total),r.status]}))};
+    if(action==='unpaid')return {title:'未付款薪資來源',scope:v.payrollGrouped?'沿用字卡的月份／員工範圍；同一員工月份合併顯示未付餘額，不執行付款。':'沿用字卡的月份／員工範圍；一位員工可能有多筆薪資來源，不執行付款。',columns:['月份','員工',v.payrollGrouped?'未付餘額':'金額','狀態'],rows:v.unpaidPayrollRows.map(r=>({id:r.id,cells:[r.month,name(employeeIdOf(r)),money(r.unpaidAmount),r.status]}))};
     if(action==='attendance')return {title:'本月點工薪資明細',scope:'沿用目前篩選與正式點工來源，不重複加總每日施工衍生紀錄。',columns:['日期','員工','案場','金額'],rows:v.attendanceRows.map(r=>({id:r.id,cells:[r.date,name(employeeIdOf(r)),project(projectIdOf(r)),money(r.amount)]}))};
     if(action==='commission')return {title:'本月抽成明細',scope:'沿用目前篩選與正式抽成來源；不變更抽成比例或付款狀態。',columns:['日期','員工','案場','業績','抽成'],rows:v.rows.map(r=>({id:r.id,cells:[r.date,name(employeeIdOf(r)),project(projectIdOf(r)),money(r.performance),money(r.commission)]}))};return null;
   }});
