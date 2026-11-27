@@ -10,7 +10,7 @@ const crypto=require('node:crypto');
 const {execFileSync}=require('node:child_process');
 const BASELINE='4c02e3c707473c4483946afd5222c7cf05d8fb63';
 const BASELINE_SHA256='ba1678758af70566ec7870eb119123532f16ab22b4c61be803c7ed1bb7b52b53';
-const EXPECTED_VERSION='p41-k27-quote-export-20261127-3';
+const EXPECTED_VERSION='p41-k27-quote-export-20261127-4';
 const options={root:process.cwd()};
 for(let i=2;i<process.argv.length;i+=2){
   const name=process.argv[i];

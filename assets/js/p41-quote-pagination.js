@@ -286,7 +286,7 @@
         }
         const date = document.createElement('div');
         date.className = 'p41-quote-sign-date';
-        date.textContent = quotationSignatureDate(quotationDate);
+        date.textContent = quotationSignatureDate(node.classList.contains('company-seals') ? quotationDate : '');
         node.appendChild(date);
       }
       sourceBlocks = Array.from(content.children).filter(node => node !== head && node !== signature && !node.classList.contains('note'));

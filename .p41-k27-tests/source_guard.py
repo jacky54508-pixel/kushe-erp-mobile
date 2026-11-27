@@ -13,8 +13,8 @@ from pathlib import Path
 
 BASE = '4c02e3c707473c4483946afd5222c7cf05d8fb63'
 BASE_TREE = '642d1178c415c0a415c03c8475fd28e627f45701'
-BRANCH = 'p41-k27-quote-export-route-20261127'
-VERSION = 'p41-k27-quote-export-20261127-3'
+BRANCH = 'p41-k27-client-date-20261127'
+VERSION = 'p41-k27-quote-export-20261127-4'
 PRODUCT = {
     'index.html',
     'billing-print.html',
@@ -71,7 +71,7 @@ def verify_quotation_date_scope(before, after):
     replacements = [
         ('async function build({ paper, noteText, quotationDate })',
          'async function build({ paper, noteText })'),
-        ('date.textContent = quotationSignatureDate(quotationDate);',
+        ("date.textContent = quotationSignatureDate(node.classList.contains('company-seals') ? quotationDate : '');",
          "date.textContent = '簽署日期：　　年　　月　　日';"),
         ('finished.set(paper, { noteText: rawNote, quotationDate, result });',
          'finished.set(paper, { noteText: rawNote, result });'),
@@ -150,7 +150,8 @@ def main():
         'quotationExportEntryChanges': True,
         'paginationLayoutAlgorithmChanges': False,
         'quotationSignatureDateAdapterChanges': True,
-        'quotationDateSource': 'saved public quotation date; no system-clock fallback',
+        'quotationDateSource': 'company only: saved public quotation date; no system-clock fallback',
+        'customerSignatureDateSource': 'blank year/month/day for manual signing',
         'indexChange': 'billing-print.js and quotations.js cache queries only',
         'quotationUiScope': 'one integrity helper block plus the existing export and print button handlers',
         'sourceAudit': {
