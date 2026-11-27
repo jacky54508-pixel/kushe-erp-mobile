@@ -29,7 +29,7 @@
   </style>
 </head>
 <body>
-  <div class="toolbar"><button type="button" onclick="printDocument()">匯出 PDF／列印</button><button type="button" class="close" onclick="closePrintView()">關閉</button></div>
+  <div class="toolbar"><button type="button" id="safePrintButton" onclick="printDocument()" disabled>載入公司 LOGO／大小章中…</button><button type="button" class="close" onclick="closePrintView()">關閉</button></div>
   <main class="paper" id="paper"></main>
   <script>
     const esc=(value)=>String(value??'').replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -47,8 +47,56 @@
     const paper=document.getElementById('paper');if(data.schema==='kushe-combined-billing-v1'){paper.innerHTML=`<header class="head"><div class="company-block"><span class="company-logo-frame"><img class="company-logo" id="formalCompanyLogo" alt="酷舍企業" onerror="this.hidden=true"></span><div class="company"><h1>${esc(company.name||'酷舍企業有限公司')}</h1><div class="en">${esc(company.englishName||'Cool Sir Limited Company')}</div><div class="sub">${companyInfo.map((value)=>`<span>${esc(value)}</span>`).join('')}</div></div></div><div class="doc-title"><h2>請款單</h2><p>多案場合併請款明細</p></div></header><section class="info"><div><span class="label">客戶</span>${esc(data.customer||'—')}</div><div><span class="label">請款日期</span>${esc(dateLabel)}</div><div><span class="label">案場</span>${(data.projects||[]).length} 個案場</div><div><span class="label">來源請款</span>${billings.length} 張</div><div><span class="label">來源單號</span>${billings.map((row)=>esc(row.number||'—')).join('、')}</div><div><span class="label">稅務／發票</span>${esc(data.taxMode||'—')}｜${esc(data.invoiceDisplay||data.invoiceStatus||'—')}</div></section>${billings.map(billingSection).join('')}<section class="grand-summary"><h2>合併請款總計</h2><div><span>施工／未稅合計</span><strong>${money(totals.salesAmount)}</strong></div><div><span>稅額合計</span><strong>${money(totals.taxAmount)}</strong></div><div class="total"><span>請款總額</span><strong>${money(totals.totalAmount)}</strong></div><div><span>保留款合計</span><strong>${money(totals.retentionAmount)}</strong></div><div class="receivable"><span>本期應收合計</span><strong>${money(totals.receivableAmount)}</strong></div></section><section class="sign"><div class="client-sign">客戶簽章</div><div class="company-seals"><div>公司大小章</div><div class="seal-wrap"><img class="seal" id="formalCompanySeal" alt="公司大小章" onerror="this.hidden=true"></div></div></section>`;document.title=data.fileName||'酷舍_合併請款單.pdf'}
     function centerPaperInViewport(){const zoom=Number.parseFloat(getComputedStyle(paper).zoom)||1,viewportWidth=document.documentElement.clientWidth;paper.style.setProperty('--preview-center-left',`${viewportWidth/(2*zoom)}px`)}
     if(window.matchMedia('screen').matches){centerPaperInViewport();window.addEventListener('resize',()=>requestAnimationFrame(centerPaperInViewport),{passive:true})}
-    async function loadAssets(){const enterpriseUrl=/\/beta(?:\/|$)/.test(location.pathname)?'../enterprise/index.html':'./enterprise/index.html';try{const source=await fetch(enterpriseUrl).then((response)=>response.text());for(const [name,id] of [['companyLogoAsset','formalCompanyLogo'],['companySealAsset','formalCompanySeal']]){const start=source.indexOf(`const ${name}=`);if(start<0)continue;let end=source.indexOf(';\n',start);if(end<0)end=source.indexOf(';\r',start);const parts=[...source.slice(start,end).matchAll(/'([^']*)'/g)].map((match)=>match[1]);if(parts.length){const image=document.getElementById(id);if(!image)continue;if(id==='formalCompanySeal')image.onload=()=>{image.onload=null;removeSealBackground(image)};image.src=parts.join('');if(id==='formalCompanyLogo')image.style.display='block'}}}catch(error){}}
-    const autoPrint=new URLSearchParams(location.search).get('print')==='1';function printDocument(){window.print()}loadAssets().finally(()=>{window.__billingBundlePrintReady=true;if(autoPrint)setTimeout(()=>window.print(),250)});
+    // K29: both manual and automatic printing require decoded original images.
+    async function loadAssets(){
+      const enterpriseUrl=/\/beta(?:\/|$)/.test(location.pathname)?'../enterprise/index.html':'./enterprise/index.html';
+      const response=await fetch(enterpriseUrl,{cache:'no-store'});
+      if(!response.ok)throw new Error('ENTERPRISE_ASSET_FETCH_FAILED');
+      const source=await response.text();
+      for(const [name,id] of [['companyLogoAsset','formalCompanyLogo'],['companySealAsset','formalCompanySeal']]){
+        const start=source.indexOf('const '+name+'=');
+        if(start<0)throw new Error('MISSING_'+name);
+        let end=source.indexOf(';\n',start);if(end<0)end=source.indexOf(';\r',start);
+        if(end<0)throw new Error('INCOMPLETE_'+name);
+        const asset=[...source.slice(start,end).matchAll(/'([^']*)'/g)].map(match=>match[1]).join('');
+        if(!asset.startsWith('data:image/png;base64,')||asset.length<1024)throw new Error('INVALID_'+name);
+        const prepared=new Image();prepared.decoding='sync';prepared.src=asset;
+        await prepared.decode();
+        if(!prepared.naturalWidth||!prepared.naturalHeight)throw new Error('UNDECODABLE_'+name);
+        if(id==='formalCompanySeal'){removeSealBackground(prepared);await prepared.decode()}
+        const image=document.getElementById(id);
+        if(!image)throw new Error('MISSING_IMAGE_NODE_'+id);
+        image.hidden=false;image.decoding='sync';image.src=prepared.src;
+        if(id==='formalCompanyLogo')image.style.display='block';
+        await image.decode();
+        if(!image.complete||!image.naturalWidth)throw new Error('IMAGE_NOT_READY_'+id);
+      }
+      if(document.fonts&&document.fonts.ready)await document.fonts.ready;
+    }
+    const autoPrint=new URLSearchParams(location.search).get('print')==='1';
+    const safePrintButton=document.getElementById('safePrintButton');
+    window.__billingBundlePrintReady=false;window.__billingBundlePrintError='';
+    function imagesReady(){return ['formalCompanyLogo','formalCompanySeal'].every(id=>{const image=document.getElementById(id);return image?.complete&&image.naturalWidth>0&&image.naturalHeight>0&&!image.hidden})}
+    function blockPrintForMissingSeals(){
+      window.__billingBundlePrintReady=false;window.__billingBundlePrintError='COMPANY_IMAGES_NOT_READY';
+      safePrintButton.disabled=true;safePrintButton.textContent='公司圖片未載入，禁止匯出';
+      if(!document.getElementById('sealLoadError')){
+        const notice=document.createElement('p');notice.id='sealLoadError';notice.setAttribute('role','alert');
+        notice.textContent='公司 LOGO／大小章載入失敗，請重新開啟原單合併 PDF。原請款資料未變更，請勿使用缺章文件。';
+        notice.style.cssText='margin:16px;padding:14px;border:1px solid #e5b8ac;border-radius:8px;background:#fff4ef;color:#8c3b26;font-size:14px;line-height:1.6';
+        paper.before(notice);
+      }
+    }
+    function printDocument(){
+      if(!window.__billingBundlePrintReady||safePrintButton.disabled)return;
+      if(!imagesReady()){blockPrintForMissingSeals();return}
+      window.print();
+    }
+    loadAssets().then(()=>{
+      if(!imagesReady()){blockPrintForMissingSeals();return}
+      window.__billingBundlePrintReady=true;safePrintButton.disabled=false;safePrintButton.textContent='匯出 PDF／列印';
+      if(autoPrint)requestAnimationFrame(printDocument);
+    }).catch(blockPrintForMissingSeals);
   </script>
 </body>
 </html>

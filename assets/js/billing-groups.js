@@ -418,7 +418,7 @@
         transport.postMessage({type:'KUSHE_PRINT_DATA',ticket,serialized});
         window.setTimeout(closeTransport,1000);
       };
-      const url=new URL('external-billing-print.html?v=p40-16bu-memory-handoff',location.href);
+      const url=new URL('external-billing-print.html?v=p41-k29-print-20261127-1',location.href);
       url.searchParams.set('ksprint',ticket);
       const a=document.createElement('a');a.href=url.href;a.target='_blank';a.rel='noopener';
       document.body.append(a);a.click();a.remove();

@@ -78,7 +78,7 @@
 
   function openView(view,autoPrint){
     const payload=encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(view)))));
-    const url=new URL(`billing-bundle-print.html?v=p30-history-1&print=${autoPrint?'1':'0'}`,location.href);
+    const url=new URL(`billing-bundle-print.html?v=p41-k29-print-20261127-1&print=${autoPrint?'1':'0'}`,location.href);
     url.hash=payload;
     location.assign(url.href);
   }

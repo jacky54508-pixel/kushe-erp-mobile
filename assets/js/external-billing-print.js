@@ -113,7 +113,7 @@
       view.isMergedExternalBilling=(houses>9||items>5||view.lines.length>12);
       view.mergedBillingProjects=[d.displayProjectName];
     }
-    const url=new URL('billing-print.html?v=p39-inv1-pdf1&print=0',location.href);
+    const url=new URL('billing-print.html?v=p41-k29-print-20261127-1&print=0',location.href);
     url.hash=encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(view)))));
     if(url.href.length>1500000)throw new Error('文件內容過大，請減少對外明細後再匯出');
     location.replace(url.href);return;
