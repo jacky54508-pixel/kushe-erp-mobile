@@ -5,12 +5,13 @@ import json
 import math
 import re
 import traceback
+import unicodedata
 import uuid
 from pathlib import Path
 from urllib.parse import quote
 
 from playwright.sync_api import sync_playwright
-from pdf_support import Report, Server, artifact_pdf, browser_options, restrict, sha, source, synthetic_assets
+from pdf_support import Report, Server, artifact_pdf, browser_options, pdf_image_paints, restrict, sha, source, synthetic_assets
 
 FILES = ['billing-print.html', 'billing-bundle-print.html', 'external-billing-print.html',
          'assets/js/display-sort.js', 'assets/js/external-billing-invoice.js', 'assets/js/external-billing-print.js',
@@ -20,12 +21,23 @@ for(const method of ['setItem','removeItem','clear'])Storage.prototype[method]=f
 IDBFactory.prototype.open=function(){__writes.push('indexedDB.open');throw Error('SYN_K29_PRINT_IDB_FORBIDDEN')};'''
 
 
-def payload(count=13, fractional=True, historical=False):
+def text_key(value):
+    # PDF CJK fonts can map a visible character to its compatibility radical.
+    # Preserve every glyph while normalizing that representation and line wraps.
+    return re.sub(r'\s+', '', unicodedata.normalize('NFKC', value))
+
+
+def payload(count=13, fractional=True, historical=False, profile='standard'):
     lines = []
     for i in range(count):
         qty = 1.2345 if fractional else 1
         price = round(12.3456 + i, 4) if fractional else 100 + i
-        lines.append({'house': 'SYN-H-' + str(i + 1), 'item': f'SYN-ITEM-{i+1:03d}', 'unit': '式',
+        item = f'SYN-ITEM-{i+1:03d}'
+        if profile == 'long-chinese':
+            item += '｜' + '公共區域耐候防水牆面修補及原工程細節完整保留' * 5
+        if profile == 'large-decimals':
+            qty, price = 1234.5678, round(1234567.8912 + i, 4)
+        lines.append({'house': 'SYN-H-' + str(i + 1), 'item': item, 'unit': '式',
                       'qty': qty, 'price': price, 'amount': math.floor(qty * price + .5)})
     parts = [lines[:len(lines)//2], lines[len(lines)//2:]]
     documents, settlements = [], []
@@ -35,9 +47,10 @@ def payload(count=13, fractional=True, historical=False):
         amount = sum(l['amount'] for l in part)
         tax = math.floor(amount * .05 + .5)
         gross = amount + tax
-        anchors = {'untaxed': amount, 'tax': tax, 'grossTotal': gross, 'retention': 0, 'receivable': gross}
-        settlement = {'billingId': 'SYN-SOURCE-' + str(i), 'received': 0, 'outstanding': gross, 'retentionReceived': 0,
-                      'retentionOutstanding': 0, 'pendingCheque': 0, 'availableToCollect': gross}
+        retention = math.floor(amount * .1) if profile == 'long-note-retention' else 0
+        anchors = {'untaxed': amount, 'tax': tax, 'grossTotal': gross, 'retention': retention, 'receivable': gross - retention}
+        settlement = {'billingId': 'SYN-SOURCE-' + str(i), 'received': 0, 'outstanding': gross - retention, 'retentionReceived': 0,
+                      'retentionOutstanding': retention, 'pendingCheque': 0, 'availableToCollect': gross - retention}
         documents.append({'billingId': settlement['billingId'], 'projectName': 'SYN-PUBLIC-A' if i == 0 else 'SYN-PRIVATE-B-PROJECT',
                           'customerId': 'SYN-CUSTOMER', 'customerName': '合成建設', 'number': 'SYN-PRIVATE-SOURCE-' + str(i),
                           'date': '2026-08-17', 'invoiceStatus': 'invoiced', 'invoiceNo': 'SYN-PRIVATE-INVOICE-' + str(i),
@@ -50,6 +63,8 @@ def payload(count=13, fractional=True, historical=False):
            'customerName': '合成建設', 'documentDate': '2026-11-27', 'note': 'SYN-PUBLIC-NOTE', 'sourceSnapshots': documents,
            'settlementSnapshots': settlements, 'totals': totals, 'detailMode': 'unified',
            'unified': {'taxMode': '未稅', 'lines': lines, 'total': totals['untaxed'], 'target': totals['untaxed'], 'reason': '合成對外文件驗收'}}
+    if profile == 'long-note-retention':
+        doc['note'] += '\n' + '\n'.join(f'SYN-NOTE-{i:02d}｜合成施工條件及保留款說明必須逐項完整保留。' for i in range(1, 13))
     result = {'schema': 'kushe-external-billing-print-v1', 'document': doc}
     if historical:
         result['template'] = {'schema': 'kushe-original-billing-template-v1', 'billingId': documents[0]['billingId'], 'historicalDetails': True}
@@ -74,9 +89,10 @@ def context_for(browser, server, report, name, extra=''):
     return context
 
 
-def check_document(browser, server, report, version, count, fractional, historical=False):
-    name = f'{version}-dense-{count}-' + ('fractional' if fractional else 'integer') + ('-historical' if historical else '')
-    data = payload(count, fractional, historical)
+def check_document(browser, server, report, version, count, fractional, historical=False, profile='standard'):
+    name = f'{version}-dense-{count}-' + ('fractional' if fractional else 'integer') + ('-historical' if historical else '') + ('' if profile == 'standard' else '-' + profile)
+    data = payload(count, fractional, historical, profile)
+    adaptive = version == 'after' and 26 <= count <= 50
     context = context_for(browser, server, report, name)
     try:
         page, bridge = open_external(context, server, version, data)
@@ -86,31 +102,60 @@ def check_document(browser, server, report, version, count, fractional, historic
         forbidden = ['SYN-PRIVATE-B-PROJECT', 'SYN-PRIVATE-INVOICE-', 'SYN-PRIVATE-SOURCE-', '2026-08-18']
         report.check(name + ': actual producer removes internal invoices and other source project', all(x not in json.dumps(view) for x in forbidden), view.get('mergedBillingProjects'))
         report.check(name + ': input payload unchanged by actual route', bridge.evaluate('()=>__payload') == data)
+        if adaptive:
+            layout = page.evaluate('()=>__billingDenseLayout')
+            expected_mode = 'original-pages' if profile != 'standard' else 'single-page' if count == 30 else ('single-page' if layout.get('metrics', {}).get('fits') else 'original-pages')
+            report.check(name + ': application prepares a measured layout before enabling print', layout['attempted'] and 'metrics' in layout and layout['mode'] == expected_mode and page.locator('iframe').count() == 0, layout)
+            page.evaluate('()=>printDocument()')
+            report.check(name + ': application print button uses the already prepared document', page.evaluate('()=>__printed') == 1 and page.evaluate('()=>__billingPrintReady'))
         rows = page.locator('.dense-line-table tbody tr:not(.line-total)')
         summary = page.locator('.grouped-item-summary-table tbody tr:not(.line-total)')
         report.check(name + ': every original and distinct summary row is present', rows.count() == count and summary.count() == count)
+        totals = data['document']['totals']
+        expected_footer = [['未稅金額', '$' + format(totals['untaxed'], ',')], ['營業稅', '$' + format(totals['tax'], ',')], ['請款金額', '$' + format(totals['grossTotal'], ',')]]
+        if totals['retention']:
+            expected_footer += [['保留款', '-$' + format(totals['retention'], ',')], ['本期實領／應收', '$' + format(totals['receivable'], ',')]]
+        actual_footer = page.locator('.summary-row').evaluate_all('(nodes)=>nodes.map(node=>[node.querySelector("span").textContent,node.querySelector("strong").textContent])')
+        report.check(name + ': every saved footer amount and label remains in its original order', actual_footer == expected_footer, actual_footer)
         for i, original in enumerate(data['document']['unified']['lines']):
             cells = rows.nth(i).locator('td').all_text_contents()
             grouped = summary.nth(i).locator('td').all_text_contents()
             expected_amount = '$' + format(original['amount'], ',')
             report.check(name + f': source row {i+1} and grouped item unchanged', cells[0] == original['house'] and cells[1] == original['item'] and grouped[0] == original['item'] and cells[5] == expected_amount and grouped[4] == expected_amount)
             if version == 'after' and fractional:
-                report.check(name + f': row {i+1} retains four-decimal quantity and price', cells[3] == str(original['qty']) and cells[4] == '$' + str(original['price']) and grouped[2] == str(original['qty']) and grouped[3] == '$' + str(original['price']), {'row': cells, 'summary': grouped})
+                decimal = lambda value: format(value, ',.4f').rstrip('0').rstrip('.')
+                report.check(name + f': row {i+1} retains four-decimal quantity and price', cells[3] == decimal(original['qty']) and cells[4] == '$' + decimal(original['price']) and grouped[2] == decimal(original['qty']) and grouped[3] == '$' + decimal(original['price']), {'row': cells, 'summary': grouped})
         if version == 'before' and fractional:
             report.check(name + ': published baseline reproduces lost precision', rows.first.locator('td').nth(3).inner_text() == '1.23' and rows.first.locator('td').nth(4).inner_text() == '$12')
         page.screenshot(path=str(report.qa / (name + '.png')), full_page=True)
         page.emulate_media(media='print')
         print_geometry = page.evaluate('''()=>Object.fromEntries(['#paper','.dense-original-details','.grouped-item-summary','.summary','.sign'].map(selector=>{const node=document.querySelector(selector),r=node?.getBoundingClientRect();return [selector,r?{x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom,scrollWidth:node.scrollWidth,clientWidth:node.clientWidth}:null]}))''')
+        print_geometry['fonts'] = page.evaluate('()=>({detail:getComputedStyle(document.querySelector(".dense-line-table td")).fontSize,summary:getComputedStyle(document.querySelector(".grouped-item-summary-table td")).fontSize})')
+        if adaptive:
+            print_geometry['actualPrintMetrics'] = page.evaluate('()=>denseBillingGeometry(paper)')
         report.save(name + '-print-geometry.json', print_geometry)
         pages, pdf_text, boxes = artifact_pdf(page, report.qa / (name + '.pdf'))
-        complete_text = all(pdf_text.count(l['item']) >= 2 and re.search(r'\b' + re.escape(l['house']) + r'\b', pdf_text) for l in view['lines'])
+        compact_text = text_key(pdf_text)
+        complete_text = all(compact_text.count(text_key(l['item'])) == 2 and len(re.findall(re.escape(l['house']) + r'(?!\d)', pdf_text)) == 1 for l in view['lines'])
         report.check(name + ': real PDF is A4 and retains every original and summary item', all(594 <= w <= 596 and 841 <= h <= 843 for w, h in boxes) and complete_text)
         report.check(name + ': PDF has no private invoice or source-area text', all(x not in pdf_text for x in forbidden))
+        report.check(name + ': full public note and both signature labels remain in the PDF', text_key(data['document']['note']) in compact_text and '客戶簽章' in compact_text and '公司大小章' in compact_text)
+        image_paints = pdf_image_paints(report.qa / (name + '.pdf'))
+        report.check(name + ': PDF actually paints logo and company seal', sum(image_paints) >= 2, image_paints)
         if version == 'after' and fractional:
-            report.check(name + ': PDF includes exact decimal values', '1.2345' in pdf_text and '12.3456' in pdf_text)
+            expected_qty = decimal(view['lines'][0]['qty'])
+            expected_price = decimal(view['lines'][0]['price'])
+            report.check(name + ': PDF includes exact decimal values', expected_qty in compact_text and expected_price in compact_text)
+        if adaptive:
+            layout = page.evaluate('()=>__billingDenseLayout')
+            report.check(name + ': actual PDF mode matches final geometry and complete content', (pages == 1 and layout['metrics']['fits'] and print_geometry['actualPrintMetrics']['fits'] if layout['mode'] == 'single-page' else not layout['metrics']['fits']) and (pages == 1 if profile == 'standard' and count == 30 else pages > 1 if profile != 'standard' else True), {'pages': pages, 'layout': layout, 'actualPrintMetrics': print_geometry['actualPrintMetrics']})
+            if layout['mode'] == 'original-pages':
+                report.check(name + ': failed fit restores the complete original structure', page.locator('.k29-summary-columns,.k29-billing-footer,.k29-dense-single').count() == 0 and page.locator('.grouped-item-summary-table').count() == 1 and page.locator('.grouped-item-summary-table .line-total').count() == 1)
+            report.data.setdefault('adaptiveLayouts', []).append({'count': count, 'profile': profile, 'pages': pages, 'layout': layout})
         if count == 30:
-            report.data.setdefault('capacity30x30', []).append({'version': version, 'pages': pages, 'onePage': pages == 1, 'originalRows': count, 'summaryRows': count, 'allTextPresent': bool(complete_text), 'a4PageBoxes': boxes, 'printGeometry': print_geometry})
-            print('CAPACITY_30x30_PAGES=' + str(pages) + ' (' + version + '; diagnostic, one-page is not assumed)', flush=True)
+            layout = page.evaluate('()=>window.__billingDenseLayout||null')
+            report.data.setdefault('capacity30x30', []).append({'version': version, 'profile': profile, 'pages': pages, 'onePage': pages == 1, 'originalRows': count, 'summaryRows': count, 'allTextPresent': bool(complete_text), 'a4PageBoxes': boxes, 'printGeometry': print_geometry, 'layout': layout})
+            print('CAPACITY_30x30_PAGES=' + str(pages) + ' (' + version + '/' + profile + ')', flush=True)
         report.check(name + ': print page performs no storage writes and retains payload', page.evaluate('()=>__writes') == [] and page.evaluate('()=>d') == view)
         report.data['cases'].append(name)
     finally:
@@ -208,6 +253,12 @@ def main():
                     check_document(browser, server, report, version, 30, False)
                     bundle_case(browser, server, report, 'success', version)
                 check_document(browser, server, report, 'after', 13, True, historical=True)
+                for profile in ('long-chinese', 'large-decimals', 'long-note-retention'):
+                    check_document(browser, server, report, 'after', 30, profile == 'large-decimals', profile=profile)
+                for count in (26, 31, 50):
+                    check_document(browser, server, report, 'after', count, False)
+                standard = [item for item in report.data['capacity30x30'] if item['profile'] == 'standard']
+                report.check('standard 30x30 keeps the published detail and summary font sizes', len(standard) == 2 and standard[0]['printGeometry']['fonts'] == standard[1]['printGeometry']['fonts'], [item['printGeometry']['fonts'] for item in standard])
                 capacity_error(browser, server, report)
                 for scenario in ('http-failure', 'corrupt', 'slow'):
                     bundle_case(browser, server, report, scenario)

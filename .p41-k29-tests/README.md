@@ -23,6 +23,11 @@ credentials, migrations, automatic historical repair, or deployment job.
   supported four-decimal external/historical line values, and displays a
   clear error above the existing 50-line limit. Its print button and automatic
   print route share the ready gate; this is not a browser Ctrl+P interceptor.
+- Dense merged billing can arrange the existing summary rows in two columns
+  and place the existing footer blocks together. It measures the complete
+  print style cascade after image/font readiness and retains the layout only
+  when its A4 height and text widths fit. Otherwise it restores the original
+  complete multipage layout. No font size, saved amount, or source row changes.
 - Cache query values are updated through every affected billing print route.
   Quote routing and data projection are covered by the unchanged K27 suite.
 
@@ -49,7 +54,11 @@ python .p41-k29-tests/run_acceptance.py --group legacy --output artifacts/legacy
 The candidate group runs baseline/candidate sync contracts, actual Store and
 CloudSync browser integration, actual commission UI, actual receivable UI,
 real print routing/PDF extraction, and unchanged K28 paid-month Store/UI
-checks. The legacy group runs the original P33-4, P34, P35, P36, P39 invoice,
+checks. A separate bulk-input suite starts with approximately 1.7 MB of
+synthetic ERP data, performs 100 sequential daily-work saves, and reloads the
+same origin to verify complete records, durable mirrors, and unchanged paid
+history. A storage failure is a failure, not permission to reduce the fixture.
+The legacy group runs the original P33-4, P34, P35, P36, P39 invoice,
 K24 recovery, K25 review, and K27 projection/export suites against the same
 candidate. The K24 baseline blob remains pinned to its original bytes.
 
@@ -59,10 +68,12 @@ Missing executables, missing summaries, timeouts, and unexecuted suites are
 not passes. Synthetic screenshots/PDFs are separated into three-day QA
 artifacts; structured evidence is retained for fourteen days.
 
-The 30-original-row/30-summary-row print fixture measures actual A4 page
-count and verifies all content. Its one-page capacity is a diagnostic, not an
-assumption or a promise for arbitrary text lengths. Mobile UI acceptance
-uses the actual page frame and checks the target is inside the viewport.
+The standard 30-original-row/30-summary-row fixture must produce one actual
+A4 page with all content and unchanged font sizes. Boundary row counts,
+long Chinese descriptions, large four-decimal values, and long notes with
+retention verify content preservation and measured fallback. This is not a
+promise that arbitrary text lengths fit one page. Mobile UI acceptance uses
+the actual page frame and checks the target is inside the viewport.
 
 ## Release boundary
 

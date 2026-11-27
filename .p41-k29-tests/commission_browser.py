@@ -188,17 +188,24 @@ def protected_source(browser,server,report,kind):
     name='preserve-'+kind+'-gate';print('RUN',name,flush=True)
     context,page,before=boot(browser,server,report,name,kind)
     try:
+        attempts=[]
         report.check(name+': UI does not expose protected source edit',page.locator('[data-edit="'+COMMISSION+'"]').count()==0)
         result=call(page,'saveCommission',values(before['idb']['main'],note=PREFIX+'forbidden edit'),COMMISSION)
+        attempts.append({'stage':'direct-existing-source-edit','result':result,'after':raw(page)})
         report.check(name+': direct actual Store refuses protected edit',not result['ok'] and raw(page)==before and public(page)==before['idb']['main'],result)
         if kind=='paid':
             open_new(page,'paid');draft=fields(page)
             page.locator('#commissionForm button[type=submit]').click()
             page.wait_for_function('()=>window.__commissionToasts.some(text=>text.includes("儲存失敗"))')
+            attempts.append({'stage':'actual-ui-new-paid-month','result':{'transaction':page.evaluate('()=>KuSheERPStore.getLastStoreTransactionResult()'),'messages':page.evaluate('()=>__commissionToasts'),'draftBefore':draft,'draftAfter':fields(page)},'after':raw(page)})
             report.check(name+': actual paid-month manual form refuses without losing draft',raw(page)==before and fields(page)==draft and page.locator('#commissionForm button[type=submit]').is_enabled())
             result=call(page,'saveCommission',{'date':DATE,'employee':EMPLOYEE,'project':PROJECT,'billing':BILL,'untaxedAmount':20000,'rate':25,'status':'已列入薪資'})
+            attempts.append({'stage':'direct-new-paid-month','result':result,'after':raw(page)})
             report.check(name+': paid-month new manual gate stays closed',not result['ok'] and raw(page)==before,result)
-        report.save(name+'.json',result);report.case(name)
+        after=raw(page)
+        collections=('commissions','payroll','salaryPayments','banks','bankTransactions','payments','commissionSettlements','billings','receivables','receipts','retentionReceipts','invoices','payables')
+        collection_evidence={key:{'beforeCount':len(before['idb']['main'].get(key,[])),'afterCount':len(after['idb']['main'].get(key,[])),'nonemptyBefore':bool(before['idb']['main'].get(key,[])),'exact':before['idb']['main'].get(key)==after['idb']['main'].get(key)} for key in collections}
+        report.save(name+'.json',{'before':before,'after':after,'attempts':attempts,'collectionEvidence':collection_evidence,'exactRawMatch':after==before});report.case(name)
     finally:context.close()
 
 

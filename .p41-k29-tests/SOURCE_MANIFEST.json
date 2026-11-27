@@ -10,20 +10,24 @@
       "sha256": "d08012ba9d71d841b60eca25478d11ae6ab872dadf9b4c107e54eef201b95357"
     },
     ".p41-k29-tests/README.md": {
-      "bytes": 4080,
-      "sha256": "dadac589d2fe4a4a73b2c285f9fb1b2e0f5176c7f20903ab3cee26eb83ba7576"
+      "bytes": 4905,
+      "sha256": "5fe39ce2a5b720f4d02d4aabddee207b50e6cf47e4c0a5a5a4dba6aa6d10621f"
     },
     ".p41-k29-tests/SYNC_README.md": {
       "bytes": 11390,
       "sha256": "b4e9dcf5ec6423a91341244378a73c3c2d37182d60912c3562678997a4cd3a45"
+    },
+    ".p41-k29-tests/bulk_input.py": {
+      "bytes": 28157,
+      "sha256": "0a1b4818d008cbbd0fcd607beb524ce944a5343a33f66ef3d2529e9bb548e35a"
     },
     ".p41-k29-tests/commission_README.md": {
       "bytes": 3242,
       "sha256": "dcf73dd6a820967e9e572078e0c38ea1a639330bba37f936c819dc37bb7b991f"
     },
     ".p41-k29-tests/commission_browser.py": {
-      "bytes": 26915,
-      "sha256": "5f400a175660c3ce7b09bf3755766d1bdc07e1202924ab9be16d99b7851b747a"
+      "bytes": 28037,
+      "sha256": "65d0d611b0b88e397cea2f7ff4877f624e6ba72e0bdcb13d7b2df9150104de98"
     },
     ".p41-k29-tests/commission_fixture.py": {
       "bytes": 7330,
@@ -34,12 +38,12 @@
       "sha256": "1a29847e5f5e22671370b75b4c38b2fc3f70b9183392398fd80eaeaf8053e129"
     },
     ".p41-k29-tests/pdf_acceptance.py": {
-      "bytes": 17300,
-      "sha256": "0d1893f6d3e06867ec319a1ddbeadbbb00dec3241ee1aba8cb14591321922675"
+      "bytes": 22712,
+      "sha256": "8edec5ef087391fce5a8d16175a70aad28d2df69538a053e25588693cd472c5e"
     },
     ".p41-k29-tests/pdf_support.py": {
-      "bytes": 5998,
-      "sha256": "6693ceb92812867fb39ce73e413d3e680210339aa66026c17b0cadf1e8656e8f"
+      "bytes": 7245,
+      "sha256": "623cb224199c68add2db6d3ab3f64637d59a464d8b94d43e0aa5c6fd78e068c8"
     },
     ".p41-k29-tests/receivables_fixture.py": {
       "bytes": 5763,
@@ -50,8 +54,8 @@
       "sha256": "9bb817472f3ab57f9210ec8719eaa9eaddaa8b855b722de346a958752272821f"
     },
     ".p41-k29-tests/run_acceptance.py": {
-      "bytes": 6913,
-      "sha256": "1cdb3bca8ecb90a22fd498fd95218a531ef360e4cda6aca70c998f660e7bd2b9"
+      "bytes": 7023,
+      "sha256": "3ba4b4e0514f413b8c1faf30ae5b17a48ed99d42898867d6ec5394de713dc68e"
     },
     ".p41-k29-tests/source_guard.py": {
       "bytes": 6445,
@@ -106,8 +110,8 @@
       "sha256": "719e66ee6dca86286e7eddae18de23b9e10505957343a04ac66b590636acb4f2"
     },
     "billing-print.html": {
-      "bytes": 39901,
-      "sha256": "7fab68f5dce6978d02b0b55257c4968fe4698375f987f6a6aeaae3dbdf8acd47"
+      "bytes": 48033,
+      "sha256": "ca885babb887be7e75751b714ade0de2bee6dcf1301a1dc6d12c7b498bd2ca33"
     },
     "external-billing-print.html": {
       "bytes": 4483,

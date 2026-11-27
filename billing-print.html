@@ -128,6 +128,17 @@
   <link rel="stylesheet" href="assets/css/p40-16cd-mint-quotation-billing.css?v=p40-16cd-1">
   <!-- P41 quotation-only: formal A4 quotation and paragraph-based payment terms. -->
   <link rel="stylesheet" href="assets/css/p41-quote-pagination.css?v=p41-k26-quote-notes-20261127-1">
+  <style>
+    /* K29: rearrange existing dense rows; keep all existing type sizes. */
+    #paper.billing-document.invoice-group-document.k29-dense-single .k29-summary-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:3mm;align-items:start}
+    #paper.billing-document.invoice-group-document.k29-dense-single .k29-summary-columns>table{width:100%;min-width:0;margin:0}
+    #paper.billing-document.invoice-group-document.k29-dense-single .k29-billing-footer{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.15fr);gap:2mm 4mm;align-items:end;margin-top:1.6mm;break-inside:avoid}
+    #paper.billing-document.invoice-group-document.k29-dense-single .k29-billing-footer>.note{grid-column:1/-1;grid-row:1;width:100%;margin:0}
+    #paper.billing-document.invoice-group-document.k29-dense-single .k29-billing-footer>.summary{grid-column:3;grid-row:2;width:100%;min-width:0;margin:0}
+    #paper.billing-document.invoice-group-document.k29-dense-single .k29-billing-footer>.sign{display:contents}
+    #paper.billing-document.invoice-group-document.k29-dense-single .k29-billing-footer .client-sign{grid-column:1;grid-row:2;width:90%;margin:0 auto}
+    #paper.billing-document.invoice-group-document.k29-dense-single .k29-billing-footer .company-seals{grid-column:2;grid-row:2;min-width:0}
+  </style>
 </head>
 <body>
   <div class="toolbar"><button id="safePrintButton" onclick="printDocument()" disabled>載入公司 LOGO／大小章中…</button><button class="close" onclick="closePrintView()">關閉</button></div>
@@ -285,6 +296,90 @@
       return true;
     }
     const nextFrame=()=>new Promise(resolve=>requestAnimationFrame(resolve));
+    // This optional layout moves existing nodes only. Its rollback restores the
+    // original table, footer order and images without changing the print payload.
+    function arrangeDenseBilling(host){
+      const section=host.querySelector('.grouped-item-summary'),table=section?.querySelector('table'),body=table?.tBodies[0];
+      const rows=body?Array.from(body.children):[],items=rows.filter(row=>!row.classList.contains('line-total'));
+      const total=rows.find(row=>row.classList.contains('line-total'));
+      const summary=host.querySelector(':scope>.summary'),note=host.querySelector(':scope>.note'),sign=host.querySelector(':scope>.sign');
+      if(items.length<16||items.length>50||!total||!summary||!sign)throw new Error('DENSE_LAYOUT_STRUCTURE');
+      const cols=Array.from(table.querySelectorAll('col')),oldStyles=cols.map(col=>col.getAttribute('style'));
+      const second=table.cloneNode(false),secondBody=host.ownerDocument.createElement('tbody');
+      second.append(table.querySelector('colgroup').cloneNode(true),table.tHead.cloneNode(true),secondBody);
+      [table,second].forEach(part=>Array.from(part.querySelectorAll('col')).forEach((col,i)=>col.style.width=[44,9,13,16,18][i]+'%'));
+      const columns=host.ownerDocument.createElement('div');columns.className='k29-summary-columns';
+      table.before(columns);columns.append(table,second);secondBody.append(...items.slice(Math.ceil(items.length/2)),total);
+      const footer=host.ownerDocument.createElement('div');footer.className='k29-billing-footer';
+      summary.before(footer);footer.append(summary);if(note)footer.append(note);footer.append(sign);
+      host.classList.add('k29-dense-single');
+      return ()=>{
+        body.append(...rows);columns.replaceWith(table);
+        cols.forEach((col,i)=>oldStyles[i]===null?col.removeAttribute('style'):col.setAttribute('style',oldStyles[i]));
+        footer.before(summary);if(note)footer.before(note);footer.before(sign);footer.remove();
+        host.classList.remove('k29-dense-single');
+      };
+    }
+    function densePrintRules(rules){
+      return Array.from(rules).map(rule=>{
+        if(rule.type===CSSRule.MEDIA_RULE){
+          const media=rule.conditionText.split(',').map(value=>value.trim()).filter(value=>!/^screen(?:\s|$)/i.test(value)).map(value=>value.replace(/\bprint\b/gi,'all')).join(',');
+          if(!media)return '';
+          const contents=densePrintRules(rule.cssRules);
+          return media==='all'?contents:'@media '+media+'{'+contents+'}';
+        }
+        if(rule.type===CSSRule.IMPORT_RULE)throw new Error('DENSE_PRINT_IMPORT_UNMEASURED');
+        if(rule.type===CSSRule.SUPPORTS_RULE)return '@supports '+rule.conditionText+'{'+densePrintRules(rule.cssRules)+'}';
+        return rule.cssText;
+      }).join('\n');
+    }
+    function denseBillingGeometry(host){
+      const doc=host.ownerDocument,view=doc.defaultView,ruler=doc.createElement('div');
+      ruler.style.cssText='position:absolute;visibility:hidden;width:210mm;height:297mm;left:0;top:0;pointer-events:none';doc.body.append(ruler);
+      const page=ruler.getBoundingClientRect(),box=host.getBoundingClientRect(),style=view.getComputedStyle(host),overflows=[];
+      let bottom=box.top;
+      const nodes=Array.from(host.querySelectorAll('th,td,.head,.info>div,.summary-row,.note,.client-sign,.company-seals,img'));
+      nodes.forEach((node,index)=>{
+        const rect=node.getBoundingClientRect();if(!rect.width||!rect.height)return;
+        bottom=Math.max(bottom,rect.bottom);
+        let overflow=node.scrollWidth>node.clientWidth+1||rect.left<box.left-.5||rect.right>box.right+.5;
+        const range=doc.createRange();range.selectNodeContents(node);
+        for(const text of range.getClientRects())if(text.width&&(text.left<rect.left-.5||text.right>rect.right+.5))overflow=true;
+        if(overflow)overflows.push({index,tag:node.tagName,text:node.textContent.slice(0,80)});
+      });
+      const metrics={heightPx:box.height,contentBottomPx:bottom-box.top+parseFloat(style.paddingBottom),limitPx:page.height-page.height/297,widthPx:box.width,a4WidthPx:page.width,overflows,
+        detailFont:view.getComputedStyle(host.querySelector('.dense-line-table td')).fontSize,summaryFont:view.getComputedStyle(host.querySelector('.grouped-item-summary-table td')).fontSize};
+      ruler.remove();
+      metrics.fits=metrics.heightPx<=metrics.limitPx&&metrics.contentBottomPx<=metrics.limitPx&&Math.abs(metrics.widthPx-metrics.a4WidthPx)<1&&!overflows.length;
+      return metrics;
+    }
+    let restoreDenseBilling=null;
+    async function prepareDenseBillingPrint(){
+      window.__billingDenseLayout={attempted:false,mode:'original-pages'};
+      if(isQuote||!denseInvoiceGroup||lines.length<26||lines.length>50||summaryItems.length<16||summaryItems.length>50)return;
+      let frame;
+      try{
+        const css=Array.from(document.styleSheets).map(sheet=>densePrintRules(sheet.cssRules)).join('\n');
+        frame=document.createElement('iframe');frame.setAttribute('aria-hidden','true');frame.tabIndex=-1;
+        frame.style.cssText='position:fixed;left:-12000px;top:0;width:210mm;height:297mm;border:0;visibility:hidden;pointer-events:none';document.body.append(frame);
+        const doc=frame.contentDocument;doc.open();doc.write('<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"></head><body></body></html>');doc.close();
+        const style=doc.createElement('style');style.textContent=css;doc.head.append(style);doc.documentElement.style.overflow='hidden';
+        const clone=paper.cloneNode(true);doc.body.append(clone);arrangeDenseBilling(clone);
+        await Promise.all(Array.from(clone.querySelectorAll('img')).map(image=>image.decode()));
+        if(doc.fonts?.ready)await doc.fonts.ready;await nextFrame();await nextFrame();
+        const metrics=denseBillingGeometry(clone);
+        window.__billingDenseLayout={attempted:true,mode:metrics.fits?'single-page':'original-pages',reason:metrics.fits?'verified-print-geometry':'content-does-not-fit',metrics};
+        if(metrics.fits)restoreDenseBilling=arrangeDenseBilling(paper);
+      }catch(error){window.__billingDenseLayout={attempted:true,mode:'original-pages',reason:'measurement-unavailable',error:String(error.message||error)};}
+      finally{frame?.remove();}
+    }
+    window.addEventListener('beforeprint',()=>{
+      if(!restoreDenseBilling||!window.matchMedia('print').matches)return;
+      let metrics;
+      try{metrics=denseBillingGeometry(paper)}catch(_){metrics={fits:false}}
+      window.__billingDenseLayout.printMetrics=metrics;
+      if(!metrics.fits){restoreDenseBilling();restoreDenseBilling=null;window.__billingDenseLayout={attempted:true,mode:'original-pages',reason:'print-geometry-changed',metrics};}
+    });
     const assetTimeout=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
     async function waitForStableImage(image){if(!image||!image.src)return;for(let attempt=0;attempt<4;attempt+=1){const source=image.currentSrc||image.src;if(!image.complete)await Promise.race([new Promise(resolve=>{image.addEventListener('load',resolve,{once:true});image.addEventListener('error',resolve,{once:true})}),assetTimeout(2000)]);try{if(image.decode)await Promise.race([image.decode(),assetTimeout(2000)])}catch(e){}await nextFrame();if(image.complete&&(image.currentSrc||image.src)===source)return}}
     function millimetersToPixels(mm){const ruler=document.createElement('div');ruler.style.cssText=`position:absolute;visibility:hidden;pointer-events:none;height:${mm}mm`;document.body.appendChild(ruler);const pixels=ruler.getBoundingClientRect().height;ruler.remove();return pixels}
@@ -381,7 +476,7 @@
     }else if(isQuote){
       prepareQuotationPrint().then(allowPrintWhenVerified).catch(handleQuotationPrintError);
     }else{
-      loadAssets().then(allowPrintWhenVerified).catch(blockPrintForMissingSeals);
+      loadAssets().then(prepareDenseBillingPrint).then(allowPrintWhenVerified).catch(blockPrintForMissingSeals);
     }
   </script>
 </body>

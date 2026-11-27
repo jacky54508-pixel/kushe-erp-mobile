@@ -33,6 +33,7 @@ def main():
             tests.extend([
                 ('receivables', [py, '.p41-k29-tests/receivables_ui.py', '--output', str(output / 'receivables')]),
                 ('pdf', [py, '.p41-k29-tests/pdf_acceptance.py', '--output', str(output / 'pdf')]),
+                ('bulk-input', [py, '.p41-k29-tests/bulk_input.py', '--output', str(output / 'bulk-input')]),
                 ('k28-store', [py, '.p41-k28-tests/k28_browser_store.py', '--mode', 'candidate', '--store', 'assets/js/erp-store.js', '--output', str(output / 'k28-store')]),
                 ('k28-ui', [py, '.p41-k28-tests/test_daily_ui.py', '--root', '.', '--store', 'assets/js/erp-store.js', '--output', str(output / 'k28-ui')]),
             ])

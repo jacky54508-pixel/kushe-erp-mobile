@@ -133,11 +133,41 @@ def artifact_pdf(page, path):
     content = page.pdf(format='A4', print_background=True, prefer_css_page_size=True)
     path.write_bytes(content)
     reader = PdfReader(io.BytesIO(content))
+    reading_text = '\n\f\n'.join(p.extract_text() or '' for p in reader.pages)
     if shutil.which('pdftotext'):
         text = subprocess.check_output(['pdftotext', '-layout', str(path), '-'], encoding='utf-8')
     else:
-        text = '\n\f\n'.join(p.extract_text() or '' for p in reader.pages)
+        text = reading_text
     path.with_suffix('.txt').write_text(text, encoding='utf-8')
+    path.with_name(path.stem + '-reading.txt').write_text(reading_text, encoding='utf-8')
     if shutil.which('pdftoppm'):
         subprocess.run(['pdftoppm', '-scale-to', '1400', '-png', str(path), str(path.with_name(path.stem + '-page'))], check=True, capture_output=True)
-    return len(reader.pages), text, [list(map(float, (p.mediabox.width, p.mediabox.height))) for p in reader.pages]
+    return len(reader.pages), reading_text, [list(map(float, (p.mediabox.width, p.mediabox.height))) for p in reader.pages]
+
+
+def pdf_image_paints(path):
+    """Count actual image draw operations, including a reused logo/seal image."""
+    from pypdf import PdfReader
+    from pypdf.generic import ContentStream
+    reader = PdfReader(path)
+
+    def count(stream, resources, depth=0):
+        if stream is None or depth > 8:
+            return 0
+        if hasattr(resources, 'get_object'):
+            resources = resources.get_object()
+        total = 0
+        xobjects = resources.get('/XObject', {})
+        if hasattr(xobjects, 'get_object'):
+            xobjects = xobjects.get_object()
+        for operands, operator in ContentStream(stream, reader).operations:
+            if operator != b'Do' or not operands or operands[0] not in xobjects:
+                continue
+            obj = xobjects[operands[0]].get_object()
+            if obj.get('/Subtype') == '/Image':
+                total += 1
+            elif obj.get('/Subtype') == '/Form':
+                total += count(obj, obj.get('/Resources', resources), depth + 1)
+        return total
+
+    return [count(page.get_contents(), page['/Resources']) for page in reader.pages]
