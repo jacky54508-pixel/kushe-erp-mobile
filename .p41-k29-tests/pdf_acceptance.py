@@ -7,6 +7,7 @@ import re
 import traceback
 import unicodedata
 import uuid
+from collections import Counter
 from pathlib import Path
 from urllib.parse import quote
 
@@ -25,6 +26,17 @@ def text_key(value):
     # PDF CJK fonts can map a visible character to its compatibility radical.
     # Preserve every glyph while normalizing that representation and line wraps.
     return re.sub(r'\s+', '', unicodedata.normalize('NFKC', value))
+
+
+def bundle_pdf_fields(value):
+    text = text_key(value)
+    markers = ('SYN-BUNDLE-WORK', 'SYN-BUNDLE-A', 'SYN-BUNDLE-NO-A')
+    return {'markers': {marker: len(re.findall(re.escape(marker) + r'(?![A-Z0-9_-])', text)) for marker in markers},
+            'currencyTokens': dict(Counter(re.findall(r'\$[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?(?![0-9,.])', text)))}
+
+
+BUNDLE_PDF_EXPECTED = {'markers': {'SYN-BUNDLE-WORK': 1, 'SYN-BUNDLE-A': 1, 'SYN-BUNDLE-NO-A': 2},
+                       'currencyTokens': {'$100': 1, '$200': 3, '$10': 2, '$210': 4, '$0': 2}}
 
 
 def payload(count=13, fractional=True, historical=False, profile='standard'):
@@ -217,7 +229,8 @@ def bundle_case(browser, server, report, scenario, version='after'):
                 report.check(name + ': manual print uses the same ready gate', page.evaluate('()=>__printed') == 2)
             page.screenshot(path=str(report.qa / (name + '.png')), full_page=True)
             pages, text, _ = artifact_pdf(page, report.qa / (name + '.pdf'))
-            report.check(name + ': PDF retains original bundle work and amount', 'SYN-BUNDLE-WORK' in text and '$210' in text, {'pages': pages})
+            fields = bundle_pdf_fields(text)
+            report.check(name + ': PDF retains exact original bundle markers and complete currency tokens', fields == BUNDLE_PDF_EXPECTED, {'pages': pages, 'fields': fields})
         else:
             page.locator('#sealLoadError').wait_for()
             page.evaluate('()=>printDocument()')

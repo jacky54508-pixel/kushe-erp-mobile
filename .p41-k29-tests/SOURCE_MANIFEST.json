@@ -38,8 +38,8 @@
       "sha256": "1a29847e5f5e22671370b75b4c38b2fc3f70b9183392398fd80eaeaf8053e129"
     },
     ".p41-k29-tests/pdf_acceptance.py": {
-      "bytes": 22712,
-      "sha256": "8edec5ef087391fce5a8d16175a70aad28d2df69538a053e25588693cd472c5e"
+      "bytes": 23374,
+      "sha256": "8076ef63ff8115de72b27ac1d8930e8d68762f9886cd53fbd4d906ed40e85989"
     },
     ".p41-k29-tests/pdf_support.py": {
       "bytes": 7245,
