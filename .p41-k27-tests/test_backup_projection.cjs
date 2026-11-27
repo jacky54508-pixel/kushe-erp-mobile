@@ -138,6 +138,15 @@ check('Prepared export does not re-read state or re-project after its public sna
   const payload=JSON.parse(Buffer.from(decodeURIComponent(new URL(loaded.navigation[0]).hash.slice(1)),'base64').toString('utf8'));
   assert.equal(payload.lines[0].note,PUBLIC_NOTE);
 });
+check('CRLF and CR in public line notes remain exact in the prepared and exported payload',()=>{
+  const f=fixture(),note='SYN CRLF 第一行\r\nSYN CR 第二行\rSYN END 第三行';
+  f.line.note=note;
+  const loaded=loadProducer(source,f.state),prepared=loaded.window.KusheQuotationPrint.prepare(f.quote);
+  assert.equal(prepared.view.lines[0].note,note);
+  prepared.export();assert.equal(loaded.navigation.length,1);
+  const payload=JSON.parse(Buffer.from(decodeURIComponent(new URL(loaded.navigation[0]).hash.slice(1)),'base64').toString('utf8'));
+  assert.equal(payload.lines[0].note,note);assert.equal(f.line.note,note);
+});
 check('Producer stops before navigation if its display sorting dependency drops a noted row',()=>{
   const f=fixture(),loaded=loadProducer(source,f.state);
   loaded.window.KusheDisplaySort.sortWorkRows=()=>[];

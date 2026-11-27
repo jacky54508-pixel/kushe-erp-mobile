@@ -291,7 +291,7 @@
       const visible=node=>{const style=getComputedStyle(node),box=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&Number(style.opacity)!==0&&box.width>0&&box.height>0};
       if(rows.length!==lines.length)fail();
       rows.forEach((row,index)=>{
-        const source=lines[index],cell=row.cells[0],note=String(source.note??'');
+        const source=lines[index],cell=row.cells[0],note=String(source.note??'').replace(/\r\n?/g,'\n');
         const expected=!note.trim()||source.isBackupPrice===true&&note.trim()==='備用單價'?'':note;
         const notes=[...cell.querySelectorAll('.p41-quote-line-note')];
         const backups=[...cell.querySelectorAll('.actual-note')].filter(node=>node.textContent==='備用單價');

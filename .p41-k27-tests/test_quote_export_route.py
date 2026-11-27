@@ -64,7 +64,7 @@ def fixture(kind):
         line(4, 'SYN-MANUAL 合成手動報價', 15000, 'SYN-NOTE-MANUAL 手動單價不推定備用。'),
         line(5, 'SYN-MISMATCH 合成歷史價格', 15100, 'SYN-NOTE-MISMATCH 已調整金額不沿用舊標記。'),
         line(6, 'SYN-MULTILINE 合成多行說明', 800,
-             'SYN-LINE-ONE 第一行工作範圍。\nSYN-LINE-TWO <img src=x onerror="window.__k27Xss=true"> & 原文保留。'),
+             'SYN-LINE-ONE 第一行工作範圍。\r\nSYN-LINE-TWO <img src=x onerror="window.__k27Xss=true"> & 原文保留。'),
     ]
     rows[0].update(priceSource='project', priceId='SYN-PRICE-OLD')
     rows[1].update(priceSource='project', priceId='SYN-PRICE-NORMAL')
@@ -289,7 +289,8 @@ def check_rows(report, name, rows, view, backups):
     failures = []
     for index, (row, source, backup) in enumerate(zip(rows, view['lines'], backups)):
         note = source.get('note', '')
-        expected_note = '' if note.strip() == '備用單價' and backup else note
+        # HTML parsing normalizes CRLF/CR to LF; the original payload remains exact.
+        expected_note = '' if note.strip() == '備用單價' and backup else re.sub(r'\r\n?', '\n', note)
         expected_notes = [expected_note] if expected_note else []
         notes = [value['text'] for value in row['notes']]
         labels = [value['text'] for value in row['badges']]
@@ -380,7 +381,7 @@ def route_case(checks, browser, server, report, name, kind, version='candidate',
         page.locator('.quotation-desktop-list [data-quote-view="SYN-Q"]').click()
         actual_notes = page.locator('.quotation-detail-table tbody tr td:last-child').all_text_contents()
         report.check(name + ': actual quotation detail UI displays every source line note',
-                     actual_notes == [row['note'] or '—' for row in record['lines']], actual_notes)
+                     actual_notes == [re.sub(r'\r\n?', '\n', row['note']) or '—' for row in record['lines']], actual_notes)
         reload_requests = inject_bridge_scenario(page, server, bridge_scenario)
         toolbar = kind == 'toolbar'
         page.locator('#printQuotation' if toolbar else '#exportQuotation').click()
