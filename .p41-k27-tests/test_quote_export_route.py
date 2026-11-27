@@ -27,7 +27,9 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 
 BASE = '4c02e3c707473c4483946afd5222c7cf05d8fb63'
-EXPECTED_VERSION = 'p41-k27-quote-export-20261127-1'
+LEGACY_PRODUCER_COMMIT = '668334605342e5766027c3f73b4fe1b29036dec0'
+LEGACY_PRODUCER_SHA256 = 'd22d21d7337ccd0291160a062ceea1a9bb634987125a3c31a8bdebc546895f6e'
+EXPECTED_VERSION = 'p41-k27-quote-export-20261127-2'
 SCRIPT_PATHS = (
     'assets/js/billing-print.js',
     'assets/js/billing-bundle-print.js',
@@ -194,6 +196,9 @@ class FixtureServer:
         self.assets = set(checks.ASSETS) | set(SCRIPT_PATHS)
         self.baseline = {path: subprocess.check_output(['git', '-C', str(root), 'show', BASE + ':' + path])
                          for path in self.assets}
+        self.legacy_producer = subprocess.check_output(['git', '-C', str(root), 'show',
+            LEGACY_PRODUCER_COMMIT + ':assets/js/billing-print.js'])
+        assert hashlib.sha256(self.legacy_producer).hexdigest() == LEGACY_PRODUCER_SHA256
         baseline_index = subprocess.check_output(['git', '-C', str(root), 'show', BASE + ':index.html']).decode()
         self.orders = {'baseline': script_order(baseline_index),
                        'candidate': script_order((root / 'index.html').read_text(encoding='utf-8'))}
@@ -283,7 +288,8 @@ def check_rows(report, name, rows, view, backups):
     report.check(name + ': all source rows reach the final document in stable order', len(rows) == len(view['lines']))
     failures = []
     for index, (row, source, backup) in enumerate(zip(rows, view['lines'], backups)):
-        expected_note = '' if source['note'].strip() == '備用單價' and backup else source['note']
+        note = source.get('note', '')
+        expected_note = '' if note.strip() == '備用單價' and backup else note
         expected_notes = [expected_note] if expected_note else []
         notes = [value['text'] for value in row['notes']]
         labels = [value['text'] for value in row['badges']]
@@ -322,7 +328,35 @@ def windows_pdf(checks, report, name, page, metrics, output, minimum_pages=1, ma
     return count
 
 
-def route_case(checks, browser, server, report, name, kind, version='candidate'):
+def inject_bridge_scenario(page, server, scenario):
+    """Inject a previously shipped or unavailable bridge after normal UI loading."""
+    if scenario in ('old', 'network-failure', 'wrong-version'):
+        page.add_script_tag(content=server.legacy_producer.decode('utf-8'))
+    elif scenario == 'missing':
+        page.evaluate('()=>{window.KusheQuotationPrint=undefined}')
+    elif scenario == 'incomplete':
+        page.evaluate('''()=>{
+          const engine=window.KusheQuotationPrint,prepare=engine.prepare.bind(engine);
+          engine.prepare=record=>{
+            const prepared=prepare(record),view=JSON.parse(JSON.stringify(prepared.view));
+            view.lines[0].note='';
+            const bad=()=>{console.error('__K27_BAD_BRIDGE__');throw Error('Incomplete bridge was used')};
+            return {view,export:bad,print:bad};
+          };
+        }''')
+    requests = []
+    page.on('request', lambda request: requests.append(request.url)
+            if urlsplit(request.url).path.endswith('/assets/js/billing-print.js') else None)
+    if scenario == 'network-failure':
+        page.route(re.compile(r'/assets/js/billing-print\.js\?'), lambda route: route.abort('failed'))
+    elif scenario == 'wrong-version':
+        page.route(re.compile(r'/assets/js/billing-print\.js\?'),
+                   lambda route: route.fulfill(status=200,content_type='application/javascript',body=server.legacy_producer))
+    return requests
+
+
+def route_case(checks, browser, server, report, name, kind, version='candidate',
+               bridge_scenario='', reproduce_missing=False):
     state, backups = fixture(kind)
     record = state['quotations'][0]
     if version == 'baseline':
@@ -330,12 +364,14 @@ def route_case(checks, browser, server, report, name, kind, version='candidate')
     context = checks.fresh_context(browser, server, report)
     context.add_init_script(PRINT_OBSERVER)
     page = context.new_page()
-    errors, source_events = [], []
+    errors, source_events, bad_bridge_calls = [], [], []
     page.on('pageerror', lambda error: errors.append(str(error)))
 
     def console(message):
         if message.text.startswith('__K27_SOURCE__'):
             source_events.append(json.loads(message.text.removeprefix('__K27_SOURCE__')))
+        if message.text.startswith('__K27_BAD_BRIDGE__'):
+            bad_bridge_calls.append(message.text)
 
     page.on('console', console)
     try:
@@ -345,6 +381,7 @@ def route_case(checks, browser, server, report, name, kind, version='candidate')
         actual_notes = page.locator('.quotation-detail-table tbody tr td:last-child').all_text_contents()
         report.check(name + ': actual quotation detail UI displays every source line note',
                      actual_notes == [row['note'] or '—' for row in record['lines']], actual_notes)
+        reload_requests = inject_bridge_scenario(page, server, bridge_scenario)
         toolbar = kind == 'toolbar'
         page.locator('#printQuotation' if toolbar else '#exportQuotation').click()
         page.wait_for_url(re.compile(r'/billing-print\.html\?'), wait_until='load')
@@ -361,10 +398,18 @@ def route_case(checks, browser, server, report, name, kind, version='candidate')
                      len(source_events) == 1 and source_events[0]['sourceUnchanged'] and source_events[0]['sourceFrozen'] and
                      not source_events[0]['storeWrites'] and not source_events[0]['storageWrites'] and
                      not source_events[0]['toasts'] and source_events[0]['loadedScripts'] == server.orders[version], source_events)
-        report.check(name + ': actual exported payload retains every public line note without leaking private fields',
-                     [row['note'] for row in view['lines']] == [row['note'].strip() for row in record['lines']] and
+        report.check(name + ': actual payload follows the expected line-note contract without private fields',
+                     (all('note' not in row for row in view['lines']) if reproduce_missing else
+                      [row['note'] for row in view['lines']] == [row['note'].strip() for row in record['lines']]) and
                      not any(marker in json.dumps(view, ensure_ascii=False) for marker in PRIVATE) and
                      not any('internalNote' in row or 'priceId' in row for row in view['lines']))
+        if bridge_scenario and version == 'candidate':
+            report.check(name + ': incompatible bridge is replaced once by the exact current producer before export',
+                         len(reload_requests)==1 and
+                         parse_qs(urlsplit(reload_requests[0]).query).get('v')==[EXPECTED_VERSION] and
+                         not bad_bridge_calls, {'requests':reload_requests,'badBridgeCalls':bad_bridge_calls})
+        else:
+            report.check(name + ': compatible path has no unnecessary producer reload', not reload_requests, reload_requests)
         report.check(name + ': backup flags follow the saved source history or explicit legacy note',
                      [row['isBackupPrice'] for row in view['lines']] == backups,
                      {'expected': backups, 'actual': [row['isBackupPrice'] for row in view['lines']]})
@@ -386,6 +431,12 @@ def route_case(checks, browser, server, report, name, kind, version='candidate')
                      calls[0]['popupCalls'] == 0 and calls[0]['hasSourceApp'] is False,
                      {key: calls[0][key] for key in ('ready', 'buttonDisabled', 'pagination', 'writes', 'popupCalls', 'hasSourceApp')} if calls else calls)
         check_rows(report, name + ' at window.print', calls[0]['rows'], view, backups)
+        if reproduce_missing:
+            report.check(name + ': old producer reproduces a missing custom line note while the legacy backup label survives',
+                         USER_NOTE not in calls[0]['publicText'] and '備用單價' in calls[0]['publicText'] and
+                         'SYN-NOTE-21000' not in calls[0]['publicText'],
+                         {'legacyProducerCommit':LEGACY_PRODUCER_COMMIT,
+                          'scope':'Reproduced mechanism; actual user browser module version remains unproven'})
         report.check(name + ': private notes and escaped markup do not become printed content or executable HTML',
                      not any(marker in calls[0]['publicText'] for marker in PRIVATE) and
                      page.evaluate('()=>window.__k27Xss===undefined') and
@@ -407,17 +458,148 @@ def route_case(checks, browser, server, report, name, kind, version='candidate')
         details = {'syntheticOnly': True, 'case': name, 'version': version, 'inputState': state,
                    'view': view, 'expectedBackupFlags': backups, 'sourceEvidence': source_events,
                    'printCalls': calls, 'printMetrics': metrics, 'pdfPages': pdf_count,
+                   'injectedBridgeScenario': bridge_scenario, 'producerReloadRequests': reload_requests,
+                   'legacyNoteOmissionReproduced': reproduce_missing,
                    'operatingSystemPrintDialogTested': False}
         (report.output / (name + '-evidence.json')).write_text(json.dumps(details, ensure_ascii=False, indent=2), encoding='utf-8')
         report.result['cases'].append({'name': name, 'mode': record['pricingMode'], 'rows': len(view['lines']),
                                        'pdfPages': pdf_count, 'actualButton': 'printQuotation' if toolbar else 'exportQuotation',
-                                       'noteDisappearanceReproduced': False,
+                                       'noteDisappearanceReproduced': reproduce_missing,
                                        'customScopeBackupMissingInBaseline': version == 'baseline' and backups[0] is False})
         return view
     except Exception:
         checks.capture_failure_artifacts(page, report, name)
         raise
     finally:
+        context.close()
+
+
+def blocked_reload_case(checks, browser, server, report, scenario):
+    name='blocked-'+scenario
+    context=checks.fresh_context(browser,server,report)
+    context.add_init_script(PRINT_OBSERVER)
+    page=context.new_page()
+    errors=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    try:
+        url=f'{server.origin}/candidate/k27-quote-ui-actual.html'
+        page.goto(url,wait_until='load')
+        page.wait_for_function('()=>window.__k27UiReady===true')
+        page.locator('.quotation-desktop-list [data-quote-view="SYN-Q"]').click()
+        reload_requests=inject_bridge_scenario(page,server,scenario)
+        page.locator('#exportQuotation').click()
+        page.wait_for_function('''()=>window.__k27Toasts.length>0&&
+            !document.querySelector('#exportQuotation').disabled&&
+            !document.querySelector('#printQuotation').disabled''')
+        facts=page.evaluate('''()=>({
+          toasts:window.__k27Toasts,printCalls:window.__k27PrintCalls,popups:window.__k27PopupCalls,
+          storeWrites:window.__k27StoreWrites,storageWrites:window.__p41WriteAttempts,
+          sourceUnchanged:JSON.stringify(window.__k27SyntheticState)===window.__k27SourceBefore,
+          exportText:document.querySelector('#exportQuotation').textContent,
+          printText:document.querySelector('#printQuotation').textContent
+        })''')
+        report.check(name+': failing replacement never navigates or prints an incomplete quotation',
+                     page.url==url and len(context.pages)==1 and not facts['printCalls'] and not facts['popups'])
+        report.check(name+': exactly one current-version replacement is attempted',
+                     len(reload_requests)==1 and parse_qs(urlsplit(reload_requests[0]).query).get('v')==[EXPECTED_VERSION],reload_requests)
+        report.check(name+': failure restores usable buttons and explains the blocked export',
+                     facts['exportText']=='匯出 PDF' and facts['printText']=='列印' and len(facts['toasts'])==1 and
+                     ('載入失敗' in facts['toasts'][0] or '停止匯出' in facts['toasts'][0]),facts['toasts'])
+        report.check(name+': failure leaves source and storage untouched with no unhandled page errors',
+                     facts['sourceUnchanged'] and not facts['storeWrites'] and not facts['storageWrites'] and not errors,errors)
+        details={'syntheticOnly':True,'case':name,'facts':facts,'reloadRequests':reload_requests,'urlUnchanged':page.url==url}
+        (report.output/(name+'-evidence.json')).write_text(json.dumps(details,ensure_ascii=False,indent=2),encoding='utf-8')
+        report.result.setdefault('blockedCases',[]).append({'name':name,'navigationPrevented':True,'sourceUnchanged':True})
+    except Exception:
+        checks.capture_failure_artifacts(page,report,name)
+        raise
+    finally:
+        context.close()
+
+
+def blocked_rendered_note_case(checks,browser,server,report):
+    name='blocked-rendered-note-removal'
+    context=checks.fresh_context(browser,server,report)
+    context.add_init_script(PRINT_OBSERVER)
+    page=context.new_page()
+    errors=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    try:
+        page.goto(f'{server.origin}/candidate/k27-quote-ui-toolbar.html',wait_until='load')
+        page.wait_for_function('()=>window.__k27UiReady===true')
+        page.locator('.quotation-desktop-list [data-quote-view="SYN-Q"]').click()
+        page.locator('#printQuotation').click()
+        page.wait_for_url(re.compile(r'/billing-print\.html\?'),wait_until='load')
+        checks.ready(page)
+        report.check(name+': correct preview starts ready with its complete source note',
+                     page.evaluate('note=>d.lines[0].note===note&&window.__billingPrintReady===true',USER_NOTE))
+        page.locator('#paper .p41-quote-line-note').first.evaluate('(node)=>node.remove()')
+        page.locator('#safePrintButton').click()
+        page.wait_for_function("()=>window.__billingPrintError==='QUOTATION_PUBLIC_NOTES_INCOMPLETE'")
+        facts=page.evaluate('''()=>({ready:window.__billingPrintReady,error:window.__billingPrintError,
+          disabled:document.querySelector('#safePrintButton').disabled,button:document.querySelector('#safePrintButton').textContent,
+          printCalls:window.__k27PrintCalls,writes:window.__p41WriteAttempts,payloadNote:d.lines[0].note})''')
+        report.check(name+': last print boundary blocks missing rendered notes rather than issuing a damaged PDF',
+                     facts['ready'] is False and facts['disabled'] and not facts['printCalls'] and
+                     facts['error']=='QUOTATION_PUBLIC_NOTES_INCOMPLETE',facts)
+        report.check(name+': blocked preview retains the source payload without writes or unhandled errors',
+                     facts['payloadNote']==USER_NOTE and not facts['writes'] and not errors,errors)
+        (report.output/(name+'-evidence.json')).write_text(json.dumps({'syntheticOnly':True,'facts':facts},ensure_ascii=False,indent=2),encoding='utf-8')
+        report.result.setdefault('blockedCases',[]).append({'name':name,'printPrevented':True,'payloadPreserved':True})
+    except Exception:
+        checks.capture_failure_artifacts(page,report,name)
+        raise
+    finally:
+        context.close()
+
+
+def canceled_reload_case(checks,browser,server,report):
+    name='canceled-delayed-producer-reload'
+    context=checks.fresh_context(browser,server,report)
+    context.add_init_script(PRINT_OBSERVER)
+    page=context.new_page()
+    pending=[]
+    errors=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    try:
+        url=f'{server.origin}/candidate/k27-quote-ui-actual.html'
+        page.goto(url,wait_until='load')
+        page.wait_for_function('()=>window.__k27UiReady===true')
+        page.locator('.quotation-desktop-list [data-quote-view="SYN-Q"]').click()
+        reload_requests=inject_bridge_scenario(page,server,'old')
+        page.route(re.compile(r'/assets/js/billing-print\.js\?'),lambda route:pending.append(route))
+        page.locator('#exportQuotation').click(no_wait_after=True)
+        page.wait_for_function("()=>document.querySelector('#quotationLayer').getAttribute('aria-busy')==='true'")
+        report.check(name+': unavailable bridge keeps export busy while the replacement is loading',
+                     page.locator('#exportQuotation').is_disabled() and page.locator('#printQuotation').is_disabled())
+        deadline=time.monotonic()+10
+        while not pending and time.monotonic()<deadline:
+            page.wait_for_timeout(25)
+        report.check(name+': one delayed current producer request is pending',len(pending)==1 and len(reload_requests)==1)
+        page.locator('.quotation-close').click()
+        report.check(name+': closing the detail removes the active export surface',
+                     not page.locator('#quotationLayer').evaluate("node=>node.classList.contains('is-open')"))
+        pending.pop().fulfill(status=200,content_type='application/javascript',
+                              body=(server.root/'assets/js/billing-print.js').read_bytes())
+        page.wait_for_function('''version=>window.KusheQuotationPrint?.version===version&&
+            document.querySelector('#quotationLayer').getAttribute('aria-busy')===null''',arg=EXPECTED_VERSION)
+        facts=page.evaluate('''()=>({printCalls:window.__k27PrintCalls,popups:window.__k27PopupCalls,
+            storageWrites:window.__p41WriteAttempts,storeWrites:window.__k27StoreWrites,toasts:window.__k27Toasts,
+            sourceUnchanged:JSON.stringify(window.__k27SyntheticState)===window.__k27SourceBefore})''')
+        report.check(name+': delayed completion does not navigate or print after the user closes the detail',
+                     page.url==url and len(context.pages)==1 and not facts['printCalls'] and not facts['popups'])
+        report.check(name+': cancellation preserves source and storage without an error or failure toast',
+                     facts['sourceUnchanged'] and not facts['storeWrites'] and not facts['storageWrites'] and
+                     not facts['toasts'] and not errors,{'facts':facts,'errors':errors})
+        (report.output/(name+'-evidence.json')).write_text(json.dumps({'syntheticOnly':True,'facts':facts,
+            'reloadRequests':reload_requests,'urlUnchanged':page.url==url},ensure_ascii=False,indent=2),encoding='utf-8')
+        report.result.setdefault('blockedCases',[]).append({'name':name,'canceledNavigationPrevented':True,'sourceUnchanged':True})
+    except Exception:
+        checks.capture_failure_artifacts(page,report,name)
+        raise
+    finally:
+        for route in pending:
+            route.abort('failed')
         context.close()
 
 
@@ -434,7 +616,8 @@ def main():
                          candidateCommit=subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip(),
                          operatingSystemPrintDialogTested=False,
                          pdfTextVerification='EXACT_POPPLER_UNICODE' if has_poppler else 'ASCII_AND_A4_ONLY_PENDING_INDEPENDENT_UNICODE_REVIEW',
-                         noteDisappearanceStatus='REPORTED_BY_USER_NOT_REPRODUCED_BY_CURRENT_SOURCE',
+                         noteDisappearanceStatus='USER_PDF_OMISSION_CONFIRMED__LEGACY_PRODUCER_MECHANISM_TO_VERIFY',
+                         userBrowserModuleVersion='NOT_IDENTIFIABLE_FROM_PDF',
                          sourceHistoryBackupStatus='BASELINE_REPRODUCTION_REQUIRED')
     if not has_poppler:
         if sys.platform != 'win32':
@@ -447,8 +630,17 @@ def main():
             try:
                 operations = [
                     ('baseline-real-ui-route', lambda: route_case(checks, browser, server, report, 'baseline-real-ui-route', 'actual', 'baseline')),
+                    ('legacy-producer-note-omission', lambda: route_case(checks, browser, server, report,
+                        'legacy-producer-note-omission','actual','baseline',bridge_scenario='old',reproduce_missing=True)),
                     *[(f'route-{kind}', lambda kind=kind: route_case(checks, browser, server, report, f'route-{kind}', kind))
                       for kind in CASE_NAMES],
+                    *[(f'recovered-{scenario}-bridge', lambda scenario=scenario: route_case(checks,browser,server,report,
+                        f'recovered-{scenario}-bridge','actual',bridge_scenario=scenario))
+                      for scenario in ('old','missing','incomplete')],
+                    *[(f'blocked-{scenario}', lambda scenario=scenario: blocked_reload_case(checks,browser,server,report,scenario))
+                      for scenario in ('network-failure','wrong-version')],
+                    ('blocked-rendered-note-removal',lambda:blocked_rendered_note_case(checks,browser,server,report)),
+                    ('canceled-delayed-producer-reload',lambda:canceled_reload_case(checks,browser,server,report)),
                     ('accepted-contract-spacing', lambda: checks.quote_case(browser, server, report, 'accepted-contract-spacing', checks.spacing_document(), minimum_pages=2, maximum_pages=2, spacing_check=True)),
                     ('unchanged-billing', lambda: checks.billing_comparison(browser, server, report)),
                 ]
@@ -463,6 +655,7 @@ def main():
             raise AssertionError('Cases failed: ' + ', '.join(case['case'] for case in report.result['caseFailures']))
         report.result['status'] = 'K27_ACTUAL_EXPORT_ROUTE_VERIFIED'
         report.result['sourceHistoryBackupStatus'] = 'BASELINE_MISSING_CUSTOM_NOTE_BACKUP__CANDIDATE_PRESERVES_BOTH'
+        report.result['noteDisappearanceStatus'] = 'LEGACY_PRODUCER_OMISSION_REPRODUCED__CANDIDATE_RECOVERS_OR_BLOCKS'
         print('K27_ACTUAL_EXPORT_ROUTE_VERIFIED__PUBLISH_PENDING', flush=True)
     except Exception as error:
         report.result['status'] = 'BLOCKED'

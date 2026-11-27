@@ -10,6 +10,7 @@ const crypto=require('node:crypto');
 const {execFileSync}=require('node:child_process');
 const BASELINE='4c02e3c707473c4483946afd5222c7cf05d8fb63';
 const BASELINE_SHA256='ba1678758af70566ec7870eb119123532f16ab22b4c61be803c7ed1bb7b52b53';
+const EXPECTED_VERSION='p41-k27-quote-export-20261127-2';
 const options={root:process.cwd()};
 for(let i=2;i<process.argv.length;i+=2){
   const name=process.argv[i];
@@ -108,9 +109,54 @@ check('Billing producer remains identical to released K26 and does not export qu
 });
 check('Export navigation payload carries both work note and resolved backup flag without private metadata',()=>{
   const f=fixture(),loaded=loadProducer(source,f.state);loaded.window.KusheQuotationPrint.export(f.quote);assert.equal(loaded.navigation.length,1);
-  const url=new URL(loaded.navigation[0]);assert.equal(url.searchParams.get('print'),'1');
+  const url=new URL(loaded.navigation[0]);assert.equal(url.searchParams.get('print'),'1');assert.equal(url.searchParams.get('v'),EXPECTED_VERSION);
   const payload=JSON.parse(Buffer.from(decodeURIComponent(url.hash.slice(1)),'base64').toString('utf8'));
   assert.equal(payload.lines[0].note,PUBLIC_NOTE);assert.equal(payload.lines[0].isBackupPrice,true);assert(!JSON.stringify(payload).includes(PRIVATE));
+});
+check('Versioned prepare API provides one immutable complete public snapshot',()=>{
+  const f=fixture(),loaded=loadProducer(source,f.state),engine=loaded.window.KusheQuotationPrint;
+  assert.equal(engine.version,EXPECTED_VERSION);
+  const prepared=engine.prepare(f.quote);
+  assert(Object.isFrozen(prepared)&&Object.isFrozen(prepared.view)&&Object.isFrozen(prepared.view.lines)&&Object.isFrozen(prepared.view.lines[0]));
+  assert.equal(prepared.view.lines[0].note,PUBLIC_NOTE);assert.equal(prepared.view.publicNote,f.quote.publicNote);
+  assert.deepEqual(normalize(prepared.view),project(f));assert.equal(loaded.navigation.length,0);
+});
+check('A prepared quotation cannot lose a line or document note between verification and export',()=>{
+  const f=fixture(),loaded=loadProducer(source,f.state),prepared=loaded.window.KusheQuotationPrint.prepare(f.quote);
+  assert.equal(Reflect.set(prepared.view.lines[0],'note',''),false);
+  assert.equal(Reflect.set(prepared.view,'publicNote',''),false);
+  assert.equal(Reflect.set(prepared.view.lines,'length',0),false);
+  prepared.export();assert.equal(loaded.navigation.length,1);
+  const payload=JSON.parse(Buffer.from(decodeURIComponent(new URL(loaded.navigation[0]).hash.slice(1)),'base64').toString('utf8'));
+  assert.equal(payload.lines[0].note,PUBLIC_NOTE);assert.equal(payload.publicNote,f.quote.publicNote);
+});
+check('Prepared export does not re-read state or re-project after its public snapshot is approved',()=>{
+  const f=fixture(),loaded=loadProducer(source,f.state),prepared=loaded.window.KusheQuotationPrint.prepare(f.quote);
+  loaded.window.KuSheERPStore.getState=()=>{throw Error('Unexpected second state read')};
+  f.line.note='SYN later source change';
+  prepared.export();assert.equal(loaded.navigation.length,1);
+  const payload=JSON.parse(Buffer.from(decodeURIComponent(new URL(loaded.navigation[0]).hash.slice(1)),'base64').toString('utf8'));
+  assert.equal(payload.lines[0].note,PUBLIC_NOTE);
+});
+check('Producer stops before navigation if its display sorting dependency drops a noted row',()=>{
+  const f=fixture(),loaded=loadProducer(source,f.state);
+  loaded.window.KusheDisplaySort.sortWorkRows=()=>[];
+  assert.throws(()=>loaded.window.KusheQuotationPrint.prepare(f.quote),/備註未完整/);
+  assert.throws(()=>loaded.window.KusheQuotationPrint.export(f.quote),/備註未完整/);
+  assert.equal(loaded.navigation.length,0);
+});
+check('Producer rejects a noted source line that its ordinary public-row filter would otherwise discard',()=>{
+  const f=fixture(),loaded=loadProducer(source,f.state);
+  Object.assign(f.line,{item:'',qty:0,price:0,subtotal:0});
+  assert.throws(()=>loaded.window.KusheQuotationPrint.prepare(f.quote),/備註未完整/);
+  assert.equal(loaded.navigation.length,0);
+});
+check('Producer rejects notes swapped between same-name rows with different saved prices',()=>{
+  const f=fixture();f.quote.lines.push({...f.line,id:'SYN-LINE-SECOND',price:21000,note:'SYN second scope',priceId:'',priceSource:'manual'});
+  const loaded=loadProducer(source,f.state);
+  loaded.window.KusheDisplaySort.sortWorkRows=rows=>rows.map((row,i)=>({...row,note:rows[1-i].note}));
+  assert.throws(()=>loaded.window.KusheQuotationPrint.prepare(f.quote),/備註未完整/);
+  assert.equal(loaded.navigation.length,0);
 });
 report.passed=report.checks.filter(c=>c.pass).length;
 report.failed=report.checks.length-report.passed;

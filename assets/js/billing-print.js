@@ -1,5 +1,6 @@
 (function(){
   'use strict';
+  const QUOTATION_EXPORT_VERSION='p41-k27-quote-export-20261127-2';
   const num=value=>Number(value)||0;
   const text=value=>String(value??'').trim();
   const safeFile=value=>text(value).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/[. ]+$/g,'');
@@ -31,8 +32,29 @@
     const pricing=text(record.pricingMode);
     return {schema:'kushe-external-document-v1',documentType:type==='quotation'?'quotation':'billing',title:type==='quotation'?'報價單':'請款單',number:text(record.number||record.externalNo),customer:text(record.customerName||record.customerLabel),project:text(record.projectName||record.projectLabel),date:text(record.date),taxMode:text(documentInfo?.supplement?.taxMode||record.taxMode),pricingMode:pricing,invoiceStatus:text(record.invoiceStatus),lines,salesAmount:sales,taxAmount:tax,totalAmount:total,retentionAmount:type==='billing'?(documentInfo?.protected?documentInfo.amounts.retention:num(record.retentionAmount??record.retention)):0,receivableAmount:type==='billing'?(documentInfo?.protected?documentInfo.amounts.receivable:num(record.total)):total,publicNote,company:companyView(data.settings)};
   }
-  function openView(view,autoPrint){const project=view.project||view.customer||'',month=view.date.slice(0,7),prefix=view.documentType==='quotation'?'酷舍_報價單':'酷舍_請款單',fileName=safeFile([prefix,project,month].filter(Boolean).join('_'))+'.pdf',payload=encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify({...view,fileName}))))),url=new URL('billing-print.html?v='+(view.documentType==='quotation'?'p41-k27-quote-export-20261127-1':'p30-history-1')+'&print='+(autoPrint?'1':'0'),location.href);url.hash=payload;location.assign(url.href)}
-  function openRecord(record,type,autoPrint){if(!record)return;try{openView(externalView(record,window.KuSheERPStore.getState(),type),autoPrint)}catch(error){window.KushePhase1?.toast(error.message||'請款資料待核對，暫停匯出')}}
+  function quotationNoteSnapshot(record){
+    const lines=(Array.isArray(record.lines)?record.lines:[]).filter(line=>line&&text(line.note)).map(line=>{
+      const qty=line.qty??line.quantity,price=line.price??line.unitPrice;
+      return JSON.stringify([text(line.house||line.unitName||line.building),text(line.item||line.name||line.description),
+        text(line.unit),num(qty)>0?num(qty):null,price===null||price===undefined?null:num(price),text(line.note)]);
+    }).sort();
+    return {publicNote:text(record.publicNote||record.note||''),lines};
+  }
+  function assertQuotationNotes(expected,view){
+    const actual=quotationNoteSnapshot(view);
+    if(view.documentType!=='quotation'||!Array.isArray(view.lines)||expected.publicNote!==actual.publicNote||
+      JSON.stringify(expected.lines)!==JSON.stringify(actual.lines))throw new Error('報價備註未完整帶入，已停止匯出，請重新整理後再試。');
+  }
+  function prepareQuotation(record){
+    if(!record)throw new Error('找不到報價內容，請重新開啟報價單。');
+    const expected=quotationNoteSnapshot(record),view=externalView(record,window.KuSheERPStore.getState(),'quotation');
+    assertQuotationNotes(expected,view);
+    view.lines.forEach(Object.freeze);Object.freeze(view.lines);Object.freeze(view.company);Object.freeze(view);
+    const send=autoPrint=>{assertQuotationNotes(expected,view);openView(view,autoPrint)};
+    return Object.freeze({view,export(){send(true)},print(){send(false)}});
+  }
+  function openView(view,autoPrint){const project=view.project||view.customer||'',month=view.date.slice(0,7),prefix=view.documentType==='quotation'?'酷舍_報價單':'酷舍_請款單',fileName=safeFile([prefix,project,month].filter(Boolean).join('_'))+'.pdf',payload=encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify({...view,fileName}))))),url=new URL('billing-print.html?v='+(view.documentType==='quotation'?QUOTATION_EXPORT_VERSION:'p30-history-1')+'&print='+(autoPrint?'1':'0'),location.href);url.hash=payload;location.assign(url.href)}
+  function openRecord(record,type,autoPrint){if(!record)return;try{if(type==='quotation'){const prepared=prepareQuotation(record);autoPrint?prepared.export():prepared.print()}else openView(externalView(record,window.KuSheERPStore.getState(),type),autoPrint)}catch(error){window.KushePhase1?.toast(error.message||'請款資料待核對，暫停匯出')}}
   window.KusheBillingPrint={export(row){openRecord(row,'billing',true)},print(row){openRecord(row,'billing',false)},buildExternalView(row){return externalView(row,window.KuSheERPStore.getState(),'billing')}};
-  window.KusheQuotationPrint={export(row){openRecord(row,'quotation',true)},print(row){openRecord(row,'quotation',false)},buildExternalView(row){return externalView(row,window.KuSheERPStore.getState(),'quotation')}};
+  window.KusheQuotationPrint={version:QUOTATION_EXPORT_VERSION,prepare:prepareQuotation,export(row){openRecord(row,'quotation',true)},print(row){openRecord(row,'quotation',false)},buildExternalView(row){return externalView(row,window.KuSheERPStore.getState(),'quotation')}};
 })();

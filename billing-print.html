@@ -284,12 +284,30 @@
     const assetTimeout=milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds));
     async function waitForStableImage(image){if(!image||!image.src)return;for(let attempt=0;attempt<4;attempt+=1){const source=image.currentSrc||image.src;if(!image.complete)await Promise.race([new Promise(resolve=>{image.addEventListener('load',resolve,{once:true});image.addEventListener('error',resolve,{once:true})}),assetTimeout(2000)]);try{if(image.decode)await Promise.race([image.decode(),assetTimeout(2000)])}catch(e){}await nextFrame();if(image.complete&&(image.currentSrc||image.src)===source)return}}
     function millimetersToPixels(mm){const ruler=document.createElement('div');ruler.style.cssText=`position:absolute;visibility:hidden;pointer-events:none;height:${mm}mm`;document.body.appendChild(ruler);const pixels=ruler.getBoundingClientRect().height;ruler.remove();return pixels}
+    function verifyQuotationPublicNotes(){
+      if(!isQuote)return;
+      const rows=[...paper.querySelectorAll('.detail tbody tr:not(.line-total)')];
+      const fail=()=>{const error=new Error('QUOTATION_PUBLIC_NOTES_INCOMPLETE');error.publicNotesFailed=true;error.quotationLayoutFailed=true;throw error};
+      const visible=node=>{const style=getComputedStyle(node),box=node.getBoundingClientRect();return style.display!=='none'&&style.visibility!=='hidden'&&Number(style.opacity)!==0&&box.width>0&&box.height>0};
+      if(rows.length!==lines.length)fail();
+      rows.forEach((row,index)=>{
+        const source=lines[index],cell=row.cells[0],note=String(source.note??'');
+        const expected=!note.trim()||source.isBackupPrice===true&&note.trim()==='備用單價'?'':note;
+        const notes=[...cell.querySelectorAll('.p41-quote-line-note')];
+        const backups=[...cell.querySelectorAll('.actual-note')].filter(node=>node.textContent==='備用單價');
+        const label=cell.cloneNode(true);label.querySelectorAll('.p41-quote-line-note,.actual-note').forEach(node=>node.remove());
+        if(label.textContent!==String(source.item||'—')||notes.length!==(expected?1:0)||
+          expected&&(notes[0].textContent!==expected||!visible(notes[0]))||
+          backups.length!==(source.isBackupPrice===true?1:0)||backups.some(node=>!visible(node)))fail();
+      });
+    }
     async function paginateQuotationToA4(){
       try{
         if(!window.KusheQuotePagination)throw new Error('QUOTATION_PAGINATOR_UNAVAILABLE');
         await window.KusheQuotePagination.paginate({paper,noteText:String(d.publicNote||'')});
         await Promise.all([...document.querySelectorAll('#quotationContent img')].map(waitForStableImage));
         if([...document.querySelectorAll('#quotationContent img')].some(image=>!image.complete||!image.naturalWidth))throw new Error('QUOTATION_PAGE_IMAGE_NOT_READY');
+        verifyQuotationPublicNotes();
         paper.dataset.quotationScale='1.0000';
         window.__quotationPrintScale=1;
         return 1;
@@ -317,13 +335,14 @@
     function handleQuotationPrintError(error){
       if(!error?.quotationLayoutFailed){blockPrintForMissingSeals();return;}
       window.__billingPrintReady=false;
-      window.__billingPrintError='QUOTATION_PAGINATION_FAILED';
+      const notesFailed=error?.publicNotesFailed===true;
+      window.__billingPrintError=notesFailed?'QUOTATION_PUBLIC_NOTES_INCOMPLETE':'QUOTATION_PAGINATION_FAILED';
       safePrintButton.disabled=true;
-      safePrintButton.textContent='報價分頁未完成，請重新開啟';
+      safePrintButton.textContent=notesFailed?'報價備註未完整顯示，請重新匯出':'報價分頁未完成，請重新開啟';
       if(!document.getElementById('quotationLayoutError')){
         const notice=document.createElement('span');
         notice.id='quotationLayoutError';notice.setAttribute('role','alert');
-        notice.textContent='報價內容尚未完整排入 A4，請重新開啟或保留此頁回報，避免寄出不完整單據。';
+        notice.textContent=notesFailed?'部分施工備註或備用單價標示未完整顯示，請返回報價單重新匯出。':'報價內容尚未完整排入 A4，請重新開啟或保留此頁回報，避免寄出不完整單據。';
         notice.style.cssText='color:#fff;font-size:12px;font-weight:700;padding:0 8px';
         document.querySelector('.toolbar').appendChild(notice);
       }
@@ -343,6 +362,7 @@
     }
     function printDocument(){
       if(!window.__billingPrintReady||safePrintButton.disabled)return;
+      if(isQuote){try{verifyQuotationPublicNotes()}catch(error){handleQuotationPrintError(error);return;}}
       const logo=document.getElementById('formalCompanyLogo');
       const seal=document.getElementById('formalCompanySeal');
       if(!logo?.naturalWidth||!seal?.naturalWidth){blockPrintForMissingSeals();return;}

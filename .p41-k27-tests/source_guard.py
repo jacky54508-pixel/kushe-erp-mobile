@@ -14,11 +14,12 @@ from pathlib import Path
 BASE = '4c02e3c707473c4483946afd5222c7cf05d8fb63'
 BASE_TREE = '642d1178c415c0a415c03c8475fd28e627f45701'
 BRANCH = 'p41-k27-quote-export-route-20261127'
-VERSION = 'p41-k27-quote-export-20261127-1'
+VERSION = 'p41-k27-quote-export-20261127-2'
 PRODUCT = {
     'index.html',
     'billing-print.html',
     'assets/js/billing-print.js',
+    'assets/js/quotations.js',
 }
 TESTS = {
     '.p41-k27-tests/source_guard.py',
@@ -29,7 +30,6 @@ WORKFLOW = '.github/workflows/p41-k27-quote-export-route.yml'
 ALLOWED = PRODUCT | TESTS | {WORKFLOW}
 PRESERVED = {
     'assets/js/erp-store.js',
-    'assets/js/quotations.js',
     'assets/js/cloud-sync.js',
     'assets/js/commissions.js',
     'assets/js/payroll.js',
@@ -43,6 +43,24 @@ STORE_SHA256 = '6689c5cd746bc9360d54fcf7e7bbe3a4af4dacdd76a108263b9540fbd85b758b
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def verify_quotation_ui_scope(before, after):
+    block = re.compile(r'^  // K27 quotation export integrity start\.\n.*?'
+                       r'^  // K27 quotation export integrity end\.\n', re.M | re.S)
+    assert len(block.findall(after)) == 1, 'expected exactly one export-integrity helper block'
+    normalized = block.sub('', after)
+    replacements = [
+        ("$('#exportQuotation',node).onclick=()=>exportQuotation(source,true,node);",
+         "$('#exportQuotation',node).onclick=()=>window.KusheQuotationPrint?.export(source);"),
+        ("$('#printQuotation',node).onclick=()=>exportQuotation(source,false,node);",
+         "$('#printQuotation',node).onclick=()=>window.KusheQuotationPrint?.print(source);"),
+    ]
+    for new, old in replacements:
+        assert normalized.count(new) == 1, 'unexpected quotation handler change'
+        normalized = normalized.replace(new, old, 1)
+    assert normalized == before, 'quotation edits outside the export helpers and two button handlers'
+    assert VERSION in block.search(after).group(), 'quotation loader must request the current producer'
 
 
 def main():
@@ -65,12 +83,14 @@ def main():
 
     before = git('show', BASE + ':index.html').decode()
     after = (root / 'index.html').read_text(encoding='utf-8')
-    script = re.compile(r"""(<script\b[^>]*\bsrc=["']assets/js/billing-print\.js\?v=)[^"']+""")
-    assert len(script.findall(before)) == len(script.findall(after)) == 1, 'expected one producer script'
+    script = re.compile(r"""(<script\b[^>]*\bsrc=["']assets/js/(?:billing-print|quotations)\.js\?v=)[^"']+""")
+    assert len(script.findall(before)) == len(script.findall(after)) == 2, 'expected producer and quotation UI scripts'
     assert script.sub(r'\1CACHE_VERSION', before) == script.sub(r'\1CACHE_VERSION', after), 'index.html contains a non-cache edit'
-    assert script.search(after).group(0).endswith(VERSION), 'index.html has the wrong producer version'
+    assert all(match.group(0).endswith(VERSION) for match in script.finditer(after)), 'index.html has a wrong quotation export version'
     producer = (root / 'assets/js/billing-print.js').read_text(encoding='utf-8')
     assert VERSION in producer, 'quotation navigation must use the matching print page version'
+    verify_quotation_ui_scope(git('show', BASE + ':assets/js/quotations.js').decode(),
+                              (root / 'assets/js/quotations.js').read_text(encoding='utf-8'))
 
     preserved = []
     for path in sorted(PRESERVED):
@@ -97,9 +117,11 @@ def main():
         'changedFiles': files,
         'preservedFiles': preserved,
         'financialCoreChanges': False,
-        'quotationEditorChanges': False,
+        'quotationEditorSaveChanges': False,
+        'quotationExportEntryChanges': True,
         'paginationEngineChanges': False,
-        'indexChange': 'one billing-print.js cache query only',
+        'indexChange': 'billing-print.js and quotations.js cache queries only',
+        'quotationUiScope': 'one integrity helper block plus the existing export and print button handlers',
         'sourceAudit': {
             'ref': BASE,
             'finding': 'billing-print.js is the sole quotation print bridge; quotations.js is the sole caller',
