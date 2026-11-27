@@ -270,3 +270,60 @@
   #receivablesApp .receivable-actions--mobile .receivable-action-secondary-row > button,
   #receivablesApp .receivable-actions--mobile .receivable-more-toggle { min-height: 44px !important; height: 44px !important; font-size: 12px; }
 }
+
+/* K29 / P41-44H: compact group summaries; original documents and actions remain. */
+#receivablesApp .ar-group-version {
+  display:flex;align-items:center;flex-wrap:wrap;gap:5px 14px;
+  padding:9px 0;margin-bottom:8px;border-bottom:1px solid #dfe7ef;
+  color:#536c85;font-size:12px;line-height:1.5;
+}
+#receivablesApp .ar-group-version>strong {font-size:12px;font-weight:650;color:#284b6e}
+#receivablesApp .ar-group-version .bg-document-stamp {font-size:11px}
+#receivablesApp .ar-group-version .bg-history-link {margin-left:auto;min-height:32px;padding:4px 8px;border:1px solid #d5e1ed;border-radius:6px;background:#fff}
+#receivablesApp .ar-group-invoices {display:flex;align-items:center;flex-wrap:wrap;gap:3px 5px;margin-top:4px;min-width:0}
+#receivablesApp .ar-group-invoices>small {font-size:10px;color:#6b8097;white-space:nowrap}
+#receivablesApp .ar-group-invoices .invoice-status-badge {font-size:10px;padding:2px 5px;line-height:1.4;white-space:normal;max-width:100%}
+@media (min-width:621px) {
+  #receivablesApp .receivable-table:not(.bg-source-table)>thead>tr>th:nth-child(3),
+  #receivablesApp .receivable-table:not(.bg-source-table)>thead>tr>th:nth-child(4),
+  #receivablesApp .receivable-table:not(.bg-source-table)>thead>tr>th:nth-child(5) {text-align:right}
+  #receivablesApp .receivable-table>tbody>.ar-compact-group.bg-inline-row.bg-audit-row>td {
+    padding:9px 10px!important;vertical-align:middle;line-height:1.45;
+    height:auto;min-height:0;overflow-wrap:anywhere;
+  }
+  #receivablesApp .ar-compact-group.bg-inline-row .bg-document-reference {gap:6px;margin:0 0 3px}
+  #receivablesApp .ar-compact-group.bg-inline-row .bg-document-reference>div {display:flex;align-items:baseline;gap:5px;flex-wrap:wrap}
+  #receivablesApp .ar-compact-group.bg-inline-row .bg-document-title {font-size:12px}
+  #receivablesApp .ar-compact-group.bg-inline-row .bg-document-count {font-size:10px}
+  #receivablesApp .ar-compact-group.bg-inline-row .bg-document-date {padding-left:38px}
+  #receivablesApp .ar-compact-group.bg-inline-row .bg-document-date-value {font-size:11px}
+  #receivablesApp .ar-compact-group.bg-inline-row .bg-audit-money,
+  #receivablesApp .receivable-main-row>.receivable-progress {text-align:right}
+  #receivablesApp .ar-compact-group.bg-inline-row .bg-inline-primary {font-size:14px}
+  #receivablesApp .ar-compact-group.bg-inline-row .bg-inline-amount-label {font-size:10px;margin:0 0 2px}
+  #receivablesApp .ar-compact-group.bg-inline-row .bg-inline-actions {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;justify-content:stretch}
+  #receivablesApp .ar-compact-group.bg-inline-row .bg-inline-actions button {min-height:36px;padding:6px 8px;border:1px solid #ccdbea;border-radius:7px;background:#fff;font-size:12px;line-height:1.4;white-space:normal}
+  #receivablesApp .ar-compact-group.bg-inline-row .bg-inline-actions [data-bg-edit] {color:#225986;background:#f0f6fc;border-color:#c5d8ea}
+  #receivablesApp .ar-compact-group.bg-inline-row .ar-group-invoices {align-items:flex-start;flex-direction:column;gap:2px;margin-top:5px}
+  #receivablesApp .bg-group-details-row .bg-row-details {padding:0 14px 10px 20px}
+}
+@media (max-width:620px) {
+  #receivablesApp .ar-compact-group.bg-group-mobile {padding:12px;min-width:0;max-width:100%;overflow-wrap:anywhere}
+  #receivablesApp .ar-compact-group.bg-group-mobile .bg-summary-single {grid-template-columns:minmax(0,1fr);gap:8px}
+  #receivablesApp .ar-compact-group.bg-group-mobile .bg-identity h3 {font-size:16px;line-height:1.45}
+  #receivablesApp .ar-compact-group.bg-group-mobile .bg-caption {font-size:12px;margin-top:2px;line-height:1.45}
+  #receivablesApp .ar-compact-group.bg-group-mobile .bg-amount {display:grid;grid-template-columns:1fr auto;gap:2px 8px;text-align:right;padding:7px 9px;background:#edf4fb;border-radius:7px}
+  #receivablesApp .ar-compact-group.bg-group-mobile .bg-amount>small {text-align:left;align-self:center}
+  #receivablesApp .ar-compact-group.bg-group-mobile .bg-amount>strong {font-size:20px;margin:0}
+  #receivablesApp .ar-compact-group.bg-group-mobile .bg-amount>.bg-state {grid-column:1/-1;text-align:right}
+  #receivablesApp .ar-compact-group.bg-group-mobile .bg-summary>.bg-actions {grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:6px}
+  #receivablesApp .ar-compact-group.bg-group-mobile .bg-summary>.bg-actions>button {min-height:44px;max-width:100%;white-space:normal;padding:7px 6px;font-size:12px}
+  #receivablesApp .ar-compact-group.bg-group-mobile .bg-mobile-audit {margin-top:7px;padding-top:6px}
+  #receivablesApp .ar-compact-group.bg-group-mobile .bg-mobile-audit .bg-document-date {display:block}
+  #receivablesApp .ar-compact-group.bg-group-mobile .bg-document-date-value {font-size:11px}
+  #receivablesApp .ar-group-version {align-items:flex-start;gap:5px 8px}
+  #receivablesApp .ar-group-version .bg-document-stamp {flex-basis:100%;white-space:normal}
+  #receivablesApp .ar-group-version .bg-history-link {margin-left:0;min-height:44px}
+  #receivablesApp .bg-source-record .bg-source-actions {min-width:0;max-width:100%}
+  #receivablesApp .bg-source-record .bg-source-account-menu[open] {box-sizing:border-box}
+}

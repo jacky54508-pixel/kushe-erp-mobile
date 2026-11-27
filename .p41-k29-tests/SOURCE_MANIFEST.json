@@ -1,0 +1,121 @@
+{
+  "baseCommit": "15eff6fc574fb64480682656daf88dc7a906baa8",
+  "files": {
+    ".github/workflows/p41-k29-bulk-input-readiness.yml": {
+      "bytes": 6400,
+      "sha256": "25b384f3732d35276885088b6a4c2cf443ad5329266ff80eb3bccd780c5c9e09"
+    },
+    ".p41-k29-tests/.gitignore": {
+      "bytes": 30,
+      "sha256": "d08012ba9d71d841b60eca25478d11ae6ab872dadf9b4c107e54eef201b95357"
+    },
+    ".p41-k29-tests/README.md": {
+      "bytes": 4080,
+      "sha256": "dadac589d2fe4a4a73b2c285f9fb1b2e0f5176c7f20903ab3cee26eb83ba7576"
+    },
+    ".p41-k29-tests/SYNC_README.md": {
+      "bytes": 9397,
+      "sha256": "d55e43c580899bf73731e77093b4392f64562a9f26798a154196306fe28563c8"
+    },
+    ".p41-k29-tests/commission_README.md": {
+      "bytes": 3242,
+      "sha256": "dcf73dd6a820967e9e572078e0c38ea1a639330bba37f936c819dc37bb7b991f"
+    },
+    ".p41-k29-tests/commission_browser.py": {
+      "bytes": 26658,
+      "sha256": "510dd5ce0a7b0d6c5eb86b1d815deeb9af2ec913c4ad1bebfd9030b586eda766"
+    },
+    ".p41-k29-tests/commission_fixture.py": {
+      "bytes": 7330,
+      "sha256": "9e7b6a7e6d4372e6fdf5878757be28e2b6dd130f1d22af300538c30f48bbcacb"
+    },
+    ".p41-k29-tests/commission_probe.cjs": {
+      "bytes": 2742,
+      "sha256": "1a29847e5f5e22671370b75b4c38b2fc3f70b9183392398fd80eaeaf8053e129"
+    },
+    ".p41-k29-tests/pdf_acceptance.py": {
+      "bytes": 17300,
+      "sha256": "0d1893f6d3e06867ec319a1ddbeadbbb00dec3241ee1aba8cb14591321922675"
+    },
+    ".p41-k29-tests/pdf_support.py": {
+      "bytes": 5673,
+      "sha256": "391ebe09614b4d62b3b99e487f806401e67e727b3f7ae959d48912a8f6f66aa5"
+    },
+    ".p41-k29-tests/receivables_fixture.py": {
+      "bytes": 5763,
+      "sha256": "c5b704c9e23cad0778e1a2fd1564e062ab66d2fcb4369f3f6e6285dd33075cb3"
+    },
+    ".p41-k29-tests/receivables_ui.py": {
+      "bytes": 11728,
+      "sha256": "102fa3a97edb192202ae5edc620a6bc0c5f21ffe49d5ddd1cfd96093e41f1d07"
+    },
+    ".p41-k29-tests/run_acceptance.py": {
+      "bytes": 6913,
+      "sha256": "1cdb3bca8ecb90a22fd498fd95218a531ef360e4cda6aca70c998f660e7bd2b9"
+    },
+    ".p41-k29-tests/source_guard.py": {
+      "bytes": 6445,
+      "sha256": "32d1f09c7b808e2059f410be1df4349847a8a6e3cf759c31650a92166572bf73"
+    },
+    ".p41-k29-tests/sync_browser.py": {
+      "bytes": 17814,
+      "sha256": "0a163ca71efa23ab1fc1ba3961fbaf1faa03a11a7ba4aba557fb932d17545e39"
+    },
+    ".p41-k29-tests/sync_contract.cjs": {
+      "bytes": 15136,
+      "sha256": "212c7aaeea527c7495c4fa0b600d9d5bc06a44ff1374c7de4f2f3d04845a14d3"
+    },
+    "assets/css/receivables-scoped.css": {
+      "bytes": 14541,
+      "sha256": "992651b64903cb19f8c478257683066c32afd161ffb5a659026b5a7c1e18ee05"
+    },
+    "assets/js/billing-bundle-print.js": {
+      "bytes": 4505,
+      "sha256": "519ada5c32f036030505427290c6840458b99a02ee092e7fa7ef194476e35bd3"
+    },
+    "assets/js/billing-groups.js": {
+      "bytes": 52764,
+      "sha256": "8cefa8636968f0d3e2dbc0975eb00d3fc6d8216c64a93668b2f1301d6e012ede"
+    },
+    "assets/js/billing-print.js": {
+      "bytes": 8067,
+      "sha256": "d254c139045fa48281c0e10e32b193fed39eecc192e873fe22e7929d4ca05798"
+    },
+    "assets/js/billing.js": {
+      "bytes": 228079,
+      "sha256": "72d9166b3ca47a5bb3028b6116b534bb6db1408b85df8b6b95a77492b779c5b8"
+    },
+    "assets/js/cloud-sync.js": {
+      "bytes": 130668,
+      "sha256": "8fc5c47ff451ecb976dd8c0d5904eebd3f0fc9cb6813c45c1a497a80f9febc7b"
+    },
+    "assets/js/commissions.js": {
+      "bytes": 188591,
+      "sha256": "1fd759099039524705addc9200eb7202034e254098ea6d3c57e34aa6b9774a1e"
+    },
+    "assets/js/erp-store.js": {
+      "bytes": 979695,
+      "sha256": "3b576751df632b5888b6ef38de24d6a0dd17edf0cc29967d739a14a62e08ca39"
+    },
+    "assets/js/external-billing-print.js": {
+      "bytes": 11174,
+      "sha256": "d111000a398fca0df55f7d9d0313b330109766401a99fd5a2999dd586027919e"
+    },
+    "billing-bundle-print.html": {
+      "bytes": 16941,
+      "sha256": "719e66ee6dca86286e7eddae18de23b9e10505957343a04ac66b590636acb4f2"
+    },
+    "billing-print.html": {
+      "bytes": 39901,
+      "sha256": "7fab68f5dce6978d02b0b55257c4968fe4698375f987f6a6aeaae3dbdf8acd47"
+    },
+    "external-billing-print.html": {
+      "bytes": 4483,
+      "sha256": "47823ffd228fbd219e79a763b31454a8512dd2a3d84fc58ecee1a01e46c68dec"
+    },
+    "index.html": {
+      "bytes": 34173,
+      "sha256": "0a74b2da17f35188b0868606a5b0ae0c2d0465c50ed0195e4eba1c3b5c51a48c"
+    }
+  }
+}

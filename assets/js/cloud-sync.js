@@ -450,15 +450,21 @@
   let editorTouched = false, editorComposition = false, editorGeneration = 0;
   let editorLease = false;
   let editorCommitFloor = '';
+  let editorPendingCommit = null, editorCommitObserver = null;
   const USER_COMMIT_OPERATIONS = new Set([
     'saveSystemSettings','saveQuotationUnitPreset','saveQuotationPublicNotePreset','deleteQuotationPublicNotePreset',
-    'saveCommission','deleteCommission','saveDailyBatch','deleteDailyBatch','saveInvoice','createBilling','updateBilling','deleteBilling',
+    'saveCommission','deleteCommission','saveDailyBatch','saveDailyUnbilledItems','deleteDailyBatch','saveInvoice','createBilling','updateBilling','deleteBilling',
     'addReceipt','updateReceipt','deleteReceipt','completeEmployeeCashHandover','cancelEmployeeCashHandover','addRetentionReceipt','updateRetentionReceipt','deleteRetentionReceipt','deleteReceivableAccounting',
     'savePayable','deletePayable','addPayablePayment','updatePayablePayment','deletePayablePayment',
-    'updatePayrollAdjustments','addSalaryPayment','updateSalaryPayment','deleteSalaryPayment','updateBillingInvoice',
-    'saveCustomer','deleteCustomer','saveProject','deleteProject','saveEmployee','deleteEmployee','saveMaterial','deleteMaterial',
-    'saveMaterialUsage','assignMaterialUsageEmployee','deleteMaterialUsage','saveProjectCost','deleteProjectCost','saveQuotationPrice','saveQuotation','setQuotationStatus','deleteQuotation',
-    'cancelQuotationConfirmation','createQuotationRevision','saveQuotationTemplate'
+    'updatePayrollAdjustments','addSalaryPayment','updateSalaryPayment','deleteSalaryPayment','updateBillingInvoice','addProjectCommissionSettlement',
+    'saveCustomer','deleteCustomer','saveProject','deleteProject','saveEmployee','deleteEmployee','saveMaterial','deleteMaterial','saveVendor',
+    'saveMaterialUsage','assignMaterialUsageEmployee','deleteMaterialUsage','saveProjectCost','deleteProjectCost','saveQuotationPrice','saveQuotation','saveQuotationBundle','setQuotationStatus','deleteQuotation',
+    'cancelQuotationConfirmation','createQuotationRevision','saveQuotationTemplate',
+    // Explicit normal UI writers only. Recovery, imports and historical repair
+    // tools must not release an editor merely because they committed data.
+    'addInventoryReceipt','recordInventoryReceiptPayable','setMaterialOpeningStock',
+    'saveReceivableCheque','clearReceivableCheque','cancelReceivableCheque',
+    'saveExternalBillingDocument','archiveExternalBillingDocument'
   ]);
   function isBusinessEditorEvent(event) {
     const shell = document.getElementById('appShell');
@@ -469,6 +475,7 @@
   function noteEditorEvent(event) {
     if (!isBusinessEditorEvent(event)) return;
     if (editorLease) { event.preventDefault?.(); event.stopImmediatePropagation?.(); }
+    discardEditorCommit();
     if (event.type === 'compositionend') editorComposition = false;
     if (event.type === 'compositionstart') editorComposition = true;
     editorTouched = true;
@@ -476,6 +483,7 @@
     editorGeneration += 1;
   }
   function noteEditorRoute() {
+    discardEditorCommit();
     editorGeneration += 1;
   }
   ['beforeinput','input','change','compositionstart','compositionend','paste','drop','submit'].forEach(type => document.addEventListener(type,noteEditorEvent,true));
@@ -483,7 +491,15 @@
   document.addEventListener('click', event => {
     if (editorLease) { event.preventDefault?.(); event.stopImmediatePropagation?.(); return; }
     const target = event.target?.closest?.('[data-module],[data-route],button,a');
-    if (target) editorGeneration += 1;
+    if (target) {
+      // This existing control only dismisses a cheque detail. A form, search
+      // input or editable content makes it an ordinary editor navigation.
+      const close=target.closest?.('[data-cheque-close]'),overlay=close?.closest?.('.cheque-overlay');
+      const readOnlyClose=overlay?.isConnected
+        && typeof overlay.querySelector==='function'
+        && !overlay.querySelector('form,input,textarea,select,[contenteditable]:not([contenteditable="false"])');
+      if (!readOnlyClose) { discardEditorCommit(); editorGeneration += 1; }
+    }
   },true);
   window.addEventListener('hashchange',noteEditorRoute);
   window.addEventListener('popstate',noteEditorRoute);
@@ -528,23 +544,67 @@
       && ready.revision?.operationId===detail.operationId
       && store.getLastStoreTransactionResult()?.operationId===detail.operationId);
   }
-  function handleEditorCommit(event) {
-    if (syncOrigin === 'REMOTE_APPLY' || event?.detail?.syncOrigin === 'REMOTE_APPLY') return;
-    const detail = {...event?.detail}, generation = editorGeneration;
-    // Store records the completed transaction after synchronous notifications.
+  function discardEditorCommit(expected = null) {
+    if (expected && editorPendingCommit !== expected) return;
+    editorPendingCommit = null;
+    editorCommitObserver?.disconnect();
+    editorCommitObserver = null;
+  }
+  function watchEditorCommit(pending) {
+    if (editorPendingCommit !== pending || editorCommitObserver
+      || typeof window.MutationObserver !== 'function') return;
+    const root=document.documentElement||document.body;
+    if (!root) return;
+    editorCommitObserver=new window.MutationObserver(() => {
+      if (editorPendingCommit === pending && pending.verified && editorSurfaceSafe()) queueEditorCommit(pending);
+    });
+    editorCommitObserver.observe(root,{subtree:true,childList:true,attributes:true,attributeFilter:['hidden','class','style','inert','open','aria-hidden']});
+  }
+  function queueEditorCommit(pending) {
+    if (editorPendingCommit !== pending || pending.scheduled || pending.verifying) return;
+    pending.scheduled=true;
+    // A closing animation or a read-only detail may outlive the first commit
+    // callback. Recheck on its actual removal, never poll or waive any gate.
     window.setTimeout(async () => {
+      pending.scheduled=false;
+      if (editorPendingCommit !== pending) return;
+      const {detail,generation,principal}=pending;
+      if (syncOrigin === 'REMOTE_APPLY' || observedPrincipal() !== principal
+        || generation !== editorGeneration) { discardEditorCommit(pending); return; }
+      if (pending.verified && !editorSurfaceSafe()) return;
+      pending.verifying=true;
       try {
         const temporaryCommit=detail.syncOrigin==='TEMPORARY_CLOUD_COMMIT';
         const verified=temporaryCommit ? await isTemporaryUserCloudCommit(detail) : await isTrustedUserDurableCommit(detail);
+        if (editorPendingCommit !== pending) return;
         if (!verified || syncOrigin === 'REMOTE_APPLY'
-          || generation !== editorGeneration || !editorSurfaceSafe()) return;
-        editorTouched = false;
-        editorCommitFloor = detail.operationId;
-        editorGeneration += 1;
-      } catch (_) { /* Unverifiable notifications cannot release a draft. */ }
+          || observedPrincipal() !== principal || generation !== editorGeneration) {
+          discardEditorCommit(pending); return;
+        }
+        pending.verified=true;
+        if (!editorSurfaceSafe()) { watchEditorCommit(pending); return; }
+        editorTouched=false;
+        editorCommitFloor=detail.operationId;
+        editorGeneration+=1;
+        discardEditorCommit(pending);
+      } catch (_) { discardEditorCommit(pending); /* Unverifiable notifications cannot release a draft. */ }
+      finally { pending.verifying=false; }
     },0);
   }
+  function handleEditorCommit(event) {
+    if (syncOrigin === 'REMOTE_APPLY' || event?.detail?.syncOrigin === 'REMOTE_APPLY') return;
+    discardEditorCommit();
+    const detail={...event?.detail},generation=editorGeneration,principal=observedPrincipal();
+    if (!principal) return;
+    const pending={detail,generation,principal,verified:false,scheduled:false,verifying:false};
+    editorPendingCommit=pending;
+    // Store records the completed transaction after synchronous notifications.
+    queueEditorCommit(pending);
+  }
   window.addEventListener('kushe:data-updated',handleEditorCommit);
+  document.addEventListener('focusout',() => {
+    if (editorPendingCommit?.verified) queueEditorCommit(editorPendingCommit);
+  },true);
   function editorReadiness(allowLease = false) {
     const unsafe = {safe:false,code:'EDITOR_DIRTY',generation:editorGeneration};
     if (editorTouched || !editorSurfaceSafe(allowLease)) return unsafe;

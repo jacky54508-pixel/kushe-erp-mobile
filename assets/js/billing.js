@@ -904,9 +904,46 @@
     return result;
   };
   const renderReceivablesBeforeDocumentGroups=renderReceivables;
+  // K29: rearrange existing read-only markup; keep every bound source/action node.
+  function compactReceivableGroups(root){
+    if(!root)return;
+    $$('[data-bg-group]',root).forEach(group=>{
+      if(group.classList.contains('ar-compact-group'))return;
+      const sibling=group.nextElementSibling;
+      const details=sibling?.dataset.bgDetails===group.dataset.bgGroup?sibling:group;
+      const originals=$('.bg-originals',details);
+      if(!originals)return;
+      group.classList.add('ar-compact-group');
+      const audit=$('.bg-document-date',group);
+      const stamp=audit&&$('.bg-document-stamp',audit),history=audit&&$('[data-bg-history]',audit);
+      if(stamp||history){
+        const version=document.createElement('div');version.className='ar-group-version';
+        const label=document.createElement('strong');label.textContent='文件版本';version.append(label);
+        if(stamp)version.append(stamp);
+        if(history)version.append(history);
+        originals.prepend(version);
+      }
+      // Reuse the original invoice labels, without inferring a new invoice state.
+      const status=group.matches('tr')?$('[data-bg-column="狀態"]',group):$('.bg-identity',group);
+      const badges=$$('.bg-source-invoice .invoice-status-badge',originals);
+      if(status&&badges.length){
+        const invoice=document.createElement('div');invoice.className='ar-group-invoices';
+        const label=document.createElement('small');label.textContent='原單發票';invoice.append(label);
+        const seen=new Set();
+        badges.forEach(badge=>{const value=badge.textContent.trim();if(seen.has(value))return;seen.add(value);invoice.append(badge.cloneNode(true))});
+        status.append(invoice);
+      }
+      const toggle=$('[data-bg-expand]',group);
+      if(toggle)toggle.title='展開原單與文件版本';
+    });
+  }
   renderReceivables=function(){
     const result=renderReceivablesBeforeDocumentGroups();
-    if(receivableActive)billingDocumentGroupsApi()?.mountList($('#receivablesApp'),'receivable',{render:renderReceivables,employeeCash:receivableFilters.view==='employee_cash'});
+    if(receivableActive){
+      const root=$('#receivablesApp');
+      billingDocumentGroupsApi()?.mountList(root,'receivable',{render:renderReceivables,employeeCash:receivableFilters.view==='employee_cash'});
+      compactReceivableGroups(root);
+    }
     return result;
   };
   async function activateReceivables(){receivableActive=true;if(!ready){await store.load();ready=true}renderReceivables()}function deactivateReceivables(){closeReceivableMore();receivableActive=false}

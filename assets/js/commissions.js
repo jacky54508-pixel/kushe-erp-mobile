@@ -74,8 +74,14 @@
     return row?.name || row?.number || fallback;
   }
   function grossOf(state, row) {
-    const billing = (state.billings || []).find((item) => item.number && item.number === row.sourceNo);
-    if (billing && number(billing.amount) === number(row.untaxedAmount) && number(billing.total)) return number(billing.total);
+    try {
+      const link=store.commissionBillingLink(row);
+      if(link.kind==='linked'){
+        const amounts=store.manualCommissionBillingAmounts(link.billing.id);
+        if(amounts.preTaxAmount===number(row.untaxedAmount))return amounts.grossTotal;
+        if(amounts.noInvoice)return number(row.untaxedAmount);
+      }
+    } catch (_) { /* A partial or unresolved historical amount is never replaced with a whole bill. */ }
     return store.grossFromUntaxed(row.untaxedAmount);
   }
   const employeeIdOf = (row) => String(row?.employee || row?.employeeId || '');
@@ -1303,12 +1309,12 @@
     layer.innerHTML = `<button class="commission-drawer-backdrop" type="button" aria-label="關閉"></button><aside class="commission-drawer" role="dialog" aria-modal="true" aria-labelledby="commissionDrawerTitle">
       <header><div><small>${editingId ? '編輯既有紀錄' : '建立新紀錄'}</small><h2 id="commissionDrawerTitle">${editingId ? '編輯業績' : '新增業績'}</h2></div><button class="commission-drawer-close" type="button" aria-label="關閉">×</button></header>
       <form id="commissionForm"><div class="commission-drawer-body">
-        <label><span>日期 *</span><input name="date" type="date" value="${esc(row?.date || today())}" required></label>
+        <label><span>日期 *</span><input name="date" type="date" value="${esc(row?row.date||'':today())}" required></label>
         <label><span>員工 *</span><select name="employee" required>${options(state.employees, row?.employee || '', '請選擇員工')}</select></label>
         <label><span>案場 *</span><select name="project" required>${options(state.projects, row?.project || '', '請選擇案場')}</select></label>
-        <label class="full"><span>請款單／業績來源</span><select name="billing"><option value="">手動登錄</option>${(state.billings || []).map((billing) => `<option value="${esc(billing.id)}" ${billing.number && billing.number === row?.sourceNo ? 'selected' : ''}>${esc(billing.number || '未編號')}｜${esc(label(state, 'projects', billing.project, billing.projectName || '未指定案場'))}｜${money(billing.total || billing.amount)}</option>`).join('')}</select></label>
+        <label class="full"><span>請款單／業績來源</span><select name="billing"><option value="">${row?'沿用原來源與原基數':'手動登錄'}</option>${(state.billings || []).map((billing) => `<option value="${esc(billing.id)}">${esc(billing.number || '未編號')}｜${esc(label(state, 'projects', billing.project, billing.projectName || '未指定案場'))}｜未稅 ${money(billing.preTaxAmount??billing.amount)}</option>`).join('')}</select></label>
         <label class="full"><span>來源單號</span><input name="sourceNo" value="${esc(row?.sourceNo || '')}" placeholder="例如：請款單號或手動來源"></label>
-        <label><span>含稅金額 *</span><input name="gross" type="number" min="0" step="1" value="${gross}" required></label>
+        <label><span id="manualCommissionGrossLabel">含稅金額 *</span><input name="gross" type="number" min="0" step="1" value="${gross}" required></label>
         <label><span>未稅金額</span><input name="untaxedAmount" type="number" value="${number(row?.untaxedAmount)}" readonly></label>
         <label><span>抽成比例（%）*</span><input name="rate" type="number" min="0" step="0.1" value="${number(row?.rate)}" required></label>
         <label><span>抽成金額</span><input name="commission" type="number" value="${number(row?.commission)}" readonly></label>
@@ -1320,18 +1326,60 @@
     layer.hidden = false;
     requestAnimationFrame(() => layer.classList.add('is-open'));
     const form = $('#commissionForm', layer);
-    const calc = () => {
-      const values = store.taxValues(form.elements.gross.value);
-      form.elements.untaxedAmount.value = values.untaxed;
-      form.elements.commission.value = Math.round(values.untaxed * number(form.elements.rate.value) / 100);
-      $('#commissionTaxHint', layer).textContent = `${money(values.total)} ÷ 1.${String(values.rate).padStart(2,'0')} = ${money(values.untaxed)}（未稅）；抽成 ${money(form.elements.commission.value)}`;
+    const context=form._manualCommissionContext={amountMode:row?'existing':'manual',expectedCommissionSnapshot:row?JSON.stringify(row):undefined,billingSnapshot:'',sourceError:''};
+    const unchanged=()=>Boolean(row)&&context.amountMode==='existing'&&['date','employee','project','sourceNo'].every(name=>String(form.elements[name].value)===String(row[name]||''))&&form.elements.status.value===(row.status==='已列入薪資'?'已列入薪資':'未列入薪資')&&number(form.elements.untaxedAmount.value)===number(row.untaxedAmount)&&number(form.elements.rate.value)===number(row.rate);
+    const validateSource=()=>{
+      form.elements.project.setCustomValidity('');form.elements.sourceNo.setCustomValidity('');form.elements.billing.setCustomValidity(context.sourceError);
+      if(unchanged())return;
+      const selected=state.billings.find(item=>item.id===form.elements.billing.value),link=selected?{kind:'linked',billing:selected}:row?store.commissionBillingLink(row):null;
+      if(link?.kind==='linked'){
+        if(!String(link.billing.project||'')||String(form.elements.project.value)!==String(link.billing.project))form.elements.project.setCustomValidity('抽成案場須與請款來源一致，請改選同案場請款。');
+        if(!selected&&form.elements.sourceNo.value!==String(link.billing.number||''))form.elements.sourceNo.setCustomValidity('請明確改選請款，不能只變更已綁定的來源單號。');
+      }else if(link&&link.kind!=='manual'&&link.evidence!=='unverified-source-number')form.elements.billing.setCustomValidity('原請款來源尚未核對；可保留金額修改備註，變更金額前請選擇有效請款。');
     };
-    form.elements.employee.addEventListener('change', () => { const employee = state.employees.find((item) => item.id === form.elements.employee.value); if (employee && !number(form.elements.rate.value)) form.elements.rate.value = number(employee.commissionRate); calc(); });
-    form.elements.billing.addEventListener('change', () => { const billing = state.billings.find((item) => item.id === form.elements.billing.value); if (!billing) return; form.elements.date.value = billing.date || form.elements.date.value; form.elements.project.value = billing.project || ''; form.elements.sourceNo.value = billing.number || ''; form.elements.gross.value = number(billing.total) || store.grossFromUntaxed(billing.amount); form.elements.untaxedAmount.value = number(billing.amount); form.elements.commission.value = Math.round(number(billing.amount) * number(form.elements.rate.value) / 100); $('#commissionTaxHint', layer).textContent = `已由 ${billing.number || '請款單'} 帶入既有未稅金額 ${money(billing.amount)}`; });
-    ['gross','rate'].forEach((name) => form.elements[name].addEventListener('input', calc));
+    const calcRate=()=>{
+      const preserve=unchanged(),base=number(form.elements.untaxedAmount.value);
+      form.elements.commission.value=preserve?number(row.commission):Math.round(base*number(form.elements.rate.value)/100);
+      $('#commissionTaxHint',layer).textContent=preserve?`沿用原未稅基數 ${money(row.untaxedAmount)}、原抽成 ${money(row.commission)}；改選請款才會帶入該單完整未稅額。`:`未稅基數 ${money(base)} × ${form.elements.rate.value||0}% = 抽成 ${money(form.elements.commission.value)}`;
+      validateSource();
+    };
+    const calcGross = () => {
+      if(context.amountMode==='billing'){calcRate();return}
+      let noInvoice=false;
+      if(row){try{const link=store.commissionBillingLink(row);if(link.kind==='linked')noInvoice=store.manualCommissionBillingAmounts(link.billing.id).noInvoice}catch(_){}}
+      const values=noInvoice?{total:number(form.elements.gross.value),untaxed:number(form.elements.gross.value)}:store.taxValues(form.elements.gross.value);
+      context.amountMode='manual';
+      form.elements.untaxedAmount.value = values.untaxed;
+      calcRate();
+      if(noInvoice)$('#commissionTaxHint',layer).textContent+= '（原來源免開發票，不另扣稅額）';
+    };
+    form.elements.employee.addEventListener('change', () => { const employee = state.employees.find((item) => item.id === form.elements.employee.value); if (employee && !number(form.elements.rate.value)) form.elements.rate.value = number(employee.commissionRate); calcRate(); });
+    form.elements.billing.addEventListener('change', () => {
+      const billing = state.billings.find((item) => item.id === form.elements.billing.value);
+      form.elements.billing.setCustomValidity('');context.billingSnapshot='';context.sourceError='';
+      form.elements.gross.readOnly=Boolean(billing);form.elements.sourceNo.readOnly=Boolean(billing);
+      $('#manualCommissionGrossLabel',layer).textContent=billing?'請款含稅總額':'含稅金額 *';
+      if(!billing){
+        context.amountMode=row?'existing':'manual';
+        if(row){for(const name of ['date','project','sourceNo','untaxedAmount'])form.elements[name].value=row[name]??'';form.elements.gross.value=gross;calcRate()}
+        else calcGross();
+        return;
+      }
+      context.amountMode='billing';
+      try {
+        const amounts=store.manualCommissionBillingAmounts(billing.id);
+        context.billingSnapshot=amounts.snapshot;
+        form.elements.date.value=billing.date||form.elements.date.value;form.elements.project.value=billing.project||'';form.elements.sourceNo.value=billing.number||'';
+        form.elements.gross.value=amounts.grossTotal;form.elements.untaxedAmount.value=amounts.preTaxAmount;
+        $('#manualCommissionGrossLabel',layer).textContent=amounts.noInvoice?'請款總額（無稅額）':'請款含稅總額';
+        calcRate();$('#commissionTaxHint',layer).textContent+= '；使用請款已保存未稅額，保留款不扣減抽成基數。';
+      } catch(error) {context.sourceError=String(error.message||error);form.elements.billing.setCustomValidity(context.sourceError);$('#commissionTaxHint',layer).textContent=context.sourceError}
+    });
+    form.elements.gross.addEventListener('input',calcGross);form.elements.rate.addEventListener('input',calcRate);
+    for(const name of ['date','project','sourceNo','status'])form.elements[name].addEventListener('change',calcRate);
     form.addEventListener('submit', submit);
     $$('.commission-drawer-backdrop,.commission-drawer-close,[data-cancel]', layer).forEach((button) => button.addEventListener('click', closeDrawer));
-    calc();
+    if(row)calcRate();else calcGross();
     startManualDrawerViewport(layer);
   }
   function closeDrawer() {
@@ -1375,6 +1423,8 @@
       // Capture the unchanged business payload before disabling any controls.
       try {
         const values = Object.fromEntries(new FormData(form));
+        const calculation=form._manualCommissionContext;
+        if(calculation){values.commissionAmountMode=calculation.amountMode;if(calculation.expectedCommissionSnapshot!==undefined)values.expectedCommissionSnapshot=calculation.expectedCommissionSnapshot;if(calculation.billingSnapshot)values.expectedCommissionBillingSnapshot=calculation.billingSnapshot}
         button = $('button[type="submit"]', form);
         enabledControls=$$('input,select,textarea,button',submittedForm).filter(control=>!control.disabled);
         enabledCloseControls=$$('.commission-drawer-backdrop,.commission-drawer-close,[data-cancel]',submittedLayer).filter(control=>!control.disabled);

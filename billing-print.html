@@ -140,6 +140,9 @@
     const n=v=>Number(v)||0;
     const m=v=>new Intl.NumberFormat('zh-TW',{style:'currency',currency:'TWD',maximumFractionDigits:0}).format(n(v));
     const q=v=>v===null||v===undefined||v===''?'—':new Intl.NumberFormat('zh-TW',{maximumFractionDigits:2}).format(n(v));
+    const preciseBillingLine=line=>['historical-supplement','external-document'].includes(line.sourcePricingType);
+    const denseQuantity=line=>preciseBillingLine(line)?new Intl.NumberFormat('zh-TW',{maximumFractionDigits:4}).format(n(line.qty)):q(line.qty);
+    const denseUnitPrice=line=>preciseBillingLine(line)?'$'+new Intl.NumberFormat('zh-TW',{maximumFractionDigits:4}).format(n(line.price)):m(line.price);
     function closePrintView(){const current=location.href;try{window.close()}catch(e){}setTimeout(()=>{if(window.closed)return;if(history.length>1){try{history.back()}catch(e){}setTimeout(()=>{if(location.href===current)location.replace(new URL('index.html',location.href).href)},400)}else location.replace(new URL('index.html',location.href).href)},100)}
     function removeSealBackground(image){const canvas=document.createElement('canvas');canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;const context=canvas.getContext('2d');context.drawImage(image,0,0);const pixels=context.getImageData(0,0,canvas.width,canvas.height);for(let index=0;index<pixels.data.length;index+=4){if(pixels.data[index]>235&&pixels.data[index+1]>235&&pixels.data[index+2]>235){pixels.data[index]=255;pixels.data[index+1]=255;pixels.data[index+2]=255}}context.putImageData(pixels,0,0);image.src=canvas.toDataURL('image/png')}
     let d={};try{d=JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(location.hash.slice(1))))))}catch(e){document.getElementById('paper').innerHTML='<p class="empty">無法讀取文件資料</p>'}
@@ -182,13 +185,14 @@
     // Never replace or recalculate the ERP source invoice/receivable records.
     const denseInvoiceGroup=isMergedExternalBilling&&
       (houses.length>9||items.length>5||lines.length>12);
+    let billingRenderError='';
     if(denseInvoiceGroup&&(lines.length>50||
         !lines.every(line=>Number.isFinite(Number(line.qty))&&
           Number.isFinite(Number(line.price))&&
           Number.isFinite(Number(line.amount)))||
         Math.abs(sum(lines,'amount')-billingDetailTotal)>.01))
-      throw new Error('施工明細筆數或合計超出 A4 安全列印範圍，請保留原始請款資料並核對');
-    const denseDetails=denseInvoiceGroup?
+      billingRenderError=lines.length>50?`此合併請款有 ${lines.length} 筆施工明細，超過目前 50 筆的安全列印上限，尚未匯出。原始請款資料未變更；請返回原單分別匯出，或保留此畫面回報。`:'施工明細金額或合計尚未通過核對，已停止匯出。原始請款資料未變更，請保留資料並核對。';
+    const denseDetails=denseInvoiceGroup&&!billingRenderError?
       '<section class="section dense-original-details">'+
       '<div class="section-title">施工明細</div>'+
       '<table class="detail dense-line-table"><colgroup>'+
@@ -199,8 +203,8 @@
       lines.map(line=>'<tr><td class="center">'+esc(line.house||'—')+'</td>'+
         '<td class="item">'+esc(line.item||'—')+'</td>'+
         '<td class="center">'+esc(line.unit||'—')+'</td>'+
-        '<td class="num">'+q(line.qty)+'</td>'+
-        '<td class="num">'+m(line.price)+'</td>'+
+        '<td class="num">'+denseQuantity(line)+'</td>'+
+        '<td class="num">'+denseUnitPrice(line)+'</td>'+
         '<td class="num">'+m(line.amount)+'</td></tr>').join('')+
       '<tr class="line-total"><td colspan="5">原施工明細合計</td>'+
       '<td class="num">'+m(billingDetailTotal)+'</td></tr>'+
@@ -209,19 +213,19 @@
     // Group ONLY identical item + unit + unit price + source pricing type.
     // Sum ORIGINAL per-line amounts (not a derived/repriced amount).
     const summaryGroups=new Map();
-    if(denseInvoiceGroup)lines.forEach(line=>{
+    if(denseInvoiceGroup&&!billingRenderError)lines.forEach(line=>{
       const key=JSON.stringify([line.item,line.unit,line.price,line.sourcePricingType||'']);
       let group=summaryGroups.get(key);
       if(!group){
-        group={item:line.item,unit:line.unit,price:line.price,qty:0,amount:0};
+        group={item:line.item,unit:line.unit,price:line.price,sourcePricingType:line.sourcePricingType||'',qty:0,amount:0};
         summaryGroups.set(key,group);
       }
       group.qty+=n(line.qty);group.amount+=n(line.amount);
     });
     const summaryItems=[...summaryGroups.values()];
-    if(denseInvoiceGroup&&Math.abs(sum(summaryItems,'amount')-billingDetailTotal)>.01)
+    if(denseInvoiceGroup&&!billingRenderError&&Math.abs(sum(summaryItems,'amount')-billingDetailTotal)>.01)
       throw new Error('施工項目彙總與原施工明細金額不同，停止匯出');
-    const groupedSummary=denseInvoiceGroup?
+    const groupedSummary=denseInvoiceGroup&&!billingRenderError?
       '<section class="section grouped-item-summary">'+
       '<div class="section-title">施工項目彙總</div>'+
       '<table class="detail grouped-item-summary-table"><colgroup>'+
@@ -231,7 +235,7 @@
       summaryItems.map(line=>'<tr><td class="item">'+esc(line.item||'—')+'</td>'+
         '<td class="center">'+esc(line.unit||'—')+'</td>'+
         '<td class="num">'+new Intl.NumberFormat('zh-TW',{maximumFractionDigits:4}).format(line.qty)+'</td>'+
-        '<td class="num">'+m(line.price)+'</td>'+
+        '<td class="num">'+denseUnitPrice(line)+'</td>'+
         '<td class="num">'+m(line.amount)+'</td></tr>').join('')+
       '<tr class="line-total"><td colspan="4">明細合計</td>'+
       '<td class="num">'+m(billingDetailTotal)+'</td></tr>'+
@@ -368,7 +372,13 @@
       if(!logo?.naturalWidth||!seal?.naturalWidth){blockPrintForMissingSeals();return;}
       window.print();
     }
-    if(isQuote){
+    if(billingRenderError){
+      window.__billingPrintReady=false;window.__billingPrintError='BILLING_PRINT_VALIDATION_FAILED';
+      safePrintButton.disabled=true;safePrintButton.textContent='此份請款尚無法匯出';
+      const notice=document.createElement('section');notice.id='billingValidationError';notice.setAttribute('role','alert');
+      notice.style.cssText='padding:18px;border:1px solid #e5b8ac;border-radius:8px;background:#fff4ef;color:#8c3b26;font-size:15px;line-height:1.7';
+      notice.textContent=billingRenderError;paper.replaceChildren(notice);
+    }else if(isQuote){
       prepareQuotationPrint().then(allowPrintWhenVerified).catch(handleQuotationPrintError);
     }else{
       loadAssets().then(allowPrintWhenVerified).catch(blockPrintForMissingSeals);

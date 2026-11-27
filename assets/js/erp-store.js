@@ -3287,35 +3287,65 @@
     if(sourceNo)return {kind:'ambiguous',billing:null,evidence:'unverified-source-number'};
     return {kind:'manual',billing:null,evidence:sourceType==='manual'?'source-type':'no-billing-evidence'};
   }
+  // Manual commission links use saved billing amounts, never the receivable after retention.
+  // This reader does not infer missing legacy amounts or repair a historical source.
+  function manualCommissionBillingAmounts(billingId) {
+    const matches=(state.billings||[]).filter(row=>String(row.id||'')===String(billingId||''));
+    if(matches.length!==1)throw new Error('無法唯一核對請款來源，請保留原業績並重新選擇。');
+    const billing=matches[0],read=(fields,label,required=true)=>{
+      const present=fields.filter(field=>billing[field]!==undefined&&billing[field]!==null&&billing[field]!=='');
+      if(!present.length){if(required)throw new Error(`請款缺少已保存${label}，不能猜算手動抽成。`);return null}
+      const values=present.map(field=>billing[field]);
+      if(values.some(value=>!['number','string'].includes(typeof value)||typeof value==='string'&&!/^\d+(?:\.\d+)?$/.test(value.trim())||!Number.isFinite(Number(value))||Number(value)<0||Number(value)>Number.MAX_SAFE_INTEGER))throw new Error(`請款${label}格式不完整，請先核對來源。`);
+      const amounts=values.map(Number);if(amounts.some(value=>Math.abs(value-amounts[0])>0.001))throw new Error(`請款${label}欄位不一致，不能自動選用其中一個金額。`);
+      return amounts[0];
+    };
+    const preTaxAmount=read(['preTaxAmount','amount'],'未稅金額'),grossTotal=read(['taxIncludedAmount','grossTotal'],'含稅總額'),taxAmount=read(['taxAmount','tax'],'稅額',false),noInvoice=billingInvoiceStatus(billing)==='no_invoice';
+    if(grossTotal<preTaxAmount||taxAmount!==null&&Math.abs(preTaxAmount+taxAmount-grossTotal)>0.001||noInvoice&&Math.abs(grossTotal-preTaxAmount)>0.001)throw new Error('請款未稅、稅額與含稅總額不一致，請先核對來源。');
+    const amounts={billingId:String(billing.id),preTaxAmount,grossTotal,taxAmount:taxAmount??grossTotal-preTaxAmount,noInvoice};
+    return {...amounts,snapshot:JSON.stringify({...amounts,date:billing.date||'',project:billing.project||'',number:billing.number||''})};
+  }
   async function saveCommission(values, id) {
     requireStoreTransactionDraft();
     const existing = id ? state.commissions.find((x) => x.id === id) : null;
+    if(id&&!existing)throw new Error('原業績已不存在，請重新開啟紀錄，不能當作新增重送。');
     if (existing&&commissionSettlementLock(existing).locked) throw new Error(PAID_COMMISSION_SOURCE_ERROR);
     if (existing?.sourceType === 'daily-log') {
       if (payrollHistoryLock(existing.employee,existing.date).locked) throw new Error(PAID_COMMISSION_SOURCE_ERROR);
       throw new Error(DAILY_LOG_COMMISSION_ERROR);
     }
     if ([[existing?.employee,existing?.date],[values.employee,values.date]].some(([employeeId,date])=>employeeId&&payrollHistoryLock(employeeId,date).locked)) throw new Error(PAID_COMMISSION_SOURCE_ERROR);
-    const selectedBilling=values.billing?state.billings.find((billing)=>String(billing.id)===String(values.billing)):null;
-    if(values.billing&&!selectedBilling)throw new Error('找不到選擇的請款來源');
+    if(values.expectedCommissionSnapshot!==undefined&&(!existing||values.expectedCommissionSnapshot!==JSON.stringify(existing)))throw new Error('原業績已更新，請保留輸入並重新開啟核對。');
+    const billingMatches=values.billing?state.billings.filter(billing=>String(billing.id)===String(values.billing)):[],selectedBilling=billingMatches[0]||null;
+    if(values.billing&&billingMatches.length!==1)throw new Error('無法唯一找到選擇的請款來源');
+    const useBillingAmount=Boolean(selectedBilling)&&(!existing||values.commissionAmountMode==='billing'),billingAmounts=useBillingAmount?manualCommissionBillingAmounts(selectedBilling.id):null;
+    if(billingAmounts&&values.expectedCommissionBillingSnapshot!==undefined&&values.expectedCommissionBillingSnapshot!==billingAmounts.snapshot)throw new Error('請款金額或來源已更新，請重新選擇請款後再儲存。');
+    if(billingAmounts&&!existing&&values.commissionAmountMode!=='billing'&&num(values.untaxedAmount)!==billingAmounts.preTaxAmount)throw new Error('輸入基數與請款已保存未稅額不同；不會把部分金額猜成整張請款，請重新核對來源。');
+    const untaxedAmount=billingAmounts?billingAmounts.preTaxAmount:num(values.untaxedAmount),rate=num(values.rate),status=values.status==='已列入薪資'?'已列入薪資':'未列入薪資',sourceNo=selectedBilling?selectedBilling.number||values.sourceNo||'':values.sourceNo||'';
+    const sameSource=!selectedBilling||existing?.sourceType==='billing'&&String(existing.sourceId||'')===String(selectedBilling.id)&&String(existing.billingId||'')===String(selectedBilling.id);
+    const originalStatus=existing?.status==='已列入薪資'?'已列入薪資':'未列入薪資';
+    const preserveAmounts=Boolean(existing)&&!useBillingAmount&&values.commissionAmountMode!=='manual'&&sameSource&&String(existing.date||'')===String(values.date||'')&&existing.employee===values.employee&&existing.project===values.project&&String(existing.sourceNo||'')===String(sourceNo)&&originalStatus===status&&num(existing.untaxedAmount)===untaxedAmount&&num(existing.rate)===rate;
+    if(existing&&!selectedBilling){
+      const originalLink=commissionBillingLink(existing),nextLink=commissionBillingLink({...existing,sourceNo,note:values.note||''});
+      if((originalLink.kind==='linked'||nextLink.kind==='linked')&&String(originalLink.billing?.id||'')!==String(nextLink.billing?.id||''))throw new Error('此筆請款來源仍依舊單號或備註辨識；本次未儲存，請保留原來源文字並先核對關聯。');
+    }
+    if(!preserveAmounts){
+      const link=selectedBilling?{kind:'linked',billing:selectedBilling}:existing?commissionBillingLink(existing):null;
+      if(link?.kind==='linked'){
+        if(!String(link.billing.project||'')||String(values.project||'')!==String(link.billing.project))throw new Error('抽成案場與請款來源不一致；請選擇同案場的請款，不能只更改案場。');
+        if(!selectedBilling&&String(sourceNo)!==String(link.billing.number||''))throw new Error('來源單號與原綁定請款不一致；請明確改選請款，不能只更改單號。');
+      }else if(link&&link.kind!=='manual'&&link.evidence!=='unverified-source-number')throw new Error('原請款來源尚未核對；可保留原金額修改備註，變更金額或歸屬前請明確選擇有效請款。');
+    }
     const before = existing ? { date: existing.date, employee: existing.employee } : null;
     const row = existing || { id: uid(), createdAt: new Date().toISOString() };
-    Object.assign(row, {
-      date: values.date,
-      employee: values.employee,
-      project: values.project,
-      sourceNo: values.sourceNo || '',
-      untaxedAmount: num(values.untaxedAmount),
-      rate: num(values.rate),
-      commission: Math.round(num(values.untaxedAmount) * num(values.rate) / 100),
-      status: values.status === '已列入薪資' ? '已列入薪資' : '未列入薪資',
-      note: values.note || '',
-      updatedAt: new Date().toISOString()
-    });
-    if(selectedBilling)Object.assign(row,{sourceType:'billing',sourceId:selectedBilling.id,billingId:selectedBilling.id,sourceNo:selectedBilling.number||row.sourceNo||''});
+    Object.assign(row,{note:values.note||'',updatedAt:new Date().toISOString()});
+    if(!preserveAmounts)Object.assign(row,{date:values.date,employee:values.employee,project:values.project,sourceNo,status,untaxedAmount,rate,commission:Math.round(untaxedAmount*rate/100)});
+    if(selectedBilling&&!preserveAmounts)Object.assign(row,{sourceType:'billing',sourceId:selectedBilling.id,billingId:selectedBilling.id,sourceNo:selectedBilling.number||row.sourceNo||''});
     if (!existing) state.commissions.unshift(row);
-    if (before?.employee) rebuildPayrollFor(monthOf(before.date), before.employee);
-    rebuildPayrollFor(monthOf(row.date), row.employee);
+    if(!preserveAmounts){
+      if(before?.employee&&(before.employee!==row.employee||monthOf(before.date)!==monthOf(row.date)))rebuildPayrollFor(monthOf(before.date),before.employee);
+      rebuildPayrollFor(monthOf(row.date),row.employee);
+    }
     persist(`${existing ? '修改' : '新增'}員工業績抽成`);
     return row;
   }
@@ -7691,6 +7721,7 @@
     };
   }
   const rawStore={ commissionCorrectionPreview, commissionCorrectionReviews, createCommissionCorrectionReview, p33Oct07CommissionRepairPreview, p33Oct07CommissionRepair, externalBillingContext, externalBillingDocumentIndex, saveExternalBillingDocument, archiveExternalBillingDocument, historicalQuotationChoices, billingDocumentState, billingDocumentLines, saveHistoricalBillingDetails, dailyDraftSnapshot, dailyDraftReview, receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
+  rawStore.manualCommissionBillingAmounts=manualCommissionBillingAmounts;
   const publicStore={
     getState:()=>publishedState,
     storeTransactionDiagnostic,
