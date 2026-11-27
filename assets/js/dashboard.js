@@ -163,11 +163,46 @@
     if (transactions.length) return sum(transactions, (row) => row.amount);
     return sum(data.receivables.filter((row) => inMonth(row, month, ['receiptDate'])), paidAR);
   }
+  function dashboardPayrollGroups(data) {
+    const store=window.KuSheERPStore;
+    return typeof store?.monthlyPayrollGroups==='function'&&store.getState?.()===data?store.monthlyPayrollGroups():null;
+  }
+  function paidPayrollFallback(data, month) {
+    const grouped=dashboardPayrollGroups(data),payments=data.salaryPayments||[],transactions=data.bankTransactions||[],seen=new Set();
+    if(!grouped)return sum((data.payroll||[]).filter(row=>row.month===month&&isPayrollPaid(row)),row=>row.total);
+    let total=0;
+    const add=payment=>{
+      const transactionId=text(payment.bankTransactionId),paymentId=text(payment.id),matches=transactions.filter(row=>transactionId&&text(row.id)===transactionId||text(row.sourceType)==='salary_payment'&&paymentId&&(text(row.sourceId)===paymentId||text(row.salaryPaymentId)===paymentId));
+      if(matches.length>1)return;
+      const transaction=matches[0],resolvedTransactionId=text(transaction?.id)||transactionId,key=resolvedTransactionId?'bank:'+resolvedTransactionId:paymentId?'payment:'+paymentId:payment;
+      if(seen.has(key))return;seen.add(key);
+      if(transaction&&!expenseTx(transaction)&&text(transaction.direction)!=='out')return;
+      const date=businessDateValue(transaction?.date)||businessDateValue(payment.date);
+      if(!date||date.slice(0,7)!==month)return;
+      const debit=transaction?number(transaction.actualDebit??transaction.amount):payment.actualDebit!==undefined&&payment.actualDebit!==null&&payment.actualDebit!==''?number(payment.actualDebit):number(payment.amount)+(payment.feePayer==='company'?Math.max(0,number(payment.fee)):0);
+      total+=Math.max(0,debit);
+    };
+    grouped.forEach(group=>{
+      const records=group.records||[],ids=new Set((group.recordIds||records.map(row=>row.id)).map(text)),recordBankIds=new Set(records.map(row=>text(row.paymentTransactionId)).filter(Boolean));
+      const linked=payments.filter(row=>ids.has(text(row.payrollId))||!text(row.payrollId)&&text(row.employee||row.employeeId)===text(group.employeeId)&&monthOf(row,['month','date'])===text(group.month));
+      const linkedIds=new Set(linked.map(row=>text(row.id))),linkedBankIds=new Set(linked.map(row=>text(row.bankTransactionId)).filter(Boolean));
+      const bankEvidence=transactions.filter(row=>recordBankIds.has(text(row.id))||linkedBankIds.has(text(row.id))||ids.has(text(row.payrollId))||text(row.sourceType)==='payroll'&&ids.has(text(row.sourceId))||text(row.sourceType)==='salary_payment'&&(linkedIds.has(text(row.sourceId))||linkedIds.has(text(row.salaryPaymentId))));
+      const history=Array.isArray(group.history)?group.history:[];
+      history.forEach(add);
+      // A dated payment belongs to its payment month, never to the wage month.
+      // Unknown dated/linked evidence must not be replaced with a salary total.
+      if(history.length||linked.length||bankEvidence.length||group.missingProjectSettlementIds?.length||records.some(row=>row.payDate||row.paidAt||row.paymentTransactionId))return;
+      if(text(group.month)!==month)return;
+      const legacy=records.filter(isPayrollPaid);
+      total+=Math.max(0,...legacy.map(row=>number(row.total)));
+    });
+    return total;
+  }
   function monthCash(data, month) {
     const rows = data.bankTransactions.filter((row) => inMonth(row, month));
     if (rows.length) return sum(rows.filter(incomeTx), (row) => row.amount) - sum(rows.filter(expenseTx), (row) => row.amount);
     const paidPayables = sum(data.payables.filter((row) => inMonth(row, month, ['payDate', 'date']) && paidAP(row) > 0), paidAP);
-    const paidPayroll = sum(data.payroll.filter((row) => row.month === month && isPayrollPaid(row)), (row) => row.total);
+    const paidPayroll = paidPayrollFallback(data, month);
     return monthCollections(data, month) - paidPayables - paidPayroll;
   }
   function bankTotal(data) { return sum(data.banks, (row) => number(row.balance) || (number(row.openingBalance) + number(row.income) - number(row.expense))); }
@@ -239,9 +274,13 @@
       const ar = data.receivables.find((row) => text(row.billingId) === text(billing.id) || text(row.sourceNo) === text(billing.number));
       return ar ? Math.max(0, arAmount(ar) - paidAR(ar)) : number(billing.total ?? billing.grossTotal);
     });
-    const payrollRows = data.payroll.filter((row) => text(row.month) === month);
+    // Paid history may retain several rows for one employee/month. Use the Store's
+    // source-based view so those snapshots are never added together as new wages.
+    const payrollGroups=dashboardPayrollGroups(data);
+    const payrollRows = (payrollGroups||data.payroll).filter((row) => text(row.month) === month);
     const payrollTotal = sum(payrollRows, (row) => row.total);
-    const payrollPaid = sum(payrollRows, (row) => payrollPaidAmount(data,row));
+    const payrollPaid = sum(payrollRows, (row) => payrollGroups?row.paid:payrollPaidAmount(data,row));
+    const payrollOpen = payrollGroups?sum(payrollRows,(row)=>Math.max(0,number(row.outstanding))):Math.max(0,payrollTotal-payrollPaid);
     const unbilledWork=unbilledWorkSummary(data);
     const retentionBillings=data.billings.filter((row)=>number(row.retention)>number(row.retentionReceived));
     const retentionOpen=sum(retentionBillings,(row)=>Math.max(0,number(row.retention)-number(row.retentionReceived)));
@@ -254,7 +293,7 @@
       { type: '待付款', count: openAP.length, amount: outstandingAP, module: 'payables', tone: 'orange', icon: 'arrow-up-from-line' },
       { type: '逾期應付', count: overduePayables.length, amount: sum(overduePayables, (row) => Math.max(0, apAmount(row) - paidAP(row))), module: 'payables', tone: 'red', icon: 'circle-alert' },
       { type: '待開發票', count: missingInvoices.length, amount: missingInvoiceAmount, module: 'invoices', tone: 'blue', icon: 'receipt' },
-      { type: '薪資待結算', count: payrollRows.filter((row) => payrollPaidAmount(data,row)<number(row.total)).length, amount: Math.max(0, payrollTotal - payrollPaid), module: 'payroll', tone: 'violet', icon: 'wallet' }
+      { type: '薪資待結算', count: payrollRows.filter((row) => payrollGroups?number(row.outstanding)>0:payrollPaidAmount(data,row)<number(row.total)).length, amount: payrollOpen, module: 'payroll', tone: 'violet', icon: 'wallet' }
     ].filter((row) => row.count || row.amount);
 
     return {
@@ -266,7 +305,7 @@
       }, structureTotal, structurePaid, structureOpen,
       collectionRate: structureTotal ? structurePaid / structureTotal * 100 : 0,
       recoveryRate: allAR ? Math.min(100, allReceived / allAR * 100) : 0,
-      projects, reportProjects: projectRows, attentions, payrollTotal, payrollPaid, payrollOpen: Math.max(0, payrollTotal - payrollPaid)
+      projects, reportProjects: projectRows, attentions, payrollTotal, payrollPaid, payrollOpen
     };
   }
 

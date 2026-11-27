@@ -773,14 +773,23 @@
     const truth=payrollPaymentTruth({employee,month,recordIds:payrollRows.map((row)=>row.id),total:Math.max(0,...payrollRows.map((row)=>num(row.total)))});
     return {locked:truth.hasRegularPayment,reason:truth.explicitPayments.length?'salary-payment':truth.verifiedLegacyTransactions.length?'salary-bank-transaction':'',payrollIds:truth.recordIds,salaryPaymentIds:truth.explicitPayments.map((row)=>String(row.id)),bankTransactionIds:truth.hasRegularPayment?truth.bankTransactionIds.filter((id)=>!truth.projectSettlementTransactions?.some((row)=>String(row.id)===String(id))):[]};
   }
-  function rebuildPayrollFor(month, employee) {
+  function rebuildPayrollFor(month, employee, paidMonthAppend = null) {
     if (!month || !employee) return;
     const atts = state.attendance.filter((x) => monthOf(x.date) === month && x.employee === employee);
     const comms = state.commissions.filter((x) => monthOf(x.date) === month && x.employee === employee && x.status === '已列入薪資');
-    let payroll = state.payroll.find((x) => x.month === month && x.employee === employee && x.status !== '已付款');
+    // A paid-month append may only update its verified, payment-free summary.
+    // Paid/partly-paid rows remain historical snapshots, including their timestamps.
+    let payroll = paidMonthAppend
+      ? state.payroll.find((x) => String(x.id) === paidMonthAppend.summaryId)
+      : state.payroll.find((x) => x.month === month && x.employee === employee && x.status !== '已付款');
+    const newPayroll = !payroll;
     if (!payroll) {
       payroll = {id:uid(),month,employee,days:0,baseSalary:0,commission:0,fuel:0,manualFuel:0,meal:0,other:0,overtime:0,bonus:0,allowance:0,advance:0,laborInsurance:0,incomeTax:0,deduction:0,total:0,payDate:'',bankId:'',paymentTransactionId:'',paidAt:'',status:'未付款',note:'由請款單、抽成與點工自動彙整',payrollAdjustmentNote:'',otherNote:'',deductionNote:'',createdAt:new Date().toISOString()};
       state.payroll.unshift(payroll);
+    }
+    if (paidMonthAppend) {
+      paidMonthAppend.summaryId = String(payroll.id);
+      if (newPayroll) Object.assign(payroll, paidMonthAppend.adjustments);
     }
     payroll.days = atts.reduce((sum, x) => sum + num(x.days), 0);
     payroll.hours = atts.reduce((sum, x) => sum + num(x.hours), 0);
@@ -2619,7 +2628,7 @@
     const history=payrollHistoryLock(log?.employee,log?.date),hasPayrollSource=dailyLogHasPayrollSource(log),settlement=dailyLogCommissionSettlementLock(log);
     return {...history,locked:hasPayrollSource&&history.locked||settlement.locked,historyLocked:history.locked,hasPayrollSource,commissionSettlementLocked:settlement.locked,commissionSettlementIds:settlement.settlementIds};
   }
-  function syncDailyLogLinks(log, oldLog = null) {
+  function syncDailyLogLinks(log, oldLog = null, paidMonthAppends = null) {
     const pairs = [];
     if (oldLog?.employee) pairs.push([monthOf(oldLog.date), oldLog.employee]);
     if (log?.employee) pairs.push([monthOf(log.date), log.employee]);
@@ -2634,7 +2643,7 @@
       state.attendance.unshift({id:uid(),date:log.date,employee:log.employee,employeeName:log.employeeName||'',customer:log.customer||'',project:log.project,projectName:log.projectName||'',sourceNo:log.billingNo||'每日點工',sourceType:'daily-log',sourceId:log.id,workMode:log.workMode,days:log.workMode==='daily'?num(log.workQty):0,hours:log.workMode==='hourly'?num(log.workQty):0,dailyRate:num(log.workRate),hourlyRate:log.workMode==='hourly'?num(log.workRate):0,amount:workAmount,fuel:0,status:'已列入薪資',note:`每日點工：${log.note||''}`,createdAt:now,updatedAt:now});
     }
     const seen = new Set();
-    pairs.forEach(([month, employee]) => { const key = `${month}__${employee}`; if (month && employee && !seen.has(key)) { seen.add(key); rebuildPayrollFor(month, employee); } });
+    pairs.forEach(([month, employee]) => { const key = `${month}__${employee}`; if (month && employee && !seen.has(key)) { seen.add(key); rebuildPayrollFor(month, employee, paidMonthAppends?.get(key) || null); } });
   }
   function batchRows(batchId) {
     return state.dailyLogs.filter((log) => (log.batchId || log.id) === batchId);
@@ -2778,6 +2787,120 @@
     });
     return lines;
   }
+  // K28: append-only admission for a paid salary month. Never infer allocations,
+  // repair old payments, or use the payment date as the salary month.
+  function dailyPaidMonthAppendPlan(employeeId, date) {
+    const employee=String(employeeId||''),month=monthOf(date),text=value=>String(value??'').trim();
+    const records=(state.payroll||[]).filter(row=>text(row.employee||row.employeeId)===employee&&text(row.month)===month);
+    const recordIds=new Set(records.map(row=>text(row.id)));
+    const payments=(state.salaryPayments||[]).filter(row=>text(row.payrollId)?recordIds.has(text(row.payrollId)):text(row.employee||row.employeeId)===employee&&text(row.month)===month);
+    const paymentIds=new Set(payments.map(row=>text(row.id)));
+    const relatedTransactions=(state.bankTransactions||[]).filter(row=>recordIds.has(text(row.payrollId))||row.sourceType==='payroll'&&recordIds.has(text(row.sourceId))||row.sourceType==='salary_payment'&&(paymentIds.has(text(row.sourceId))||paymentIds.has(text(row.salaryPaymentId))||text(row.employee||row.employeeId)===employee&&text(row.month)===month));
+    const truth=payrollPaymentTruth({employee,month,recordIds:[...recordIds],total:Math.max(0,...records.map(row=>num(row.total)))});
+    const required=truth.hasRegularPayment||payments.length>0||relatedTransactions.length>0||truth.integrity==='stale-payroll-status';
+    const result={required:Boolean(required),allowed:true,employee,month,summaryId:'',adjustments:{},protectedPayrollIds:[],message:''};
+    if(!required)return result;
+    const reject=reason=>({...result,allowed:false,code:'DAILY_PAID_MONTH_UNVERIFIED',message:`此員工 ${month} 已有薪資付款，${reason}。本次施工尚未儲存，請保留草稿並核對付款來源；原付款不會變更。`});
+    const unique=(rows,id)=>id&&rows.filter(row=>text(row.id)===id).length===1;
+    const amountOK=value=>(typeof value==='number'||typeof value==='string'&&/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(value.trim()))&&Number.isFinite(Number(value))&&Number(value)>=0&&Number(value)<=Number.MAX_SAFE_INTEGER;
+    if(!/^\d{4}-\d{2}$/.test(month)||!unique(state.employees,employee)||!records.length||recordIds.size!==records.length||records.some(row=>!unique(state.payroll,text(row.id))||row.employee&&row.employeeId&&text(row.employee)!==text(row.employeeId)))return reject('員工或薪資月份無法唯一核對');
+    if(truth.integrity!=='explicit'||truth.verifiedLegacyTransactions.length||truth.projectSettlementHistory.length||!payments.length||payments.length!==truth.explicitPayments.length||payments.some(row=>Number(row.paymentAllocationVersion)!==2))return reject('既有付款尚缺可核對的日薪與抽成分配');
+    const group=monthlyPayrollGroups().find(row=>row.employeeId===employee&&row.month===month);
+    if(!group||!group.sources.length)return reject('既有薪資來源不完整');
+    if(records.some(row=>!amountOK(row.total))||!financialAuditMoneyEqual(num(truth.total),num(group.total)))return reject('原薪資摘要與完整月份來源金額不一致');
+    const sourceRows=[...(state.attendance||[]).filter(row=>text(row.employee||row.employeeId)===employee&&monthOf(row.date)===month).map(row=>({row,type:'attendance'})),...(state.commissions||[]).filter(row=>text(row.employee||row.employeeId)===employee&&monthOf(row.date)===month&&row.status==='已列入薪資').map(row=>({row,type:'commission'}))];
+    const sourceKeys=new Set();
+    for(const {row,type} of sourceRows){
+      const sourceKey=salarySourceIdentity(row,type),collection=type==='attendance'?state.attendance:state.commissions;
+      if(!unique(collection,text(row.id))||sourceKeys.has(sourceKey)||!amountOK(type==='attendance'?row.amount:row.commission)||row.employee&&row.employeeId&&text(row.employee)!==text(row.employeeId))return reject('月份薪資來源有重複或無效金額');
+      sourceKeys.add(sourceKey);
+      if(row.sourceType==='daily-log'){
+        const logs=state.dailyLogs.filter(log=>text(log.id)===text(row.sourceId)),log=logs[0];
+        if(!text(row.sourceId)||logs.length!==1||collection.filter(item=>item.sourceType==='daily-log'&&text(item.sourceId)===text(row.sourceId)).length!==1||text(log.employee)!==employee||text(log.date)!==text(row.date)||text(log.project)!==text(row.project)||!financialAuditMoneyEqual(type==='attendance'?dailyWorkAmount(log):num(log.commission),type==='attendance'?num(row.amount):num(row.commission)))return reject('施工與薪資來源無法一一對應');
+        if(type==='commission'&&(!Array.isArray(log.items)||!log.items.some(item=>num(item.untaxedSubtotal)>0||num(item.qty)*num(item.price)>0)))return reject('已列入薪資的施工抽成缺少原戶別明細');
+      }
+    }
+    const allocations=sourceRows.filter(item=>item.type==='commission').flatMap(({row})=>commissionHouseAllocations(row).map(allocation=>({...allocation,source:row})));
+    const commissionIds=new Set(sourceRows.filter(item=>item.type==='commission').map(item=>text(item.row.id)));
+    const usesMonthCommission=key=>{try{const value=JSON.parse(key);return Array.isArray(value)&&commissionIds.has(text(value[0]));}catch(_){return false;}};
+    if((state.salaryPayments||[]).some(payment=>!payments.includes(payment)&&(Array.isArray(payment.commissionSelectionKeys)?payment.commissionSelectionKeys:[]).some(usesMonthCommission)))return reject('月份抽成另有不同員工或月份的付款關聯');
+    if((state.commissionSettlements||[]).some(settlement=>commissionSettlementSourceIds(settlement).some(id=>commissionIds.has(text(id)))))return reject('月份抽成另有案場結算紀錄需要核對');
+    const paidKeys=new Set(),verifiedTransactionIds=new Set();
+    let basePaid=0,paid=0;
+    for(const payment of payments){
+      const id=text(payment.id),payrollId=text(payment.payrollId),keys=payment.commissionSelectionKeys;
+      if(!unique(state.salaryPayments,id)||!recordIds.has(payrollId)||!Array.isArray(keys)||keys.some(key=>typeof key!=='string'||!key||key!==key.trim())||new Set(keys).size!==keys.length||[payment.amount,payment.baseAmount,payment.commissionAmount,payment.fee,payment.actualDebit].some(value=>!amountOK(value))||num(payment.amount)<=0||!financialAuditMoneyEqual(num(payment.baseAmount)+num(payment.commissionAmount),num(payment.amount))||Boolean(keys.length)!==(num(payment.commissionAmount)>0)||!['company','recipient'].includes(payment.feePayer))return reject('既有付款的來源分配不完整或重複');
+      if((payment.employee||payment.employeeId)&&text(payment.employee||payment.employeeId)!==employee||payment.employee&&payment.employeeId&&text(payment.employee)!==text(payment.employeeId)||payment.month&&text(payment.month)!==month)return reject('付款所屬員工或薪資月份不一致');
+      const expectedDebit=num(payment.amount)+(payment.feePayer==='company'?num(payment.fee):0);
+      if(!financialAuditMoneyEqual(expectedDebit,num(payment.actualDebit))||payment.feePayer==='recipient'&&num(payment.fee)>num(payment.amount))return reject('付款金額與手續費不一致');
+      let transaction;
+      try{transaction=salaryPaymentDeletionPlan(payment).transaction;}catch(_){return reject('付款與銀行流水無法唯一核對');}
+      if(verifiedTransactionIds.has(text(transaction.id))||transaction.type==='收入'||transaction.direction==='in'||!(transaction.type==='支出'||transaction.direction==='out')||text(transaction.payrollId)!==payrollId||text(transaction.employee||transaction.employeeId)!==employee||text(transaction.month)!==month||[transaction.sourceId,transaction.salaryPaymentId].some(value=>value&&text(value)!==id)||transaction.employee&&transaction.employeeId&&text(transaction.employee)!==text(transaction.employeeId))return reject('銀行流水的付款身份或方向不一致');
+      for(const [field,expected] of [['salaryAmount',payment.amount],['fee',payment.fee],['actualDebit',payment.actualDebit]])if(transaction[field]!==undefined&&(!amountOK(transaction[field])||!financialAuditMoneyEqual(num(transaction[field]),num(expected))))return reject('銀行流水的金額明細不一致');
+      if(transaction.feePayer&&transaction.feePayer!==payment.feePayer)return reject('銀行流水的手續費負擔不一致');
+      verifiedTransactionIds.add(text(transaction.id));
+      let selectedAmount=0;
+      for(const key of keys){
+        const matches=allocations.filter(row=>row.allocationKey===key),allocation=matches[0];
+        if(paidKeys.has(key)||matches.length!==1||!allocation||num(allocation.amount)<=0)return reject('已付抽成的戶別來源缺失或重複');
+        const keyPayments=(state.salaryPayments||[]).filter(row=>Array.isArray(row.commissionSelectionKeys)&&row.commissionSelectionKeys.includes(key));
+        if(keyPayments.length!==1||keyPayments[0]!==payment)return reject('同一戶別抽成另有付款紀錄');
+        const source=allocation.source;
+        if(source.sourceType!=='daily-log'&&commissionBillingLink(source).kind!=='linked')return reject('已付抽成的請款來源無法核對');
+        if((state.commissionSettlements||[]).some(settlement=>settlementUsesWholeCommission(settlement,text(source.id))||settlementAllocationKeys(settlement).has(key)))return reject('同一抽成同時出現在不同付款紀錄');
+        selectedAmount+=num(allocation.amount);paidKeys.add(key);
+      }
+      if(!financialAuditMoneyEqual(selectedAmount,num(payment.commissionAmount)))return reject('已付抽成金額與原戶別來源不一致');
+      basePaid+=num(payment.baseAmount);paid+=num(payment.amount);
+    }
+    if(relatedTransactions.some(row=>!verifiedTransactionIds.has(text(row.id))))return reject('月份另有尚未對應的銀行付款');
+    const nonCommissionTotal=group.sources.filter(row=>row.type!=='抽成').reduce((sum,row)=>sum+num(row.amount),0);
+    if(basePaid>Math.max(0,nonCommissionTotal)||paid>num(group.total))return reject('已付款超過可核對的薪資來源金額');
+    const paymentRecordIds=new Set(payments.map(row=>text(row.payrollId))),safeRows=[];
+    for(const row of records){
+      const markers=row.status==='已付款'||row.status==='部分付款'||num(row.paidAmount)>0||row.payDate||row.paidAt||row.paymentTransactionId;
+      if(markers&&!paymentRecordIds.has(text(row.id)))return reject('薪資付款標記與實際付款關聯不完整');
+      if(row.status==='未付款'&&!markers&&!row.bankId&&!row.bankAccountId&&!paymentRecordIds.has(text(row.id)))safeRows.push(row);
+    }
+    if(safeRows.length>1)return reject('同月份有多筆未付款摘要，無法安全選定追加來源');
+    if(safeRows.length&&salaryAdjustmentFields.some(([field])=>!financialAuditMoneyEqual(num(safeRows[0][field]),num(group[field]))))return reject('未付款摘要的人工加扣項與月份來源不一致');
+    result.summaryId=text(safeRows[0]?.id);
+    result.protectedPayrollIds=records.filter(row=>text(row.id)!==result.summaryId).map(row=>text(row.id));
+    result.adjustments=Object.fromEntries(salaryAdjustmentFields.map(([field])=>[field,num(group[field])]));
+    for(const field of ['payrollAdjustmentNote','otherNote','deductionNote'])result.adjustments[field]=String(group[field]||'');
+    result.total=num(group.total);result.paid=num(group.paid);result.history=storeStateFingerprint(group.history);
+    return result;
+  }
+  function captureDailyPaidMonthAppend(plans, employeeIds, date) {
+    if(!plans.size)return null;
+    const summaries=new Set([...plans.values()].map(plan=>plan.summaryId).filter(Boolean));
+    // Other employees in the same new batch retain their existing unpaid-month
+    // path. Allow only the exact summary that the original rebuild would use.
+    const ordinarySummaries=new Set();
+    for(const employee of employeeIds||[]){
+      const month=monthOf(date);
+      if(!plans.has(`${month}__${employee}`)){
+        const summary=state.payroll.find(row=>row.month===month&&row.employee===employee&&row.status!=='已付款');
+        if(summary)ordinarySummaries.add(summary);
+      }
+    }
+    const fixed=['salaryPayments','commissionSettlements','banks','bankTransactions','billings','receivables','receipts','retentionReceipts','payables','payments','invoices','materialUsages','inventoryReceipts','projectCosts'];
+    return {fixed:Object.fromEntries(fixed.map(key=>[key,storeStateFingerprint(state[key]||[])])),rows:Object.fromEntries(['dailyLogs','attendance','commissions','payroll'].map(key=>[key,(state[key]||[]).filter(row=>key!=='payroll'||!summaries.has(String(row.id))&&!ordinarySummaries.has(row)).map(row=>({row,fingerprint:storeStateFingerprint(row)}))]))};
+  }
+  function assertDailyPaidMonthAppend(plans, before) {
+    if(!before)return;
+    const fail=()=>{throw storeError('新增施工的薪資保護核對未通過，本次尚未儲存；草稿已保留，請先核對來源。','DAILY_PAID_MONTH_CHANGED');};
+    for(const [key,fingerprint] of Object.entries(before.fixed))if(storeStateFingerprint(state[key]||[])!==fingerprint)fail();
+    for(const [key,entries] of Object.entries(before.rows))for(const entry of entries)if(!(state[key]||[]).includes(entry.row)||storeStateFingerprint(entry.row)!==entry.fingerprint)fail();
+    const oldAttendance=new Set(before.rows.attendance.map(entry=>entry.row)),oldCommissions=new Set(before.rows.commissions.map(entry=>entry.row));
+    for(const plan of plans.values()){
+      const belongs=row=>String(row.employee||row.employeeId)===plan.employee&&monthOf(row.date)===plan.month;
+      const added=(state.attendance||[]).filter(row=>belongs(row)&&!oldAttendance.has(row)).reduce((sum,row)=>sum+num(row.amount)+num(row.fuel),0)+(state.commissions||[]).filter(row=>belongs(row)&&!oldCommissions.has(row)&&row.status==='已列入薪資').reduce((sum,row)=>sum+num(row.commission),0);
+      const group=monthlyPayrollGroups().find(row=>row.employeeId===plan.employee&&row.month===plan.month),summary=state.payroll.find(row=>String(row.id)===plan.summaryId);
+      if(!group||!summary||!financialAuditMoneyEqual(num(group.total),plan.total+added)||!financialAuditMoneyEqual(num(summary.total),num(group.total))||!financialAuditMoneyEqual(num(group.paid),plan.paid)||storeStateFingerprint(group.history)!==plan.history)fail();
+      if(!dailyPaidMonthAppendPlan(plan.employee,plan.month).allowed)fail();
+    }
+  }
   // P29-7: scoped draft evidence; this reader never persists or normalizes data.
   function dailyDraftScope(values={},editingBatchId='',source=state) {
     const rows=key=>Array.isArray(source?.[key])?source[key]:[],same=(a,b)=>String(a??'')===String(b??''),date=String(values.date||''),month=monthOf(date);
@@ -2790,7 +2913,19 @@
     const logIds=new Set([...logs,...previous].map(log=>String(log.id)));
     const payroll=rows('payroll').filter(row=>employees.has(String(row.employee||row.employeeId))&&same(row.month,month)),payrollIds=new Set(payroll.map(row=>String(row.id)));
     const ordered=list=>[...list].sort((a,b)=>String(a.id||'').localeCompare(String(b.id||'')));
-    return {date,month,batchId:editingBatchId,employees:ordered(rows('employees').filter(row=>employees.has(String(row.id)))),projects:ordered(selectedProjects),customers:ordered(rows('customers').filter(row=>customers.has(String(row.id)))),quotations:ordered(rows('quotations').filter(row=>quotations.has(String(row.id)))),taxRate:source?.settings?.defaultTax,logs:ordered(logs),previous:ordered(previous),commissions:ordered(rows('commissions').filter(row=>row.sourceType==='daily-log'&&logIds.has(String(row.sourceId)))),payroll:ordered(payroll),payments:ordered(rows('salaryPayments').filter(row=>payrollIds.has(String(row.payrollId))||employees.has(String(row.employee||row.employeeId))&&same(row.month||monthOf(row.date),month))),settlements:ordered(rows('commissionSettlements').filter(row=>employees.has(String(row.employee||row.employeeId))))};
+    const payments=rows('salaryPayments').filter(row=>String(row.payrollId||'').trim()?payrollIds.has(String(row.payrollId)):employees.has(String(row.employee||row.employeeId))&&same(row.month,month)),paymentIds=new Set(payments.map(row=>String(row.id)));
+    const settlements=rows('commissionSettlements').filter(row=>employees.has(String(row.employee||row.employeeId))),settlementIds=new Set(settlements.map(row=>String(row.id)));
+    const belongsToMonth=row=>employees.has(String(row.employee||row.employeeId))&&same(monthOf(row.date),month);
+    const monthCommissions=rows('commissions').filter(belongsToMonth),monthAttendance=rows('attendance').filter(belongsToMonth),monthSourceIds=new Set([...monthCommissions,...monthAttendance].filter(row=>row.sourceType==='daily-log').map(row=>String(row.sourceId)));
+    const transactionIds=new Set([...payroll.map(row=>row.paymentTransactionId),...payments.map(row=>row.bankTransactionId),...settlements.map(row=>row.bankTransactionId)].filter(Boolean).map(String));
+    const transactions=rows('bankTransactions').filter(row=>transactionIds.has(String(row.id))||payrollIds.has(String(row.payrollId))||row.sourceType==='payroll'&&payrollIds.has(String(row.sourceId))||row.sourceType==='salary_payment'&&(paymentIds.has(String(row.sourceId))||paymentIds.has(String(row.salaryPaymentId))||employees.has(String(row.employee||row.employeeId))&&same(row.month,month))||row.sourceType==='project_commission_settlement'&&settlementIds.has(String(row.sourceId)));
+    const bankIds=new Set([...transactions,...payments,...settlements].flatMap(row=>[row.bankId,row.bankAccountId]).filter(Boolean).map(String));
+    const salaryMonthSources={attendance:ordered(monthAttendance),commissions:ordered(monthCommissions),dailyLogs:ordered(rows('dailyLogs').filter(row=>belongsToMonth(row)||monthSourceIds.has(String(row.id))))};
+    const monthCommissionIds=new Set(monthCommissions.map(row=>String(row.id)));
+    const allocationPayments=rows('salaryPayments').filter(row=>(Array.isArray(row.commissionSelectionKeys)?row.commissionSelectionKeys:[]).some(key=>{try{const value=JSON.parse(key);return Array.isArray(value)&&monthCommissionIds.has(String(value[0]));}catch(_){return false;}}));
+    const allocationSettlements=rows('commissionSettlements').filter(row=>commissionSettlementSourceIds(row).some(id=>monthCommissionIds.has(String(id))));
+    const salaryPaymentEvidence={transactions:ordered(transactions),banks:ordered(rows('banks').filter(row=>bankIds.has(String(row.id)))),allocationPayments:ordered(allocationPayments),allocationSettlements:ordered(allocationSettlements)};
+    return {date,month,batchId:editingBatchId,employees:ordered(rows('employees').filter(row=>employees.has(String(row.id)))),projects:ordered(selectedProjects),customers:ordered(rows('customers').filter(row=>customers.has(String(row.id)))),quotations:ordered(rows('quotations').filter(row=>quotations.has(String(row.id)))),taxRate:source?.settings?.defaultTax,logs:ordered(logs),previous:ordered(previous),commissions:ordered(rows('commissions').filter(row=>row.sourceType==='daily-log'&&logIds.has(String(row.sourceId)))),payroll:ordered(payroll),payments:ordered(payments),settlements:ordered(settlements),salaryMonthSources,salaryPaymentEvidence};
   }
   function dailyDraftSnapshot(values={},editingBatchId='',source=state) {
     return storeStateFingerprint(dailyDraftScope(values,editingBatchId,source));
@@ -2804,11 +2939,18 @@
     changed('quotations','所選報價已更新，請核對施工品項、單價及稅別。');
     changed('taxRate','稅率設定已更新，請核對新的試算金額。');
     changed('payroll','所選員工月份的薪資資料已更新。');
+    changed('salaryMonthSources','所選員工月份的施工、點工或抽成來源已更新。');
+    changed('salaryPaymentEvidence','所選員工的薪資付款或銀行核對資料已更新。');
     if(editingBatchId&&(!current.previous.length||storeStateFingerprint(before.previous)!==storeStateFingerprint(current.previous)))add('原施工紀錄已被修改或刪除；不能用舊草稿覆蓋。請先匯出草稿，再開啟最新紀錄核對。',{code:'BATCH_CHANGED'});
     (values.employeeIds||[]).forEach(id=>{
       const matches=(state.employees||[]).filter(row=>String(row.id)===String(id));
       if(matches.length!==1)add('所選員工已不存在或識別不唯一，請重新選擇。',{code:'EMPLOYEE_CHANGED'});
-      if(payrollHistoryLock(id,values.date).locked)add('所選員工此月份已有薪資付款，不能新增或更動施工薪資來源。',{code:'PAYROLL_LOCKED'});
+      if(editingBatchId){
+        if(payrollHistoryLock(id,values.date).locked)add('所選員工此月份已有薪資付款，不能更動既有施工薪資來源。',{code:'PAYROLL_LOCKED'});
+      }else{
+        const plan=dailyPaidMonthAppendPlan(id,values.date);
+        if(!plan.allowed)add(plan.message,{code:plan.code});
+      }
     });
     if(current.previous.some(log=>log.billingId||log.billingStatus&&log.billingStatus!=='未請款'||dailyLogCommissionSettlementLock(log).locked))add('原施工已進入請款或抽成發放流程，不能直接修改。',{code:'SOURCE_LOCKED'});
     (values.lines||[]).forEach((line,index)=>{
@@ -2866,7 +3008,7 @@
       if(!options.expectedDraftPrincipal||storeCurrentUserId()!==options.expectedDraftPrincipal)throw storeError('登入帳號已變更，草稿不可送到另一個帳號。','DAILY_DRAFT_SESSION_CHANGED');
       if(options.expectedDailyDraftSnapshot!==dailyDraftSnapshot(values,editingBatchId))throw storeError('草稿使用的案場、報價或薪資來源已更新；請保留草稿並核對最新資料。','DAILY_DRAFT_CONTEXT_CHANGED');
       const problems=dailyDraftReview(values,editingBatchId,state).issues;
-      if(problems.length)throw storeError(problems[0].message,'DAILY_DRAFT_SOURCE_CHANGED');
+      if(problems.length)throw storeError(problems[0].message,problems[0].code==='DAILY_PAID_MONTH_UNVERIFIED'?problems[0].code:'DAILY_DRAFT_SOURCE_CHANGED');
     }
     const previous = editingBatchId ? batchRows(editingBatchId) : [];
     const strictLines=options?.strictRows===true?validateStrictDailyBatch(values,previous,options):null;
@@ -2889,7 +3031,14 @@
       if(shares.reduce((sum,value)=>sum+value,0)!==5000)
         throw storeError('所有抽成員工比例合計必須剛好 50%，已停止儲存；請重新分配員工抽成','COMMISSION_POOL_NOT_50');
     }
-    if ([...previous.map((log)=>[log.employee,log.date]),...employeeIds.map((employeeId)=>[employeeId,date])].some(([employeeId,workDate])=>payrollHistoryLock(employeeId,workDate).locked)) throw new Error(PAID_PAYROLL_SOURCE_ERROR);
+    if (editingBatchId&&[...previous.map((log)=>[log.employee,log.date]),...employeeIds.map((employeeId)=>[employeeId,date])].some(([employeeId,workDate])=>payrollHistoryLock(employeeId,workDate).locked)) throw new Error(PAID_PAYROLL_SOURCE_ERROR);
+    const paidMonthAppends=new Map();
+    if(!editingBatchId)for(const employeeId of employeeIds){
+      const plan=dailyPaidMonthAppendPlan(employeeId,date);
+      if(!plan.allowed)throw storeError(plan.message,plan.code);
+      if(plan.required)paidMonthAppends.set(`${plan.month}__${plan.employee}`,plan);
+    }
+    const paidMonthBefore=captureDailyPaidMonthAppend(paidMonthAppends,employeeIds,date);
     if(previous.some((log)=>dailyLogCommissionSettlementLock(log).locked))throw new Error('此施工紀錄的案場抽成已發放，為保留結算歷史不可修改。');
     previous.forEach((log) => syncDailyLogLinks({...log,performance:0,workMode:'none'}, log));
     if (previous.length) state.dailyLogs = state.dailyLogs.filter((log) => (log.batchId || log.id) !== editingBatchId);
@@ -2917,8 +3066,9 @@
         const prior=previous.find((row)=>String(row.employee)===String(employeeId));
         const log={id:uid(),batchId,groupId:`${batchId}:work-only`,date,employee:employeeId,employeeName:employee.name||'',customer:'',customerName:'',project:'',projectName:'無固定案場／純點工',payType:'點工',items:[],groupTotal:0,grossTotal:0,billingTotal:0,billable:false,billingStatus:'',billingId:'',billingNo:'',performance:0,untaxedPerformance:0,taxIncludedPerformance:0,untaxedCommissionBaseAmount:0,taxIncludedCommissionBaseAmount:0,commissionBasis:'preTax',commissionBaseAmount:0,commissionEnabled:false,rate:0,commission:0,workMode,workQty,workRate:rate,isPrimaryWork:true,workOnly:true,note:String(values.note||'').trim(),createdAt:prior?.createdAt||previous[0]?.createdAt||now,updatedAt:now};
         state.dailyLogs.unshift(log);
-        syncDailyLogLinks(log);
+        syncDailyLogLinks(log,null,paidMonthAppends);
       });
+      assertDailyPaidMonthAppend(paidMonthAppends,paidMonthBefore);
       persist(`${previous.length?'修改':'新增'}純點工／修繕出勤`);
       return batchId;
     }
@@ -2968,11 +3118,12 @@
         const resolvedWorkMode = canAddWork ? workMode : 'none';
         const hasCommission=commissionAmount>0;
         const log = {id:uid(),batchId,groupId:`${batchId}:${projectId}`,date,employee:employeeId,employeeName:employee.name||'',customer:project.customer||'',customerName:customer.name||project.customerName||'',project:projectId,projectName:project.name||'',payType:hasCommission&&resolvedWorkMode!=='none'?'業績抽成／點工':hasCommission?'業績抽成':resolvedWorkMode!=='none'?'點工':'僅業績',items:projectLines.map((line)=>({...line})),groupTotal:total,grossTotal:projectLines.reduce((sum,line)=>sum+num(line.subtotal),0),billingTotal:billableTotal,billable:billableTotal>0,billingStatus:billableTotal>0?'未請款':'',billingId:'',billingNo:'',performance,untaxedPerformance,taxIncludedPerformance,untaxedCommissionBaseAmount,taxIncludedCommissionBaseAmount,commissionBasis,commissionBaseAmount,commissionEnabled:commissionEnabledForLog,rate:commissionRate,commission:commissionAmount,workMode:resolvedWorkMode,workQty:canAddWork?workQty:0,workRate:canAddWork?employeeWorkRate:0,isPrimaryWork:canAddWork,workOnly:false,note:values.note||'',createdAt:previous[0]?.createdAt||now,updatedAt:now};
-        state.dailyLogs.unshift(log); syncDailyLogLinks(log); firstProject = false;
+        state.dailyLogs.unshift(log); syncDailyLogLinks(log,null,paidMonthAppends); firstProject = false;
       });
     });
     state.dailyItemPresets = state.dailyItemPresets || [];
     prepared.filter((line)=>line.sourceType==='manual').forEach((line) => { const existing = state.dailyItemPresets.find((row) => String(row.projectId||'') === String(line.project||'') && String(row.item||'').trim() === String(line.item||'').trim()); const preset={projectId:line.project,item:line.item,unit:line.unit||'式',qty:line.qty,inputPrice:line.inputPrice,price:line.inputPrice,taxMode:line.taxMode||'未稅',pricingType:line.pricingType||'actual',updatedAt:now}; if(existing)Object.assign(existing,preset);else state.dailyItemPresets.push({id:uid(),...preset}); });
+    assertDailyPaidMonthAppend(paidMonthAppends,paidMonthBefore);
     persist(`${previous.length?'修改':'新增'}多案場每日施工紀錄`);
     return batchId;
   }
