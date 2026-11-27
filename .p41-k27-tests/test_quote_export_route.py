@@ -21,6 +21,7 @@ import threading
 import time
 import traceback
 from datetime import date
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
@@ -30,7 +31,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 BASE = '4c02e3c707473c4483946afd5222c7cf05d8fb63'
 LEGACY_PRODUCER_COMMIT = '668334605342e5766027c3f73b4fe1b29036dec0'
 LEGACY_PRODUCER_SHA256 = 'd22d21d7337ccd0291160a062ceea1a9bb634987125a3c31a8bdebc546895f6e'
-EXPECTED_VERSION = 'p41-k27-quote-export-20261127-3'
+EXPECTED_VERSION = 'p41-k27-quote-export-20261127-4'
 SCRIPT_PATHS = (
     'assets/js/billing-print.js',
     'assets/js/billing-bundle-print.js',
@@ -189,7 +190,8 @@ PRINT_OBSERVER = r"""(() => {
   window.print=()=>{window.__k27PrintCalls.push({
     ready:window.__billingPrintReady===true,buttonDisabled:document.querySelector('#safePrintButton')?.disabled,
     pagination:window.__quotationPagination||null,rows:window.__k27RowFacts(),
-    signatureDates:[...document.querySelectorAll('.p41-quote-sign-date')].map(node=>node.textContent),
+    signatureDates:[...document.querySelectorAll('.p41-quote-sign-date')].map(node=>({
+      role:node.closest('.client-sign')?'client':node.closest('.company-seals')?'company':'unknown',text:node.textContent})),
     publicText:document.querySelector('#paper')?.innerText||'',urlSearch:location.search,
     writes:window.__p41WriteAttempts||[],popupCalls:window.__k27PopupCalls.length,
     hasSourceApp:!!window.KuSheERPStore
@@ -323,30 +325,38 @@ def expected_signature_date(value, baseline=False):
     return f'簽署日期：{saved.year:04d}年{saved.month:02d}月{saved.day:02d}日'
 
 
+def expected_signature_dates(value, baseline=False):
+    return [{'role': 'client', 'text': '簽署日期：　　年　　月　　日'},
+            {'role': 'company', 'text': expected_signature_date(value, baseline)}]
+
+
 def verify_signature_date_pdf(checks, original_check_pdf, report, name, page, metrics, output, *args, **kwargs):
     count = original_check_pdf(report, name, page, metrics, output, *args, **kwargs)
     document = page.evaluate('()=>d')
     if document.get('documentType') != 'quotation':
         return count
     baseline = urlsplit(page.url).path.startswith('/baseline/')
-    expected = expected_signature_date(document.get('date'), baseline)
+    expected = expected_signature_dates(document.get('date'), baseline)
     facts = page.evaluate('''()=>[...document.querySelectorAll('.p41-quote-sign-date')].map(node=>{
       const rect=node.getBoundingClientRect(),style=getComputedStyle(node);
-      return {text:node.textContent,visible:style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0,
+      return {role:node.closest('.client-sign')?'client':node.closest('.company-seals')?'company':'unknown',
+        text:node.textContent,visible:style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0,
         lastPage:node.closest('.p41-quote-page')===[...document.querySelectorAll('.p41-quote-page')].at(-1)};
     })''')
-    report.check(name + ': both bottom dates match the saved quotation date on the final sheet',
-                 len(facts) == 2 and all(item['text'] == expected and item['visible'] and item['lastPage'] for item in facts),
+    report.check(name + ': bottom dates follow the expected customer and company roles on the final sheet',
+                 [{'role': item['role'], 'text': item['text']} for item in facts] == expected and
+                 all(item['visible'] and item['lastPage'] for item in facts),
                  {'sourceDate': document.get('date'), 'expected': expected, 'actual': facts})
     exact_pdf_review = shutil.which('pdftotext') is not None
     if exact_pdf_review:
         texts = checks.extract_layout_pages(output / (name + '.pdf'), count)
         compact = lambda value: re.sub(r'\s+', '', value)
-        report.check(name + ': actual PDF contains both exact signature dates on its final physical page',
-                     compact(texts[-1]).count(compact(expected)) == 2 and
-                     all(compact(expected) not in compact(text) for text in texts[:-1]),
+        expected_counts = Counter(compact(item['text']) for item in expected)
+        report.check(name + ': actual PDF preserves the exact customer and company date text on its final physical page',
+                     all(compact(texts[-1]).count(text) == amount for text, amount in expected_counts.items()) and
+                     all(text not in compact(prior) for text in expected_counts for prior in texts[:-1]),
                      {'sourceDate': document.get('date'), 'expected': expected, 'pdfPages': count})
-    evidence = {'savedQuotationDate': document.get('date'), 'expectedSignatureDate': expected,
+    evidence = {'savedQuotationDate': document.get('date'), 'expectedSignatureDates': expected,
                 'baseline': baseline, 'signatureDates': facts, 'pdfPages': count,
                 'exactPdfDateTextVerified': exact_pdf_review,
                 'pendingIndependentWindowsUnicodeReview': not exact_pdf_review}
@@ -484,9 +494,9 @@ def route_case(checks, browser, server, report, name, kind, version='candidate',
                      calls[0]['popupCalls'] == 0 and calls[0]['hasSourceApp'] is False,
                      {key: calls[0][key] for key in ('ready', 'buttonDisabled', 'pagination', 'writes', 'popupCalls', 'hasSourceApp')} if calls else calls)
         check_rows(report, name + ' at window.print', calls[0]['rows'], view, backups)
-        report.check(name + ': print callback retains the saved quotation date in both signature fields',
+        report.check(name + ': print callback keeps the customer date blank and the expected company date',
                      view['date'] == record['date'] and
-                     calls[0]['signatureDates'] == [expected_signature_date(record['date'], version == 'baseline')] * 2,
+                     calls[0]['signatureDates'] == expected_signature_dates(record['date'], version == 'baseline'),
                      {'sourceDate': record['date'], 'signatureDates': calls[0]['signatureDates']})
         if reproduce_missing:
             report.check(name + ': old producer reproduces a missing custom line note while the legacy backup label survives',

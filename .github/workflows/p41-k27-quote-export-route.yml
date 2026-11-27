@@ -2,7 +2,7 @@ name: P41 K27 quotation export route and backup-price labels
 
 on:
   push:
-    branches: [p41-k27-quote-export-route-20261127]
+    branches: [p41-k27-client-date-20261127]
     paths:
       - index.html
       - billing-print.html
