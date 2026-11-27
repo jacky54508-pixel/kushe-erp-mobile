@@ -14,12 +14,13 @@ from pathlib import Path
 BASE = '4c02e3c707473c4483946afd5222c7cf05d8fb63'
 BASE_TREE = '642d1178c415c0a415c03c8475fd28e627f45701'
 BRANCH = 'p41-k27-quote-export-route-20261127'
-VERSION = 'p41-k27-quote-export-20261127-2'
+VERSION = 'p41-k27-quote-export-20261127-3'
 PRODUCT = {
     'index.html',
     'billing-print.html',
     'assets/js/billing-print.js',
     'assets/js/quotations.js',
+    'assets/js/p41-quote-pagination.js',
 }
 TESTS = {
     '.p41-k27-tests/source_guard.py',
@@ -35,7 +36,6 @@ PRESERVED = {
     'assets/js/payroll.js',
     'assets/js/banks.js',
     'assets/js/billing.js',
-    'assets/js/p41-quote-pagination.js',
     'assets/css/p41-quote-pagination.css',
 }
 STORE_SHA256 = '6689c5cd746bc9360d54fcf7e7bbe3a4af4dacdd76a108263b9540fbd85b758b'
@@ -61,6 +61,30 @@ def verify_quotation_ui_scope(before, after):
         normalized = normalized.replace(new, old, 1)
     assert normalized == before, 'quotation edits outside the export helpers and two button handlers'
     assert VERSION in block.search(after).group(), 'quotation loader must request the current producer'
+
+
+def verify_quotation_date_scope(before, after):
+    block = re.compile(r'^  // K27 quotation date presentation start\.\n.*?'
+                       r'^  // K27 quotation date presentation end\.\n\n', re.M | re.S)
+    assert len(block.findall(after)) == 1, 'expected exactly one date-formatting helper'
+    normalized = block.sub('', after)
+    replacements = [
+        ('async function build({ paper, noteText, quotationDate })',
+         'async function build({ paper, noteText })'),
+        ('date.textContent = quotationSignatureDate(quotationDate);',
+         "date.textContent = '簽署日期：　　年　　月　　日';"),
+        ('finished.set(paper, { noteText: rawNote, quotationDate, result });',
+         'finished.set(paper, { noteText: rawNote, result });'),
+        ("    const quotationDate = String(options.quotationDate ?? '').trim();\n", ''),
+        ('prior.noteText !== noteText || prior.quotationDate !== quotationDate',
+         'prior.noteText !== noteText'),
+        ('build({ paper, noteText, quotationDate }).finally',
+         'build({ paper, noteText }).finally'),
+    ]
+    for new, old in replacements:
+        assert normalized.count(new) == 1, 'unexpected quotation date-adapter change'
+        normalized = normalized.replace(new, old, 1)
+    assert normalized == before, 'pagination algorithm changed outside the signature-date adapter'
 
 
 def main():
@@ -91,6 +115,11 @@ def main():
     assert VERSION in producer, 'quotation navigation must use the matching print page version'
     verify_quotation_ui_scope(git('show', BASE + ':assets/js/quotations.js').decode(),
                               (root / 'assets/js/quotations.js').read_text(encoding='utf-8'))
+    verify_quotation_date_scope(git('show', BASE + ':assets/js/p41-quote-pagination.js').decode(),
+                                (root / 'assets/js/p41-quote-pagination.js').read_text(encoding='utf-8'))
+    renderer = (root / 'billing-print.html').read_text(encoding='utf-8')
+    assert f'assets/js/p41-quote-pagination.js?v={VERSION}' in renderer
+    assert "paginate({paper,noteText:String(d.publicNote||''),quotationDate:d.date})" in renderer
 
     preserved = []
     for path in sorted(PRESERVED):
@@ -119,7 +148,9 @@ def main():
         'financialCoreChanges': False,
         'quotationEditorSaveChanges': False,
         'quotationExportEntryChanges': True,
-        'paginationEngineChanges': False,
+        'paginationLayoutAlgorithmChanges': False,
+        'quotationSignatureDateAdapterChanges': True,
+        'quotationDateSource': 'saved public quotation date; no system-clock fallback',
         'indexChange': 'billing-print.js and quotations.js cache queries only',
         'quotationUiScope': 'one integrity helper block plus the existing export and print button handlers',
         'sourceAudit': {

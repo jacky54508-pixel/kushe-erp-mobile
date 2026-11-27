@@ -202,7 +202,20 @@
     });
   }
 
-  async function build({ paper, noteText }) {
+  // K27 quotation date presentation start.
+  function quotationSignatureDate(value) {
+    const blank = '簽署日期：　　年　　月　　日';
+    const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? '').trim());
+    if (!parts) return blank;
+    const year = Number(parts[1]), month = Number(parts[2]), day = Number(parts[3]);
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if (year < 1 || month < 1 || month > 12 || day < 1 || day > days[month - 1]) return blank;
+    return `簽署日期：${parts[1]}年${parts[2]}月${parts[3]}日`;
+  }
+  // K27 quotation date presentation end.
+
+  async function build({ paper, noteText, quotationDate }) {
     if (!paper || !paper.classList.contains('quotation-document')) return { pageCount: 0, scale: 1, applied: false };
     const content = paper.querySelector('#quotationContent');
     if (!content) throw fail('QUOTATION_CONTENT_MISSING', '找不到報價單內容，請重新開啟預覽。');
@@ -273,7 +286,7 @@
         }
         const date = document.createElement('div');
         date.className = 'p41-quote-sign-date';
-        date.textContent = '簽署日期：　　年　　月　　日';
+        date.textContent = quotationSignatureDate(quotationDate);
         node.appendChild(date);
       }
       sourceBlocks = Array.from(content.children).filter(node => node !== head && node !== signature && !node.classList.contains('note'));
@@ -629,7 +642,7 @@
       }
       const result = { applied: true, pageCount: pages.length, scale: 1, noteTextPreserved: true,
         noteMode: noteModel.mode, sourceOffsetsPreserved: true, rowsPreserved: originalRows.length };
-      finished.set(paper, { noteText: rawNote, result });
+      finished.set(paper, { noteText: rawNote, quotationDate, result });
       window.__quotationPagination = result;
       return result;
     } catch (error) {
@@ -652,13 +665,14 @@
     const paper = options.paper || document.getElementById('paper');
     if (!paper || !paper.classList.contains('quotation-document')) return Promise.resolve({ applied: false, pageCount: 0, scale: 1 });
     const noteText = String(options.noteText ?? '');
+    const quotationDate = String(options.quotationDate ?? '').trim();
     const prior = finished.get(paper);
     if (prior) {
-      if (prior.noteText !== noteText) return Promise.reject(fail('QUOTATION_SOURCE_CHANGED', '報價內容已變更，請重新開啟預覽。'));
+      if (prior.noteText !== noteText || prior.quotationDate !== quotationDate) return Promise.reject(fail('QUOTATION_SOURCE_CHANGED', '報價內容已變更，請重新開啟預覽。'));
       return Promise.resolve(prior.result);
     }
     if (jobs.has(paper)) return jobs.get(paper);
-    const job = build({ paper, noteText }).finally(() => jobs.delete(paper));
+    const job = build({ paper, noteText, quotationDate }).finally(() => jobs.delete(paper));
     jobs.set(paper, job);
     return job;
   }

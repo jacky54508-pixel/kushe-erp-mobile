@@ -134,7 +134,7 @@
   <main class="paper" id="paper"></main>
   <script src="assets/js/display-sort.js?v=20260913-p17-3-house-sort1"></script>
   <script src="assets/js/external-billing-invoice.js?v=p39-inv1-source1"></script>
-  <script src="assets/js/p41-quote-pagination.js?v=p41-k26-quote-notes-20261127-1"></script>
+  <script src="assets/js/p41-quote-pagination.js?v=p41-k27-quote-export-20261127-3"></script>
   <script>
     const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const n=v=>Number(v)||0;
@@ -304,7 +304,7 @@
     async function paginateQuotationToA4(){
       try{
         if(!window.KusheQuotePagination)throw new Error('QUOTATION_PAGINATOR_UNAVAILABLE');
-        await window.KusheQuotePagination.paginate({paper,noteText:String(d.publicNote||'')});
+        await window.KusheQuotePagination.paginate({paper,noteText:String(d.publicNote||''),quotationDate:d.date});
         await Promise.all([...document.querySelectorAll('#quotationContent img')].map(waitForStableImage));
         if([...document.querySelectorAll('#quotationContent img')].some(image=>!image.complete||!image.naturalWidth))throw new Error('QUOTATION_PAGE_IMAGE_NOT_READY');
         verifyQuotationPublicNotes();

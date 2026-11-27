@@ -7,6 +7,8 @@ on:
       - index.html
       - billing-print.html
       - assets/js/billing-print.js
+      - assets/js/quotations.js
+      - assets/js/p41-quote-pagination.js
       - '.p41-k27-tests/**'
       - '.github/workflows/p41-k27-quote-export-route.yml'
   workflow_dispatch:
@@ -49,6 +51,7 @@ jobs:
           mkdir -p artifacts/k27-${{ runner.os }}/route
           python .p41-k27-tests/source_guard.py > artifacts/k27-${{ runner.os }}/SOURCE_SCOPE.json
           node --check assets/js/billing-print.js
+          node --check assets/js/p41-quote-pagination.js
           node --check .p41-k27-tests/test_backup_projection.cjs
           node .p41-k27-tests/test_backup_projection.cjs --root . 2>&1 | tee artifacts/k27-${{ runner.os }}/PROJECTION.log
           python -m py_compile .p41-k27-tests/test_quote_export_route.py .p41-k27-tests/source_guard.py

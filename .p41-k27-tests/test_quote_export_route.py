@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 import traceback
+from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
@@ -29,7 +30,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 BASE = '4c02e3c707473c4483946afd5222c7cf05d8fb63'
 LEGACY_PRODUCER_COMMIT = '668334605342e5766027c3f73b4fe1b29036dec0'
 LEGACY_PRODUCER_SHA256 = 'd22d21d7337ccd0291160a062ceea1a9bb634987125a3c31a8bdebc546895f6e'
-EXPECTED_VERSION = 'p41-k27-quote-export-20261127-2'
+EXPECTED_VERSION = 'p41-k27-quote-export-20261127-3'
 SCRIPT_PATHS = (
     'assets/js/billing-print.js',
     'assets/js/billing-bundle-print.js',
@@ -112,10 +113,16 @@ def fixture(kind):
     amount = sum(row['lumpSumAmount'] if row['pricingType'] == 'lump_sum' else row['subtotal'] for row in rows)
     record = dict(id='SYN-Q', number='SYNTHETIC-K27', customer='SYN-C', project='SYN-P',
                   customerName='合成測試客戶', projectName='合成報價匯出測試',
-                  status='草稿', date='2026-11-27', pricingMode=mode, taxMode='未稅',
+                  status='草稿', date='2026-09-03', pricingMode=mode, taxMode='未稅',
                   amount=amount, tax=round(amount * .05), total=amount + round(amount * .05),
                   publicNote='SYN-DOC-START 本文件僅為隔離測試。\nSYN-DOC-END 特殊品項依合成現場條件另行報價。',
                   internalNote=PRIVATE[0], lines=rows)
+    # Reuse existing routes for missing/invalid saved dates; neither may acquire
+    # an invented current date in the signature fields.
+    if kind == 'legacy':
+        record['date'] = ''
+    if kind == 'manual':
+        record['date'] = '2026-02-30'
     state = dict(settings={}, quotations=[record], quotationPrices=prices, quotationTemplates=[],
                  itemPresets=[], dailyItemPresets=[],
                  customers=[dict(id='SYN-C', name='合成測試客戶')],
@@ -182,6 +189,7 @@ PRINT_OBSERVER = r"""(() => {
   window.print=()=>{window.__k27PrintCalls.push({
     ready:window.__billingPrintReady===true,buttonDisabled:document.querySelector('#safePrintButton')?.disabled,
     pagination:window.__quotationPagination||null,rows:window.__k27RowFacts(),
+    signatureDates:[...document.querySelectorAll('.p41-quote-sign-date')].map(node=>node.textContent),
     publicText:document.querySelector('#paper')?.innerText||'',urlSearch:location.search,
     writes:window.__p41WriteAttempts||[],popupCalls:window.__k27PopupCalls.length,
     hasSourceApp:!!window.KuSheERPStore
@@ -301,6 +309,50 @@ def check_rows(report, name, rows, view, backups):
             failures.append({'index': index, 'expectedItem': source['item'], 'expectedNotes': expected_notes,
                              'expectedBackup': backup, 'actual': row})
     report.check(name + ': each item keeps its own complete visible scope note and exactly one expected backup label', not failures, failures)
+
+
+def expected_signature_date(value, baseline=False):
+    blank = '簽署日期：　　年　　月　　日'
+    text = str(value or '').strip()
+    if baseline or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', text):
+        return blank
+    try:
+        saved = date.fromisoformat(text)
+    except ValueError:
+        return blank
+    return f'簽署日期：{saved.year:04d}年{saved.month:02d}月{saved.day:02d}日'
+
+
+def verify_signature_date_pdf(checks, original_check_pdf, report, name, page, metrics, output, *args, **kwargs):
+    count = original_check_pdf(report, name, page, metrics, output, *args, **kwargs)
+    document = page.evaluate('()=>d')
+    if document.get('documentType') != 'quotation':
+        return count
+    baseline = urlsplit(page.url).path.startswith('/baseline/')
+    expected = expected_signature_date(document.get('date'), baseline)
+    facts = page.evaluate('''()=>[...document.querySelectorAll('.p41-quote-sign-date')].map(node=>{
+      const rect=node.getBoundingClientRect(),style=getComputedStyle(node);
+      return {text:node.textContent,visible:style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0,
+        lastPage:node.closest('.p41-quote-page')===[...document.querySelectorAll('.p41-quote-page')].at(-1)};
+    })''')
+    report.check(name + ': both bottom dates match the saved quotation date on the final sheet',
+                 len(facts) == 2 and all(item['text'] == expected and item['visible'] and item['lastPage'] for item in facts),
+                 {'sourceDate': document.get('date'), 'expected': expected, 'actual': facts})
+    exact_pdf_review = shutil.which('pdftotext') is not None
+    if exact_pdf_review:
+        texts = checks.extract_layout_pages(output / (name + '.pdf'), count)
+        compact = lambda value: re.sub(r'\s+', '', value)
+        report.check(name + ': actual PDF contains both exact signature dates on its final physical page',
+                     compact(texts[-1]).count(compact(expected)) == 2 and
+                     all(compact(expected) not in compact(text) for text in texts[:-1]),
+                     {'sourceDate': document.get('date'), 'expected': expected, 'pdfPages': count})
+    evidence = {'savedQuotationDate': document.get('date'), 'expectedSignatureDate': expected,
+                'baseline': baseline, 'signatureDates': facts, 'pdfPages': count,
+                'exactPdfDateTextVerified': exact_pdf_review,
+                'pendingIndependentWindowsUnicodeReview': not exact_pdf_review}
+    (output / (name + '-signature-date-evidence.json')).write_text(
+        json.dumps(evidence, ensure_ascii=False, indent=2), encoding='utf-8')
+    return count
 
 
 def windows_pdf(checks, report, name, page, metrics, output, minimum_pages=1, maximum_pages=None):
@@ -432,6 +484,10 @@ def route_case(checks, browser, server, report, name, kind, version='candidate',
                      calls[0]['popupCalls'] == 0 and calls[0]['hasSourceApp'] is False,
                      {key: calls[0][key] for key in ('ready', 'buttonDisabled', 'pagination', 'writes', 'popupCalls', 'hasSourceApp')} if calls else calls)
         check_rows(report, name + ' at window.print', calls[0]['rows'], view, backups)
+        report.check(name + ': print callback retains the saved quotation date in both signature fields',
+                     view['date'] == record['date'] and
+                     calls[0]['signatureDates'] == [expected_signature_date(record['date'], version == 'baseline')] * 2,
+                     {'sourceDate': record['date'], 'signatureDates': calls[0]['signatureDates']})
         if reproduce_missing:
             report.check(name + ': old producer reproduces a missing custom line note while the legacy backup label survives',
                          USER_NOTE not in calls[0]['publicText'] and '備用單價' in calls[0]['publicText'] and
@@ -625,6 +681,8 @@ def main():
             raise RuntimeError('Linux verification requires independent pdftotext Unicode extraction')
         checks.check_pdf = lambda *args, **kwargs: windows_pdf(checks, *args, **kwargs)
         checks.extract_layout_pages = lambda path, count: [page.extract_text() or '' for page in checks.PdfReader(str(path)).pages]
+    original_check_pdf = checks.check_pdf
+    checks.check_pdf = lambda *args, **kwargs: verify_signature_date_pdf(checks, original_check_pdf, *args, **kwargs)
     try:
         with FixtureServer(root, output, checks) as server, checks.sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True, **({} if sys.platform == 'win32' else {'channel': 'chrome'}))

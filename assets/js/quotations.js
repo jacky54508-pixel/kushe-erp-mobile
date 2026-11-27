@@ -100,7 +100,7 @@
     form.onsubmit=async(e)=>{e.preventDefault();const button=$('button[type="submit"]',form);if(button.disabled)return;button.disabled=true;let saved;try{const values={...Object.fromEntries(new FormData(form)),lines:collect(),sourceType:row?.sourceType||'manual',importTemplateId:row?.importTemplateId||''},projectPrices=form.elements.saveProjectPrice?.value==='yes'?values.lines.filter(x=>x.pricingType==='actual'&&x.priceSource==='manual'&&x.item&&x.price>0).map(line=>({scope:'project',item:line.item,unit:line.unit,price:line.price})):[],result=await store.saveQuotationBundle(values,editingId,{projectPrices,priceSourcePrefix:'quotation'});saved=result.quotation}catch(error){button.disabled=false;window.KushePhase1.toast(error.message);return}try{closeLayer();render();const result=store.getLastStoreTransactionResult?.();if(result?.status==='COMMITTED_WITH_NOTIFICATION_WARNING')committedQuotationWarning();else window.KushePhase1.toast(`報價單 ${saved.number} 已儲存`)}catch(error){committedQuotationWarning(error)}};bindLines();refreshQuotationUnits();renderPublicNotePresets();syncMode();window.KusheTableScroll?.refresh();
   }
   // K27 quotation export integrity start.
-  const quotationPrintVersion='p41-k27-quote-export-20261127-2';
+  const quotationPrintVersion='p41-k27-quote-export-20261127-3';
   let quotationPrintReload=null,quotationExportPending=false;
   function quotationPrintNotes(record){
     const text=value=>String(value??'').trim();

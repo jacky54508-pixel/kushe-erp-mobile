@@ -1,6 +1,6 @@
 (function(){
   'use strict';
-  const QUOTATION_EXPORT_VERSION='p41-k27-quote-export-20261127-2';
+  const QUOTATION_EXPORT_VERSION='p41-k27-quote-export-20261127-3';
   const num=value=>Number(value)||0;
   const text=value=>String(value??'').trim();
   const safeFile=value=>text(value).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/[. ]+$/g,'');
