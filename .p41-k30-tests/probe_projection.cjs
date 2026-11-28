@@ -32,7 +32,7 @@ async function load(data) {
     KUSHE_PHASE1_CONFIG: {},
     KusheAuthGate: {session: () => ({access_token: 'SYN-K30-LOCAL-ONLY'}), user: () => ({id: 'SYN-K30-OWNER'}),
       companyContext: () => ({userId: 'SYN-K30-OWNER', companyId: 'SYN-K30-COMPANY', role: 'owner', status: 'active', shadowVerified: true})},
-    KusheCloudSync: {billingAllowanceWriteReadiness: () => ({ready: true, capability: 'billing-allowances-v1', reason: 'SYN-K30 isolated capability fixture'})}};
+    KusheCloudSync: {billingAllowanceWriteReadiness: () => ({ready: true, capability: 'billing-allowances-v2', reason: 'SYN-K30 isolated capability fixture'})}};
   sandbox.window = sandbox;
   vm.runInContext(source, vm.createContext(sandbox), {timeout: 5000, filename: 'exact-candidate-erp-store.js'});
   const store = sandbox.KuSheERPStore;

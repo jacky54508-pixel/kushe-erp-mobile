@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// K30 extends only the two reviewed allowance writers; all K29 behavioral assertions retained.
+// K30 extends the reviewed allowance and future-agreement writers; all K29 behavioral assertions retained.
 // Actual cloud-sync module in an isolated VM. This is an event-contract test,
 // not a browser, database, authentication or remote synchronization test.
 const fs=require('fs'),path=require('path'),vm=require('vm'),crypto=require('crypto'),cp=require('child_process');
@@ -16,6 +16,9 @@ const source=bytes.toString('utf8'),digest=x=>crypto.createHash('sha256').update
 const additions={
   postBillingAllowance:['billing-allowance-ui.js'],
   reverseBillingAllowance:['billing-allowance-ui.js'],
+  createCommissionAgreement:['commission-agreement-ui.js'],
+  finalizeCommissionAgreements:['commission-agreement-ui.js'],
+  cancelCommissionAgreement:['commission-agreement-ui.js'],
   saveQuotationBundle:['quotations.js'],
   saveDailyUnbilledItems:['commissions.js'],
   saveVendor:['materials.js'],
@@ -38,9 +41,10 @@ async function run(operationType,variant='valid'){
   const listeners={document:new Map(),window:new Map()},timers=[],observers=[];
   let principal='SYN-K29-OWNER',token=true,lastResult=null,reads=0,writes=0,network=0,openForm=false,openDetail=false,focused=false,detailHasInput=false;
   class SyntheticNode{}
-  const target=new SyntheticNode(),shell={hidden:false,inert:false,contains:node=>node===target};
+  const target=new SyntheticNode(),shell={hidden:false,inert:false,contains:node=>node===target&&variant!=='commission-overlay'};
   const form={id:'SYN-K29-FORM',hidden:false,closest:()=>null,getClientRects:()=>[{}]};
   const detailOverlay={id:'SYN-K29-CHEQUE-DETAIL',hidden:false,isConnected:true,closest:()=>null,getClientRects:()=>[{}],querySelector:()=>detailHasInput?form:null};
+  if(variant==='commission-overlay')target.closest=selector=>selector==='.ca-overlay'?detailOverlay:null;
   const outsideTarget=new SyntheticNode();outsideTarget.closest=selector=>selector==='.erp-detail-overlay,.cheque-overlay'?detailOverlay:null;
   const excludedTarget=new SyntheticNode();excludedTarget.closest=selector=>selector==='#cloudSyncModal,.auth-view,.auth-modal-layer'?detailOverlay:selector==='.erp-detail-overlay,.cheque-overlay'?detailOverlay:null;
   const closeButton={closest:selector=>selector==='.cheque-overlay'?detailOverlay:closeButton};
@@ -160,6 +164,7 @@ async function run(operationType,variant='valid'){
     }
     const delayedUnknown=await run('SYN-K29-UNKNOWN-WRITER','delayed-form-close');check('unknown writer is never made trusted by closing a form',!delayedUnknown.after.safe&&delayedUnknown.activeObservers===0,delayedUnknown);report.cases.push(delayedUnknown);
     const delayedTemporary=await run('saveQuotation','temporary-delayed-close');check('temporary commit delayed close requires the same verified cloud evidence',delayedTemporary.after.safe===(mode==='candidate')&&delayedTemporary.activeObservers===0,delayedTemporary);report.cases.push(delayedTemporary);
+    if(mode==='candidate')for(const name of ['createCommissionAgreement','finalizeCommissionAgreements','cancelCommissionAgreement']){const result=await run(name,'commission-overlay');check(name+': body agreement editor is tracked and releases after verified close',result.after.safe,result);report.cases.push(result);}
     report.status=mode==='baseline'?'K29_SYNC_BASELINE_REPRODUCED':'K30_SYNC_EVENT_CONTRACT_PASS';
   }catch(error){report.status='BLOCKED';report.error={message:error.message,stack:error.stack};process.exitCode=1;}
   finally{

@@ -21,7 +21,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 ROOT = Path(__file__).resolve().parents[1]
-CAP = 'billing-allowances-v1'
+CAP = 'billing-allowances-v2'
 SCHEMA = 'kushe.billing.allowances.v1'
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=Path, required=True)
@@ -276,7 +276,7 @@ def positive():
     owner, data, version = seed('positive')
     with connection('authenticated', owner) as conn:
         capability = conn.execute('select public.erp_billing_allowance_capability()').fetchone()[0]
-        check('capability verifies installed guard', capability == {'capability': CAP, 'schema': SCHEMA, 'guardVersion': 1, 'enabled': True})
+        check('capability verifies installed guard', capability == {'capability': CAP, 'schema': SCHEMA, 'guardVersion': 2, 'enabled': True})
     posted = with_event(data, event(owner))
     applied = rpc(owner, version, posted)
     check('post increments server CAS exactly once', applied[0] == 'APPLIED' and applied[1] == 2)
@@ -520,9 +520,9 @@ try:
         conn.execute(migration[0].read_text())
         report['serverVersion'] = conn.execute('show server_version').fetchone()[0]
         security = conn.execute("select proname,prosecdef,proconfig from pg_proc join pg_namespace n on n.oid=pronamespace where n.nspname='erp_allowance_internal' or proname in ('erp_state_cas_write_v3','erp_billing_allowance_capability')").fetchall()
-        expected_functions = {'money', 'money_aliases', 'verify_tax', 'validate_snapshot', 'guard_state_write',
+        expected_functions = {'money', 'money_aliases', 'verify_tax', 'validate_snapshot', 'commission_log_content', 'commission_billing_scopes', 'commission_unbilled_ceiling', 'validate_commission_policy', 'guard_state_write',
                               'erp_state_cas_write_v3', 'erp_billing_allowance_capability'}
-        check('exact seven reviewed functions use invoker with locked search path',
+        check('all eleven reviewed functions use invoker with locked search path',
               len(security) == len(expected_functions) and {row[0] for row in security} == expected_functions
               and all(not row[1] and 'search_path=pg_catalog' in row[2] for row in security))
     for name, work in [('positive-post-and-reverse',positive),('legacy-and-direct-write-fence',legacy),('rls-and-mfa',auth_rls),('invalid-event-rejections',invalid_events),('immutable-history-and-originals',history),('coalesced-local-writers-in-one-cloud-payload',aggregated_writers),('first-post-preserves-original-anchors',first_post_originals),('mixed-group-issued-zero-allocation',mixed_group_zero_issued),('invoice-basis-and-reversal-protection',invoice_basis_protection),('effective-collection-capacities',capacity),('real-concurrent-cas',concurrency)]:

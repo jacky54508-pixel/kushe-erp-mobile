@@ -2,56 +2,72 @@
   "baseCommit": "3a8fc71efa70ea56332fbbd781f8db78a680448f",
   "files": {
     ".github/workflows/p41-k30-allowance-posting.yml": {
-      "bytes": 8080,
-      "sha256": "545db3fc7083d2fc4073ef350c7ba5a428cf136dfa616331a5dd56fb0cdb936a"
+      "bytes": 8373,
+      "sha256": "2b919bbe1e5dc41568a03832faa3ac061706ed10ad322fa6f7546d4fc1ad8058"
     },
     ".p41-k30-tests/.gitignore": {
       "bytes": 41,
       "sha256": "a804b37c43bb982526bd05b1aeeda26861081e82b21133c830e79110adcba93f"
     },
     ".p41-k30-tests/cloud_allowance_contract.cjs": {
-      "bytes": 10524,
-      "sha256": "af82e7066badf2647535e32544fe03f1fdefe66b88104486c63b4dfbe1e29a58"
+      "bytes": 12419,
+      "sha256": "7cef6209839f22324c00344a7ca59a6ef828f196ba447f878b8240f371b883e6"
     },
     ".p41-k30-tests/k30_browser_store.py": {
       "bytes": 57997,
       "sha256": "0e29b679ec2dde8c6e4a58cbe39ebb32dd8b13aac00bd48ef061faef0f771e1b"
     },
     ".p41-k30-tests/k30_browser_ui.py": {
-      "bytes": 22472,
-      "sha256": "249744ee39be1097de492ea97c20ed1a5b9f5f596c6a9a7e0b50fb227a9e58a7"
+      "bytes": 22960,
+      "sha256": "d421558e75592a056d14c8e1a9160f22361b5d9c283eb72bed3309ccd2d84e95"
     },
     ".p41-k30-tests/k30_fixture.py": {
       "bytes": 16165,
-      "sha256": "b2078046070e7b873b7420b069635f5b632a609a35459eddcd99f56e88189b48"
+      "sha256": "458c061daa95cc13de7e1427e7b08fce4825a15f53876c5f9eb1b8d42bdefdf4"
+    },
+    ".p41-k30-tests/k30_policy_browser_store.py": {
+      "bytes": 46621,
+      "sha256": "b5646a63411c266628b08f053895eebd6d78c1343284aac5817dae8d62d973f1"
+    },
+    ".p41-k30-tests/k30_policy_browser_ui.py": {
+      "bytes": 25686,
+      "sha256": "50b30b3a0d35ada1c9a45d6f866ae63fb2196e18619c5cf079f3c64615fd7185"
+    },
+    ".p41-k30-tests/k30_policy_fixture.py": {
+      "bytes": 8823,
+      "sha256": "86fd6edd490d3c00e11e0f6e09e57fa4f9f738bd6fc381d9251782d40b99ac7d"
+    },
+    ".p41-k30-tests/k30_policy_postgres_guard.py": {
+      "bytes": 28413,
+      "sha256": "6d71bf862f764aa64c9b147c0b2d2b11e7ba6d280ecf8a78aa3dda37c9697876"
     },
     ".p41-k30-tests/postgres_bootstrap.sql": {
       "bytes": 7065,
       "sha256": "e72732dbefaa41c3f8f45422b5a624d2f3a9d3a70b955c1e8aa839c0c231ce0c"
     },
     ".p41-k30-tests/postgres_guard.py": {
-      "bytes": 36658,
-      "sha256": "4d7e8b8b74df78093a14a16c47c1d645d2d70b9284a4c5b5009024a7acc21411"
+      "bytes": 36773,
+      "sha256": "1907f4832881c4404436325a40cfccfd3553fc89b6c064a88def3ad49de9308a"
     },
     ".p41-k30-tests/probe_projection.cjs": {
       "bytes": 6303,
-      "sha256": "be8fafaa672d32e50db17ad4bc1f5f97e33798cae78c9d196520ef6bc21622a2"
+      "sha256": "7b5d66e3608ec671e357d7b9b21189880e6dbc3ce72f9b1ff2aae7c6b7144a9e"
     },
     ".p41-k30-tests/run_acceptance.py": {
-      "bytes": 7665,
-      "sha256": "c613f111cbce9725e1ab12ded1663884f3f02e0fc850e95d39b40c4ed87004ad"
+      "bytes": 7958,
+      "sha256": "a345846edb59d694ed1ecb75758a68b3d445bfdebdf14327dcc3fd7eaadbaed5"
     },
     ".p41-k30-tests/source_guard.py": {
-      "bytes": 5946,
-      "sha256": "4549635d5f0a82f959d8e99d96fddb409599b7bbd8055059f23399238bb119a7"
+      "bytes": 7386,
+      "sha256": "f99f121d1b3c64a238613a710e79510c7fba9d0d77a0caa001d4cf788829cd61"
     },
     ".p41-k30-tests/sync_editor_contract.cjs": {
-      "bytes": 16830,
-      "sha256": "03d24cf1d26cfdb76e392b33688edb9ffdd7f124a464943c0af5608ac8f1773b"
+      "bytes": 17483,
+      "sha256": "3d33ea4030f8d5108067ad1d6225a6ee09365c07b52732610547ffe87e9c9a81"
     },
     "assets/js/billing-allowance-ui.js": {
-      "bytes": 28583,
-      "sha256": "c3ef8aa08dd71c70aaf961872e1bfdd9eec4416a6a936683d2927fd9975ebe43"
+      "bytes": 32923,
+      "sha256": "6ba2be2e7c16d06b2b8187cc8ee0fbb21aa470928d17f2cc19756c54f853777a"
     },
     "assets/js/billing-groups.js": {
       "bytes": 55202,
@@ -62,16 +78,28 @@
       "sha256": "68d9184ee2c14f5468f9224b86946410aaf495e76aac00dbe050fab001b97b78"
     },
     "assets/js/cloud-sync.js": {
-      "bytes": 136710,
-      "sha256": "8261604ac4caadedf0d264050eb3f85a1d6d5fb20ca394d8ffd3e76f5295b6dc"
+      "bytes": 137280,
+      "sha256": "6aa436bdc69f73ba28891b82eb37f08056dce5bcd6857bf8f96c1106cf18ffde"
+    },
+    "assets/js/commission-agreement-ui.js": {
+      "bytes": 49205,
+      "sha256": "5404d8e2cc9dfc5a81286472d12416feb0d2f7de5aae3246e03fd4da7a0d53d2"
+    },
+    "assets/js/commissions.js": {
+      "bytes": 195160,
+      "sha256": "384acc05d267baf9367e75136e1eaed98f04608de82d312a1a345722f2b39fb4"
+    },
+    "assets/js/daily-draft-review.js": {
+      "bytes": 9566,
+      "sha256": "bdae75cabfccda74a416be7de14bdff9f7f9f6d5f06f322ad739ad3f42dc22c5"
     },
     "assets/js/dashboard.js": {
       "bytes": 44141,
       "sha256": "39bcc03321dd610e45027ec4ffda9c028c69f077bae407ac730fba9041644889"
     },
     "assets/js/erp-store.js": {
-      "bytes": 1034474,
-      "sha256": "a09f799eca417e390fa589f370f1b12006cbc3ebd246f59f980b85a811128389"
+      "bytes": 1098830,
+      "sha256": "3029883f17bb561f2665a7801cd662f5d3e62e1ab2dc5780eda208d1b05ae74a"
     },
     "assets/js/external-billing-invoice-ui.js": {
       "bytes": 6947,
@@ -85,9 +113,13 @@
       "bytes": 21377,
       "sha256": "525bd798716acc7e3f80b063e7efdaa38ee45ececee03e9030cbd603901f28a7"
     },
+    "assets/js/payroll.js": {
+      "bytes": 46411,
+      "sha256": "96a84edffd5fe73b8da947670f3bc911c57e1ff9948b2d127c8977dabdcb80af"
+    },
     "assets/js/projects.js": {
-      "bytes": 90619,
-      "sha256": "f362c917cd1842f4db8bc2a8af409bd50edd63eab85b0923dfec65e1de4e5103"
+      "bytes": 91783,
+      "sha256": "2cf55fe16065f258841461a05bc360a11e3904b1327fdab7f6a0cf4c3f00fb70"
     },
     "assets/js/receivable-cheques.js": {
       "bytes": 25119,
@@ -98,12 +130,12 @@
       "sha256": "313763d2157dd558dd4686c441d47f64a2570a957eda488d88ed440704044bc4"
     },
     "index.html": {
-      "bytes": 34380,
-      "sha256": "2912c156f06a63a1ac69407cc93ab4f815df016994401d9363e48ee585760028"
+      "bytes": 34565,
+      "sha256": "2841ed008a5bcc54b21101eeaaa85982a7083f78eb5f2eb50e7ee54840176952"
     },
     "supabase/migrations/20261128032204_k30_billing_allowance_guard.sql": {
-      "bytes": 43278,
-      "sha256": "68282fb3d350f0f657c920b3c413d8c38cf1986fe280ad8a3f547508c51cc5b9"
+      "bytes": 85784,
+      "sha256": "6a1d50ed3d1d216a170b14a455570a6c9cfd3c3e6dc10ca2acde322b2ebf09da"
     }
   }
 }

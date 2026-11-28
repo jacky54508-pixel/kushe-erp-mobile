@@ -15,7 +15,7 @@ function harness(options={}){
  let remote={data:copy(state),updated_at:'2026-11-28T02:00:00.000Z',sync_version:1,last_writer_mode:'trusted',last_base_sync_version:null};
  const entries=new Map(),requests=[],events=[];
  const trust=()=>entries.set('kushe_erp_device_trust_v1',JSON.stringify({schema:'kushe-device-trust-v1',version:1,mode,userId:user,updatedAt:'2026-11-28T02:00:00.000Z'}));trust();
- const capability={capability:'billing-allowances-v1',schema:'kushe.billing.allowances.v1',guardVersion:1,enabled:true};
+ const capability={capability:'billing-allowances-v2',schema:'kushe.billing.allowances.v1',guardVersion:2,enabled:true};
  const response=(data,status=200)=>({ok:status>=200&&status<300,status,json:async()=>copy(data)});
  const listeners=new Map(),shell={hidden:false,inert:false,contains:()=>false};
  const context={console,Object,JSON,AbortController,TextEncoder,Blob,URL,crypto:crypto.webcrypto,Node:class{},MutationObserver:class{observe(){}disconnect(){}},
@@ -39,7 +39,7 @@ function harness(options={}){
    if(url.includes('/erp_states?')){remoteReads++;if(options.remoteRace&&remoteReads===2)remote.sync_version++;return response([remote])}
    if(url.includes('/rpc/erp_state_cas_write_')){
     const v3=url.endsWith('_v3');
-    if(v3&&body.client_capability!=='billing-allowances-v1')return response({},400);
+    if(v3&&body.client_capability!=='billing-allowances-v2')return response({},400);
     if(body.expected_sync_version!==remote.sync_version)return response([{status:'CONFLICT',...remote}]);
     remote={data:copy(body.new_data),sync_version:remote.sync_version+1,updated_at:'2026-11-28T03:00:00.000Z',last_writer_mode:body.writer_mode,last_base_sync_version:body.expected_sync_version};
     return response([{status:'APPLIED',sync_version:remote.sync_version,updated_at:remote.updated_at,last_writer_mode:remote.last_writer_mode,last_base_sync_version:remote.last_base_sync_version}]);
@@ -69,8 +69,9 @@ async function run(name,fn){try{await fn();report.cases.push({name,passed:true})
  });
  for(const [name,options,code] of [
   ['missing-server-guard',{capabilityStatus:404},'ALLOWANCE_SERVER_REQUIRED'],
-  ['disabled-trigger',{capability:{capability:'billing-allowances-v1',schema:'kushe.billing.allowances.v1',guardVersion:1,enabled:false}},'ALLOWANCE_SERVER_REQUIRED'],
-  ['unknown-server-version',{capability:{capability:'billing-allowances-v1',schema:'kushe.billing.allowances.v1',guardVersion:2,enabled:true}},'ALLOWANCE_SERVER_REQUIRED'],
+  ['disabled-trigger',{capability:{capability:'billing-allowances-v2',schema:'kushe.billing.allowances.v1',guardVersion:2,enabled:false}},'ALLOWANCE_SERVER_REQUIRED'],
+  ['old-server-capability',{capability:{capability:'billing-allowances-v1',schema:'kushe.billing.allowances.v1',guardVersion:1,enabled:true}},'ALLOWANCE_SERVER_REQUIRED'],
+  ['unknown-server-version',{capability:{capability:'billing-allowances-v2',schema:'kushe.billing.allowances.v1',guardVersion:3,enabled:true}},'ALLOWANCE_SERVER_REQUIRED'],
   ['temporary-cannot-formally-post',{mode:'temporary'},'DEVICE_TRUST_REQUIRED'],
   ['remote-changes-during-check',{remoteRace:true},'RACE_BLOCKED']]){
   await run(name,async()=>{const h=harness(options);await denied(name,()=>h.cloud.prepareBillingAllowanceWrite(),code);check(name+': never ready',!h.cloud.billingAllowanceWriteReadiness().ready);check(name+': zero cloud business writes',h.requests.every(r=>!r.path.includes('cas_write')))});
@@ -89,11 +90,29 @@ async function run(name,fn){try{await fn();report.cases.push({name,passed:true})
    const writes=h.requests.filter(r=>r.path.includes('cas_write'));
    check('one selected CAS endpoint',writes.length===1&&writes[0].path.endsWith(withLedger?'_v3':'_v2'));
    check('server version verified',result.syncVersion===2&&JSON.stringify(result.data)===JSON.stringify(next));
-   check('explicit capability only on new protocol',withLedger?writes[0].body.client_capability==='billing-allowances-v1':!('client_capability'in writes[0].body));
+   check('explicit capability only on new protocol',withLedger?writes[0].body.client_capability==='billing-allowances-v2':!('client_capability'in writes[0].body));
   });
  }
  await run('malformed-ledger-never-uploads',async()=>{const h=harness({mode:'temporary'});await h.cloud.bootstrapTemporarySession();const next=copy(h.state);next.meta.billingAllowances={invalid:true};await denied('bad ledger',()=>h.cloud.commitTemporarySnapshot(next,{userId:'SYN-K30-CLOUD-OWNER'}),'ALLOWANCE_LEDGER_INVALID');check('no malformed CAS',h.requests.every(r=>!r.path.includes('cas_write')))});
  await run('ledger-cas-fails-closed-without-server-guard',async()=>{const h=harness({mode:'temporary',capabilityStatus:404});await h.cloud.bootstrapTemporarySession();const next=copy(h.state);next.meta.billingAllowances=[{schema:'kushe.billing.allowances.v1',id:'SYN-CONTRACT-ONLY'}];await denied('no fallback to legacy CAS',()=>h.cloud.commitTemporarySnapshot(next,{userId:'SYN-K30-CLOUD-OWNER'}),'ALLOWANCE_SERVER_REQUIRED');check('no legacy CAS fallback',h.requests.every(r=>!r.path.includes('cas_write')))});
+
+ for(const [key,schema] of Object.entries({commissionAgreements:'kushe.commission.agreement.v1',commissionFinalizations:'kushe.commission.finalization.v1',commissionPaymentTerms:'kushe.commission.payment-terms.v1'})){
+  await run(key+'-alone-requires-v3',async()=>{
+   const h=harness({mode:'temporary'});await h.cloud.bootstrapTemporarySession();const next=copy(h.state);next.meta[key]=[{schema,id:'SYN-POLICY-TRANSPORT-ONLY'}];
+   await h.cloud.commitTemporarySnapshot(next,{userId:'SYN-K30-CLOUD-OWNER'});const writes=h.requests.filter(r=>r.path.includes('cas_write'));
+   check(key+' chooses guarded protocol without any allowance',writes.length===1&&writes[0].path.endsWith('_v3')&&writes[0].body.client_capability==='billing-allowances-v2');
+  });
+  for(const bad of [null,{},[{schema:'unrecognized.v3'}]])await run(key+'-invalid-'+JSON.stringify(bad),async()=>{
+   const h=harness({mode:'temporary'});await h.cloud.bootstrapTemporarySession();const next=copy(h.state);next.meta[key]=bad;
+   await denied(key+' invalid cannot upload',()=>h.cloud.commitTemporarySnapshot(next,{userId:'SYN-K30-CLOUD-OWNER'}),'COMMISSION_POLICY_LEDGER_INVALID');
+   check(key+' invalid zero writes',h.requests.every(r=>!r.path.includes('cas_write')));
+  });
+  await run(key+'-cannot-fallback',async()=>{
+   const h=harness({mode:'temporary',capabilityStatus:404});await h.cloud.bootstrapTemporarySession();const next=copy(h.state);next.meta[key]=[{schema,id:'SYN-POLICY-TRANSPORT-ONLY'}];
+   await denied(key+' missing guard',()=>h.cloud.commitTemporarySnapshot(next,{userId:'SYN-K30-CLOUD-OWNER'}),'ALLOWANCE_SERVER_REQUIRED');
+   check(key+' no legacy protocol fallback',h.requests.every(r=>!r.path.includes('cas_write')));
+  });
+ }
  report.status=report.failures.length?'BLOCKED':'PASS';report.passCount=report.checks.filter(x=>x.passed).length;
  if(output){fs.mkdirSync(path.dirname(output),{recursive:true});fs.writeFileSync(output,JSON.stringify(report,null,2)+'\n')}
  console.log(JSON.stringify({status:report.status,passCount:report.passCount,cases:report.cases.length,failures:report.failures},null,2));

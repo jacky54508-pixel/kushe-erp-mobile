@@ -22,7 +22,7 @@
   const DEVICE_TRUST_SCHEMA = 'kushe-device-trust-v1';
   const AUTO_DEBOUNCE_MS = 8000;
   const AUTO_ONLINE_RETRY_MS = 3000;
-  const BILLING_ALLOWANCE_CAPABILITY = 'billing-allowances-v1';
+  const BILLING_ALLOWANCE_CAPABILITY = 'billing-allowances-v2';
   const BILLING_ALLOWANCE_SCHEMA = 'kushe.billing.allowances.v1';
   const BILLING_ALLOWANCE_READY_MS = 60000;
   const SETTINGS_CREDENTIAL_KEYS = new Set([
@@ -473,7 +473,8 @@
     'addInventoryReceipt','recordInventoryReceiptPayable','setMaterialOpeningStock',
     'saveReceivableCheque','clearReceivableCheque','cancelReceivableCheque',
     'saveExternalBillingDocument','archiveExternalBillingDocument',
-    'postBillingAllowance','reverseBillingAllowance'
+    'postBillingAllowance','reverseBillingAllowance',
+    'createCommissionAgreement','finalizeCommissionAgreements','cancelCommissionAgreement'
   ]);
   function isBusinessEditorEvent(event) {
     const shell = document.getElementById('appShell');
@@ -482,7 +483,7 @@
     // Receipt, payable, material, payroll and cheque editors are mounted on
     // document.body. They are business drafts too; auth/cloud dialogs are not.
     if (target.closest?.('#cloudSyncModal,.auth-view,.auth-modal-layer')) return false;
-    const overlay=target.closest?.('.erp-detail-overlay,.cheque-overlay');
+    const overlay=target.closest?.('.erp-detail-overlay,.cheque-overlay') || target.closest?.('.ca-overlay');
     return Boolean(shell.contains(target) || overlay?.isConnected && !overlay.hidden);
   }
   function noteEditorEvent(event) {
@@ -986,12 +987,22 @@
   }
 
   function hasBillingAllowanceLedger(data) {
-    const ledger = data?.meta?.billingAllowances;
-    if (ledger === undefined) return false;
-    if (!Array.isArray(ledger) || ledger.some(row => !row || row.schema !== BILLING_ALLOWANCE_SCHEMA)) {
-      throw new CloudSyncError('ALLOWANCE_LEDGER_INVALID');
+    const schemas = {
+      billingAllowances: BILLING_ALLOWANCE_SCHEMA,
+      commissionAgreements: 'kushe.commission.agreement.v1',
+      commissionFinalizations: 'kushe.commission.finalization.v1',
+      commissionPaymentTerms: 'kushe.commission.payment-terms.v1'
+    };
+    let present = false;
+    for (const [key, schema] of Object.entries(schemas)) {
+      const ledger = data?.meta?.[key];
+      if (ledger === undefined) continue;
+      if (!Array.isArray(ledger) || ledger.some(row => !row || row.schema !== schema)) {
+        throw new CloudSyncError(key === 'billingAllowances' ? 'ALLOWANCE_LEDGER_INVALID' : 'COMMISSION_POLICY_LEDGER_INVALID');
+      }
+      present = present || ledger.length > 0;
     }
-    return ledger.length > 0;
+    return present;
   }
 
   async function requireBillingAllowanceCapability(auth, force = false) {
@@ -1011,7 +1022,7 @@
     }
     assertOperation(auth);
     if (!result || result.capability !== BILLING_ALLOWANCE_CAPABILITY
-      || result.schema !== BILLING_ALLOWANCE_SCHEMA || result.guardVersion !== 1 || result.enabled !== true) {
+      || result.schema !== BILLING_ALLOWANCE_SCHEMA || result.guardVersion !== 2 || result.enabled !== true) {
       throw new CloudSyncError('ALLOWANCE_SERVER_REQUIRED');
     }
     billingAllowanceCapability = { userId: auth.user.id, generation: syncGeneration,

@@ -8,8 +8,8 @@ import subprocess
 from pathlib import Path
 
 BASE='3a8fc71efa70ea56332fbbd781f8db78a680448f'
-VERSION='p41-k30-allowance-posting-20261128-1'
-RUNTIME={ 'assets/js/'+name+'.js' for name in ('erp-store','cloud-sync','receivable-cheques','dashboard','invoices','projects','external-billing-invoice','external-billing-invoice-ui','billing-groups','billing','reports','billing-allowance-ui') } | {'index.html'}
+VERSION='p41-k30-commission-agreements-20261128-2'
+RUNTIME={ 'assets/js/'+name+'.js' for name in ('erp-store','cloud-sync','receivable-cheques','dashboard','invoices','projects','external-billing-invoice','external-billing-invoice-ui','billing-groups','billing','reports','billing-allowance-ui','commissions','daily-draft-review','payroll','commission-agreement-ui') } | {'index.html'}
 WORKFLOW='.github/workflows/p41-k30-allowance-posting.yml'
 MIGRATION='supabase/migrations/20261128032204_k30_billing_allowance_guard.sql'
 MANIFEST='.p41-k30-tests/SOURCE_MANIFEST.json'
@@ -37,24 +37,30 @@ def main():
         check('all changed paths are reviewed K30 scope',all(p in RUNTIME or p in (WORKFLOW,MIGRATION) or p.startswith('.p41-k30-tests/') for p in changed))
         check('no private records or generated evidence in source',all('/private/' not in p and '/artifacts/' not in p and '/results/' not in p and '/__pycache__/' not in p and not p.endswith(('.pyc','.png','.pdf','.zip')) for p in changed))
         before=git(root,'show',BASE+':index.html').decode()
-        names=('erp-store','cloud-sync','receivable-cheques','dashboard','invoices','projects','external-billing-invoice','external-billing-invoice-ui','billing-groups','billing','reports')
+        names=('erp-store','cloud-sync','receivable-cheques','dashboard','invoices','projects','external-billing-invoice','external-billing-invoice-ui','billing-groups','billing','reports','commissions','daily-draft-review','payroll')
         expected=before
         for name in names:
             expected,count=re.subn(r'(src="assets/js/'+re.escape(name)+r'\.js)\?v=[^"]+',lambda m:m[1]+'?v='+VERSION,expected)
             check('one cache reference for '+name,count==1)
         marker='  <script src="assets/js/billing.js?v='+VERSION+'"></script>'
         expected=expected.replace(marker,'  <script src="assets/js/billing-allowance-ui.js?v='+VERSION+'"></script>\n'+marker)
-        check('index only refreshes reviewed assets and adds one allowance UI script',expected==(root/'index.html').read_text())
+        marker='  <script src="assets/js/commissions.js?v='+VERSION+'"></script>'
+        expected=expected.replace(marker,'  <script src="assets/js/commission-agreement-ui.js?v='+VERSION+'"></script>\n'+marker)
+        check('index only refreshes reviewed assets and adds allowance and commission agreement UI scripts',expected==(root/'index.html').read_text())
         prior=git(root,'ls-tree','-r','--name-only',BASE).decode().splitlines()
         oldtests=[p for p in prior if p.startswith(LEGACY)]
         check('all prior test files preserve exact bytes and assertions',all((root/p).read_bytes()==git(root,'show',BASE+':'+p) for p in oldtests))
         report['legacyFilesVerified']=len(oldtests)
         check('at least 70 prior acceptance files protected',len(oldtests)>=70)
-        for name in ('assets/js/billing-print.js','assets/js/billing-bundle-print.js','assets/js/external-billing-print.js','billing-print.html','billing-bundle-print.html','external-billing-print.html','assets/js/commissions.js','assets/js/payroll.js'):
+        for name in ('assets/js/billing-print.js','assets/js/billing-bundle-print.js','assets/js/external-billing-print.js','billing-print.html','billing-bundle-print.html','external-billing-print.html'):
             check(name+' remains byte-identical',(root/name).read_bytes()==git(root,'show',BASE+':'+name))
         old=(root/'.p41-k29-tests/sync_contract.cjs').read_text()
-        expected_contract=old.replace('const additions={',"const additions={\n  postBillingAllowance:['billing-allowance-ui.js'],\n  reverseBillingAllowance:['billing-allowance-ui.js'],",1).replace("schema:'k29-cloud-editor-event-contract-v1'","schema:'k30-cloud-editor-event-contract-v1'").replace('// Actual cloud-sync module','// K30 extends only the two reviewed allowance writers; all K29 behavioral assertions retained.\n// Actual cloud-sync module',1).replace('K29_SYNC_EVENT_CONTRACT_PASS','K30_SYNC_EVENT_CONTRACT_PASS')
-        check('new event suite retains all old assertions and adds only two normal writers',expected_contract==(root/'.p41-k30-tests/sync_editor_contract.cjs').read_text())
+        expected_contract=old.replace('const additions={',"const additions={\n  postBillingAllowance:['billing-allowance-ui.js'],\n  reverseBillingAllowance:['billing-allowance-ui.js'],\n  createCommissionAgreement:['commission-agreement-ui.js'],\n  finalizeCommissionAgreements:['commission-agreement-ui.js'],\n  cancelCommissionAgreement:['commission-agreement-ui.js'],",1).replace("schema:'k29-cloud-editor-event-contract-v1'","schema:'k30-cloud-editor-event-contract-v1'").replace('// Actual cloud-sync module','// K30 extends the reviewed allowance and future-agreement writers; all K29 behavioral assertions retained.\n// Actual cloud-sync module',1).replace('K29_SYNC_EVENT_CONTRACT_PASS','K30_SYNC_EVENT_CONTRACT_PASS')
+        # Add isolated coverage for the new body-mounted agreement form.
+        expected_contract=expected_contract.replace('contains:node=>node===target',"contains:node=>node===target&&variant!=='commission-overlay'",1)
+        expected_contract=expected_contract.replace('  const outsideTarget=new SyntheticNode();',"  if(variant==='commission-overlay')target.closest=selector=>selector==='.ca-overlay'?detailOverlay:null;\n  const outsideTarget=new SyntheticNode();",1)
+        expected_contract=expected_contract.replace("    report.status=mode==='baseline'?","    if(mode==='candidate')for(const name of ['createCommissionAgreement','finalizeCommissionAgreements','cancelCommissionAgreement']){const result=await run(name,'commission-overlay');check(name+': body agreement editor is tracked and releases after verified close',result.after.safe,result);report.cases.push(result);}\n    report.status=mode==='baseline'?",1)
+        check('new event suite retains all old assertions and adds only five reviewed normal writers',expected_contract==(root/'.p41-k30-tests/sync_editor_contract.cjs').read_text())
         files={}
         for name in sorted((RUNTIME|changed)-{MANIFEST}):
             if (root/name).is_file():

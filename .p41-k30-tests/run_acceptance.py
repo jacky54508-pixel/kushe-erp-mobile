@@ -35,6 +35,8 @@ def main():
                 ('k30-projection', ['node', '.p41-k30-tests/probe_projection.cjs', '--root', '.', '--output', str(output / 'k30-projection' / 'RESULT.json')]),
                 ('k30-store', [py, '.p41-k30-tests/k30_browser_store.py', '--root', '.', '--output', str(output / 'k30-store')]),
                 ('k30-ui', [py, '.p41-k30-tests/k30_browser_ui.py', '--root', '.', '--output', str(output / 'k30-ui')]),
+                ('k30-policy-store', [py, '.p41-k30-tests/k30_policy_browser_store.py', '--root', '.', '--output', str(output / 'k30-policy-store')]),
+                ('k30-policy-ui', [py, '.p41-k30-tests/k30_policy_browser_ui.py', '--root', '.', '--output', str(output / 'k30-policy-ui')]),
                 ('receivables', [py, '.p41-k29-tests/receivables_ui.py', '--output', str(output / 'receivables')]),
                 ('pdf', [py, '.p41-k29-tests/pdf_acceptance.py', '--output', str(output / 'pdf')]),
                 ('bulk-input', [py, '.p41-k29-tests/bulk_input.py', '--output', str(output / 'bulk-input')]),

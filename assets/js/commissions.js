@@ -86,6 +86,14 @@
   }
   const employeeIdOf = (row) => String(row?.employee || row?.employeeId || '');
   const projectIdOf = (row) => String(row?.project || row?.projectId || '');
+  const prospectiveCommission = row => row?.commissionPolicy === 'discounted-pretax-v1' || Boolean(row?.commissionAgreementId);
+  const dailyCommissionMarkup = batch => window.KusheCommissionAgreements?.batchMarkup(batch.logs,batch.commission) || money(batch.commission);
+  function openCommissionAgreements(options={}) {
+    try {
+      if(!window.KusheCommissionAgreements)throw new Error('新約定抽成元件尚未載入，請重新整理。');
+      return window.KusheCommissionAgreements.open(options);
+    } catch(error) { window.KushePhase1?.toast(error.message||String(error)); }
+  }
   function rowsFor(state) {
     const query = filters.query.trim().toLocaleLowerCase('zh-Hant');
     const rows = (state.commissions || []).filter((row) => {
@@ -242,15 +250,17 @@
     }).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
   }
   function dailyActions(batch) {
+    const fixedAgreement=batch.logs.some(log=>prospectiveCommission(log)&&window.KusheCommissionAgreements?.dailyInfo(log)?.agreement?.status==='finalized');
+    if(fixedAgreement)return `<button type="button" data-daily-view="${esc(batch.batchId)}">查看內容</button><button type="button" data-view-commission-agreement="${esc(batch.logs.find(prospectiveCommission)?.project||'')}">查看新約定抽成</button><span class="commission-status is-settled">抽成已核定，來源保留</span>`;
     const monthPaidLocked=batch.logs.some((log)=>store.payrollHistoryLock(log.employee,log.date).locked),paidDeleteLocked=batch.logs.some((log)=>store.dailyLogPayrollDeleteLock(log).locked),billingLocked=batch.logs.some((log)=>log.billingId||(log.billingStatus&&log.billingStatus!=='未請款')),actions=paidDeleteLocked?'<span class="commission-status is-settled" title="此紀錄已納入已付款薪資，為保留歷史帳務不可修改或刪除。">已付款鎖定</span>':billingLocked?`<span class="commission-status billing-done daily-billing-lock" title="已請款項目保持鎖定；未請款項目請使用專用編輯入口。">${esc(dailyBillingLockLabel(batch.billingSummary))}</span>`:monthPaidLocked?`<div class="commission-row-actions"><span class="commission-status is-settled" title="同月份已有薪資付款，為避免新增薪資來源不可編輯。">編輯鎖定</span><button type="button" data-daily-delete="${esc(batch.batchId)}">刪除</button></div>`:`<div class="commission-row-actions"><button type="button" data-daily-edit="${esc(batch.batchId)}">編輯</button><button type="button" data-daily-delete="${esc(batch.batchId)}">刪除</button></div>`;
     const canAmend=billingLocked&&batch.billingSummary.unbilledItemCount>0&&!batch.billingSummary.inconsistentItemCount&&!paidDeleteLocked&&!monthPaidLocked;
     return `<button type="button" data-daily-view="${esc(batch.batchId)}">查看內容</button>${canAmend?`<button type="button" data-daily-unbilled="${esc(batch.batchId)}">編輯未請款明細</button>`:''}${actions}`;
   }
   function dailySection(state,batches) {
-    return `<section class="commission-panel daily-work-panel"><header><div><h2>每日作業</h2><p>沿用既有每日施工流程；抽成、點工與待請款仍由同一筆來源串聯。</p></div></header><div class="commission-table-wrap daily-desktop-table"><table class="commission-table daily-work-table"><thead><tr><th>日期</th><th>員工</th><th>客戶／案場</th><th>施工項目</th><th class="num">未稅施工額</th><th class="num">抽成</th><th class="num">點工薪資</th><th>請款狀態</th><th>操作</th></tr></thead><tbody>${batches.map((batch)=>{const actions=dailyActions(batch);return `<tr data-daily-batch="${esc(batch.batchId)}"><td>${esc(batch.date)}</td><td><b>${esc(batch.employees.join('、'))}</b></td><td><span class="daily-project-list">${batch.projects.map(esc).join('<br>')}</span></td><td><span class="commission-source">${esc(batch.items.filter(Boolean).slice(0,3).join('、')||'純點工')}${batch.itemCount>3?` 等 ${batch.itemCount} 項`:''}</span></td><td class="num"><b>${money(batch.untaxed)}</b><small>${batch.itemCount} 筆</small></td><td class="num">${money(batch.commission)}</td><td class="num">${money(batch.work)}</td><td>${dailyBillingBadge(batch.billingSummary)}${dailyBillingCounts(batch.billingSummary)}${dailyBillingAmountText(batch.billingSummary)}</td><td>${actions}</td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="9">此篩選條件下沒有每日作業紀錄。</td></tr>'}</tbody></table></div><div class="daily-mobile-list" aria-label="每日作業清單">${dailyMobileCards(batches)}</div></section>`;
+    return `<section class="commission-panel daily-work-panel"><header><div><h2>每日作業</h2><p>沿用既有每日施工流程；抽成、點工與待請款仍由同一筆來源串聯。</p></div></header><div class="commission-table-wrap daily-desktop-table"><table class="commission-table daily-work-table"><thead><tr><th>日期</th><th>員工</th><th>客戶／案場</th><th>施工項目</th><th class="num">未稅施工額</th><th class="num">抽成</th><th class="num">點工薪資</th><th>請款狀態</th><th>操作</th></tr></thead><tbody>${batches.map((batch)=>{const actions=dailyActions(batch);return `<tr data-daily-batch="${esc(batch.batchId)}"><td>${esc(batch.date)}</td><td><b>${esc(batch.employees.join('、'))}</b></td><td><span class="daily-project-list">${batch.projects.map(esc).join('<br>')}</span></td><td><span class="commission-source">${esc(batch.items.filter(Boolean).slice(0,3).join('、')||'純點工')}${batch.itemCount>3?` 等 ${batch.itemCount} 項`:''}</span></td><td class="num"><b>${money(batch.untaxed)}</b><small>${batch.itemCount} 筆</small></td><td class="num">${dailyCommissionMarkup(batch)}</td><td class="num">${money(batch.work)}</td><td>${dailyBillingBadge(batch.billingSummary)}${dailyBillingCounts(batch.billingSummary)}${dailyBillingAmountText(batch.billingSummary)}</td><td>${actions}</td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="9">此篩選條件下沒有每日作業紀錄。</td></tr>'}</tbody></table></div><div class="daily-mobile-list" aria-label="每日作業清單">${dailyMobileCards(batches)}</div></section>`;
   }
   function dailyMobileCards(batches) {
-    return batches.map((batch)=>`<article class="daily-mobile-card" data-daily-card="${esc(batch.batchId)}"><header><strong>${esc(batch.date)}</strong>${dailyBillingBadge(batch.billingSummary)}</header>${dailyBillingCounts(batch.billingSummary)}<h3>${esc(batch.employees.join('、'))}</h3><p>${esc(batch.projects.join('、'))}</p><p>${esc(batch.items.filter(Boolean).slice(0,3).join('、')||'純點工')}${batch.itemCount>3?` 等 ${batch.itemCount} 項`:''}</p><small>${batch.itemCount} 筆</small><dl>${dailyDetailField('未稅施工額',batch.untaxed,true)}${dailyDetailField('抽成',batch.commission,true)}${dailyDetailField('點工薪資',batch.work,true)}${batch.billingSummary.unbilledItemCount||batch.billingSummary.inconsistentItemCount?dailyDetailField(dailyBillingAmountLabel(batch.billingSummary),batch.billingSummary.remainingAmount,true):''}</dl><footer>${dailyActions(batch)}</footer></article>`).join('')||'<p class="daily-mobile-empty">此篩選條件下沒有每日作業紀錄。</p>';
+    return batches.map((batch)=>`<article class="daily-mobile-card" data-daily-card="${esc(batch.batchId)}"><header><strong>${esc(batch.date)}</strong>${dailyBillingBadge(batch.billingSummary)}</header>${dailyBillingCounts(batch.billingSummary)}<h3>${esc(batch.employees.join('、'))}</h3><p>${esc(batch.projects.join('、'))}</p><p>${esc(batch.items.filter(Boolean).slice(0,3).join('、')||'純點工')}${batch.itemCount>3?` 等 ${batch.itemCount} 項`:''}</p><small>${batch.itemCount} 筆</small><dl>${dailyDetailField('未稅施工額',batch.untaxed,true)}<div><dt>抽成／新約定暫估</dt><dd>${dailyCommissionMarkup(batch)}</dd></div>${dailyDetailField('點工薪資',batch.work,true)}${batch.billingSummary.unbilledItemCount||batch.billingSummary.inconsistentItemCount?dailyDetailField(dailyBillingAmountLabel(batch.billingSummary),batch.billingSummary.remainingAmount,true):''}</dl><footer>${dailyActions(batch)}</footer></article>`).join('')||'<p class="daily-mobile-empty">此篩選條件下沒有每日作業紀錄。</p>';
   }
   function dailyDetailField(title,value,isMoney=false) {
     const text=value===null||value===undefined||value===''?'—':isMoney?money(value):typeof value==='boolean'?(value?'是':'否'):value;
@@ -279,13 +289,13 @@
     dailyDetailActive=true;
     const field=dailyDetailField;
     const historicalPreview=window.KuSheP33HistoricalPreview?.render?.(state,batch,store)||'';
-    const workforce=batch.logs.map((log)=>`<article class="daily-detail-worker"><h4>${esc(label(state,'employees',log.employee,log.employeeName||'—'))}</h4><dl>${field('案場',label(state,'projects',log.project,log.projectName||'—'))}${field('點工類型',log.workMode==='hourly'?'時薪':log.workMode==='daily'?'日薪':'不計點工')}${field('點工數量',log.workQty)}${field('點工單價',log.workRate,true)}${field('點工金額',store.dailyWorkAmount(log),true)}${field('業績',log.performance,true)}${field('抽成比例',log.rate===null||log.rate===undefined?'—':log.rate+'%')}${field('抽成',log.commission,true)}</dl>${log.note?`<p>備註：${esc(log.note)}</p>`:''}</article>`).join('');
+    const workforce=batch.logs.map((log)=>`<article class="daily-detail-worker"><h4>${esc(label(state,'employees',log.employee,log.employeeName||'—'))}</h4><dl>${field('案場',label(state,'projects',log.project,log.projectName||'—'))}${field('點工類型',log.workMode==='hourly'?'時薪':log.workMode==='daily'?'日薪':'不計點工')}${field('點工數量',log.workQty)}${field('點工單價',log.workRate,true)}${field('點工金額',store.dailyWorkAmount(log),true)}${field('業績',log.performance,true)}${field('抽成比例',log.rate===null||log.rate===undefined?'—':log.rate+'%')}${prospectiveCommission(log)?field('新約定暫估抽成',log.estimatedCommission,true)+(window.KusheCommissionAgreements?.dailyMarkup(log)||''):field('抽成',log.commission,true)}</dl>${log.note?`<p>備註：${esc(log.note)}</p>`:''}</article>`).join('');
     const projects=dailyDetailGroups(batch).map(({id,first,items})=>{
       const billing=batch.billingSummary.groups.get(id),displayItems=window.KusheDisplaySort?.sortWorkRows?window.KusheDisplaySort.sortWorkRows(items):items;
       const houses=new Map();displayItems.forEach((item)=>{const house=item.house||'未指定戶別';if(!houses.has(house))houses.set(house,[]);houses.get(house).push(item)});
       return `<section class="daily-detail-project" data-detail-group="${esc(id)}"><h3>${esc(label(state,'projects',first.project,first.projectName||'—'))}</h3><dl>${field('客戶',label(state,'customers',first.customer,first.customerName||'—'))}${field('請款狀態',billing.status)}${field('已請款項數',`${billing.billedItemCount} / ${billing.billableItemCount}`)}${field('剩餘項數',billing.unbilledItemCount)}${field(dailyBillingAmountLabel(billing),billing.remainingAmount,true)}${field('待查核項數',billing.inconsistentItemCount)}${field('請款單號',billing.billingNumbers.join('、'))}${field('請款 ID',first.billingId)}${field('可請款',first.billable)}${field('不需請款',first.noInvoice)}</dl>${[...houses.entries()].map(([house,rows])=>`<section class="daily-detail-house"><h4>${esc(house)}</h4>${rows.map((item)=>dailyDetailItem(item,billing.items.get(item))).join('')}</section>`).join('')||'<p>此來源群組沒有施工項目。</p>'}</section>`;
     }).join('');
-    layer.hidden=false;layer.innerHTML=`<div class="commission-drawer-backdrop" data-detail-close></div><aside class="commission-drawer daily-readonly-detail" role="dialog" aria-modal="true" aria-labelledby="dailyDetailTitle"><header><div><h2 id="dailyDetailTitle">每日作業內容</h2><p>${esc(batch.date)} · ${esc(batch.billingSummary.status)}</p></div><button type="button" data-detail-close aria-label="關閉每日作業內容">關閉</button></header><div class="daily-detail-body"><p>${esc(batch.employees.join('、'))}</p><dl class="daily-detail-summary">${field('未稅施工額',batch.untaxed,true)}${field('施工總額',batch.gross,true)}${field('抽成',batch.commission,true)}${field('點工薪資',batch.work,true)}${field(dailyBillingAmountLabel(batch.billingSummary),batch.billingSummary.remainingAmount,true)}${field('已請款項數',`${batch.billingSummary.billedItemCount} / ${batch.billingSummary.billableItemCount}`)}${field('剩餘項數',batch.billingSummary.unbilledItemCount)}${field('待查核項數',batch.billingSummary.inconsistentItemCount)}</dl>${historicalPreview}<section><h3>員工作業</h3>${workforce}</section><section><h3>施工明細</h3>${projects}</section></div></aside>`;
+    layer.hidden=false;layer.innerHTML=`<div class="commission-drawer-backdrop" data-detail-close></div><aside class="commission-drawer daily-readonly-detail" role="dialog" aria-modal="true" aria-labelledby="dailyDetailTitle"><header><div><h2 id="dailyDetailTitle">每日作業內容</h2><p>${esc(batch.date)} · ${esc(batch.billingSummary.status)}</p></div><button type="button" data-detail-close aria-label="關閉每日作業內容">關閉</button></header><div class="daily-detail-body"><p>${esc(batch.employees.join('、'))}</p><dl class="daily-detail-summary">${field('未稅施工額',batch.untaxed,true)}${field('施工總額',batch.gross,true)}<div><dt>抽成／新約定暫估</dt><dd>${dailyCommissionMarkup(batch)}</dd></div>${field('點工薪資',batch.work,true)}${field(dailyBillingAmountLabel(batch.billingSummary),batch.billingSummary.remainingAmount,true)}${field('已請款項數',`${batch.billingSummary.billedItemCount} / ${batch.billingSummary.billableItemCount}`)}${field('剩餘項數',batch.billingSummary.unbilledItemCount)}${field('待查核項數',batch.billingSummary.inconsistentItemCount)}</dl>${historicalPreview}<section><h3>員工作業</h3>${workforce}</section><section><h3>施工明細</h3>${projects}</section></div></aside>`;
     layer.classList.add('is-open');
     $$('[data-detail-close]',layer).forEach((button)=>button.addEventListener('click',closeDailyDetail));
     layer.onkeydown=(event)=>{if(event.key==='Escape'){event.preventDefault();closeDailyDetail()}else if(event.key==='Tab'){const targets=$$('button,summary',layer),first=targets[0],last=targets[targets.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}}};
@@ -350,15 +360,15 @@
   function buildCommissionPresentationRows(state, rows) {
     const settlementCache=new Map();
     return rows.map((row)=>{
-      const linkedPayroll=state.payroll.filter((item)=>item.month===String(row.date||'').slice(0,7)&&item.employee===row.employee),locked=store.payrollHistoryLock(row.employee,row.date).locked,source=store.commissionBillingLink(row),isDaily=source.kind==='daily-log',sourceView={linked:['請款來源','is-synced'],'orphan-billing':['來源已不存在','is-legacy'],manual:['手動登錄','is-manual'],'daily-log':['每日施工同步','is-synced'],ambiguous:['來源待確認','is-legacy']}[source.kind]||['來源待確認','is-legacy'],projectPayment=commissionSettlementStatusForRow(row,settlementCache);
-      return {row,employeeName:label(state,'employees',row.employee,row.employeeName||'—'),projectName:label(state,'projects',row.project,row.projectName||'—'),source,sourceView,gross:grossOf(state,row),locked,actions:locked?`<span class="commission-status is-settled" title="${source.kind==='orphan-billing'?'此抽成已納入真正已付款薪資，不能直接清除來源。':'此紀錄已納入已付款薪資，為保留歷史帳務不可修改。'}">已付款鎖定</span>`:isDaily?'<span class="commission-status" title="請由每日施工來源調整">來源同步</span>':`<div class="commission-row-actions"><button type="button" data-edit="${esc(row.id)}">編輯</button><button type="button" data-delete="${esc(row.id)}">刪除</button></div>`,payrollRecords:linkedPayroll.length,payrollCommission:linkedPayroll.filter((item)=>item.status!=='已付款').reduce((sum,item)=>sum+number(item.commission),0),payrollLabel:row.status==='已列入薪資'?'已列入薪資':'未列入薪資',payrollClass:row.status==='已列入薪資'?'is-settled':'is-unsettled',projectPayment};
+      const linkedPayroll=state.payroll.filter((item)=>item.month===String(row.date||'').slice(0,7)&&item.employee===row.employee),locked=store.payrollHistoryLock(row.employee,row.date).locked,source=store.commissionBillingLink(row),isDaily=source.kind==='daily-log',isProspective=prospectiveCommission(row),sourceView=isProspective?['新約定已核定','is-synced']:{linked:['請款來源','is-synced'],'orphan-billing':['來源已不存在','is-legacy'],manual:['手動登錄','is-manual'],'daily-log':['每日施工同步','is-synced'],ambiguous:['來源待確認','is-legacy']}[source.kind]||['來源待確認','is-legacy'],projectPayment=commissionSettlementStatusForRow(row,settlementCache);
+      return {row,employeeName:label(state,'employees',row.employee,row.employeeName||'—'),projectName:label(state,'projects',row.project,row.projectName||'—'),source,sourceView,gross:isProspective?null:grossOf(state,row),locked,actions:isProspective?`<button type="button" data-view-commission-agreement="${esc(row.project||'')}">查看已核定約定</button><span class="commission-status is-settled">金額固定</span>`:locked?`<span class="commission-status is-settled" title="${source.kind==='orphan-billing'?'此抽成已納入真正已付款薪資，不能直接清除來源。':'此紀錄已納入已付款薪資，為保留歷史帳務不可修改。'}">已付款鎖定</span>`:isDaily?'<span class="commission-status" title="請由每日施工來源調整">來源同步</span>':`<div class="commission-row-actions"><button type="button" data-edit="${esc(row.id)}">編輯</button><button type="button" data-delete="${esc(row.id)}">刪除</button></div>`,payrollRecords:linkedPayroll.length,payrollCommission:linkedPayroll.filter((item)=>item.status!=='已付款').reduce((sum,item)=>sum+number(item.commission),0),payrollLabel:row.status==='已列入薪資'?'已列入薪資':'未列入薪資',payrollClass:row.status==='已列入薪資'?'is-settled':'is-unsettled',projectPayment};
     });
   }
   function commissionPresentationAttributes(view) {
     return `data-row-id="${esc(view.row.id)}" data-source-integrity="${esc(view.source.kind)}" data-payroll-records="${view.payrollRecords}" data-payroll-commission="${view.payrollCommission}"`;
   }
   function commissionMobileCards(views) {
-    return `<div class="commission-mobile-list">${views.map((view)=>{const row=view.row;return `<article class="commission-mobile-card" ${commissionPresentationAttributes(view)}><header><span>${esc(row.date||'—')}</span><span class="commission-status ${view.projectPayment.className}">${view.projectPayment.label}</span></header><div class="commission-mobile-primary"><strong>${esc(view.employeeName)}</strong><span>${esc(view.projectName)}</span></div><div class="commission-mobile-source"><span class="workforce-source-badge ${view.sourceView[1]}">${view.sourceView[0]}</span>${row.sourceNo?`<small class="workforce-source-no">${esc(row.sourceNo)}</small>`:''}</div><dl><div><dt>含稅金額</dt><dd>${money(view.gross)}</dd></div><div><dt>未稅金額</dt><dd>${money(row.untaxedAmount)}</dd></div><div><dt>抽成 %</dt><dd>${number(row.rate)}%</dd></div><div><dt>抽成金額</dt><dd>${money(row.commission)}</dd></div><div><dt>薪資狀態</dt><dd><span class="commission-status ${view.payrollClass}">${view.payrollLabel}</span></dd></div><div><dt>案場抽成付款</dt><dd><span class="commission-status ${view.projectPayment.className}">${view.projectPayment.label}</span></dd></div></dl><footer>${view.actions}</footer></article>`}).join('')||'<p class="commission-mobile-empty">此篩選條件下沒有業績／抽成紀錄。</p>'}</div>`;
+    return `<div class="commission-mobile-list">${views.map((view)=>{const row=view.row;return `<article class="commission-mobile-card" ${commissionPresentationAttributes(view)}><header><span>${esc(row.date||'—')}</span><span class="commission-status ${view.projectPayment.className}">${view.projectPayment.label}</span></header><div class="commission-mobile-primary"><strong>${esc(view.employeeName)}</strong><span>${esc(view.projectName)}</span></div><div class="commission-mobile-source"><span class="workforce-source-badge ${view.sourceView[1]}">${view.sourceView[0]}</span>${row.sourceNo?`<small class="workforce-source-no">${esc(row.sourceNo)}</small>`:''}</div><dl><div><dt>含稅金額</dt><dd>${view.gross===null?'—':money(view.gross)}</dd></div><div><dt>${prospectiveCommission(row)?'抽成基數':'未稅金額'}</dt><dd>${money(row.untaxedAmount)}</dd></div><div><dt>抽成 %</dt><dd>${number(row.rate)}%</dd></div><div><dt>抽成金額</dt><dd>${money(row.commission)}</dd></div><div><dt>薪資狀態</dt><dd><span class="commission-status ${view.payrollClass}">${view.payrollLabel}</span></dd></div><div><dt>案場抽成付款</dt><dd><span class="commission-status ${view.projectPayment.className}">${view.projectPayment.label}</span></dd></div></dl><footer>${view.actions}</footer></article>`}).join('')||'<p class="commission-mobile-empty">此篩選條件下沒有業績／抽成紀錄。</p>'}</div>`;
   }
   function settlementHistoryRows(state) {
     return (state.commissionSettlements||[]).filter((row)=>{
@@ -376,7 +386,7 @@
   }
   function commissionSection(state, rows) {
     const views=buildCommissionPresentationRows(state,rows);
-    return `<section class="commission-panel commission-table-panel"><header><div><h2>業績／抽成</h2><p>薪資列入狀態與案場抽成實際付款分開呈現，避免把「已列入薪資」誤認為「已付款」。</p></div><button class="commission-primary commission-settlement-open" id="projectCommissionSettlementOpen" type="button">案場抽成結算</button></header><div class="commission-table-wrap commission-desktop-table"><table class="commission-table workforce-commission-table"><thead><tr><th>${sortButton('date','日期')}</th><th>${sortButton('employee','員工')}</th><th>${sortButton('project','案場')}</th><th>業績來源</th><th class="num">含稅金額</th><th class="num">${sortButton('untaxedAmount','未稅金額')}</th><th class="num">${sortButton('rate','抽成 %')}</th><th class="num">${sortButton('commission','抽成金額')}</th><th>${sortButton('status','薪資狀態')}</th><th>案場抽成付款</th><th>操作</th></tr></thead><tbody>${views.map((view)=>{const row=view.row;return `<tr ${commissionPresentationAttributes(view)}><td>${esc(row.date||'—')}</td><td><b>${esc(view.employeeName)}</b></td><td>${esc(view.projectName)}</td><td><span class="workforce-source-badge ${view.sourceView[1]}">${view.sourceView[0]}</span>${row.sourceNo?`<small class="workforce-source-no">${esc(row.sourceNo)}</small>`:''}</td><td class="num">${money(view.gross)}</td><td class="num">${money(row.untaxedAmount)}</td><td class="num">${number(row.rate)}%</td><td class="num"><b>${money(row.commission)}</b></td><td><span class="commission-status ${view.payrollClass}">${view.payrollLabel}</span></td><td><span class="commission-status ${view.projectPayment.className}">${view.projectPayment.label}</span></td><td>${view.actions}</td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="11">此篩選條件下沒有業績／抽成紀錄。</td></tr>'}</tbody></table></div>${commissionMobileCards(views)}</section>${settlementHistorySection(state)}`;
+    return `<section class="commission-panel commission-table-panel"><header><div><h2>業績／抽成</h2><p>薪資列入狀態與案場抽成實際付款分開呈現，避免把「已列入薪資」誤認為「已付款」。</p></div><button class="commission-primary commission-settlement-open" id="projectCommissionSettlementOpen" type="button">案場抽成結算</button></header><div class="commission-table-wrap commission-desktop-table"><table class="commission-table workforce-commission-table"><thead><tr><th>${sortButton('date','日期')}</th><th>${sortButton('employee','員工')}</th><th>${sortButton('project','案場')}</th><th>業績來源</th><th class="num">含稅金額</th><th class="num">${sortButton('untaxedAmount','未稅額／抽成基數')}</th><th class="num">${sortButton('rate','抽成 %')}</th><th class="num">${sortButton('commission','抽成金額')}</th><th>${sortButton('status','薪資狀態')}</th><th>案場抽成付款</th><th>操作</th></tr></thead><tbody>${views.map((view)=>{const row=view.row;return `<tr ${commissionPresentationAttributes(view)}><td>${esc(row.date||'—')}</td><td><b>${esc(view.employeeName)}</b></td><td>${esc(view.projectName)}</td><td><span class="workforce-source-badge ${view.sourceView[1]}">${view.sourceView[0]}</span>${row.sourceNo?`<small class="workforce-source-no">${esc(row.sourceNo)}</small>`:''}</td><td class="num">${view.gross===null?'—':money(view.gross)}</td><td class="num">${money(row.untaxedAmount)}${prospectiveCommission(row)?'<small class="ca-status">新約定抽成基數</small>':''}</td><td class="num">${number(row.rate)}%</td><td class="num"><b>${money(row.commission)}</b></td><td><span class="commission-status ${view.payrollClass}">${view.payrollLabel}</span></td><td><span class="commission-status ${view.projectPayment.className}">${view.projectPayment.label}</span></td><td>${view.actions}</td></tr>`}).join('')||'<tr><td class="commission-empty" colspan="11">此篩選條件下沒有業績／抽成紀錄。</td></tr>'}</tbody></table></div>${commissionMobileCards(views)}</section>${settlementHistorySection(state)}`;
   }
 
   function settlementHouseGroups(preview) {
@@ -468,7 +478,16 @@
   function buildSummaryRows(state, attendanceRows, commissionRows) {
     const grouped=new Map(),ensure=(employeeId,fallback='—')=>{if(!employeeId)return null;if(!grouped.has(employeeId))grouped.set(employeeId,{employeeId,name:label(state,'employees',employeeId,fallback),days:0,hours:0,work:0,untaxed:0,commission:0});return grouped.get(employeeId)};
     attendanceRows.forEach((row)=>{const target=ensure(employeeIdOf(row),row.employeeName||'—');if(!target)return;target.days+=number(row.days);target.hours+=number(row.hours);target.work+=number(row.amount)});
-    commissionRows.forEach((row)=>{const target=ensure(employeeIdOf(row),row.employeeName||'—');if(!target)return;target.untaxed+=number(row.untaxedAmount);target.commission+=number(row.commission)});
+    commissionRows.forEach((row)=>{const target=ensure(employeeIdOf(row),row.employeeName||'—');if(!target)return;if(!prospectiveCommission(row))target.untaxed+=number(row.untaxedAmount);target.commission+=number(row.commission)});
+    // Each new agreement participant uses the full approved basis for their
+    // individual rate. Employee performance remains the saved daily share.
+    const query=filters.query.trim().toLocaleLowerCase('zh-Hant');
+    (state.dailyLogs||[]).filter(prospectiveCommission).forEach(log=>{
+      if(filters.month&&!String(log.date||'').startsWith(filters.month)||filters.employee&&String(log.employee)!==String(filters.employee)||filters.project&&String(log.project)!==String(filters.project))return;
+      const employee=label(state,'employees',log.employee,log.employeeName||''),project=label(state,'projects',log.project,log.projectName||'');
+      if(query&&!`${employee} ${project} ${log.note||''} ${log.billingNo||''}`.toLocaleLowerCase('zh-Hant').includes(query))return;
+      const target=ensure(employeeIdOf(log),log.employeeName||'—');if(target)target.untaxed+=number(log.performance);
+    });
     const rows=[...grouped.values()].sort((a,b)=>a.name.localeCompare(b.name,'zh-Hant'));
     return rows.map((row)=>({...row,payrollStatus:payrollState(state,row.employeeId,filters.month)}));
   }
@@ -564,7 +583,7 @@
     $('#commissionsApp').innerHTML = `
       <section class="commissions-heading workforce-heading">
         <div><h1>出勤／業績管理</h1><p>整合每日作業、點工薪資、員工業績與抽成結算</p></div>
-        <div class="workforce-heading-actions">${window.KusheAuthGate?.companyContext?.()?.role==='owner'?'<button class="commission-secondary" id="openCommissionCorrectionReview" type="button" data-k25-open>歷史抽成更正核對</button>':''}<button class="commission-secondary" id="openCommissionAudit" type="button">歷史抽成查核（唯讀）</button><button class="commission-secondary" id="manualCommission" type="button">新增手動抽成</button><button class="commission-primary" id="addCommission" type="button">＋ 新增每日作業</button></div>
+        <div class="workforce-heading-actions">${window.KusheAuthGate?.companyContext?.()?.role==='owner'?'<button class="commission-secondary" id="openCommissionCorrectionReview" type="button" data-k25-open>歷史抽成更正核對</button>':''}<button class="commission-secondary" id="openCommissionAudit" type="button">歷史抽成查核（唯讀）</button><button class="commission-secondary" id="openCommissionAgreements" type="button">新約定抽成核定</button><button class="commission-secondary" id="manualCommission" type="button">新增手動抽成</button><button class="commission-primary" id="addCommission" type="button">＋ 新增每日作業</button></div>
       </section>
       ${workforceKpis(view)}
       <section class="commission-panel commission-filters workforce-filters" aria-label="共用搜尋與篩選">
@@ -585,6 +604,7 @@
   function bind() {
     $('#addCommission')?.addEventListener('click', () => openDailyDrawer());
     $('#manualCommission')?.addEventListener('click', () => openDrawer());
+    $('#openCommissionAgreements')?.addEventListener('click',()=>openCommissionAgreements({projectId:filters.project}));
     $('#openCommissionAudit')?.addEventListener('click',()=>window.KuSheCommissionHistoryAudit?.open?.(store));
     $('#commissionMonthFilter').addEventListener('change', (event) => { commitSearchForAction(); filters.month = event.target.value; refreshWorkforceResults(); });
     $('#commissionEmployeeFilter').addEventListener('change', (event) => { commitSearchForAction(); filters.employee = event.target.value; refreshWorkforceResults(); });
@@ -630,6 +650,7 @@
   function bindWorkforcePanel() {
     const panel = $('.workforce-tab-panel', $('#commissionsApp'));
     $$('[data-sort]', panel).forEach((button) => button.addEventListener('click', () => { commitSearchForAction(); const key = button.dataset.sort; filters.direction = filters.sort === key && filters.direction === 'desc' ? 'asc' : 'desc'; filters.sort = key; refreshWorkforceResults(); }));
+    $$('[data-view-commission-agreement]',panel).forEach(button=>button.onclick=()=>openCommissionAgreements({projectId:button.dataset.viewCommissionAgreement}));
     $$('[data-edit]', panel).forEach((button) => button.addEventListener('click', () => openDrawer(button.dataset.edit)));
     $$('[data-delete]', panel).forEach((button) => button.addEventListener('click', () => remove(button.dataset.delete)));
     $$('[data-daily-view]', panel).forEach((button)=>button.addEventListener('click',()=>openDailyDetail(button.dataset.dailyView,button)));
@@ -662,8 +683,9 @@
     stopDailyDrawerViewport();dailyEditorActive=true;
     const decimal=value=>new Intl.NumberFormat('zh-TW',{maximumFractionDigits:6}).format(number(value));
     const groupHtml=(group,gi)=>{
+      const agreementLog=batch.logs.find(log=>(log.groupId||log.id)===group.groupId&&prospectiveCommission(log)),agreement=agreementLog?window.KusheCommissionAgreements?.dailyInfo(agreementLog)?.agreement:null;
       const rows=group.rows.filter(row=>row.editable),display=window.KusheDisplaySort?.sortWorkRows?window.KusheDisplaySort.sortWorkRows(rows.map(row=>({...row.item,sourceIndex:row.index}))):rows.map(row=>({...row.item,sourceIndex:row.index}));
-      return `<section class="unbilled-group" data-unbilled-group="${gi}"><header><h3>${esc(group.projectName||'施工案場')}</h3><p>${esc(group.employeeNames.join('、'))} · 已請款及不列入請款 ${group.rows.length-rows.length} 項保留</p></header>${!group.safe?`<p class="unbilled-notice">${esc(group.reason)}</p>`:`<div>${display.map(item=>`<div class="unbilled-item"><div><b>${esc(item.house||'未指定戶別')} · ${esc(item.item||item.itemName)}</b><small>原數量 ${decimal(item.qty)} ${esc(item.unit)} · 單價 $${decimal(item.inputPrice??item.unitPrice??item.price)}（${esc(item.taxMode||'未稅')}）</small></div><label><span>修改後總數量</span><input data-unbilled-qty="${gi}:${item.sourceIndex}" type="number" min="0.000001" step="any" inputmode="decimal" required value="${esc(item.qty)}" aria-label="${esc(item.house+' '+(item.item||item.itemName)+' 修改後總數量')}"></label></div>`).join('')}</div><div data-unbilled-additions="${gi}"></div><button class="commission-secondary" type="button" data-unbilled-add="${gi}">＋ 追加施工項目</button>`}</section>`;
+      return `<section class="unbilled-group" data-unbilled-group="${gi}"><header><h3>${esc(group.projectName||'施工案場')}</h3><p>${esc(group.employeeNames.join('、'))} · 已請款及不列入請款 ${group.rows.length-rows.length} 項保留</p></header>${agreement?`<section class="commission-agreement-panel"><b>本組沿用新約定：${esc(agreement.workScope)}</b><p>約定依據 ${esc(agreement.reference)}。只更新未核定施工暫估；不同新約定的工作請另建每日作業。</p><label class="ca-check"><input type="checkbox" data-unbilled-agreement-confirmed="${gi}"><span>確認本次修改及追加仍屬於這份已保存的新約定範圍，員工、比例及付款約定保持不變。</span></label></section>`:''}${!group.safe?`<p class="unbilled-notice">${esc(group.reason)}</p>`:`<div>${display.map(item=>`<div class="unbilled-item"><div><b>${esc(item.house||'未指定戶別')} · ${esc(item.item||item.itemName)}</b><small>原數量 ${decimal(item.qty)} ${esc(item.unit)} · 單價 $${decimal(item.inputPrice??item.unitPrice??item.price)}（${esc(item.taxMode||'未稅')}）</small></div><label><span>修改後總數量</span><input data-unbilled-qty="${gi}:${item.sourceIndex}" type="number" min="0.000001" step="any" inputmode="decimal" required value="${esc(item.qty)}" aria-label="${esc(item.house+' '+(item.item||item.itemName)+' 修改後總數量')}"></label></div>`).join('')}</div><div data-unbilled-additions="${gi}"></div><button class="commission-secondary" type="button" data-unbilled-add="${gi}">＋ 追加施工項目</button>`}</section>`;
     };
     layer.innerHTML=`<div class="commission-drawer-backdrop" data-unbilled-close></div><aside class="commission-drawer daily-drawer unbilled-drawer" role="dialog" aria-modal="true" aria-labelledby="unbilledTitle"><header><div><h2 id="unbilledTitle">編輯未請款明細</h2><p>${esc(batch.date)} · ${esc(batch.employees.join('、'))}</p></div><button type="button" class="commission-drawer-close" data-unbilled-close aria-label="關閉">×</button></header><form id="dailyWorkForm"><div class="daily-drawer-body"><p class="unbilled-notice">數量請填修改後的總數。例如原有 10、追加 3，請填 13。新項目會加入這筆每日作業；日期、員工與原單價維持不變。</p>${preview.groups.map(groupHtml).join('')}<section class="unbilled-review" id="unbilledReview" aria-live="polite" hidden></section><p id="unbilledError" role="alert" hidden></p></div><footer><button type="button" class="commission-secondary" data-unbilled-close>取消</button><button class="commission-primary" type="submit">檢查變更</button></footer></form></aside>`;
     layer.hidden=false;layer.classList.add('is-open');
@@ -671,6 +693,7 @@
     let reviewed='',committed=false;
     const clearReview=()=>{reviewed='';review.hidden=true;errorBox.hidden=true;submit.textContent='檢查變更'};
     form.addEventListener('input',clearReview);form.addEventListener('change',clearReview);
+    form.addEventListener('input',event=>{if(!event.target.matches('[data-unbilled-agreement-confirmed]'))$$('[data-unbilled-agreement-confirmed]',form).forEach(input=>input.checked=false);});
     const isCurrent=()=>dailyEditorActive&&form.isConnected&&$('#dailyWorkForm',layer)===form;
     const close=()=>{if(dailySubmitInFlight||!isCurrent())return;layer.onkeydown=null;closeDrawer()};
     $$('[data-unbilled-close]',layer).forEach(button=>button.onclick=close);
@@ -705,14 +728,16 @@
       if(!form.reportValidity())return;
       const {changes,additions}=collect(),payload={expectedFingerprint:preview.fingerprint,changes:changes.map(({groupId,workItemId,qty})=>({groupId,workItemId,qty})),additions},signature=JSON.stringify(payload);
       if(!changes.length&&!additions.length){errorBox.textContent='尚未變更施工明細';errorBox.hidden=false;return}
+      const touched=new Set([...changes,...additions].map(row=>row.groupId));for(const input of $$('[data-unbilled-agreement-confirmed]',form)){if(touched.has(preview.groups[Number(input.dataset.unbilledAgreementConfirmed)].groupId)&&!input.checked){errorBox.textContent='請確認本次修改仍屬於原新約定範圍；不同約定請另建每日作業。';errorBox.hidden=false;input.focus();return;}}
       if(reviewed!==signature){
         const taxRate=number(state.settings.defaultTax)||5,amount=(qty,price,tax)=>tax==='含稅'?Math.round(number(qty)*number(price)/(1+taxRate/100)):number(qty)*number(price),delta=changes.reduce((sum,row)=>sum+amount(row.qty,row.old.inputPrice??row.old.unitPrice??row.old.price,row.old.taxMode)-number(row.old.untaxedSubtotal),0)+additions.reduce((sum,row)=>sum+amount(row.qty,row.inputPrice,row.taxMode),0);
-        review.innerHTML=`<h3>確認本次變更</h3><ul>${changes.map(row=>`<li>${esc(row.group.projectName)}／${esc(row.old.house||'未指定戶別')}／${esc(row.old.item||row.old.itemName)}：${decimal(row.old.qty)} → <b>${decimal(row.qty)}</b> ${esc(row.old.unit)}</li>`).join('')}${additions.map(row=>`<li>追加 ${esc(row.house)}／${esc(row.item)}：${decimal(row.qty)} ${esc(row.unit)} × $${decimal(row.inputPrice)}（${esc(row.taxMode)}）</li>`).join('')}</ul><p>待請款未稅金額：${money(batch.billingSummary.remainingAmount)} → <b>${money(batch.billingSummary.remainingAmount+delta)}</b></p><p>儲存後，同步更新這筆施工的業績與未付款抽成。</p>`;
+        review.innerHTML=`<h3>確認本次變更</h3><ul>${changes.map(row=>`<li>${esc(row.group.projectName)}／${esc(row.old.house||'未指定戶別')}／${esc(row.old.item||row.old.itemName)}：${decimal(row.old.qty)} → <b>${decimal(row.qty)}</b> ${esc(row.old.unit)}</li>`).join('')}${additions.map(row=>`<li>追加 ${esc(row.house)}／${esc(row.item)}：${decimal(row.qty)} ${esc(row.unit)} × $${decimal(row.inputPrice)}（${esc(row.taxMode)}）</li>`).join('')}</ul><p>待請款未稅金額：${money(batch.billingSummary.remainingAmount)} → <b>${money(batch.billingSummary.remainingAmount+delta)}</b></p><p>${batch.logs.some(prospectiveCommission)?'儲存後更新施工業績；新約定僅更新暫估，原約定依原流程處理。':'儲存後，同步更新這筆施工的業績與未付款抽成。'}</p>`;
         review.hidden=false;reviewed=signature;submit.textContent='確認儲存';review.scrollIntoView({block:'nearest',behavior:'smooth'});return;
       }
       dailySubmitInFlight=true;
       const enabled=$$('input,select,button',layer).filter(node=>!node.disabled);enabled.forEach(node=>node.disabled=true);submit.textContent='儲存中…';errorBox.hidden=true;
       try{
+        if(batch.logs.some(prospectiveCommission)){if(!window.KusheCloudSync?.prepareBillingAllowanceWrite)throw new Error('雲端新約定保護尚未載入，請重新整理。');await window.KusheCloudSync.prepareBillingAllowanceWrite();}
         await store.saveDailyUnbilledItems(batchId,payload);committed=true;
         const result=store.getLastStoreTransactionResult?.();if(result?.status==='COMMITTED_WITH_NOTIFICATION_WARNING')showManualCommittedWarning(result);
       }catch(error){
@@ -756,7 +781,7 @@
     projectGroups.forEach(log=>(log.items||[]).forEach(item=>lines.push({project:log.project,house:item.house||'',item:item.itemName||item.item||'',unit:item.unit||'式',qty:number(item.qty),inputPrice:number(item.unitPrice??item.inputPrice??item.price),taxMode:item.taxMode||'未稅',billable:item.billable!==false,workItemId:item.workItemId||'',sourceType:item.sourceType||(item.quotationId?'quotation':'manual'),quotationId:item.quotationId||item.quoteId||'',quotationLineId:item.quotationLineId||item.quoteLineId||'',quotationNo:item.quotationNo||'',pricingType:item.pricingType||'actual',lumpSumAmount:number(item.lumpSumAmount)})));
     const emptyLine=(project='',house='')=>({project,house,item:'',unit:'式',qty:'',inputPrice:0,taxMode:'未稅',billable:true,workItemId:'',sourceType:'',pricingType:'actual'});
     if(!lines.length&&!workOnly)lines=[emptyLine()];
-    const workLog=logs.find(log=>log.workMode&&log.workMode!=='none')||{},initialWorkMode=workLog.workMode||'none',commissionEnabled=!workOnly&&(!logs.length||logs.some(log=>number(log.performance)>0)),layer=$('#commissionDrawerLayer');
+    const workLog=logs.find(log=>log.workMode&&log.workMode!=='none')||{},initialWorkMode=workLog.workMode||'none',commissionEnabled=!workOnly&&(!logs.length||logs.some(log=>number(log.performance)>0||prospectiveCommission(log))),layer=$('#commissionDrawerLayer');
     const projectOptions=(selected='')=>`<option value="">請選擇案場</option>${store.masterOptions('projects').map(project=>`<option value="${esc(project.id)}" ${String(project.id)===String(selected)?'selected':''}>${esc(label(store.getState(),'customers',project.customer,project.customerName||'未指定客戶'))}｜${esc(project.name)}</option>`).join('')}`;
     let employeeOptions=store.masterOptions('employees');
     const defaultCommissionRate=employee=>employee.commissionRate===undefined||employee.commissionRate===null||employee.commissionRate===''?25:number(employee.commissionRate);
@@ -844,6 +869,7 @@
       if(poolStatus){poolStatus.dataset.valid=String(pctValid);poolStatus.textContent=form.elements.commissionEnabled.checked?'總抽成分配 '+pctTotal.toFixed(2)+'% / 50%'+(pctValid?' ✓':'（須合計 50% 才能儲存）'):'本次不計抽成';}
       $('#dailyCommissionTotal',layer).textContent=!isWorkOnly&&form.elements.commissionEnabled.checked&&!pctValid?'比例待調整':money(commission);$('#dailyBillingTotal',layer).textContent=money(billing);$('#dailyWorkTotal',layer).textContent=money(work);if(workQtyLabel)workQtyLabel.textContent=mode==='hourly'?'點工時數':'點工天數';$$('[data-work-card]',workRatePanel).forEach(card=>{const input=$('input[name="dailyWorkRate"]',card),total=$('[data-work-card-total]',card),rate=number(input?.value);if(total)total.textContent=rate>0&&qty>0?money(rate*qty):'尚未計算'});$$('.daily-house-group',body).forEach(group=>{$('.daily-house-subtotal',group).textContent=money(isWorkOnly?0:$$('.daily-line',group).reduce((sum,row)=>sum+number(row.dataset.previewSubtotal),0))});
       totals.hidden=isWorkOnly;
+      form._dailySubmitContext?.agreements?.refresh();
       const filled=$$('.daily-line',body).filter(row=>Number($('.daily-line-qty',row).value)>0),houses=new Set(filled.map(row=>groupKey(groupProject(row),groupHouse(row.closest('.daily-house-group')))));
       $('#dailyDraftCount',form).textContent=isWorkOnly?`${ids.length} 位員工 · 點工薪資 ${money(work)}`:`${ids.length} 位員工 · ${houses.size} 戶 · ${filled.length} 項施工`;
       const staff=ids.map(id=>{const employee=employeeOptions.find(item=>String(item.id)===id);return `${employee?.name||id} ${rates[id]??commissionRateDraft[id]}%（未稅）`});
@@ -874,6 +900,7 @@
       const block=document.createElement('section');block.className='daily-form-section daily-project-block';block.dataset.project=String(project||'');
       block.innerHTML=`<header class="daily-house-header"><div class="daily-house-project-control"><label><span>客戶｜案場（此區只選一次）</span><select class="daily-house-project">${projectOptions(project)}</select></label><button type="button" class="commission-secondary daily-quick-project-open">＋ 新增案場</button></div><div class="daily-house-actions"><button type="button" class="commission-secondary daily-project-remove">移除此案場</button></div></header><div class="daily-house-groups" data-project-houses></div><footer class="daily-section-title"><div><button type="button" class="commission-secondary daily-next-house">＋ 下一戶，沿用品項</button><p class="daily-next-source"></p></div></footer>`;
       body.appendChild(block);const select=$('.daily-house-project',block);
+      form._dailySubmitContext?.agreements?.refresh();
       select.onchange=()=>{if(select.value&&$$('.daily-project-block',body).some(other=>other!==block&&$('.daily-house-project',other).value===select.value)){select.value=block.dataset.project;window.KushePhase1?.toast('此案場已在本批次，請於原案場區塊新增戶別');return false}block.dataset.project=select.value;$$('.daily-house-group',block).forEach(group=>{group.dataset.project=select.value;groupRows(group).forEach(row=>{const context=$('.daily-line-project',row);context.value=select.value;context.onchange()})});return true};
       $('.daily-quick-project-open',block).onclick=()=>openQuickProject(block);
       $('.daily-project-remove',block).onclick=()=>{block.remove();if(!body.children.length)createGroup('','',[emptyLine()],createProjectBlock(''));calc()};
@@ -1077,7 +1104,7 @@
       rows.forEach((row,index)=>{const draft=rowDraft(row),project=current.projects.find(item=>String(item.id)===String(draft.project)),fail=(message,field)=>{const error=new Error(`第 ${index+1} 筆施工：${message}`);Object.assign(error,{dailyRowIndex:index,dailyField:field});throw error};if(!project||!project.customer||!current.customers.some(item=>String(item.id)===String(project.customer)))fail('請選擇有有效客戶關聯的案場','project');if(!draft.house&&!(legacyItems.has(draft.workItemId)&&!String(legacyItems.get(draft.workItemId).house||'').trim()))fail('請填寫戶別','house');if(!draft.item)fail('請填寫施工品項','item');if(!/^\d+(?:\.\d+)?$/.test(draft.qty.trim())||!Number.isFinite(Number(draft.qty))||Number(draft.qty)<=0||Number(draft.qty)>Number.MAX_SAFE_INTEGER)fail('數量必須是有限正數，不可空白','qty');if(draft.sourceType==='quotation'||draft.quotationId||draft.quotationLineId){if(!draft.quotationId||!draft.quotationLineId||!quoteChoices(draft.project).some(item=>String(item.quotationId)===draft.quotationId&&String(item.quotationLineId)===draft.quotationLineId))fail('報價項目已失效，請重新選擇正式報價來源','quotation')}else if(draft.sourceType!=='manual')fail('請選擇報價品項或明確使用手動施工','quotation');if(draft.workItemId&&ids.has(draft.workItemId))fail('施工來源識別重複','item');if(draft.workItemId)ids.add(draft.workItemId)});
       if(!rows.length)throw new Error('請至少填寫一筆施工項目');
     };
-    form._dailySubmitContext={batchId,strictRows:true,workOnly:()=>form.elements.entryMode?.value==='workOnly',validateRows,showRowError,afterCommit:async()=>{if(batchId||form.elements.entryMode?.value==='workOnly'){dailySubmitInFlight=false;closeDrawer();render();return}const templates=$$('.daily-project-block',body).map(block=>{const group=block._dailyTemplate&&block.contains(block._dailyTemplate)?block._dailyTemplate:$('.daily-house-group',block);return {project:groupProject(block),lines:group?groupRows(group).map(nextHouseLine):[]}});state=store.getState();body.replaceChildren();templates.forEach(template=>{const block=createProjectBlock(template.project);createGroup(template.project,'',template.lines.length?template.lines:[emptyLine(template.project)],block)});calc();form.dataset.committed='false';$('.daily-house-name',body)?.focus()}};
+    form._dailySubmitContext={batchId,strictRows:true,workOnly:()=>form.elements.entryMode?.value==='workOnly',validateRows,showRowError,afterCommit:async()=>{if(batchId||form.elements.entryMode?.value==='workOnly'){dailySubmitInFlight=false;closeDrawer();render();return}const templates=$$('.daily-project-block',body).map(block=>{const group=block._dailyTemplate&&block.contains(block._dailyTemplate)?block._dailyTemplate:$('.daily-house-group',block);return {project:groupProject(block),lines:group?groupRows(group).map(nextHouseLine):[]}});form._dailySubmitContext?.agreements?.captureNext();state=store.getState();body.replaceChildren();templates.forEach(template=>{const block=createProjectBlock(template.project);createGroup(template.project,'',template.lines.length?template.lines:[emptyLine(template.project)],block)});form._dailySubmitContext?.agreements?.restoreNext();calc();form.dataset.committed='false';$('.daily-house-name',body)?.focus()}};
     form.onsubmit=event=>{if(!quantityLayer.hidden){event.preventDefault();return}return submitDaily(event)};
     $$('.commission-drawer-backdrop,.commission-drawer-close,[data-cancel]',layer).forEach(button=>button.addEventListener('click',closeDrawer));
     // Bind essential controls before optional commission-panel initialization.
@@ -1095,6 +1122,7 @@
       const row=$$('.daily-line',form).sort((a,b)=>number(a.dataset.draftOrder)-number(b.dataset.draftOrder))[index];
       if(row){refreshChoices(row);applyChoice(row);calc()}
     };
+    if(window.KusheCommissionAgreements)form._dailySubmitContext.agreements=window.KusheCommissionAgreements.attachDaily(form,{batchId,logs});
     if(window.KusheDailyDraftReview)form._dailySubmitContext.review=window.KusheDailyDraftReview.attach(form,form._dailySubmitContext,state);
     startDailyDrawerViewport(layer);
   }
@@ -1116,7 +1144,10 @@
   function readDailyDraft(form,context,rows=$$('.daily-line',form).sort((a,b)=>number(a.dataset.draftOrder)-number(b.dataset.draftOrder))) {
       const workOnly=Boolean(context?.workOnly?.());
       const lines=workOnly?[]:rows.map(row=>({project:$('.daily-line-project',row).value,house:$('.daily-line-house',row).value.trim(),item:row.dataset.itemName||$('.daily-line-item',row).value.trim(),itemName:row.dataset.itemName||$('.daily-line-item',row).value.trim(),unit:$('.daily-line-unit',row).value.trim()||'式',qty:context?.strictRows?$('.daily-line-qty',row).value:number($('.daily-line-qty',row).value),inputPrice:number($('.daily-line-price',row).value),unitPrice:number($('.daily-line-price',row).value),taxMode:$('.daily-line-tax',row).value,billable:row.dataset.pricingType!=='lump_sum'&&$('.daily-billable input',row).checked,sourceType:row.dataset.sourceType||'manual',pricingType:row.dataset.pricingType||'actual',quotationId:row.dataset.quotationId||'',quotationLineId:row.dataset.quotationLineId||'',quotationNo:row.dataset.quotationNo||'',quoteId:row.dataset.quotationId||'',quoteLineId:row.dataset.quotationLineId||'',lumpSumAmount:number(row.dataset.lumpSumAmount),workItemId:row.dataset.workItemId||''}));
-      return {date:form.elements.date.value,employeeIds:$$('input[name="dailyEmployees"]:checked',form).map(input=>input.value),commissionRates:Object.fromEntries($$('input[name="dailyCommissionRate"]',form).map(input=>[input.dataset.employeeId,input.value])),commissionBases:Object.fromEntries($$('select[name="dailyCommissionBasis"]',form).map(select=>[select.dataset.employeeId,select.value])),workRates:Object.fromEntries($$('input[name="dailyWorkRate"]',form).map(input=>[input.dataset.employeeId,input.value])),lines,workOnly,commissionEnabled:workOnly?false:form.elements.commissionEnabled.checked,workMode:form.elements.workMode.value,workQty:number(form.elements.workQty.value),note:(workOnly?form.elements.workDescription.value:form.elements.note.value).trim()};
+      const values = {date:form.elements.date.value,employeeIds:$$('input[name="dailyEmployees"]:checked',form).map(input=>input.value),commissionRates:Object.fromEntries($$('input[name="dailyCommissionRate"]',form).map(input=>[input.dataset.employeeId,input.value])),commissionBases:Object.fromEntries($$('select[name="dailyCommissionBasis"]',form).map(select=>[select.dataset.employeeId,select.value])),workRates:Object.fromEntries($$('input[name="dailyWorkRate"]',form).map(input=>[input.dataset.employeeId,input.value])),lines,workOnly,commissionEnabled:workOnly?false:form.elements.commissionEnabled.checked,workMode:form.elements.workMode.value,workQty:number(form.elements.workQty.value),note:(workOnly?form.elements.workDescription.value:form.elements.note.value).trim()};
+      const agreements=context?.agreements?.read();
+      if(agreements&&Object.keys(agreements).length)values.commissionAgreementsByProject=agreements;
+      return values;
   }
   async function submitDaily(event) {
     event.preventDefault();const form=event.currentTarget,context=form._dailySubmitContext;
@@ -1128,6 +1159,7 @@
     try{
       const workOnly=Boolean(context?.workOnly?.());
       context?.validateRows(rows);
+      context?.agreements?.validate();
       values=readDailyDraft(form,context,rows);
       context?.review?.beforeSubmit();
     }catch(error){dailySaveError(form,context,error,rows);return}
@@ -1138,6 +1170,7 @@
     enabledControls.forEach(input=>{input.disabled=true});
     let batchId;
     try{
+      await context?.agreements?.beforeSubmit(values);
       batchId=await store.saveDailyBatch(values,context?.batchId??editingDailyBatch,context?.strictRows?{strictRows:true,draftRowKeys:rows.map(row=>row.dataset.draftRowKey),...context?.review?.saveOptions(values)}:{});
     }catch(error){
       dailySubmitInFlight=false;
@@ -1159,7 +1192,7 @@
         window.KusheRecovery?.showResult(result);
       }else{
         dailySaveFeedback(form,'本筆已儲存；已保留案場與品項，請填下一戶及數量。','success');
-        window.KushePhase1?.toast('每日施工、抽成、點工與待請款已同步儲存');
+        window.KushePhase1?.toast(Object.keys(values.commissionAgreementsByProject||{}).length?'每日施工與新約定暫估已儲存；正式抽成請另行核定。':'每日施工、抽成、點工與待請款已同步儲存');
       }
     }catch(error){
       const warning={status:'COMMITTED_WITH_NOTIFICATION_WARNING',operationId:result?.operationId||'',notificationWarnings:[String(error?.message||error)]};
@@ -1300,6 +1333,7 @@
     const state = store.getState();
     const row = id ? state.commissions.find((item) => item.id === id) : null;
     if(row&&store.payrollHistoryLock(row.employee,row.date).locked)return window.KushePhase1?.toast('此抽成紀錄已納入已付款薪資，為保留歷史帳務不可修改或刪除。');
+    if(prospectiveCommission(row))return openCommissionAgreements({projectId:row.project});
     if(row?.sourceType==='daily-log')return window.KushePhase1?.toast('每日施工衍生抽成必須由每日施工來源調整。');
     stopManualDrawerViewport();
     manualDrawerGeneration += 1;
@@ -1309,6 +1343,7 @@
     layer.innerHTML = `<button class="commission-drawer-backdrop" type="button" aria-label="關閉"></button><aside class="commission-drawer" role="dialog" aria-modal="true" aria-labelledby="commissionDrawerTitle">
       <header><div><small>${editingId ? '編輯既有紀錄' : '建立新紀錄'}</small><h2 id="commissionDrawerTitle">${editingId ? '編輯業績' : '新增業績'}</h2></div><button class="commission-drawer-close" type="button" aria-label="關閉">×</button></header>
       <form id="commissionForm"><div class="commission-drawer-body">
+        ${!row?'<section class="full commission-agreement-panel"><b>原約定／補登既有抽成</b><p>此表保留原計算流程。新議定且採議價折讓後未稅基數的工作，請建立獨立新約定。</p><button class="commission-secondary" type="button" data-manual-new-agreement>建立新約定抽成</button></section>':''}
         <label><span>日期 *</span><input name="date" type="date" value="${esc(row?row.date||'':today())}" required></label>
         <label><span>員工 *</span><select name="employee" required>${options(state.employees, row?.employee || '', '請選擇員工')}</select></label>
         <label><span>案場 *</span><select name="project" required>${options(state.projects, row?.project || '', '請選擇案場')}</select></label>
@@ -1326,6 +1361,7 @@
     layer.hidden = false;
     requestAnimationFrame(() => layer.classList.add('is-open'));
     const form = $('#commissionForm', layer);
+    $('[data-manual-new-agreement]',form)?.addEventListener('click',()=>{try{if(!window.KusheCommissionAgreements)throw new Error('新約定抽成元件尚未載入，請重新整理。');const projectId=form.elements.project.value;closeDrawer();window.KusheCommissionAgreements.openManual({projectId});}catch(error){window.KushePhase1?.toast(error.message||String(error));}});
     const context=form._manualCommissionContext={amountMode:row?'existing':'manual',expectedCommissionSnapshot:row?JSON.stringify(row):undefined,billingSnapshot:'',sourceError:''};
     const unchanged=()=>Boolean(row)&&context.amountMode==='existing'&&['date','employee','project','sourceNo'].every(name=>String(form.elements[name].value)===String(row[name]||''))&&form.elements.status.value===(row.status==='已列入薪資'?'已列入薪資':'未列入薪資')&&number(form.elements.untaxedAmount.value)===number(row.untaxedAmount)&&number(form.elements.rate.value)===number(row.rate);
     const validateSource=()=>{
@@ -1387,6 +1423,7 @@
     if(dailySubmitInFlight||$('#dailyWorkForm')?._dailySubmitContext?.review?.busy)return;
     if($('#dailyWorkForm')?._dailySubmitContext?.review?.allowClose()===false)return;
     $('#dailyWorkForm')?._dailySubmitContext?.review?.dispose();
+    $('#dailyWorkForm')?._dailySubmitContext?.agreements?.dispose();
     const wasManual=$('#commissionDrawerLayer')?.dataset.drawerMode==='manual';
     if(manualSubmitInFlight&&wasManual)return;
     stopDailyDrawerViewport();
@@ -1493,6 +1530,7 @@
     searchComposing = false;
     searchRenderPending = false;
     $('#dailyWorkForm')?._dailySubmitContext?.review?.dispose();
+    $('#dailyWorkForm')?._dailySubmitContext?.agreements?.dispose();
     active = false; stopDailyDrawerViewport(); stopManualDrawerViewport(); closeDailyDetail(); closeProjectCommissionSettlementDrawer(); dailyDetailNeedsRefresh=false; dailyDetailContext=null; dailyEditorActive = false;
   }
   window.addEventListener('kushe:data-updated', () => { if (active && !quickProjectSaveActive && !dailySubmitInFlight && !dailyEditorActive && !manualDrawerActive && !settlementDrawerActive) refreshWorkforceResults(); });

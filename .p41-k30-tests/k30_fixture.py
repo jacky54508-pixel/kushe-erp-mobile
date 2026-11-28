@@ -40,7 +40,7 @@ HTML = HTML.replace('<div id="commissionsApp"></div>', '''
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <main class="page-frame"><section class="view" id="billingsView"><div id="billingsApp"></div></section><section class="view" id="receivablesView"><div id="receivablesApp"></div></section><div id="settingsApp"></div></main>''')
 HTML = HTML.replace("'use strict';", """'use strict';
-window.__k30CloudReady={ready:true,reason:'SYN-K30 explicit isolated capability fixture',capability:'billing-allowances-v1'};
+window.__k30CloudReady={ready:true,reason:'SYN-K30 explicit isolated capability fixture',capability:'billing-allowances-v2'};
 window.KusheCloudSync={billingAllowanceWriteReadiness:()=>({...__k30CloudReady}),prepareBillingAllowanceWrite:async()=>({...__k30CloudReady}),deviceSecurityStatus:()=>({trusted:true,mode:'trusted'}),subscribe:()=>()=>{}};
 window.__k30Toasts=[];window.KushePhase1={toast:m=>__k30Toasts.push(String(m)),navigate(){}};
 window.KusheKpi={register(){}};window.KusheIcons={render(){}};

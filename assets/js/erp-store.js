@@ -535,7 +535,7 @@
     // journal, mirror or commit token. The original layers remain reviewable.
     let allowanceEmergencyCandidate=null;
     try{const raw=localStorage.getItem(EMERGENCY_KEY);allowanceEmergencyCandidate=raw?JSON.parse(raw):null}catch(_){}
-    try{for(const candidate of [persistentValue,allowanceEmergencyCandidate,window.KuSheLegacyData?.getState?.()])if(candidate?.meta?.billingAllowances!==undefined)billingAllowanceValidateSnapshot(candidate)}catch(error){state=null;throw error}
+    try{for(const candidate of [persistentValue,allowanceEmergencyCandidate,window.KuSheLegacyData?.getState?.()])if(candidate)billingAllowanceValidateSnapshot(candidate)}catch(error){state=null;throw error}
     if(db&&!recoveryVerification){
       await bootstrapLegacyStore();
       persistentValue=await dbGetCommitted(STATE_KEY);state=persistentValue;
@@ -2857,7 +2857,7 @@
         const keyPayments=(state.salaryPayments||[]).filter(row=>Array.isArray(row.commissionSelectionKeys)&&row.commissionSelectionKeys.includes(key));
         if(keyPayments.length!==1||keyPayments[0]!==payment)return reject('同一戶別抽成另有付款紀錄');
         const source=allocation.source;
-        if(source.sourceType!=='daily-log'&&commissionBillingLink(source).kind!=='linked')return reject('已付抽成的請款來源無法核對');
+        if(source.sourceType!=='daily-log'&&source.commissionPolicy!==COMMISSION_POLICY&&commissionBillingLink(source).kind!=='linked')return reject('已付抽成的請款來源無法核對');
         if((state.commissionSettlements||[]).some(settlement=>settlementUsesWholeCommission(settlement,text(source.id))||settlementAllocationKeys(settlement).has(key)))return reject('同一抽成同時出現在不同付款紀錄');
         selectedAmount+=num(allocation.amount);paidKeys.add(key);
       }
@@ -2936,7 +2936,7 @@
     const allocationPayments=rows('salaryPayments').filter(row=>(Array.isArray(row.commissionSelectionKeys)?row.commissionSelectionKeys:[]).some(key=>{try{const value=JSON.parse(key);return Array.isArray(value)&&monthCommissionIds.has(String(value[0]));}catch(_){return false;}}));
     const allocationSettlements=rows('commissionSettlements').filter(row=>commissionSettlementSourceIds(row).some(id=>monthCommissionIds.has(String(id))));
     const salaryPaymentEvidence={transactions:ordered(transactions),banks:ordered(rows('banks').filter(row=>bankIds.has(String(row.id)))),allocationPayments:ordered(allocationPayments),allocationSettlements:ordered(allocationSettlements)};
-    return {date,month,batchId:editingBatchId,employees:ordered(rows('employees').filter(row=>employees.has(String(row.id)))),projects:ordered(selectedProjects),customers:ordered(rows('customers').filter(row=>customers.has(String(row.id)))),quotations:ordered(rows('quotations').filter(row=>quotations.has(String(row.id)))),taxRate:source?.settings?.defaultTax,logs:ordered(logs),previous:ordered(previous),commissions:ordered(rows('commissions').filter(row=>row.sourceType==='daily-log'&&logIds.has(String(row.sourceId)))),payroll:ordered(payroll),payments:ordered(payments),settlements:ordered(settlements),salaryMonthSources,salaryPaymentEvidence};
+    return {date,month,batchId:editingBatchId,employees:ordered(rows('employees').filter(row=>employees.has(String(row.id)))),projects:ordered(selectedProjects),customers:ordered(rows('customers').filter(row=>customers.has(String(row.id)))),quotations:ordered(rows('quotations').filter(row=>quotations.has(String(row.id)))),taxRate:source?.settings?.defaultTax,logs:ordered(logs),previous:ordered(previous),commissions:ordered(rows('commissions').filter(row=>row.sourceType==='daily-log'&&logIds.has(String(row.sourceId)))),payroll:ordered(payroll),payments:ordered(payments),settlements:ordered(settlements),salaryMonthSources,salaryPaymentEvidence,commissionAgreementsByProject:values.commissionAgreementsByProject||{},commissionPolicyRecords:COMMISSION_POLICY_KEYS.map(key=>({key,rows:source?.meta?.[key]||[]}))};
   }
   function dailyDraftSnapshot(values={},editingBatchId='',source=state) {
     return storeStateFingerprint(dailyDraftScope(values,editingBatchId,source));
@@ -3102,6 +3102,7 @@
     });
     const byProject = new Map();
     prepared.forEach((line) => { if (!byProject.has(line.project)) byProject.set(line.project, []); byProject.get(line.project).push(line); });
+    const prospectiveAgreements=commissionPolicyDailyAgreements(values,previous,batchId,byProject);
     const sortedEmployeeIds = [...employeeIds].sort((a, b) => {
       const left = String(a), right = String(b);
       return left < right ? -1 : left > right ? 1 : 0;
@@ -3125,10 +3126,12 @@
         const billableTotal = projectLines.filter((line) => line.billable).reduce((sum, line) => sum + num(line.untaxedSubtotal), 0);
         const canAddWork = firstProject && !(workMode === 'daily' && hasDaily);
         const untaxedPerformance=splitPerformanceAmount(total,sortedEmployeeIds.length,performanceIndexByEmployeeId.get(employeeId)),taxIncludedPerformance=splitPerformanceAmount(taxIncludedTotal,sortedEmployeeIds.length,performanceIndexByEmployeeId.get(employeeId)),untaxedCommissionBaseAmount=total,taxIncludedCommissionBaseAmount=taxIncludedTotal,commissionBaseAmount=commissionBasis==='taxIncluded'?taxIncludedCommissionBaseAmount:untaxedCommissionBaseAmount,performance=untaxedPerformance;
-        const commissionEnabledForLog=values.commissionEnabled!==false,commissionAmount=commissionEnabledForLog?Math.round(commissionBaseAmount*commissionRate/100):0;
+        const prospectiveAgreement=prospectiveAgreements.get(String(projectId));
+        const commissionEnabledForLog=values.commissionEnabled!==false,estimatedCommission=commissionEnabledForLog?Math.round(commissionBaseAmount*commissionRate/100):0,commissionAmount=prospectiveAgreement?0:estimatedCommission;
         const resolvedWorkMode = canAddWork ? workMode : 'none';
         const hasCommission=commissionAmount>0;
         const log = {id:uid(),batchId,groupId:`${batchId}:${projectId}`,date,employee:employeeId,employeeName:employee.name||'',customer:project.customer||'',customerName:customer.name||project.customerName||'',project:projectId,projectName:project.name||'',payType:hasCommission&&resolvedWorkMode!=='none'?'業績抽成／點工':hasCommission?'業績抽成':resolvedWorkMode!=='none'?'點工':'僅業績',items:projectLines.map((line)=>({...line})),groupTotal:total,grossTotal:projectLines.reduce((sum,line)=>sum+num(line.subtotal),0),billingTotal:billableTotal,billable:billableTotal>0,billingStatus:billableTotal>0?'未請款':'',billingId:'',billingNo:'',performance,untaxedPerformance,taxIncludedPerformance,untaxedCommissionBaseAmount,taxIncludedCommissionBaseAmount,commissionBasis,commissionBaseAmount,commissionEnabled:commissionEnabledForLog,rate:commissionRate,commission:commissionAmount,workMode:resolvedWorkMode,workQty:canAddWork?workQty:0,workRate:canAddWork?employeeWorkRate:0,isPrimaryWork:canAddWork,workOnly:false,note:values.note||'',createdAt:previous[0]?.createdAt||now,updatedAt:now};
+        if(prospectiveAgreement)Object.assign(log,{commissionAgreementId:prospectiveAgreement.id,commissionPolicy:COMMISSION_POLICY,estimatedCommission,payType:resolvedWorkMode!=='none'?'抽成預估／點工':'抽成預估待定案'});
         state.dailyLogs.unshift(log); syncDailyLogLinks(log,null,paidMonthAppends); firstProject = false;
       });
     });
@@ -3153,6 +3156,7 @@
       if(new Set(employeeIds).size!==members.length||employeeIds.some(id=>!id)||new Set(ids).size!==ids.length||ids.some(id=>!id))block('施工來源識別不完整或重複，請先查核');
       if(state.dailyLogs.filter(log=>(log.groupId||log.id)===groupId).length!==members.length||members.some(log=>log.project!==first.project||log.customer!==first.customer||log.date!==first.date||log.noInvoice||log.billable===false||JSON.stringify(log.items)!==JSON.stringify(items)))block('同一施工的員工副本不一致，請先查核');
       members.forEach(log=>{
+        if(log.commissionAgreementId&&commissionPolicyLifecycle(log.commissionAgreementId))block('新約定已定案或取消，原施工內容不可修改；請另建新的工作範圍');
         const linked=state.commissions.filter(row=>row.sourceType==='daily-log'&&row.sourceId===log.id);
         if(payrollHistoryLock(log.employee,log.date).locked||state.payroll.some(row=>row.employee===log.employee&&row.month===monthOf(log.date)&&row.status==='已付款'))block('相關薪資已付款，無法修改施工來源');
         if(dailyLogCommissionSettlementLock(log).locked||linked.some(row=>commissionSettlementLock(row).locked))block('相關抽成已發放，無法修改施工來源');
@@ -3232,14 +3236,17 @@
     patches.forEach(({group,items},groupId)=>{
       const members=batchRows(batchId).filter(log=>(log.groupId||log.id)===groupId),oldItems=members[0].items,oldBasis=commissionBasisAmounts(oldItems),newBasis=commissionBasisAmounts(items),deltaPre=newBasis.preTax-oldBasis.preTax,deltaTax=newBasis.taxIncluded-oldBasis.taxIncluded,deltaGross=items.reduce((sum,row)=>sum+num(row.subtotal),0)-oldItems.reduce((sum,row)=>sum+num(row.subtotal),0),sorted=members.map(log=>log.employee).sort();
       if(!Number.isFinite(newBasis.taxIncluded)||newBasis.taxIncluded>Number.MAX_SAFE_INTEGER||newBasis.preTax>Number.MAX_SAFE_INTEGER)fail('施工合計超過可儲存範圍');
-      const rates=members.filter((log)=>log.commissionEnabled!==false&&Number(log.rate)>0);
+      const prospectiveAgreementId=members[0]?.commissionAgreementId||'';
+      if(prospectiveAgreementId&&(members.some(log=>log.commissionAgreementId!==prospectiveAgreementId)||commissionPolicyLifecycle(prospectiveAgreementId)))fail('新約定來源不一致或已定案，不能修改原工作');
+      const rates=members.filter((log)=>!log.commissionAgreementId&&log.commissionEnabled!==false&&Number(log.rate)>0);
       if(rates.length&&(rates.reduce((total,log)=>total+Math.round(Number(log.rate)*100),0)!==5000||
         rates.some((log)=>normalizeCommissionBasis(log.commissionBasis)!=='preTax'||num(log.commission)!==Math.round(oldBasis.preTax*num(log.rate)/100))))
         fail('此歷史施工的抽成比例或計算尚未核對；請先使用抽成歷史查核，禁止修改施工數量時順帶重算舊薪資');
       members.forEach(log=>{
-        const i=sorted.indexOf(log.employee),preDelta=splitPerformanceAmount(newBasis.preTax,sorted.length,i)-splitPerformanceAmount(oldBasis.preTax,sorted.length,i),taxDelta=splitPerformanceAmount(newBasis.taxIncluded,sorted.length,i)-splitPerformanceAmount(oldBasis.taxIncluded,sorted.length,i),basis=normalizeCommissionBasis(log.commissionBasis),newBase=basis==='taxIncluded'?newBasis.taxIncluded:newBasis.preTax,nextCommission=log.commissionEnabled===false?0:Math.round(newBase*num(log.rate)/100),commissionDelta=nextCommission-num(log.commission),oldPerformance=num(log.performance);
+        const i=sorted.indexOf(log.employee),preDelta=splitPerformanceAmount(newBasis.preTax,sorted.length,i)-splitPerformanceAmount(oldBasis.preTax,sorted.length,i),taxDelta=splitPerformanceAmount(newBasis.taxIncluded,sorted.length,i)-splitPerformanceAmount(oldBasis.taxIncluded,sorted.length,i),basis=normalizeCommissionBasis(log.commissionBasis),newBase=basis==='taxIncluded'?newBasis.taxIncluded:newBasis.preTax,nextCommission=log.commissionAgreementId||log.commissionEnabled===false?0:Math.round(newBase*num(log.rate)/100),commissionDelta=nextCommission-num(log.commission),oldPerformance=num(log.performance);
         if(newBase<0||oldPerformance+preDelta<0||nextCommission<0)fail('調整後金額與原施工業績不一致，請先查核');
         Object.assign(log,{items:structuredClone(items),groupTotal:num(log.groupTotal)+deltaPre,grossTotal:num(log.grossTotal)+deltaGross,billingTotal:num(log.billingTotal)+deltaPre,performance:oldPerformance+preDelta,untaxedPerformance:num(log.untaxedPerformance??oldPerformance)+preDelta,taxIncludedPerformance:num(log.taxIncludedPerformance??splitPerformanceAmount(oldBasis.taxIncluded,sorted.length,i))+taxDelta,untaxedCommissionBaseAmount:newBasis.preTax,taxIncludedCommissionBaseAmount:newBasis.taxIncluded,commissionBaseAmount:newBase,commission:nextCommission,updatedAt:now});
+        if(log.commissionAgreementId)log.estimatedCommission=Math.round(newBase*num(log.rate)/100);
         // Attendance, work wages, billing headers and all source IDs remain intact.
         const linked=state.commissions.find(row=>row.sourceType==='daily-log'&&row.sourceId===log.id);
         if(linked)Object.assign(linked,{untaxedAmount:log.untaxedPerformance,commissionBaseAmount:newBase,commission:log.commission,updatedAt:now});
@@ -3257,6 +3264,7 @@
   }
   async function deleteDailyBatch(batchId) {
     requireStoreTransactionDraft(); const rows = batchRows(batchId); if (!rows.length) return false;
+    if(rows.some(log=>log.commissionAgreementId&&commissionPolicyLifecycle(log.commissionAgreementId)?.eventType!=='cancel'))throw commissionPolicyError('COMMISSION_AGREEMENT_SOURCE_LOCKED','新約定工作不可直接刪除；未請款的預估請先明確取消約定，已定案來源須保留');
     if (rows.some((log) => log.billingId || (log.billingStatus && log.billingStatus !== '未請款'))) throw new Error('已進入請款流程的施工紀錄不可刪除');
     if (rows.some((log)=>dailyLogPayrollDeleteLock(log).locked)) throw new Error(PAID_PAYROLL_SOURCE_ERROR);
     rows.forEach((log) => {
@@ -3320,6 +3328,7 @@
   async function saveCommission(values, id) {
     requireStoreTransactionDraft();
     const existing = id ? state.commissions.find((x) => x.id === id) : null;
+    if(existing?.commissionPolicy===COMMISSION_POLICY||existing?.commissionFinalizationId||values.commissionPolicy||values.commissionAgreementId||values.commissionFinalizationId)throw commissionPolicyError('COMMISSION_FINALIZATION_REQUIRED','新約定抽成必須由完整定案入口建立；不可改寫已核定來源或把舊抽成改套新制');
     const allowanceCommissionBilling=values.billing||existing?.billingId||(['billing','billing-commission','billing_commission'].includes(existing?.sourceType)?existing?.sourceId:'');
     if(allowanceCommissionBilling&&billingAllowanceActiveLock(allowanceCommissionBilling))throw allowanceError('COMMISSION_POLICY_REVIEW','此來源折讓後的抽成政策尚未核定，保留既有抽成並暫停修改');
     if(id&&!existing)throw new Error('原業績已不存在，請重新開啟紀錄，不能當作新增重送。');
@@ -3367,6 +3376,7 @@
     requireStoreTransactionDraft();
     const row = state.commissions.find((x) => x.id === id);
     if (!row) return false;
+    if(row.commissionFinalizationId||commissionPolicyRecords().commissionPaymentTerms.some(term=>term.commissionId===String(row.id)))throw commissionPolicyError('COMMISSION_FINALIZED_AMOUNT_IMMUTABLE','已有定案或付款條款核對的抽成來源不可刪除');
     const source=commissionBillingLink(row);
     if (payrollHistoryLock(row.employee,row.date).locked||commissionSettlementLock(row).locked) throw new Error(source.kind==='orphan-billing'?PAID_ORPHAN_COMMISSION_ERROR:PAID_COMMISSION_SOURCE_ERROR);
     if (row.sourceType === 'daily-log') throw new Error(DAILY_LOG_COMMISSION_ERROR);
@@ -3587,6 +3597,7 @@
     const bankLinked=state.bankTransactions.some((row)=>String(row.billingId||'')===String(billing.id)||String(row.receivableId||'')===String(receivable.id)||[String(billing.id),String(receivable.id)].includes(String(row.sourceId||''))||receiptIds.has(String(row.sourceId||''))||receiptIds.has(String(row.receiptId||''))||receiptIds.has(String(row.retentionReceiptId||''))||(String(row.sourceNo||'')===String(billing.number||'')&&/receipt|receivable|retention|收款|應收|保留/i.test(`${row.sourceType||''} ${row.category||''}`)));
     const issuedInvoice=billingInvoiceStatus(billing)==='invoiced'||Boolean(String(billing.invoiceNo||'').trim())||billingInvoiceRecords(billing).some((row)=>invoiceStatus(row.status,row.invoiceNumber||row.number)==='issued'||Boolean(String(row.invoiceNumber||row.number||'').trim()));
     let reason='';
+    if(commissionPolicyRecords().commissionFinalizations.some(event=>event.eventType==='finalize'&&event.billingSnapshots.some(snapshot=>snapshot.billingId===String(billing.id))))reason='已有新約定抽成定案，原請款金額與工作範圍不可改寫或刪除';
     try{if(billingAllowanceHistoryLock(billing.id))reason='已有折讓／撤銷歷程，原單與來源不可改寫或刪除'}catch(error){reason=error.message}
     if(!reason&&externalBillingMembership(billing.id).length)reason='已納入對外合併請款，原單編刪暫鎖定；請先核對並解除分組';
     else if(receivable.receivableCheques!==undefined&&(!Array.isArray(receivable.receivableCheques)||receivable.receivableCheques.length))reason='已有支票登記／歷程，為保留票據關聯不可改刪請款';
@@ -4956,6 +4967,14 @@
   }
   function commissionAllocationReleaseState(row,allocation) {
     const sourceType=String(row?.sourceType||''),billingSet=new Map(),result={unlocked:false,releaseStatus:'來源待核對',billingIds:[],billingNumbers:[],customerId:String(row?.customer||''),customerName:'',projectId:String(row?.project||''),projectName:row?.projectName||'',receivedAmount:0,receivableAmount:0};
+    const explicitTerm=commissionPolicyRecords().commissionPaymentTerms.find(term=>term.commissionId===String(row?.id||''));
+    if(row?.commissionPolicy===COMMISSION_POLICY||explicitTerm?.mode==='agreed-date'){
+      const due=row?.commissionPolicy===COMMISSION_POLICY?row.paymentTerms?.dueDate:explicitTerm.agreedDueDate,terms=row?.commissionPolicy===COMMISSION_POLICY?row.paymentTerms?.terms:explicitTerm.reference;
+      if(!due||!/^\d{4}-\d{2}-\d{2}$/.test(due)){result.releaseStatus='付款約定待核對';return result}
+      result.agreedDueDate=due;result.paymentTerms=terms;result.commissionPolicy=row.commissionPolicy||'legacy-confirmed-terms';result.unlocked=due<=businessDate();result.releaseStatus=result.unlocked?'依約可發':'約定付款日未到';
+      const ids=new Set(row.billingIds||[]);if(row.commissionAgreementId)for(const log of state.dailyLogs||[])if(log.commissionAgreementId===row.commissionAgreementId)for(const item of log.items||[])if(item.billingId)ids.add(String(item.billingId));
+      if(row.billingId)ids.add(String(row.billingId));result.billingIds=[...ids];result.billingNumbers=(state.billings||[]).filter(bill=>ids.has(String(bill.id))).map(bill=>String(bill.number||''));result.customerName=state.customers.find(customer=>String(customer.id)===result.customerId)?.name||'';return result;
+    }
     if(sourceType==='daily-log'&&row?.sourceId){
       const logs=(state.dailyLogs||[]).filter((log)=>String(log.id||'')===String(row.sourceId));
       if(logs.length!==1)return result;
@@ -4975,7 +4994,9 @@
       billingSet.set(String(link.billing.id),link.billing);
     }
     const billings=[...billingSet.values()];if(!billings.length){result.releaseStatus='未請款';return result}
-    const states=billings.map((billing)=>({billing,receipt:billingReceiptState(billing)}));
+    const states=billings.map((billing)=>{if(explicitTerm?.mode!=='effective-collection')return {billing,receipt:billingReceiptState(billing)};const financial=billingFinancialState(billing.id);return {billing,valid:financial.valid,receipt:financial.valid?{status:financial.settlement.outstanding===0?'已收':financial.settlement.received>0?'部分收款':'未收',received:financial.settlement.received,receivable:{amount:financial.effective.receivable}}:{status:'來源待核對',received:0,receivable:{amount:0}}}});
+    if(states.some(item=>item.valid===false))return result;
+    if(explicitTerm){result.paymentTerms=explicitTerm.reference;result.commissionPolicy='legacy-confirmed-terms';result.paymentTermMode=explicitTerm.mode}
     result.billingIds=billings.map((billing)=>String(billing.id));result.billingNumbers=billings.map((billing)=>String(billing.number||'')).filter(Boolean);
     if(!result.customerId)result.customerId=String(billings[0]?.customer||'');
     result.customerName=state.customers.find((customer)=>String(customer.id)===result.customerId)?.name||billings[0]?.customerName||'';
@@ -5602,20 +5623,318 @@
     }));
   }
   function invoiceAllowanceRows(snapshot) {return allowanceAccountingRows(snapshot).filter(row=>row.invoiceStage==='postinvoice')}
+  // K30: prospective agreements are explicit source records. Existing work is
+  // never enrolled by a date, an employee default, a load or a discount.
+  const COMMISSION_POLICY='discounted-pretax-v1';
+  const COMMISSION_POLICY_START='2026-11-28';
+  const COMMISSION_POLICY_KEYS=['commissionAgreements','commissionFinalizations','commissionPaymentTerms'];
+  const commissionPolicyError=(code,message)=>allowanceError(code,message);
+  function commissionPolicyRecords(source=state) {
+    const result={};
+    for(const key of COMMISSION_POLICY_KEYS){const rows=source?.meta?.[key];if(rows!==undefined&&(!Array.isArray(rows)||rows.length>10000))throw commissionPolicyError('COMMISSION_POLICY_LEDGER_INVALID','新約定／定案／付款條款歷程格式待核對，保留原資料並停止寫入');result[key]=rows||[]}
+    return result;
+  }
+  function commissionPolicyDate(value,label) {return chequeDate(value,label)}
+  function commissionPolicyText(value,label,required=true) {return externalBillingText(value,label,1000,required)}
+  function commissionPolicyAccess() {
+    const access=allowanceWriteAccess();if(access.blockers.length)throw commissionPolicyError(access.blockers[0].code,access.blockers[0].message);
+    const epoch=ephemeralSessionEpoch,prior=activeStoreTransaction?.preCommitGuard;
+    if(activeStoreTransaction)activeStoreTransaction.preCommitGuard=()=>{if(prior)prior();const next=allowanceWriteAccess();if(next.blockers.length)throw commissionPolicyError(next.blockers[0].code,next.blockers[0].message);if(epoch!==ephemeralSessionEpoch||next.owner.userId!==access.owner.userId||next.owner.companyId!==access.owner.companyId)throw commissionPolicyError('COMMISSION_AGREEMENT_PRINCIPAL_CHANGED','登入或公司已變更，請重新核對新約定')};
+    return access.owner;
+  }
+  function commissionPolicyWorkContent(log) {
+    const copy=storeStateClone(log);for(const key of ['billingId','billingIds','billingNo','billingStatus','updatedAt'])delete copy[key];
+    copy.items=(copy.items||[]).map(item=>{const row={...item};for(const key of ['billingId','billingNo','billingStatus'])delete row[key];return row});return copy;
+  }
+  function commissionPolicyBillingOriginal(billing) {
+    const keys=['id','date','number','customer','project','taxMode','lines','amount','preTaxAmount','tax','taxAmount','grossTotal','taxIncludedAmount','total','retention','retentionAmount','retentionRate','retentionBase','retentionMode','sourceType','sourceItemRefs','sourceContractRefs','receivableId'];
+    return Object.fromEntries(keys.filter(key=>hasOwn(billing,key)).map(key=>[key,storeStateClone(billing[key])]));
+  }
+  function commissionPolicyLifecycle(agreementId,source=state) {return commissionPolicyRecords(source).commissionFinalizations.find(event=>event.agreementIds?.includes(agreementId))||null}
+  function commissionPolicyAgreement(id,source=state) {
+    const rows=commissionPolicyRecords(source).commissionAgreements.filter(row=>row.id===String(id||''));
+    if(rows.length!==1)throw commissionPolicyError('COMMISSION_AGREEMENT_NOT_FOUND','找不到唯一的新約定來源');return rows[0];
+  }
+  function commissionPolicyGroup(agreement,source=state) {
+    const logs=(source.dailyLogs||[]).filter(log=>String(log.commissionAgreementId||'')===agreement.id);
+    if(agreement.kind==='manual')return {logs:[],items:[],originalUntaxed:agreement.originalUntaxedAmount,unbilledUntaxed:agreement.billingIds.length?0:agreement.originalUntaxedAmount};
+    const fail=()=>{throw commissionPolicyError('COMMISSION_AGREEMENT_SOURCE_INVALID','新約定施工來源、參與員工或凍結比例不一致')};
+    if(logs.length!==agreement.participants.length||new Set(logs.map(log=>String(log.employee))).size!==logs.length)fail();
+    const first=logs[0],items=first?.items||[];
+    for(const log of logs){const participant=agreement.participants.find(row=>row.employeeId===String(log.employee));if(!participant||String(log.groupId)!==agreement.groupId||String(log.project)!==agreement.projectId||String(log.date)!==agreement.workDate||log.commissionPolicy!==COMMISSION_POLICY||num(log.rate)!==participant.rate||num(log.commission)!==0||log.commissionEnabled===false||storeStateFingerprint(log.items||[])!==storeStateFingerprint(items))fail()}
+    if(!items.length||items.some(item=>!item.workItemId)||new Set(items.map(item=>item.workItemId)).size!==items.length)fail();
+    for(const [index,item] of items.entries()){
+      const linked=(source.billings||[]).filter(billing=>billingSourceRefs(billing).some(ref=>sourceMatches(ref,first,item,index))),id=String(item.billingId||'');
+      if(linked.length>1||linked.length===1&&String(linked[0].id)!==id||id&&(linked.length!==1||String(linked[0].id)!==id))throw commissionPolicyError('COMMISSION_AGREEMENT_SOURCE_INVALID','施工與請款來源未一一對應，不可同時計入已請款與未請款基數');
+    }
+    const amount=item=>Math.max(0,num(item.untaxedSubtotal));
+    return {logs,items,originalUntaxed:Math.round(items.reduce((sum,item)=>sum+amount(item),0)),unbilledUntaxed:Math.floor(items.filter(item=>!String(item.billingId||'')).reduce((sum,item)=>sum+amount(item),0))};
+  }
+  function commissionPolicyBuildAgreement(input,{kind,projectId,groupId='',workDate,participants,originalUntaxedAmount,billingIds=[]},source=state) {
+    if(!input||input.policy!==COMMISSION_POLICY||input.futureNewAgreementConfirmed!==true)throw commissionPolicyError('COMMISSION_AGREEMENT_CONFIRMATION_REQUIRED','請明確確認這是新議定的工作範圍；既有約定及補登舊工不可轉用新制');
+    const date=commissionPolicyDate(workDate,'施工日期'),agreedDate=commissionPolicyDate(input.agreedDate,'新約定日期'),startDate=commissionPolicyDate(input.startDate,'新約定開始日期');
+    if(agreedDate<COMMISSION_POLICY_START||startDate<COMMISSION_POLICY_START||agreedDate>startDate||startDate>date)throw commissionPolicyError('COMMISSION_AGREEMENT_DATE_INVALID','新約定須於 2026-11-28 起另行議定，並在本次工作開始前生效；補登舊工請保留原約定');
+    const project=(source.projects||[]).filter(row=>String(row.id)===String(projectId));if(project.length!==1)throw commissionPolicyError('COMMISSION_AGREEMENT_SOURCE_INVALID','請選擇唯一案場');
+    const reference=commissionPolicyText(input.reference,'新約定依據'),workScope=commissionPolicyText(input.workScope,'新約定工作範圍');
+    if(!Array.isArray(participants)||!participants.length||new Set(participants.map(row=>String(row.employeeId))).size!==participants.length)throw commissionPolicyError('COMMISSION_AGREEMENT_PARTICIPANTS_INVALID','請核對本次參與員工與個別約定比例');
+    const people=participants.map(person=>{const employeeId=String(person.employeeId||''),rate=Number(person.rate),override=input.participantPaymentTerms?.[employeeId]||{};
+      if((source.employees||[]).filter(row=>String(row.id)===employeeId).length!==1||!Number.isFinite(rate)||rate<0||rate>50||Math.abs(rate*100-Math.round(rate*100))>0.000001)throw commissionPolicyError('COMMISSION_AGREEMENT_PARTICIPANTS_INVALID','個別約定比例須為 0 至 50%，最多兩位小數');
+      const agreedDueDate=commissionPolicyDate(override.agreedDueDate??person.agreedDueDate??input.agreedDueDate,'約定付款日'),paymentTerms=commissionPolicyText(override.paymentTerms??person.paymentTerms??input.paymentTerms,'薪資付款約定');
+      if(agreedDueDate<agreedDate)throw commissionPolicyError('COMMISSION_AGREEMENT_DATE_INVALID','約定付款日不可早於新約定日期');return {employeeId,rate,agreedDueDate,paymentTerms};
+    }).sort((a,b)=>a.employeeId.localeCompare(b.employeeId));
+    if(people.reduce((sum,row)=>sum+Math.round(row.rate*100),0)!==5000)throw commissionPolicyError('COMMISSION_POOL_NOT_50','本次新約定參與人的比例合計須為 50%');
+    const owner=commissionPolicyAccess(),id='cag-'+uid();
+    return {schema:'kushe.commission.agreement.v1',id,policy:COMMISSION_POLICY,kind,scopeKey:kind==='daily'?'daily:'+groupId:'manual:'+id,groupId,projectId:String(projectId),customerId:String(project[0].customer||''),workDate:date,workScope,agreedDate,startDate,reference,originalUntaxedAmount:allowanceMoney(Math.round(originalUntaxedAmount),'原工作未稅額'),billingIds:[...new Set(billingIds.map(String))].sort(),participants:people,futureNewAgreementConfirmed:true,...(kind==='manual'?{manualSourceIdentity:JSON.stringify([String(projectId),date,workScope.replace(/\s+/g,' ').toLocaleLowerCase('zh-TW')])}:{}),companyId:owner.companyId,createdBy:owner.userId,createdAt:new Date().toISOString()};
+  }
+  function commissionPolicyDailyAgreements(values,previous,batchId,byProject) {
+    const carrier=values.commissionAgreementsByProject;
+    if(carrier!==undefined&&(!carrier||typeof carrier!=='object'||Array.isArray(carrier)))throw commissionPolicyError('COMMISSION_AGREEMENT_INVALID','逐案場新約定格式無效');
+    const result=new Map(),records=commissionPolicyRecords(),knownProjects=new Set([...byProject.keys()].map(String));
+    if(carrier&&Object.keys(carrier).some(key=>!knownProjects.has(key)))throw commissionPolicyError('COMMISSION_AGREEMENT_SOURCE_INVALID','新約定包含本次施工以外的案場');
+    for(const [projectId,lines] of byProject){
+      const prior=previous.filter(log=>String(log.project)===String(projectId)),priorIds=[...new Set(prior.map(log=>String(log.commissionAgreementId||'')))],input=carrier?.[projectId];
+      if(priorIds.some(Boolean)){
+        if(priorIds.length!==1||!priorIds[0]||!input)throw commissionPolicyError('COMMISSION_AGREEMENT_IMMUTABLE','既有新約定不可移除或改回原制');
+        const agreement=commissionPolicyAgreement(priorIds[0]);if(commissionPolicyLifecycle(agreement.id))throw commissionPolicyError('COMMISSION_AGREEMENT_FINALIZED','已定案或取消的新約定不可重新編輯');
+        const people=[...(values.employeeIds||[])].map(id=>({employeeId:String(id),rate:num(values.commissionRates?.[id])})).sort((a,b)=>a.employeeId.localeCompare(b.employeeId));
+        if(agreement.workDate!==String(values.date)||storeStateFingerprint(people)!==storeStateFingerprint(agreement.participants.map(({employeeId,rate})=>({employeeId,rate})))||input.policy!==COMMISSION_POLICY||input.futureNewAgreementConfirmed!==true||['workScope','agreedDate','startDate','reference'].some(key=>String(input[key]||'')!==String(agreement[key]||''))||agreement.participants.some(person=>String(input.participantPaymentTerms?.[person.employeeId]?.agreedDueDate??input.agreedDueDate)!==person.agreedDueDate||String(input.participantPaymentTerms?.[person.employeeId]?.paymentTerms??input.paymentTerms)!==person.paymentTerms))throw commissionPolicyError('COMMISSION_AGREEMENT_IMMUTABLE','新約定參與人、比例、日期或付款條款已凍結，請保留原約定並另建新工作範圍');
+        result.set(String(projectId),agreement);continue;
+      }
+      if(!input)continue;if(previous.length||prior.length)throw commissionPolicyError('COMMISSION_AGREEMENT_RETROFIT_FORBIDDEN','既有施工不可改套新約定；請另建未來新議定的工作範圍');
+      if(values.commissionEnabled===false||values.workOnly===true)throw commissionPolicyError('COMMISSION_AGREEMENT_INVALID','純點工或不計抽成的施工不可附加抽成新約定');
+      const participants=(values.employeeIds||[]).map(id=>({employeeId:String(id),rate:hasOwn(values.commissionRates||{},id)?Number(values.commissionRates[id]):Number((state.employees||[]).find(row=>String(row.id)===String(id))?.commissionRate??25)}));
+      const agreement=commissionPolicyBuildAgreement(input,{kind:'daily',projectId,groupId:`${batchId}:${projectId}`,workDate:values.date,participants,originalUntaxedAmount:commissionBasisAmounts(lines).preTax});
+      state.meta.commissionAgreements=[...(state.meta.commissionAgreements||records.commissionAgreements),agreement];result.set(String(projectId),agreement);
+    }
+    if(previous.some(log=>log.commissionAgreementId&&!knownProjects.has(String(log.project))))throw commissionPolicyError('COMMISSION_AGREEMENT_IMMUTABLE','不可在編輯批次時移除已保存的新約定案場');
+    return result;
+  }
+  function commissionPolicyBillingScopes(billing,source=state) {
+    const grouped=new Map(),seenItems=new Set(),records=commissionPolicyRecords(source),refs=billingSourceRefs(billing),manual=records.commissionAgreements.filter(row=>row.kind==='manual'&&row.billingIds.includes(String(billing.id)));
+    const add=(scopeKey,label,amount,agreementId='')=>{if(!grouped.has(scopeKey))grouped.set(scopeKey,{scopeKey,label,originalUntaxed:0,agreementId});grouped.get(scopeKey).originalUntaxed+=amount};
+    for(const ref of refs){
+      const matches=[];for(const log of source.dailyLogs||[])for(const [index,item] of (log.items||[]).entries())if(sourceMatches(ref,log,item,index))matches.push({log,item});
+      const groups=[...new Set(matches.map(({log})=>String(log.groupId||log.id)))];if(groups.length!==1)throw commissionPolicyError('COMMISSION_SOURCE_ALLOCATION_UNRESOLVED','請款的施工範圍無法唯一核對，不能猜測抽成分攤');
+      const {log,item}=matches[0],groupId=groups[0],scopeKey='daily:'+groupId,key=scopeKey+':'+item.workItemId;
+      if(seenItems.has(key))continue;seenItems.add(key);
+      if(matches.some(row=>String(row.item.workItemId)!==String(item.workItemId)||storeStateFingerprint(row.item)!==storeStateFingerprint(item)||row.item.billingId&&String(row.item.billingId)!==String(billing.id)))throw commissionPolicyError('COMMISSION_SOURCE_ALLOCATION_UNRESOLVED','同組員工的施工來源副本或請款歸屬不一致');
+      add(scopeKey,`${log.projectName||billing.projectName||'施工'}／${log.date||''}／${groupId}`,Math.max(0,num(item.untaxedSubtotal)),String(log.commissionAgreementId||''));
+    }
+    if(manual.length){if(manual.length!==1||grouped.size)throw commissionPolicyError('COMMISSION_DUPLICATE_SOURCE_CLAIM','手動新約定不能再次認領已有施工約定的來源');const agreement=manual[0];return [{scopeKey:agreement.scopeKey,label:agreement.workScope,originalUntaxed:num(billing.preTaxAmount??billing.amount),agreementId:agreement.id}]}
+    for(const ref of billing.sourceContractRefs||[]){const key='contract:'+String(ref.contractKey||'');if(!ref.contractKey)throw commissionPolicyError('COMMISSION_SOURCE_ALLOCATION_UNRESOLVED','總價來源識別不完整');add(key,ref.item||ref.contractKey,Math.max(0,num(ref.billingAmount)))}
+    if(!grouped.size)add('billing:'+billing.id+':remainder',billing.number||'其他請款來源',num(billing.preTaxAmount??billing.amount));
+    return [...grouped.values()].map(row=>({...row,originalUntaxed:Math.round(row.originalUntaxed)})).sort((a,b)=>a.scopeKey.localeCompare(b.scopeKey));
+  }
+  function commissionAgreementScopes(source=state) {
+    const response={agreements:[],issues:[]};try{commissionPolicyValidateSnapshot(source);const records=commissionPolicyRecords(source);
+      response.agreements=records.commissionAgreements.map(agreement=>{const lifecycle=commissionPolicyLifecycle(agreement.id,source),cancelled=lifecycle?.eventType==='cancel',group=cancelled?null:commissionPolicyGroup(agreement,source),result=lifecycle?.results?.find(row=>row.agreementId===agreement.id);return {...storeStateClone(agreement),status:cancelled?'cancelled':lifecycle?'finalized':'draft',estimatedBase:group?.originalUntaxed??agreement.originalUntaxedAmount,estimatedCommission:agreement.participants.reduce((sum,person)=>sum+Math.round((group?.originalUntaxed??agreement.originalUntaxedAmount)*person.rate/100),0),finalizationId:lifecycle?.id||'',finalBase:result?.base??null,finalCommissions:storeStateClone(result?.participants||[]),snapshot:storeFingerprintDigest(storeStateFingerprint({agreement,lifecycle,logs:group?.logs||[]}))}});
+    }catch(error){response.issues.push({code:error.code||'COMMISSION_POLICY_LEDGER_INVALID',message:error.message})}return response;
+  }
+  function createCommissionAgreement(input={}) {
+    requireStoreTransactionDraft();if(input.kind!=='manual'||input.confirmed!==true)throw commissionPolicyError('COMMISSION_AGREEMENT_CONFIRMATION_REQUIRED','請確認這是獨立的新議定手動工作範圍');
+    const billingIds=Array.isArray(input.billingIds)?input.billingIds.map(String):[],records=commissionPolicyRecords();
+    if(new Set(billingIds).size!==billingIds.length||billingIds.length>30)throw commissionPolicyError('COMMISSION_AGREEMENT_SOURCE_INVALID','請款來源不可重複');
+    for(const id of billingIds){const matches=(state.billings||[]).filter(row=>String(row.id)===id);if(matches.length!==1||billingSourceRefs(matches[0]).length||(state.dailyLogs||[]).some(log=>String(log.billingId||'')===id||(log.items||[]).some(item=>String(item.billingId||'')===id))||records.commissionAgreements.some(row=>row.billingIds.includes(id))||allowanceCommissionSources(state,[id]).commissionIds.length)throw commissionPolicyError('COMMISSION_DUPLICATE_SOURCE_CLAIM','手動新約定不能重新認領既有施工、抽成或已認領的請款來源');if(String(matches[0].project)!==String(input.projectId)||String(matches[0].date)<String(input.agreedDate))throw commissionPolicyError('COMMISSION_AGREEMENT_SOURCE_INVALID','請款案場或日期不屬於本次新約定')}
+    const agreement=commissionPolicyBuildAgreement(input,{kind:'manual',projectId:input.projectId,workDate:input.workDate,participants:input.participants,originalUntaxedAmount:allowanceMoney(input.originalUntaxedAmount,'原工作未稅額'),billingIds});
+    if(records.commissionAgreements.some(row=>row.manualSourceIdentity===agreement.manualSourceIdentity))throw commissionPolicyError('COMMISSION_DUPLICATE_SOURCE_CLAIM','同一獨立工作範圍已有新約定，不能換依據或重送建立第二次抽成');
+    state.meta.commissionAgreements=[...records.commissionAgreements,agreement];persist('建立新議定工作抽成約定',{agreementId:agreement.id,originalCommissionsPreserved:true});return agreement;
+  }
+  function commissionFinalizationPreview(input={}) {
+    const result={allowed:false,blockers:[],snapshot:'',agreements:[],allocationRows:[],billingTotals:[],results:[],allocations:[],billingSnapshots:[],sourceSnapshots:[]};
+    const block=(code,message)=>{if(!result.blockers.some(row=>row.code===code&&row.message===message))result.blockers.push({code,message})};
+    try{
+      commissionPolicyValidateSnapshot(state);const records=commissionPolicyRecords(),ids=input.agreementIds;
+      if(!Array.isArray(ids)||!ids.length||ids.length>100||ids.some(id=>typeof id!=='string'||!id)||new Set(ids).size!==ids.length)throw commissionPolicyError('COMMISSION_FINALIZATION_SCOPE_INVALID','請選擇 1 至 100 個不重複的新約定工作範圍');
+      const agreements=ids.map(id=>commissionPolicyAgreement(id));result.agreements=storeStateClone(agreements);
+      for(const agreement of agreements)if(commissionPolicyLifecycle(agreement.id))throw commissionPolicyError('COMMISSION_ALREADY_FINALIZED','所選工作範圍已定案或已取消，不可重複認列');
+      const selectedKeys=new Set(agreements.map(row=>row.scopeKey)),related=new Map(),groups=new Map();
+      for(const agreement of agreements){const group=commissionPolicyGroup(agreement);groups.set(agreement.id,group);
+        result.sourceSnapshots.push(...group.logs.map(log=>({dailyLogId:String(log.id),content:commissionPolicyWorkContent(log)})));
+        if(agreement.kind==='manual')for(const id of agreement.billingIds){const billing=(state.billings||[]).find(row=>String(row.id)===id);if(!billing)throw commissionPolicyError('COMMISSION_FINALIZATION_SOURCE_INVALID','手動約定的請款來源已不存在');related.set(id,billing)}
+        else for(const billing of state.billings||[]){const refs=billingSourceRefs(billing),linked=group.items.some(item=>String(item.billingId||'')===String(billing.id)),matches=refs.some(ref=>group.logs.some(log=>(log.items||[]).some((item,index)=>sourceMatches(ref,log,item,index))));if(linked||matches)related.set(String(billing.id),billing)}
+      }
+      const history=billingAllowanceLedger(),active=allowanceActiveEvents(history);
+      for(const [billingId,billing] of related){
+        const financial=billingFinancialState(billingId),scopes=commissionPolicyBillingScopes(billing),originalUntaxed=num(billing.preTaxAmount??billing.amount);
+        if(!financial.valid)throw commissionPolicyError('COMMISSION_FINALIZATION_SOURCE_INVALID',financial.issues.join('；'));
+        if(scopes.reduce((sum,row)=>sum+row.originalUntaxed,0)!==originalUntaxed)throw commissionPolicyError('COMMISSION_SOURCE_ALLOCATION_UNRESOLVED','原請款未稅額與原施工範圍合計不一致，請先核對原始工作依據，不猜測分攤');
+        if(!scopes.some(scope=>selectedKeys.has(scope.scopeKey)))throw commissionPolicyError('COMMISSION_SOURCE_ALLOCATION_UNRESOLVED','施工連結與請款原始來源不符');
+        result.billingTotals.push({billingId,billingNo:String(billing.number||''),originalUntaxed,effectiveUntaxed:financial.effective.untaxed});
+        result.billingSnapshots.push({billingId,originalUntaxed,effectiveUntaxed:financial.effective.untaxed,allowanceHistoryLength:history.length,allowanceIds:active.filter(event=>event.allocations.some(row=>row.billingId===billingId)).map(event=>event.id),sourceScopes:scopes.map(({scopeKey,originalUntaxed})=>({scopeKey,originalUntaxed})),originalSource:commissionPolicyBillingOriginal(billing)});
+        const exactOriginal=scopes.reduce((sum,row)=>sum+row.originalUntaxed,0)===originalUntaxed&&!financial.hasAllowance;
+        for(const scope of scopes){
+          const prior=records.commissionFinalizations.filter(event=>event.eventType==='finalize'&&event.results?.some(row=>row.scopeKey===scope.scopeKey));
+          const priorAllocation=prior.flatMap(event=>event.allocations).find(row=>row.billingId===billingId&&row.scopeKey===scope.scopeKey);
+          // An independently approved unbilled scope may be invoiced later. It
+          // remains a frozen wage, never a second claim against this invoice.
+          const requiredUntaxed=priorAllocation?priorAllocation.untaxedAmount:null;
+          result.allocationRows.push({billingId,billingNo:String(billing.number||''),scopeKey:scope.scopeKey,label:scope.label,agreementId:scope.agreementId,selected:selectedKeys.has(scope.scopeKey),originalUntaxed:scope.originalUntaxed,suggestedUntaxed:requiredUntaxed??(exactOriginal?scope.originalUntaxed:null),requiredUntaxed,unbilled:false,maximumUntaxed:Math.min(scope.originalUntaxed,financial.effective.untaxed)});
+        }
+      }
+      for(const agreement of agreements){const group=groups.get(agreement.id),hasUnbilled=agreement.kind==='manual'?!agreement.billingIds.length:group.items.some(item=>!String(item.billingId||''));
+        if(hasUnbilled)result.allocationRows.push({billingId:'',billingNo:'尚未請款',scopeKey:agreement.scopeKey,label:agreement.workScope,agreementId:agreement.id,selected:true,originalUntaxed:group.unbilledUntaxed,suggestedUntaxed:null,requiredUntaxed:null,unbilled:true,maximumUntaxed:group.unbilledUntaxed});
+      }
+      const supplied=input.allocations===undefined?[]:input.allocations;
+      if(!Array.isArray(supplied))throw commissionPolicyError('COMMISSION_ALLOCATION_INVALID','定案分攤格式無效');
+      const keys=new Set(),expected=new Map(result.allocationRows.map(row=>[JSON.stringify([row.billingId,row.scopeKey]),row]));
+      for(const allocation of supplied){
+        const billingId=String(allocation?.billingId||''),scopeKey=String(allocation?.scopeKey||''),key=JSON.stringify([billingId,scopeKey]),row=expected.get(key);
+        if(!row||keys.has(key))throw commissionPolicyError('COMMISSION_ALLOCATION_SCOPE_INVALID','定案分攤包含重複或不屬於本次完整來源的範圍');keys.add(key);
+        const untaxedAmount=allowanceMoney(allocation.untaxedAmount,'核定未稅分攤'),approvalReference=row.unbilled?commissionPolicyText(allocation.approvalReference,'未請款工作核定依據'):commissionPolicyText(allocation.approvalReference,'分攤核對依據',false);
+        if(untaxedAmount>row.maximumUntaxed||row.requiredUntaxed!==null&&untaxedAmount!==row.requiredUntaxed)throw commissionPolicyError('COMMISSION_ALLOCATION_EXCEEDS_SOURCE','分攤超過可核定來源，或試圖改變已定案的來源分攤');
+        result.allocations.push({billingId,scopeKey,untaxedAmount,approvalReference});
+      }
+      if(keys.size!==expected.size)block('COMMISSION_ALLOCATION_INCOMPLETE','請完整核定每張請款全部工作範圍（含舊制及其他來源）與未請款工作，不可漏列或自動比例分攤');
+      for(const bill of result.billingTotals)if(result.allocations.filter(row=>row.billingId===bill.billingId).reduce((sum,row)=>sum+row.untaxedAmount,0)!==bill.effectiveUntaxed)block('COMMISSION_ALLOCATION_TOTAL_MISMATCH',`請款 ${bill.billingNo||bill.billingId} 的完整分攤合計須等於折讓後未稅額`);
+      for(const agreement of agreements){const base=result.allocations.filter(row=>row.scopeKey===agreement.scopeKey).reduce((sum,row)=>sum+row.untaxedAmount,0);result.results.push({agreementId:agreement.id,scopeKey:agreement.scopeKey,base,participants:agreement.participants.map(person=>({...person,commission:Math.round(base*person.rate/100)}))})}
+      let date='',reference='',reason='';try{date=commissionPolicyDate(input.date,'定案日期');reference=commissionPolicyText(input.reference,'最終金額核定依據');reason=commissionPolicyText(input.reason,'定案說明')}catch(error){block(error.code||'COMMISSION_FINALIZATION_INPUT_REQUIRED',error.message)}
+      if(date&&agreements.some(agreement=>date<agreement.workDate))block('COMMISSION_FINALIZATION_DATE_INVALID','定案日期不可早於本次工作日期');
+      if(date>businessDate())block('COMMISSION_FINALIZATION_DATE_INVALID','定案日期不可晚於今天');
+      const access=allowanceWriteAccess();access.blockers.forEach(row=>block(row.code,row.message));
+      Object.assign(result,{date,reference,reason,owner:access.owner});
+      result.snapshot=storeFingerprintDigest(storeStateFingerprint({agreements,allocations:result.allocations,billingSnapshots:result.billingSnapshots,sourceSnapshots:result.sourceSnapshots,date,reference,reason,finalizations:records.commissionFinalizations,commissions:state.commissions,payroll:state.payroll,salaryPayments:state.salaryPayments,commissionSettlements:state.commissionSettlements,owner:access.owner}));result.allowed=!result.blockers.length;
+    }catch(error){block(error.code||'COMMISSION_FINALIZATION_INVALID',error.message)}return result;
+  }
+  function commissionPolicyFinalIntent(input) {const copy=storeStateClone(input);for(const key of ['expectedSnapshot','idempotencyKey','confirmed','finalAmountsApproved'])delete copy[key];return storeStateFingerprint(copy)}
+  function finalizeCommissionAgreements(input={}) {
+    requireStoreTransactionDraft();const owner=commissionPolicyAccess(),records=commissionPolicyRecords(),key=externalBillingText(input.idempotencyKey,'操作識別',200),intentFingerprint=commissionPolicyFinalIntent(input),existing=records.commissionFinalizations.find(row=>row.idempotencyKey===key);
+    if(existing){if(existing.eventType!=='finalize'||existing.intentFingerprint!==intentFingerprint||existing.createdBy!==owner.userId||existing.companyId!==owner.companyId)throw commissionPolicyError('COMMISSION_FINALIZATION_IDEMPOTENCY_CONFLICT','相同定案操作識別的內容或操作者不同');return existing}
+    const preview=commissionFinalizationPreview(input);if(!preview.allowed)throw commissionPolicyError(preview.blockers[0]?.code||'COMMISSION_FINALIZATION_BLOCKED',preview.blockers.map(row=>row.message).join('；'));
+    if(input.confirmed!==true||input.finalAmountsApproved!==true)throw commissionPolicyError('COMMISSION_FINALIZATION_CONFIRMATION_REQUIRED','請確認這些工作範圍的最終未稅金額與員工約定已核定');
+    if(typeof input.expectedSnapshot!=='string'||input.expectedSnapshot!==preview.snapshot)throw commissionPolicyError('COMMISSION_FINALIZATION_STALE_SNAPSHOT','來源、折讓、薪資或核定分攤已變更，請重新預覽後定案');
+    const now=new Date().toISOString(),id='cfn-'+uid(),plans=new Map();
+    for(const agreement of preview.agreements)for(const person of agreement.participants){const plan=dailyPaidMonthAppendPlan(person.employeeId,agreement.workDate);if(!plan.allowed)throw commissionPolicyError(plan.code,plan.message);if(plan.required)plans.set(`${plan.month}__${plan.employee}`,plan)}
+    const protectedCollections=['dailyLogs','attendance','billings','receivables','invoices','receipts','retentionReceipts','banks','bankTransactions','salaryPayments','commissionSettlements'],protectedBefore=Object.fromEntries(protectedCollections.map(key=>[key,storeStateFingerprint(state[key]||[])])),oldCommissions=storeStateClone(state.commissions||[]),protectedPayroll=[...(state.payroll||[])].filter(row=>[...plans.values()].some(plan=>plan.protectedPayrollIds.includes(String(row.id)))).map(row=>({id:row.id,value:storeStateFingerprint(row)}));
+    const results=storeStateClone(preview.results),commissionRows=[];
+    for(const result of results){const agreement=preview.agreements.find(row=>row.id===result.agreementId),billingIds=[...new Set(preview.allocations.filter(row=>row.scopeKey===agreement.scopeKey&&row.billingId).map(row=>row.billingId))];
+      for(const person of result.participants){const employee=state.employees.find(row=>String(row.id)===person.employeeId),project=state.projects.find(row=>String(row.id)===agreement.projectId),commissionId='cfc-'+uid();person.commissionId=commissionId;
+        const row={id:commissionId,date:agreement.workDate,employee:person.employeeId,employeeName:employee?.name||'',customer:agreement.customerId,project:agreement.projectId,projectName:project?.name||'',sourceNo:agreement.reference,sourceType:'commission-finalization',sourceId:id+':'+agreement.id,untaxedAmount:result.base,commissionBaseAmount:result.base,commissionBasis:'preTax',rate:person.rate,commission:person.commission,status:'已列入薪資',commissionPolicy:COMMISSION_POLICY,commissionAgreementId:agreement.id,commissionFinalizationId:id,paymentTerms:{mode:'agreed-date',dueDate:person.agreedDueDate,terms:person.paymentTerms,reference:agreement.reference},billingIds,note:preview.reason,createdAt:now,updatedAt:now};commissionRows.push(row);
+      }
+    }
+    const event={schema:'kushe.commission.finalization.v1',id,eventType:'finalize',agreementIds:preview.agreements.map(row=>row.id),date:preview.date,reference:preview.reference,reason:preview.reason,allocations:storeStateClone(preview.allocations),billingSnapshots:storeStateClone(preview.billingSnapshots),sourceSnapshots:storeStateClone(preview.sourceSnapshots),results,commissionRows:storeStateClone(commissionRows),idempotencyKey:key,intentFingerprint,sourceSnapshot:preview.snapshot,companyId:owner.companyId,createdBy:owner.userId,createdAt:now};
+    state.meta.commissionFinalizations=[...records.commissionFinalizations,event];state.commissions.unshift(...commissionRows);
+    const rebuilt=new Set();for(const agreement of preview.agreements)for(const person of agreement.participants){const month=monthOf(agreement.workDate),pair=`${month}__${person.employeeId}`;if(!rebuilt.has(pair)){rebuildPayrollFor(month,person.employeeId,plans.get(pair)||null);rebuilt.add(pair)}}
+    if(protectedCollections.some(key=>storeStateFingerprint(state[key]||[])!==protectedBefore[key])||oldCommissions.some(row=>storeStateFingerprint((state.commissions||[]).find(next=>next.id===row.id))!==storeStateFingerprint(row))||protectedPayroll.some(row=>storeStateFingerprint(state.payroll.find(next=>next.id===row.id))!==row.value))throw commissionPolicyError('COMMISSION_PROTECTED_DATA_CHANGED','定案不得修改原施工、既有抽成、已付款薪資或銀行資料');
+    commissionPolicyValidateSnapshot(state);persist('定案新約定工作抽成',{finalizationId:id,agreementIds:event.agreementIds,bankWrites:false,existingCommissionsPreserved:true});return event;
+  }
+  function cancelCommissionAgreement(agreementId,input={}) {
+    requireStoreTransactionDraft();const owner=commissionPolicyAccess(),records=commissionPolicyRecords(),agreement=commissionPolicyAgreement(agreementId),key=externalBillingText(input.idempotencyKey,'操作識別',200),intentFingerprint=commissionPolicyFinalIntent({...input,agreementId}),existing=records.commissionFinalizations.find(row=>row.idempotencyKey===key);
+    if(existing){if(existing.eventType!=='cancel'||existing.intentFingerprint!==intentFingerprint||existing.createdBy!==owner.userId)throw commissionPolicyError('COMMISSION_FINALIZATION_IDEMPOTENCY_CONFLICT','取消識別已用於不同操作');return existing}
+    if(commissionPolicyLifecycle(agreement.id))throw commissionPolicyError('COMMISSION_ALREADY_FINALIZED','此約定已定案或取消');
+    const group=commissionPolicyGroup(agreement),view=commissionAgreementScopes().agreements.find(row=>row.id===agreement.id);
+    if(agreement.billingIds.length||group.items.some(item=>item.billingId)||(state.billings||[]).some(billing=>billingSourceRefs(billing).some(ref=>group.logs.some(log=>(log.items||[]).some((item,index)=>sourceMatches(ref,log,item,index))))))throw commissionPolicyError('COMMISSION_AGREEMENT_SOURCE_LOCKED','已有請款來源的新約定不可直接取消');
+    if(input.confirmed!==true||input.expectedSnapshot!==view?.snapshot)throw commissionPolicyError('COMMISSION_FINALIZATION_STALE_SNAPSHOT','請重新核對未定案範圍並明確確認取消');
+    const event={schema:'kushe.commission.finalization.v1',id:'cfn-'+uid(),eventType:'cancel',agreementIds:[agreement.id],date:commissionPolicyDate(input.date,'取消日期'),reference:commissionPolicyText(input.reference,'取消依據'),reason:commissionPolicyText(input.reason,'取消原因'),allocations:[],billingSnapshots:[],sourceSnapshots:group.logs.map(log=>({dailyLogId:String(log.id),content:commissionPolicyWorkContent(log)})),results:[],commissionRows:[],idempotencyKey:key,intentFingerprint,sourceSnapshot:view.snapshot,companyId:owner.companyId,createdBy:owner.userId,createdAt:new Date().toISOString()};
+    state.meta.commissionFinalizations=[...records.commissionFinalizations,event];persist('取消尚未請款的新抽成約定',{agreementId:agreement.id,existingCommissionsPreserved:true});return event;
+  }
+  function commissionPolicyValidateSnapshot(source) {
+    const records=commissionPolicyRecords(source),agreements=records.commissionAgreements,events=records.commissionFinalizations,terms=records.commissionPaymentTerms;
+    const fail=(code,message)=>{throw commissionPolicyError(code||'COMMISSION_POLICY_LEDGER_INVALID',message||'新約定抽成歷程不完整或遭到改寫，保留原資料並停止操作')},same=(a,b)=>storeStateFingerprint(a)===storeStateFingerprint(b),ids=new Set(),scopes=new Set(),manualIdentities=new Set();
+    for(const agreement of agreements){
+      if(!agreement||agreement.schema!=='kushe.commission.agreement.v1'||agreement.policy!==COMMISSION_POLICY||!['daily','manual'].includes(agreement.kind)||!allowanceText(agreement.id)||ids.has(agreement.id)||!allowanceText(agreement.projectId)||!allowanceText(agreement.workScope)||!allowanceText(agreement.reference)||agreement.futureNewAgreementConfirmed!==true||!Array.isArray(agreement.participants)||!agreement.participants.length||!Array.isArray(agreement.billingIds)||new Set(agreement.billingIds).size!==agreement.billingIds.length||!allowanceText(agreement.companyId)||!allowanceText(agreement.createdBy)||!allowanceText(agreement.createdAt))fail();
+      ids.add(agreement.id);if(scopes.has(agreement.scopeKey)||agreement.scopeKey!==(agreement.kind==='daily'?'daily:'+agreement.groupId:'manual:'+agreement.id)||agreement.kind==='daily'&&(!agreement.groupId||agreement.billingIds.length))fail();scopes.add(agreement.scopeKey);
+      const projects=(source.projects||[]).filter(row=>String(row.id)===agreement.projectId);if(projects.length!==1||String(projects[0].customer||'')!==agreement.customerId)fail('COMMISSION_AGREEMENT_SOURCE_INVALID','新約定案場或客戶關聯不一致');
+      if(agreement.kind==='manual'){const identity=JSON.stringify([agreement.projectId,agreement.workDate,agreement.workScope.trim().replace(/\s+/g,' ').toLocaleLowerCase('zh-TW')]);if(agreement.manualSourceIdentity!==identity||manualIdentities.has(identity))fail('COMMISSION_DUPLICATE_SOURCE_CLAIM','同一獨立工作範圍不能重複認領');manualIdentities.add(identity)}
+      if(agreement.kind==='manual')for(const id of agreement.billingIds){const bills=(source.billings||[]).filter(row=>String(row.id)===id);if(bills.length!==1||String(bills[0].project)!==agreement.projectId||String(bills[0].date)<agreement.agreedDate||billingSourceRefs(bills[0]).length||(source.dailyLogs||[]).some(log=>String(log.billingId||'')===id||(log.items||[]).some(item=>String(item.billingId||'')===id))||agreements.filter(row=>row.kind==='manual'&&row.billingIds.includes(id)).length!==1)fail('COMMISSION_DUPLICATE_SOURCE_CLAIM','手動約定請款來源不唯一或已屬於施工來源')}
+      for(const [key,label] of [['agreedDate','約定日期'],['startDate','開始日期'],['workDate','施工日期']])commissionPolicyDate(agreement[key],label);
+      if(agreement.agreedDate<COMMISSION_POLICY_START||agreement.startDate<agreement.agreedDate||agreement.workDate<agreement.startDate||!Number.isSafeInteger(agreement.originalUntaxedAmount)||agreement.originalUntaxedAmount<0)fail('COMMISSION_AGREEMENT_DATE_INVALID','約定日期或原工作額無效，不能套用至既有工作');
+      const people=new Set();let rateTotal=0;
+      for(const person of agreement.participants){if(!person||!allowanceText(person.employeeId)||people.has(person.employeeId)||(source.employees||[]).filter(row=>String(row.id)===person.employeeId).length!==1||typeof person.rate!=='number'||!Number.isFinite(person.rate)||person.rate<0||person.rate>50||Math.abs(person.rate*100-Math.round(person.rate*100))>0.000001||!allowanceText(person.paymentTerms))fail('COMMISSION_AGREEMENT_PARTICIPANTS_INVALID','新約定員工比例或付款條款不完整');people.add(person.employeeId);rateTotal+=Math.round(person.rate*100);commissionPolicyDate(person.agreedDueDate,'約定付款日');if(person.agreedDueDate<agreement.agreedDate)fail()}
+      if(rateTotal!==5000)fail('COMMISSION_POOL_NOT_50','新約定員工比例合計必須為 50%');
+    }
+    const claimed=new Set(),eventIds=new Set(),intentIds=new Set(),commissionIds=new Set();
+    for(const event of events){
+      if(!event||event.schema!=='kushe.commission.finalization.v1'||!['finalize','cancel'].includes(event.eventType)||!allowanceText(event.id)||eventIds.has(event.id)||!allowanceText(event.idempotencyKey)||intentIds.has(event.idempotencyKey)||!allowanceText(event.intentFingerprint)||!allowanceText(event.sourceSnapshot)||!allowanceText(event.reference)||!allowanceText(event.reason)||!allowanceText(event.createdBy)||!allowanceText(event.companyId)||!allowanceText(event.createdAt)||!Array.isArray(event.agreementIds)||!event.agreementIds.length||new Set(event.agreementIds).size!==event.agreementIds.length||['allocations','billingSnapshots','sourceSnapshots','results','commissionRows'].some(key=>!Array.isArray(event[key])))fail();
+      eventIds.add(event.id);intentIds.add(event.idempotencyKey);commissionPolicyDate(event.date,'定案日期');
+      const selected=event.agreementIds.map(id=>{if(!ids.has(id)||claimed.has(id))fail('COMMISSION_DUPLICATE_SOURCE_CLAIM','同一新約定不能重複定案或取消');claimed.add(id);return agreements.find(row=>row.id===id)});
+      if(selected.some(agreement=>event.date<agreement.workDate))fail('COMMISSION_FINALIZATION_DATE_INVALID','定案或取消日期不可早於工作日期');
+      if(event.eventType==='cancel'){if(event.allocations.length||event.billingSnapshots.length||event.results.length||event.commissionRows.length)fail();for(const snapshot of event.sourceSnapshots){const log=(source.dailyLogs||[]).find(row=>String(row.id)===snapshot.dailyLogId);if(log&&!same(commissionPolicyWorkContent(log),snapshot.content))fail('COMMISSION_AGREEMENT_SOURCE_LOCKED','已取消的新約定來源不可改套其他工作或重新認列')}continue}
+      if(event.results.length!==selected.length||new Set(event.results.map(row=>row.agreementId)).size!==selected.length)fail();
+      const allocationKeys=new Set();for(const row of event.allocations){const key=JSON.stringify([row.billingId,row.scopeKey]);if(typeof row.billingId!=='string'||!allowanceText(row.scopeKey)||allocationKeys.has(key)||!Number.isSafeInteger(row.untaxedAmount)||row.untaxedAmount<0||row.billingId===''&&!allowanceText(row.approvalReference))fail('COMMISSION_ALLOCATION_INVALID','定案來源分攤格式無效');allocationKeys.add(key)}
+      const expectedKeys=new Set(),billingIds=new Set();
+      for(const snapshot of event.billingSnapshots){
+        const matches=(source.billings||[]).filter(row=>String(row.id)===snapshot.billingId),billing=matches[0];
+        if(matches.length!==1||billingIds.has(snapshot.billingId)||!same(commissionPolicyBillingOriginal(billing),snapshot.originalSource))fail('COMMISSION_FINALIZED_SOURCE_CHANGED','已定案抽成的原請款金額、內容或來源不可改寫');billingIds.add(snapshot.billingId);
+        const scopesNow=commissionPolicyBillingScopes(billing,source).map(({scopeKey,originalUntaxed})=>({scopeKey,originalUntaxed}));
+        if(!same(scopesNow,snapshot.sourceScopes)||scopesNow.reduce((sum,row)=>sum+row.originalUntaxed,0)!==snapshot.originalUntaxed||!Number.isSafeInteger(snapshot.allowanceHistoryLength)||snapshot.allowanceHistoryLength<0)fail('COMMISSION_SOURCE_ALLOCATION_UNRESOLVED','原請款工作範圍分攤依據不完整');
+        const full=source.meta?.billingAllowances||[];if(snapshot.allowanceHistoryLength>full.length)fail();const active=allowanceActiveEvents(full.slice(0,snapshot.allowanceHistoryLength)),relevant=active.filter(row=>row.allocations.some(a=>a.billingId===snapshot.billingId)),effective=num(billing.preTaxAmount??billing.amount)-relevant.reduce((sum,event)=>sum+event.allocations.filter(row=>row.billingId===snapshot.billingId).reduce((part,row)=>part+num(row.reductions.untaxed),0),0);
+        if(snapshot.originalUntaxed!==num(billing.preTaxAmount??billing.amount)||snapshot.effectiveUntaxed!==effective||!same(snapshot.allowanceIds,relevant.map(row=>row.id)))fail('COMMISSION_FINALIZATION_BASIS_INVALID','定案未稅基數與當時原請款及有效折讓不符');
+        const rows=event.allocations.filter(row=>row.billingId===snapshot.billingId);if(rows.length!==snapshot.sourceScopes.length||rows.some(row=>!snapshot.sourceScopes.some(scope=>scope.scopeKey===row.scopeKey&&row.untaxedAmount<=scope.originalUntaxed))||rows.reduce((sum,row)=>sum+row.untaxedAmount,0)!==effective)fail('COMMISSION_ALLOCATION_TOTAL_MISMATCH','定案每張請款的完整來源分攤不等於有效未稅額或超過原工作額');
+        for(const row of rows)expectedKeys.add(JSON.stringify([row.billingId,row.scopeKey]));
+        for(const prior of events){if(prior===event)break;if(prior.eventType!=='finalize')continue;for(const result of prior.results||[]){const old=(prior.allocations||[]).find(row=>row.billingId===snapshot.billingId&&row.scopeKey===result.scopeKey),next=rows.find(row=>row.scopeKey===result.scopeKey);if(old&&(!next||old.untaxedAmount!==next.untaxedAmount))fail('COMMISSION_FINALIZED_AMOUNT_IMMUTABLE','後續定案不可減少或重分既有已核定來源') }}
+      }
+      const sourceIds=new Set(),expectedSourceIds=new Set();
+      for(const agreement of selected){const group=commissionPolicyGroup(agreement,source);for(const log of group.logs)expectedSourceIds.add(String(log.id));const unbilledRows=event.allocations.filter(row=>!row.billingId&&row.scopeKey===agreement.scopeKey);
+        // Determine the unbilled ceiling from the frozen source content and the
+        // invoice sources captured at this decision, not from later collection.
+        let originalUnbilled=agreement.kind==='manual'?(agreement.billingIds.length?0:agreement.originalUntaxedAmount):0;
+        if(agreement.kind==='daily'){const frozen=event.sourceSnapshots.find(row=>String(row.dailyLogId)===String(group.logs[0]?.id));if(!frozen)fail();const billedIds=new Set(event.billingSnapshots.flatMap(snapshot=>(snapshot.originalSource.sourceItemRefs||[]).concat((snapshot.originalSource.lines||[]).flatMap(line=>line.sourceRefs||[]))).filter(ref=>!ref.sourceGroupKey||ref.sourceGroupKey===agreement.groupId).map(ref=>ref.workItemId).filter(Boolean));const billedIndexes=new Set(event.billingSnapshots.flatMap(snapshot=>(snapshot.originalSource.sourceItemRefs||[]).concat((snapshot.originalSource.lines||[]).flatMap(line=>line.sourceRefs||[]))).filter(ref=>ref.sourceGroupKey===agreement.groupId&&ref.sourceItemIndex!==undefined&&ref.sourceItemIndex!==null).map(ref=>Number(ref.sourceItemIndex)));originalUnbilled=Math.floor((frozen.content.items||[]).filter((item,index)=>!billedIds.has(item.workItemId)&&!billedIndexes.has(index)).reduce((sum,item)=>sum+Math.max(0,num(item.untaxedSubtotal)),0))}
+        if(unbilledRows.length>1||unbilledRows.some(row=>row.untaxedAmount>originalUnbilled)||originalUnbilled>0&&unbilledRows.length!==1)fail('COMMISSION_UNBILLED_APPROVAL_INVALID','未請款工作必須有獨立核定依據，且不得超過原工作未稅額');
+        for(const row of unbilledRows)expectedKeys.add(JSON.stringify([row.billingId,row.scopeKey]));
+        const result=event.results.find(row=>row.agreementId===agreement.id),base=event.allocations.filter(row=>row.scopeKey===agreement.scopeKey).reduce((sum,row)=>sum+row.untaxedAmount,0);
+        if(!result||result.scopeKey!==agreement.scopeKey||result.base!==base||!Array.isArray(result.participants)||result.participants.length!==agreement.participants.length)fail('COMMISSION_FINALIZATION_BASIS_INVALID','定案工作範圍與基數不一致');
+        for(const person of agreement.participants){const part=result.participants.filter(row=>row.employeeId===person.employeeId),value=part[0];if(part.length!==1||value.rate!==person.rate||value.agreedDueDate!==person.agreedDueDate||value.paymentTerms!==person.paymentTerms||value.commission!==Math.round(base*person.rate/100)||!allowanceText(value.commissionId)||commissionIds.has(value.commissionId))fail('COMMISSION_FINALIZATION_AMOUNT_INVALID','定案員工、約定比例或抽成金額不符');commissionIds.add(value.commissionId);
+          const copies=event.commissionRows.filter(row=>row.id===value.commissionId),actual=(source.commissions||[]).filter(row=>row.id===value.commissionId),row=copies[0];
+          if(copies.length!==1||actual.length!==1||!same(row,actual[0])||row.sourceType!=='commission-finalization'||row.sourceId!==event.id+':'+agreement.id||row.commissionPolicy!==COMMISSION_POLICY||row.commissionAgreementId!==agreement.id||row.commissionFinalizationId!==event.id||row.employee!==person.employeeId||row.project!==agreement.projectId||row.date!==agreement.workDate||row.untaxedAmount!==base||row.commissionBaseAmount!==base||row.commissionBasis!=='preTax'||row.rate!==person.rate||row.commission!==value.commission||row.status!=='已列入薪資'||!same(row.paymentTerms,{mode:'agreed-date',dueDate:person.agreedDueDate,terms:person.paymentTerms,reference:agreement.reference}))fail('COMMISSION_FINALIZED_AMOUNT_IMMUTABLE','正式新約定抽成與定案快照不符，不能改寫已核定權益');
+        }
+      }
+      if(event.commissionRows.length!==event.results.reduce((sum,row)=>sum+row.participants.length,0)||expectedKeys.size!==event.allocations.length||event.allocations.some(row=>!expectedKeys.has(JSON.stringify([row.billingId,row.scopeKey]))))fail();
+      for(const snapshot of event.sourceSnapshots){const logs=(source.dailyLogs||[]).filter(row=>String(row.id)===snapshot.dailyLogId);if(sourceIds.has(snapshot.dailyLogId)||logs.length!==1||!same(commissionPolicyWorkContent(logs[0]),snapshot.content))fail('COMMISSION_FINALIZED_SOURCE_CHANGED','已定案的施工內容不可修改，後續請款連結不會回算薪資');sourceIds.add(snapshot.dailyLogId)}
+      if(!same([...sourceIds].sort(),[...expectedSourceIds].sort()))fail('COMMISSION_FINALIZATION_SOURCE_INVALID','定案缺少完整的施工來源快照');
+    }
+    for(const agreement of agreements){const lifecycle=events.find(row=>row.agreementIds.includes(agreement.id));if(lifecycle?.eventType==='cancel')continue;const group=commissionPolicyGroup(agreement,source);for(const log of group.logs){const expected=Math.round(group.originalUntaxed*num(log.rate)/100);if(num(log.estimatedCommission)!==expected)fail('COMMISSION_AGREEMENT_ESTIMATE_INVALID','新約定預估與原工作未稅額或個別約定比例不符')}}
+    for(const log of source?.dailyLogs||[])if(log.commissionAgreementId||log.commissionPolicy===COMMISSION_POLICY){const agreement=agreements.find(row=>row.id===log.commissionAgreementId);if(!agreement||agreement.kind!=='daily'||agreement.groupId!==String(log.groupId)||num(log.commission)!==0)fail('COMMISSION_AGREEMENT_RETROFIT_FORBIDDEN','新約定施工缺少原約定或被改成直接入薪資')}
+    for(const row of source?.commissions||[])if(row.commissionPolicy===COMMISSION_POLICY||row.sourceType==='commission-finalization'||row.commissionAgreementId||row.commissionFinalizationId)if(!commissionIds.has(String(row.id)))fail('COMMISSION_FINALIZATION_REQUIRED','正式新約定抽成必須由完整定案事件建立，不能直接新增或改標舊資料');
+    const termIds=new Set(),termSources=new Set();
+    for(const term of terms){const rows=(source.commissions||[]).filter(row=>String(row.id)===term?.commissionId),events=(source.meta?.billingAllowances||[]).filter(row=>row.id===term?.allowanceEventId);if(!term||term.schema!=='kushe.commission.payment-terms.v1'||!allowanceText(term.id)||termIds.has(term.id)||termSources.has(term.commissionId)||!['agreed-date','effective-collection'].includes(term.mode)||!allowanceText(term.reference)||!allowanceText(term.allowanceEventId)||!allowanceText(term.companyId)||!allowanceText(term.createdBy)||!allowanceText(term.createdAt)||rows.length!==1||rows[0].commissionPolicy===COMMISSION_POLICY||!same(rows[0],term.commissionSnapshot)||events.length!==1)fail('COMMISSION_PAYMENT_TERMS_INVALID','既有抽成的付款條款核對證據不完整或原抽成已改寫');if(!allowanceCommissionSources(source,events[0].sourceBillingIds).legacy.some(row=>row.commissionId===term.commissionId))fail('COMMISSION_PAYMENT_TERMS_INVALID','付款條款不屬於該次折讓的原抽成來源');if(term.mode==='agreed-date')commissionPolicyDate(term.agreedDueDate,'約定付款日');else if(term.agreedDueDate!=='')fail();termIds.add(term.id);termSources.add(term.commissionId)}
+    return records;
+  }
+  function commissionPolicyPreserveHistory(before,after) {
+    const prior=commissionPolicyRecords(before),next=commissionPolicyValidateSnapshot(after);
+    for(const key of COMMISSION_POLICY_KEYS)if(next[key].length<prior[key].length||prior[key].some((row,index)=>storeStateFingerprint(row)!==storeStateFingerprint(next[key][index])))throw commissionPolicyError('COMMISSION_POLICY_HISTORY_IMMUTABLE','不能刪除或改寫已保存的新約定、定案或付款條款歷程');
+    for(const log of before?.dailyLogs||[]){const found=(after.dailyLogs||[]).find(row=>String(row.id)===String(log.id));if(found&&String(found.commissionAgreementId||'')!==String(log.commissionAgreementId||''))throw commissionPolicyError('COMMISSION_AGREEMENT_RETROFIT_FORBIDDEN','既有施工不可加掛、移除或更換新約定')}
+    for(const row of before?.commissions||[]){const found=(after.commissions||[]).find(next=>String(next.id)===String(row.id));if(found&&(String(found.commissionAgreementId||'')!==String(row.commissionAgreementId||'')||String(found.commissionFinalizationId||'')!==String(row.commissionFinalizationId||'')))throw commissionPolicyError('COMMISSION_AGREEMENT_RETROFIT_FORBIDDEN','既有抽成不可改標新約定或新定案來源')}
+    return {prior,next};
+  }
+  function commissionPolicyValidateTransition(before,after,operationType) {
+    const {prior,next}=commissionPolicyPreserveHistory(before,after),writers={commissionAgreements:['saveDailyBatch','createCommissionAgreement'],commissionFinalizations:['finalizeCommissionAgreements','cancelCommissionAgreement'],commissionPaymentTerms:['postBillingAllowance','reverseBillingAllowance']};
+    for(const key of COMMISSION_POLICY_KEYS)if(next[key].length!==prior[key].length&&!writers[key].includes(operationType))throw commissionPolicyError('COMMISSION_POLICY_WRITER_REQUIRED','新約定／定案／付款條款只能由對應的正式入口追加');
+    for(const event of next.commissionFinalizations.slice(prior.commissionFinalizations.length))if(event.eventType==='finalize'){
+      for(const snapshot of event.sourceSnapshots){const original=(before.dailyLogs||[]).find(row=>String(row.id)===snapshot.dailyLogId);if(!original||storeStateFingerprint(commissionPolicyWorkContent(original))!==storeStateFingerprint(snapshot.content))throw commissionPolicyError('COMMISSION_FINALIZED_SOURCE_CHANGED','定案交易不可同時改寫原工作內容')}
+      for(const snapshot of event.billingSnapshots){const original=(before.billings||[]).find(row=>String(row.id)===snapshot.billingId);if(!original||storeStateFingerprint(commissionPolicyBillingOriginal(original))!==storeStateFingerprint(snapshot.originalSource)||snapshot.allowanceHistoryLength!==(after.meta?.billingAllowances||[]).length)throw commissionPolicyError('COMMISSION_FINALIZATION_BASIS_INVALID','定案交易不能改寫原單或略過最新有效折讓')}
+    }
+  }
   function allowanceWriteAccess() {
     const owner=commissionCorrectionOwner(),blockers=[];
     if(!owner.allowed)blockers.push({code:'ALLOWANCE_OWNER_REQUIRED',message:'只有目前已驗證的公司負責人可正式入帳或撤銷折讓'});
     let readiness;try{readiness=window.KusheCloudSync?.billingAllowanceWriteReadiness?.()}catch(error){readiness={ready:false,reason:error.message}}
-    if(readiness?.ready!==true||readiness?.capability!=='billing-allowances-v1')blockers.push({code:'ALLOWANCE_CAPABILITY_REQUIRED',message:readiness?.reason||'折讓雲端版本保護尚未就緒，暫停正式入帳'});
+    if(readiness?.ready!==true||readiness?.capability!=='billing-allowances-v2')blockers.push({code:'ALLOWANCE_CAPABILITY_REQUIRED',message:readiness?.reason||'折讓與新約定雲端版本保護尚未就緒，暫停正式入帳'});
     return {owner,blockers};
   }
   function allowanceCommissionSources(source,billingIds) {
     const ids=new Set(billingIds),billings=(source.billings||[]).filter(row=>ids.has(String(row.id))),numbers=new Set(billings.map(row=>allowanceText(row.number)).filter(Boolean));
     const dailyIds=new Set(),sourceGroups=new Set(billings.flatMap(billing=>billingSourceRefs(billing).map(ref=>String(ref.sourceGroupKey||''))).filter(Boolean));
     for(const log of source.dailyLogs||[])if(ids.has(String(log.billingId||''))||sourceGroups.has(String(log.groupId||''))||(log.items||[]).some(item=>ids.has(String(item.billingId||'')))||billings.some(billing=>billingSourceRefs(billing).some(ref=>[ref.sourceId,ref.dailyLogId,ref.logId,...(ref.dailyLogIds||[])].some(value=>value&&String(value)===String(log.id)))))dailyIds.add(String(log.id));
-    const commissionRows=(source.commissions||[]).filter(row=>num(row.commission)>0&&(ids.has(String(row.billingId||''))||row.sourceType!=='daily-log'&&ids.has(String(row.sourceId||''))||row.sourceType==='daily-log'&&dailyIds.has(String(row.sourceId||''))||numbers.has(allowanceText(row.sourceNo))));
+    const records=commissionPolicyRecords(source),agreementIds=new Set((source.dailyLogs||[]).filter(row=>dailyIds.has(String(row.id))).map(row=>row.commissionAgreementId).filter(Boolean));
+    for(const agreement of records.commissionAgreements)if((agreement.billingIds||[]).some(id=>ids.has(id)))agreementIds.add(agreement.id);
+    const commissionRows=(source.commissions||[]).filter(row=>num(row.commission)>0&&(ids.has(String(row.billingId||''))||(row.billingIds||[]).some(id=>ids.has(String(id)))||agreementIds.has(row.commissionAgreementId)||row.sourceType!=='daily-log'&&ids.has(String(row.sourceId||''))||row.sourceType==='daily-log'&&dailyIds.has(String(row.sourceId||''))||numbers.has(allowanceText(row.sourceNo))));
     const dailyRows=(source.dailyLogs||[]).filter(row=>dailyIds.has(String(row.id))&&row.commissionEnabled!==false&&(num(row.commission)>0||num(row.commissionRate)>0||num(row.rate)>0));
-    return {commissionIds:commissionRows.map(row=>String(row.id)),dailyLogIds:dailyRows.map(row=>String(row.id)),blocked:commissionRows.length>0||dailyRows.length>0};
+    const legacy=commissionRows.filter(row=>row.commissionPolicy!==COMMISSION_POLICY).map(row=>{const term=records.commissionPaymentTerms.find(term=>term.commissionId===String(row.id));return {commissionId:String(row.id),employeeId:String(row.employee||row.employeeId||''),employeeName:row.employeeName||(source.employees||[]).find(person=>String(person.id)===String(row.employee||row.employeeId))?.name||'',amount:num(row.commission),hasTerms:Boolean(term),requiredTerms:!term,paymentTerms:term?storeStateClone(term):null}});
+    const ambiguous=[];
+    for(const log of dailyRows)if(!log.commissionAgreementId){const linked=commissionRows.filter(row=>row.sourceType==='daily-log'&&String(row.sourceId)===String(log.id));if(linked.length!==1||num(linked[0]?.commission)!==num(log.commission)||String(linked[0]?.employee)!==String(log.employee))ambiguous.push({dailyLogId:String(log.id),message:'舊施工與正式抽成來源無法一一核對，請先確認原始資料'})}
+    for(const row of commissionRows)if(row.sourceType==='daily-log'&&!(source.dailyLogs||[]).some(log=>String(log.id)===String(row.sourceId)))ambiguous.push({commissionId:String(row.id),message:'抽成的原施工來源不存在，不能推定付款條款'});
+    const prospectiveDrafts=[],finalized=[];
+    for(const id of agreementIds){const agreement=records.commissionAgreements.find(row=>row.id===id),lifecycle=records.commissionFinalizations.find(event=>event.agreementIds.includes(id));if(!agreement){ambiguous.push({agreementId:id,message:'新約定來源不完整'});continue}if(!lifecycle)prospectiveDrafts.push({agreementId:id,workScope:agreement.workScope,message:'新約定仍為預估，最終折讓後未稅額須另行人工定案'});else if(lifecycle.eventType==='finalize'){const result=lifecycle.results.find(row=>row.agreementId===id);finalized.push({agreementId:id,workScope:agreement.workScope,finalizationId:lifecycle.id,frozenCommission:result.participants.reduce((sum,row)=>sum+row.commission,0),currentEstimatedCommission:null,difference:null,message:'既有定案金額凍結；後續差額須另行約定，不自動回扣'})}}
+    return {commissionIds:commissionRows.map(row=>String(row.id)),dailyLogIds:dailyRows.map(row=>String(row.id)),legacy,prospectiveDrafts,finalized,ambiguous,blocked:ambiguous.length>0||legacy.some(row=>row.requiredTerms)};
+  }
+  function allowanceLegacyPaymentTerms(input,impact,source=state) {
+    const supplied=input===undefined?[]:input;if(!Array.isArray(supplied))throw commissionPolicyError('COMMISSION_PAYMENT_TERMS_INVALID','請逐筆確認原抽成付款條款');
+    const existing=commissionPolicyRecords(source).commissionPaymentTerms,seen=new Set(),normalized=[];
+    for(const value of supplied){const id=String(value?.commissionId||''),row=impact.legacy.find(row=>row.commissionId===id);if(!row||seen.has(id)||value.confirmed!==true||!['agreed-date','effective-collection'].includes(value.mode))throw commissionPolicyError('COMMISSION_PAYMENT_TERMS_INVALID','付款條款核對必須逐一明確確認且不可重複或多列');seen.add(id);
+      const reference=commissionPolicyText(value.reference,'原薪資付款條款核對依據'),agreedDueDate=value.mode==='agreed-date'?commissionPolicyDate(value.agreedDueDate,'約定付款日'):'';
+      const term=existing.find(term=>term.commissionId===id);if(term&&(term.mode!==value.mode||term.agreedDueDate!==agreedDueDate||term.reference!==reference))throw commissionPolicyError('COMMISSION_PAYMENT_TERMS_IMMUTABLE','此原抽成已保存付款條款，不能藉後續折讓改寫原約定');if(!term)normalized.push({commissionId:id,mode:value.mode,agreedDueDate,reference});
+    }
+    return {normalized,missing:impact.legacy.filter(row=>row.requiredTerms&&!seen.has(row.commissionId)).map(row=>row.commissionId)};
   }
   function allowanceEvidence(values,needed) {
     if(values===undefined)values=[];
@@ -5678,10 +5997,11 @@
       if(approvedGrossReduction<=0||approvedGrossReduction!==allowanceSum(allocations.map(row=>row.reductions),'grossTotal'))throw allowanceError('ALLOWANCE_TOTAL_MISMATCH','逐原單分攤必須精確等於整張核定折讓，且折讓須大於零');
       const needed=allocations.filter(row=>row.invoiceStage==='postinvoice'&&row.reductions.grossTotal>0).map(row=>row.invoiceId),invoiceEvidence=allowanceEvidence(input.invoiceEvidence,needed),commission=allowanceCommissionSources(state,allocations.filter(row=>row.reductions.grossTotal>0).map(row=>row.billingId));
       if(invoiceEvidence.some(row=>row.voucherDate>date))throw allowanceError('ALLOWANCE_DATE_INVALID','折讓入帳不能早於核對憑證日期');
-      const access=allowanceWriteAccess(),blockers=[...access.blockers];
-      if(commission.blocked)blockers.push({code:'COMMISSION_POLICY_REVIEW',message:'此折讓涉及既有抽成來源；折讓後抽成基數及發放條件尚未核定，保留既有抽成與薪資並暫停入帳',...commission});
-      Object.assign(result,{scope,billingId:scope==='billing'?billingId:'',externalDocumentId:scope==='external-document'?externalDocumentId:'',externalDocumentRevision:document?.revision||0,sourceBillingIds,date,reason,reference,approvedGrossReduction,allocations,invoiceEvidence,reverseOf,sourceRows,blockers,owner:access.owner,totals:{before:Object.fromEntries(BILLING_ALLOWANCE_AMOUNT_KEYS.map(key=>[key,allowanceSum(sourceRows.map(row=>row.before),key)])),reductions:Object.fromEntries(BILLING_ALLOWANCE_AMOUNT_KEYS.map(key=>[key,allowanceSum(allocations.map(row=>row.reductions),key)])),after:Object.fromEntries(BILLING_ALLOWANCE_AMOUNT_KEYS.map(key=>[key,allowanceSum(sourceRows.map(row=>row.after),key)]))}});
-      result.snapshot=storeFingerprintDigest(storeStateFingerprint({scope,sourceBillingIds,document,reverseOf,proposal:{date,reason,reference,allocations,approvedGrossReduction,invoiceEvidence},financial:sourceRows.map(row=>row.financialSnapshot),ledger:rows,commission,owner:{userId:access.owner.userId,companyId:access.owner.companyId}}));result.allowed=!blockers.length;
+      const access=allowanceWriteAccess(),blockers=[...access.blockers],terms=allowanceLegacyPaymentTerms(input.legacyPaymentTerms,commission);
+      if(commission.ambiguous.length)blockers.push({code:'COMMISSION_POLICY_REVIEW',message:'抽成原始來源待核對，暫停折讓；原抽成金額與薪資保持不變',...commission});
+      if(terms.missing.length){blockers.push({code:'COMMISSION_POLICY_REVIEW',reasonCode:'COMMISSION_PAYMENT_TERMS_REQUIRED',message:'此來源的既有抽成金額保留，仍須明確核對原薪資付款約定'});blockers.push({code:'COMMISSION_PAYMENT_TERMS_REQUIRED',message:'請逐筆選擇約定付款日，或明確確認沿用收清條款並改用有效應收餘額',commissionIds:terms.missing})}
+      Object.assign(result,{scope,billingId:scope==='billing'?billingId:'',externalDocumentId:scope==='external-document'?externalDocumentId:'',externalDocumentRevision:document?.revision||0,sourceBillingIds,date,reason,reference,approvedGrossReduction,allocations,invoiceEvidence,legacyPaymentTerms:terms.normalized,commissionImpact:commission,reverseOf,sourceRows,blockers,owner:access.owner,totals:{before:Object.fromEntries(BILLING_ALLOWANCE_AMOUNT_KEYS.map(key=>[key,allowanceSum(sourceRows.map(row=>row.before),key)])),reductions:Object.fromEntries(BILLING_ALLOWANCE_AMOUNT_KEYS.map(key=>[key,allowanceSum(allocations.map(row=>row.reductions),key)])),after:Object.fromEntries(BILLING_ALLOWANCE_AMOUNT_KEYS.map(key=>[key,allowanceSum(sourceRows.map(row=>row.after),key)]))}});
+      result.snapshot=storeFingerprintDigest(storeStateFingerprint({scope,sourceBillingIds,document,reverseOf,proposal:{date,reason,reference,allocations,approvedGrossReduction,invoiceEvidence,legacyPaymentTerms:terms.normalized},financial:sourceRows.map(row=>row.financialSnapshot),ledger:rows,commission,policyRecords:commissionPolicyRecords(),owner:{userId:access.owner.userId,companyId:access.owner.companyId}}));result.allowed=!blockers.length;
     }catch(error){result.blockers.push({code:error.code||'ALLOWANCE_INPUT_INVALID',message:error.message})}
     return result;
   }
@@ -5705,6 +6025,9 @@
     if(input.confirmed!==true)throw allowanceError('ALLOWANCE_CONFIRMATION_REQUIRED','請確認逐原單分攤、發票依據及折讓後可收金額');
     if(typeof input.expectedSnapshot!=='string'||input.expectedSnapshot!==preview.snapshot)throw allowanceError('ALLOWANCE_STALE_SNAPSHOT','來源、收款、票據或核定資料已更新，請保留輸入並重新預覽');
     const event={schema:BILLING_ALLOWANCE_SCHEMA,id:'allowance-'+uid(),eventType:reverseOf?'reverse':'post',reverseOf,date:preview.date,reason:preview.reason,reference:preview.reference,scope:preview.scope,billingId:preview.billingId,externalDocumentId:preview.externalDocumentId,externalDocumentRevision:preview.externalDocumentRevision,sourceBillingIds:preview.sourceBillingIds.slice(),approvedGrossReduction:preview.approvedGrossReduction,allocations:storeStateClone(preview.allocations),invoiceEvidence:storeStateClone(preview.invoiceEvidence),idempotencyKey:key,intentFingerprint,sourceSnapshot:preview.snapshot,companyId:access.owner.companyId,createdBy:access.owner.userId,createdAt:new Date().toISOString()};
+    const previousTerms=commissionPolicyRecords().commissionPaymentTerms,newTerms=preview.legacyPaymentTerms.map(term=>({schema:'kushe.commission.payment-terms.v1',id:'cpt-'+uid(),...term,commissionSnapshot:storeStateClone(state.commissions.find(row=>String(row.id)===term.commissionId)),allowanceEventId:event.id,companyId:access.owner.companyId,createdBy:access.owner.userId,createdAt:event.createdAt}));
+    if(newTerms.length)state.meta.commissionPaymentTerms=[...previousTerms,...newTerms];
+    if(preview.commissionImpact.legacy.length)event.commissionPaymentTermIds=[...previousTerms,...newTerms].filter(term=>preview.commissionImpact.legacy.some(row=>row.commissionId===term.commissionId)).map(term=>term.id);
     state.meta.billingAllowances=[...rows,event];
     billingAllowanceValidateSnapshot(state);
     persist((reverseOf?'撤銷折讓入帳 ':'正式折讓入帳 ')+(preview.sourceRows.map(row=>row.billingNo).join('、')),{allowanceEventId:event.id,reverseOf,sourceBillingIds:event.sourceBillingIds.slice(),grossReduction:event.approvedGrossReduction,originalRecordsPreserved:true});
@@ -5718,21 +6041,24 @@
   function billingAllowanceValidateSnapshot(source) {
     const rows=billingAllowanceLedger(source),ids=[...new Set(rows.flatMap(row=>row.sourceBillingIds))];
     for(const id of ids)allowanceFinancialState(source,allowanceOriginalContext(source,id),rows);
+    commissionPolicyValidateSnapshot(source);
     return rows;
   }
   function billingAllowancePreserveHistory(before,after) {
+    commissionPolicyPreserveHistory(before,after);
     const oldRows=billingAllowanceLedger(before),newRows=billingAllowanceValidateSnapshot(after);
     if(newRows.length<oldRows.length||oldRows.some((row,index)=>storeStateFingerprint(row)!==storeStateFingerprint(newRows[index])))throw allowanceError('ALLOWANCE_HISTORY_IMMUTABLE','不能以還原、匯入或同步刪除／改寫既有折讓歷程');
     return {oldRows,newRows};
   }
   function billingAllowanceValidateTransition(before,after,operationType) {
+    commissionPolicyValidateTransition(before,after,operationType);
     if(before?.meta?.billingAllowances===undefined&&after?.meta?.billingAllowances===undefined)return;
     const {oldRows,newRows}=billingAllowancePreserveHistory(before,after);
     if(!['postBillingAllowance','reverseBillingAllowance'].includes(operationType)&&newRows.length!==oldRows.length)throw allowanceError('ALLOWANCE_WRITER_REQUIRED','折讓只能經正式入帳或反向事件入口建立');
     const activeSources=[...new Set(allowanceActiveEvents(newRows).flatMap(row=>row.allocations.filter(a=>a.reductions.grossTotal>0).map(a=>a.billingId)))];
     if(activeSources.length&&allowanceCommissionSources(after,activeSources).blocked)throw allowanceError('COMMISSION_POLICY_REVIEW','有效折讓來源的抽成政策尚未核定，不可新增或改動相關抽成');
     if(['postBillingAllowance','reverseBillingAllowance'].includes(operationType)){
-      const stripped=value=>{const result=storeStateClone(value);if(result.meta)delete result.meta.billingAllowances;return result};
+      const stripped=value=>{const result=storeStateClone(value);if(result.meta){delete result.meta.billingAllowances;delete result.meta.commissionPaymentTerms}return result};
       if(storeStateFingerprint(stripped(before))!==storeStateFingerprint(stripped(after)))throw allowanceError('ALLOWANCE_PROTECTED_DATA_CHANGED','折讓交易不得修改原請款、發票、收款、銀行、抽成或薪資');
     }
   }
@@ -8115,6 +8441,7 @@
   }
 
   const STORE_WRITER_NAMES=new Set([
+    'createCommissionAgreement','finalizeCommissionAgreements','cancelCommissionAgreement',
     'postBillingAllowance','reverseBillingAllowance',
     'createCommissionCorrectionReview',
     'p33Oct07CommissionRepair',
@@ -8141,6 +8468,7 @@
   }
   const rawStore={ commissionCorrectionPreview, commissionCorrectionReviews, createCommissionCorrectionReview, p33Oct07CommissionRepairPreview, p33Oct07CommissionRepair, externalBillingContext, externalBillingDocumentIndex, saveExternalBillingDocument, archiveExternalBillingDocument, historicalQuotationChoices, billingDocumentState, billingDocumentLines, saveHistoricalBillingDetails, dailyDraftSnapshot, dailyDraftReview, receivableChequeRows, receivableChequeCapacity, receivableChequeSnapshot, saveReceivableCheque, cancelReceivableCheque, clearReceivableCheque, dailyBillingLinkRepairPreview, repairDailyBillingLinks, saveSystemSettings, load, masterOptions, materialVendorOptions, CUSTOMER_DEDUCTION_CATEGORIES, receiptCashAmount, receiptDeductionAmount, receiptSettlementAmount, receiptDeductions, projectCustomerDeductions, projectCustomerDeductionCost, payrollHistoryLock, payrollPaymentTruth, financialIntegrityAudit, financialIntegrityPhase2Audit, dailyLogPayrollDeleteLock, commissionBillingLink, saveCommission, deleteCommission, saveDailyBatch, dailyUnbilledEditPreview, saveDailyUnbilledItems, deleteDailyBatch, dailyManualItems, unbilledWork, dailyWorkAmount, taxValues, grossFromUntaxed, projectCommissionBasisAmounts, calculateBilling, nextBillingNumber, createBilling, billingEditable, billingDeletable, updateBilling, deleteBilling, receivableAccountingDeletePreview, deleteReceivableAccounting, billingReceiptState, addReceipt, updateReceipt, deleteReceipt, completeEmployeeCashHandover, cancelEmployeeCashHandover, addRetentionReceipt, updateRetentionReceipt, deleteRetentionReceipt, nextPayableNumber, savePayable, payableDeletePreview, deletePayable, materialPayableTestCleanupPreview, cleanupMaterialPayableTestData, mergedPayableRepairPreview, repairMergedPayableHistory, addPayablePayment, updatePayablePayment, deletePayablePayment, monthlyPayrollGroups, salaryPaymentSummary, salaryPaymentPlan, employeePerformanceSummary, commissionHouseAllocations, commissionReleasePool, projectCommissionSettlementPreview, commissionSettlementLock, dailyLogCommissionSettlementLock, payrollAdjustmentSnapshot, updatePayrollAdjustments, addSalaryPayment, updateSalaryPayment, deleteSalaryPayment, addProjectCommissionSettlement, deleteProjectCommissionSettlement, updateBillingInvoice, invoiceAmounts, invoiceRows, saveInvoice, saveCustomer, customerDeletePreview, deleteCustomer, companyProjectDefaults, saveProject, projectDeletePreview, deleteProject, projectMergePreview, mergeProject, saveEmployee, employeeUsage, deleteEmployee, saveVendor, saveMaterial, deleteMaterial, materialInventorySummary, setMaterialOpeningStock, addInventoryReceipt, inventoryReceiptPayablePreview, recordInventoryReceiptPayable, saveMaterialUsage, assignMaterialUsageEmployee, deleteMaterialUsage, saveProjectCost, deleteProjectCost, quotationTotals, nextQuotationNumber, quotationPriceFor, saveQuotationPrice, saveQuotationBundle, saveQuotationUnitPreset, quotationPublicNotePresets, saveQuotationPublicNotePreset, deleteQuotationPublicNotePreset, saveQuotation, setQuotationStatus, quotationUsage, deleteQuotation, cancelQuotationConfirmation, createQuotationRevision, saveQuotationTemplate, confirmedQuotationItems, projectPricingMode, contractSources, billedContractAmount, num };
   Object.assign(rawStore,{billingFinancialState,receivableFinancialState,billingAllowancePreview,postBillingAllowance,reverseBillingAllowance,allowanceAccountingRows,invoiceAllowanceRows});
+  Object.assign(rawStore,{commissionAgreementScopes,createCommissionAgreement,commissionFinalizationPreview,finalizeCommissionAgreements,cancelCommissionAgreement});
   rawStore.manualCommissionBillingAmounts=manualCommissionBillingAmounts;
   const publicStore={
     getState:()=>publishedState,
