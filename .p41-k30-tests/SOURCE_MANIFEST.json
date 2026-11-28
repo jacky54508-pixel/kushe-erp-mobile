@@ -102,8 +102,8 @@
       "sha256": "2912c156f06a63a1ac69407cc93ab4f815df016994401d9363e48ee585760028"
     },
     "supabase/migrations/20261128032204_k30_billing_allowance_guard.sql": {
-      "bytes": 43276,
-      "sha256": "ecf621ec36bf38d27c89b9193e9c16e9c3040f01973e154266c2d7b6b4d9ec9a"
+      "bytes": 43278,
+      "sha256": "68282fb3d350f0f657c920b3c413d8c38cf1986fe280ad8a3f547508c51cc5b9"
     }
   }
 }

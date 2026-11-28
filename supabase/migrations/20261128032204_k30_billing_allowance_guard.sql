@@ -241,7 +241,7 @@ begin
         if allocation->>'invoiceStage'='preinvoice' then
           tax_basis:=allocation->'taxBasis';
           perform erp_allowance_internal.verify_tax(original,tax_basis);
-          if tax_basis->>'taxMode' is distinct from case when billing->>'taxMode'='含稅' then '含稅' else '未稅' end then
+          if tax_basis->>'taxMode' is distinct from (case when billing->>'taxMode'='含稅' then '含稅' else '未稅' end) then
             raise exception 'ALLOWANCE_TAX_BASIS_REVIEW' using errcode='23514';
           end if;
         else
