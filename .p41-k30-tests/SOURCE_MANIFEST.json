@@ -1,0 +1,109 @@
+{
+  "baseCommit": "3a8fc71efa70ea56332fbbd781f8db78a680448f",
+  "files": {
+    ".github/workflows/p41-k30-allowance-posting.yml": {
+      "bytes": 8080,
+      "sha256": "545db3fc7083d2fc4073ef350c7ba5a428cf136dfa616331a5dd56fb0cdb936a"
+    },
+    ".p41-k30-tests/.gitignore": {
+      "bytes": 41,
+      "sha256": "a804b37c43bb982526bd05b1aeeda26861081e82b21133c830e79110adcba93f"
+    },
+    ".p41-k30-tests/cloud_allowance_contract.cjs": {
+      "bytes": 10524,
+      "sha256": "af82e7066badf2647535e32544fe03f1fdefe66b88104486c63b4dfbe1e29a58"
+    },
+    ".p41-k30-tests/k30_browser_store.py": {
+      "bytes": 53767,
+      "sha256": "9560c2e9778380f126d26060ca461769f27913999e0aceaef14454f569a10881"
+    },
+    ".p41-k30-tests/k30_browser_ui.py": {
+      "bytes": 15285,
+      "sha256": "72e7f116b1f95b914ef9af831a4ad0c40de79c67894d3feb3acd7b87f3e3c782"
+    },
+    ".p41-k30-tests/k30_fixture.py": {
+      "bytes": 14158,
+      "sha256": "469aa0152fc7a05642da30c21774441fa90c1efe465c2453f5cb7b5dde3baa22"
+    },
+    ".p41-k30-tests/postgres_bootstrap.sql": {
+      "bytes": 7065,
+      "sha256": "e72732dbefaa41c3f8f45422b5a624d2f3a9d3a70b955c1e8aa839c0c231ce0c"
+    },
+    ".p41-k30-tests/postgres_guard.py": {
+      "bytes": 18381,
+      "sha256": "aa72ac58488ab28782ad95d74a46be6e452ff4273e2974cee804ab1e8a80be06"
+    },
+    ".p41-k30-tests/probe_projection.cjs": {
+      "bytes": 6303,
+      "sha256": "be8fafaa672d32e50db17ad4bc1f5f97e33798cae78c9d196520ef6bc21622a2"
+    },
+    ".p41-k30-tests/run_acceptance.py": {
+      "bytes": 7665,
+      "sha256": "c613f111cbce9725e1ab12ded1663884f3f02e0fc850e95d39b40c4ed87004ad"
+    },
+    ".p41-k30-tests/source_guard.py": {
+      "bytes": 5946,
+      "sha256": "4549635d5f0a82f959d8e99d96fddb409599b7bbd8055059f23399238bb119a7"
+    },
+    ".p41-k30-tests/sync_editor_contract.cjs": {
+      "bytes": 16830,
+      "sha256": "03d24cf1d26cfdb76e392b33688edb9ffdd7f124a464943c0af5608ac8f1773b"
+    },
+    "assets/js/billing-allowance-ui.js": {
+      "bytes": 26170,
+      "sha256": "9f6fb5d1000f24b6540a1a79f466904dd4930793b0100c4e5c6eb3990e17f44a"
+    },
+    "assets/js/billing-groups.js": {
+      "bytes": 54669,
+      "sha256": "32edd02f17783780f94744eef9e9e37eb48f73b7f5892c208c9644af0ab39568"
+    },
+    "assets/js/billing.js": {
+      "bytes": 232365,
+      "sha256": "36dc7d112e49e95c7ca6a50dfc14775997ef4ff764098ccea189e916bd87019d"
+    },
+    "assets/js/cloud-sync.js": {
+      "bytes": 136710,
+      "sha256": "8261604ac4caadedf0d264050eb3f85a1d6d5fb20ca394d8ffd3e76f5295b6dc"
+    },
+    "assets/js/dashboard.js": {
+      "bytes": 43231,
+      "sha256": "108e30c2ce8340e65f1c9f2118a67cbc109359d4d8e0983349c06a1a904e3164"
+    },
+    "assets/js/erp-store.js": {
+      "bytes": 1032135,
+      "sha256": "29a00d0ffc790deea69fc1070dbe47ec319a5c43cb6c825b6594d37f6dd8e99a"
+    },
+    "assets/js/external-billing-invoice-ui.js": {
+      "bytes": 6319,
+      "sha256": "50a52adbfa826886e503e5cc44b1ed53ec291b551b34ca2319a7ca8b14c38c53"
+    },
+    "assets/js/external-billing-invoice.js": {
+      "bytes": 8495,
+      "sha256": "51828f625c30813fdbe2916428710b318e96adda3308864e9399ba428557d81e"
+    },
+    "assets/js/invoices.js": {
+      "bytes": 20945,
+      "sha256": "6f700f63ea04cbb5e7084576e6fed23167cb482e8c1c143e6709060a1166aeec"
+    },
+    "assets/js/projects.js": {
+      "bytes": 89740,
+      "sha256": "3bfc2bf53d7d2fc6837fb421b37ac44e5dc0a2ea9349eee87b16cb0683fc7077"
+    },
+    "assets/js/receivable-cheques.js": {
+      "bytes": 25119,
+      "sha256": "674dca0b6909c85480534dd44e2ba240a7023fcfd64dd83aa5be4cd01f93b65c"
+    },
+    "assets/js/reports.js": {
+      "bytes": 11781,
+      "sha256": "313763d2157dd558dd4686c441d47f64a2570a957eda488d88ed440704044bc4"
+    },
+    "index.html": {
+      "bytes": 34380,
+      "sha256": "2912c156f06a63a1ac69407cc93ab4f815df016994401d9363e48ee585760028"
+    },
+    "supabase/migrations/20261128032204_k30_billing_allowance_guard.sql": {
+      "bytes": 22981,
+      "sha256": "9601be809f73a9c0bd48acefa7d074f1c383277de17479516f5fde33c43f566a"
+    }
+  }
+}

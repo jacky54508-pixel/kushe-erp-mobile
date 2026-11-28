@@ -22,6 +22,9 @@
   const DEVICE_TRUST_SCHEMA = 'kushe-device-trust-v1';
   const AUTO_DEBOUNCE_MS = 8000;
   const AUTO_ONLINE_RETRY_MS = 3000;
+  const BILLING_ALLOWANCE_CAPABILITY = 'billing-allowances-v1';
+  const BILLING_ALLOWANCE_SCHEMA = 'kushe.billing.allowances.v1';
+  const BILLING_ALLOWANCE_READY_MS = 60000;
   const SETTINGS_CREDENTIAL_KEYS = new Set([
     'username', 'password', 'loginusername', 'loginpassword', 'cloudurl',
     'cloudpublishablekey', 'supabaseurl', 'supabasepublishablekey',
@@ -46,6 +49,9 @@
     TRUSTED_PRIORITY_AVAILABLE: '雲端最後更新來自臨時裝置，且與此公司信任裝置從同一版本分叉。已停止自動同步，等待公司信任裝置確認處置。',
     VERIFY_FAILED: '雲端驗證失敗，請停止操作。',
     CAS_RESPONSE_INVALID: '雲端版本回應無法驗證，已停止同步。',
+    ALLOWANCE_SERVER_REQUIRED: '雲端尚未啟用折讓版本保護，正式折讓入帳暫停。',
+    ALLOWANCE_PREFLIGHT_REQUIRED: '請先重新核對雲端與本機資料，再確認折讓入帳。',
+    ALLOWANCE_LEDGER_INVALID: '折讓紀錄格式待核對，已停止同步。',
     SERVER_ERROR: '雲端服務回應錯誤，已停止同步。',
     CANCELLED: '已取消上傳。',
     UPLOAD_COMPLETE: '雲端同步完成。',
@@ -100,6 +106,8 @@
   const pendingOperations = new Map();
   let syncOrigin = 'USER_LOCAL_EDIT';
   const requestControllers = new Set();
+  let billingAllowanceCapability = null;
+  let billingAllowanceReady = null;
 
   function observedPrincipal() {
     const gate = window.KusheAuthGate;
@@ -464,7 +472,8 @@
     // tools must not release an editor merely because they committed data.
     'addInventoryReceipt','recordInventoryReceiptPayable','setMaterialOpeningStock',
     'saveReceivableCheque','clearReceivableCheque','cancelReceivableCheque',
-    'saveExternalBillingDocument','archiveExternalBillingDocument'
+    'saveExternalBillingDocument','archiveExternalBillingDocument',
+    'postBillingAllowance','reverseBillingAllowance'
   ]);
   function isBusinessEditorEvent(event) {
     const shell = document.getElementById('appShell');
@@ -976,12 +985,91 @@
     return deviceAllowsAutomaticSync() ? 'trusted' : 'temporary';
   }
 
+  function hasBillingAllowanceLedger(data) {
+    const ledger = data?.meta?.billingAllowances;
+    if (ledger === undefined) return false;
+    if (!Array.isArray(ledger) || ledger.some(row => !row || row.schema !== BILLING_ALLOWANCE_SCHEMA)) {
+      throw new CloudSyncError('ALLOWANCE_LEDGER_INVALID');
+    }
+    return ledger.length > 0;
+  }
+
+  async function requireBillingAllowanceCapability(auth, force = false) {
+    const now = Date.now();
+    if (!force && billingAllowanceCapability?.userId === auth.user.id
+      && billingAllowanceCapability.generation === syncGeneration
+      && billingAllowanceCapability.token === auth.token
+      && now - billingAllowanceCapability.checkedAt < BILLING_ALLOWANCE_READY_MS) return;
+    billingAllowanceCapability = null;
+    let result;
+    try {
+      result = await request('/rest/v1/rpc/erp_billing_allowance_capability', auth, { method: 'POST', body: {} });
+    } catch (error) {
+      if (['AUTH_REQUIRED', 'AUTH_CHANGED'].includes(error?.code)) throw error;
+      if ([401, 403].includes(error?.httpStatus)) throw new CloudSyncError('AUTH_REQUIRED');
+      throw new CloudSyncError('ALLOWANCE_SERVER_REQUIRED');
+    }
+    assertOperation(auth);
+    if (!result || result.capability !== BILLING_ALLOWANCE_CAPABILITY
+      || result.schema !== BILLING_ALLOWANCE_SCHEMA || result.guardVersion !== 1 || result.enabled !== true) {
+      throw new CloudSyncError('ALLOWANCE_SERVER_REQUIRED');
+    }
+    billingAllowanceCapability = { userId: auth.user.id, generation: syncGeneration,
+      token: auth.token, checkedAt: Date.now() };
+  }
+
+  function billingAllowanceWriteReadiness() {
+    const prepared = billingAllowanceReady, gate = window.KusheAuthGate, store = window.KuSheERPStore;
+    const ready = Boolean(prepared && billingAllowanceCapability && navigator.onLine !== false
+      && deviceAllowsAutomaticSync() && !store?.isEphemeralMode?.()
+      && prepared.userId === observedPrincipal() && prepared.generation === syncGeneration
+      && prepared.token === gate?.session()?.access_token
+      && Date.now() - prepared.checkedAt >= 0 && Date.now() - prepared.checkedAt < BILLING_ALLOWANCE_READY_MS
+      && prepared.stateReference === store?.getState?.()
+      && billingAllowanceCapability.userId === prepared.userId
+      && billingAllowanceCapability.generation === prepared.generation);
+    return { ready, reason: ready ? '' : STATUS_TEXT.ALLOWANCE_PREFLIGHT_REQUIRED,
+      capability: BILLING_ALLOWANCE_CAPABILITY, syncVersion: ready ? prepared.syncVersion : null };
+  }
+
+  function prepareBillingAllowanceWrite() {
+    return coordinate('billing-allowance-preflight', async () => {
+      billingAllowanceReady = null;
+      if (!deviceAllowsAutomaticSync() || window.KuSheERPStore?.isEphemeralMode?.()) throw new CloudSyncError('DEVICE_TRUST_REQUIRED');
+      if (navigator.onLine === false) throw new CloudSyncError('ALLOWANCE_PREFLIGHT_REQUIRED');
+      const auth = await authContext(), store = window.KuSheERPStore;
+      const stateReference = store?.getState?.();
+      if (!stateReference) throw new CloudSyncError('STORE_UNAVAILABLE');
+      await requireBillingAllowanceCapability(auth, true);
+      const firstRow = await readRemote(auth), local = await readLocal();
+      const first = firstRow ? await validateRemoteSnapshot(firstRow.data, firstRow.updated_at) : null;
+      if (!firstRow || !first || local.fingerprint !== first.fingerprint) throw new CloudSyncError('ALLOWANCE_PREFLIGHT_REQUIRED');
+      const currentAuth = await revalidatePrincipal(auth), raceRow = await readRemote(currentAuth);
+      const race = raceRow ? await validateRemoteSnapshot(raceRow.data, raceRow.updated_at) : null;
+      const latestLocal = await readLocal();
+      if (!raceRow || !race || !sameSyncVersion(firstRow.sync_version, raceRow.sync_version)
+        || firstRow.updated_at !== raceRow.updated_at || first.fingerprint !== race.fingerprint
+        || local.fingerprint !== latestLocal.fingerprint || stateReference !== store.getState()
+        || local.storeBaseline !== latestLocal.storeBaseline) throw new CloudSyncError('RACE_BLOCKED');
+      assertOperation(auth);
+      billingAllowanceReady = { userId: auth.user.id, token: auth.token, generation: syncGeneration,
+        stateReference, checkedAt: Date.now(), syncVersion: serverSyncVersion(raceRow.sync_version) };
+      return billingAllowanceWriteReadiness();
+    }).catch(error => {
+      if (STATUS_TEXT[error?.code]) error.message = STATUS_TEXT[error.code];
+      throw error;
+    });
+  }
+
   async function casWrite(auth, expectedSyncVersion, data, options = {}) {
     const expected = expectedSyncVersion === null ? null : serverSyncVersion(expectedSyncVersion);
     const writerMode = writerModeForCurrentDevice();
-    const rows = await request('/rest/v1/rpc/erp_state_cas_write_v2', auth, {
+    const allowanceAware = hasBillingAllowanceLedger(data);
+    if (allowanceAware) await requireBillingAllowanceCapability(auth);
+    const rows = await request(allowanceAware ? '/rest/v1/rpc/erp_state_cas_write_v3' : '/rest/v1/rpc/erp_state_cas_write_v2', auth, {
       method: 'POST', cas: true, signal: options.signal,
-      body: { expected_sync_version: expected, new_data: data, writer_mode: writerMode }
+      body: { expected_sync_version: expected, new_data: data, writer_mode: writerMode,
+        ...(allowanceAware ? { client_capability: BILLING_ALLOWANCE_CAPABILITY } : {}) }
     });
     if (!Array.isArray(rows) || rows.length !== 1) throw new CloudSyncError('CAS_RESPONSE_INVALID');
     const result = rows[0];
@@ -2338,6 +2426,8 @@
     autoRetryMode = '';
     autoPendingVerification = null;
     temporarySessionBaseline = null;
+    billingAllowanceReady = null;
+    billingAllowanceCapability = null;
     window.removeEventListener('kushe:data-updated', handleDataUpdated);
     window.removeEventListener('online', handleOnline);
     autoState = { code: 'STOPPED', message: AUTO_STATUS_TEXT.STOPPED, userId: principalId || '', pending: false, armed: false };
@@ -2387,6 +2477,7 @@
     inspect, uploadLocal, restoreRemote, status: publicStatus, open, close,
     startAutoBackup, stopAutoBackup, autoStatus, setSyncOrigin, editorReadiness, decideRemote, safeApplyRemote, reconcileFromCloud,
     deviceSecurityStatus, setDeviceMode, bootstrapTemporarySession, commitTemporarySnapshot, refreshTemporaryFromCloud,
-    keepTrustedPriorityRemote, useTrustedPriorityLocal
+    keepTrustedPriorityRemote, useTrustedPriorityLocal,
+    billingAllowanceWriteReadiness, prepareBillingAllowanceWrite
   });
 }());

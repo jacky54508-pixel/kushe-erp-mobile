@@ -26,7 +26,7 @@ CREATE OR REPLACE FUNCTION public.erp_state_cas_write(expected_sync_version bigi
  RETURNS TABLE(status text, sync_version bigint, updated_at timestamp with time zone)
  LANGUAGE plpgsql
  SET search_path TO 'pg_catalog'
-AS $function$;
+AS $function$
 declare
   principal_id uuid := auth.uid();
   applied_version bigint;
@@ -78,7 +78,7 @@ CREATE OR REPLACE FUNCTION public.erp_state_cas_write_v2(expected_sync_version b
  RETURNS TABLE(status text, sync_version bigint, updated_at timestamp with time zone, last_writer_mode text, last_base_sync_version bigint)
  LANGUAGE plpgsql
  SET search_path TO 'pg_catalog'
-AS $function$;
+AS $function$
 declare
   principal_id uuid := auth.uid();
   applied_version bigint;
@@ -148,7 +148,7 @@ CREATE OR REPLACE FUNCTION public.erp_states_enforce_sync_version()
  RETURNS trigger
  LANGUAGE plpgsql
  SET search_path TO 'pg_catalog'
-AS $function$;
+AS $function$
     BEGIN
       IF TG_OP = 'INSERT' THEN
         NEW.sync_version := 1;

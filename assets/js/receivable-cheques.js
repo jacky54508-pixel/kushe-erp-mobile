@@ -96,8 +96,9 @@
       return null;
     }
     const expectedSnapshot=store.receivableChequeSnapshot(ar.id),card=form.closest('section');
-    let capacity,capacityError='';try{capacity=store.receivableChequeCapacity(ar.id)}catch(error){capacityError=error.message;capacity={outstanding:Math.max(0,Number(ar.amount||0)-Number(ar.received||0)),reserved:0,available:0}}
+    let capacity,capacityError='';try{capacity=store.receivableChequeCapacity(ar.id)}catch(error){capacityError=error.message;capacity={outstanding:null,reserved:0,available:0}}
 
+    if(capacityError)form.querySelector('.receipt-form-grid')?.insertAdjacentHTML('beforebegin','<p class="cheque-entry-note" role="alert">'+esc(capacityError)+'；請先核對有效應收與折讓紀錄。</p>');
     const fieldset=document.createElement('fieldset');fieldset.className='cheque-entry-fields';fieldset.hidden=true;fieldset.innerHTML='<legend>支票資料</legend>'+ticketFields()+'<p class="cheque-help">儲存後為待兌現：銀行不入帳、應收暫不沖銷、抽成不提前解鎖。客戶扣款先保留，確認兌現時再處理。</p>';
     method.closest('label').after(fieldset);
     if(capacity.reserved>0)form.querySelector('.receipt-form-grid').insertAdjacentHTML('beforebegin',`<p class="cheque-entry-note">已有待兌現預留 ${money(capacity.reserved)}，本次可再收款／登記 ${money(capacity.available)}。待兌現金額仍包含在未沖銷應收內。</p>`);
@@ -112,7 +113,7 @@
       form.elements.note.placeholder=cheque?'票據用途、收票說明或其他備註':'匯款末五碼、現場代收說明或其他備註';$$('input,select',fieldset).forEach(n=>n.disabled=!cheque);
       caption('date',cheque?'收票日期':'收款日期');caption('cashAmount',cheque?'支票票面金額':'本次客戶付款');
       if(cheque){['bankId','fee','feePayer'].forEach(name=>{const n=form.elements[name];n.disabled=true;n.required=false;n.closest('label').hidden=true;n.closest('label').style.display='none'});form.elements.cashAmount.min='1';
-        summary('customerBankPreview','銀行本次入帳',0);summary('customerSettlementPreview','本次立即沖銷',0);summary('customerOutstandingPreview','原未沖銷應收',capacity.outstanding);
+        summary('customerBankPreview','銀行本次入帳',0);summary('customerSettlementPreview','本次立即沖銷',0);summary('customerOutstandingPreview','有效未沖銷應收',capacity.outstanding);if(capacityError)$('#customerOutstandingPreview',form).textContent='待核對';
       }else{form.elements.cashAmount.min='0';
         for(const [id,text] of [['customerBankPreview','銀行實際入帳'],['customerSettlementPreview','本次沖銷應收'],['customerOutstandingPreview','沖銷後未收']]){const n=$('#'+id,form);if(n?.parentElement.firstChild?.nodeType===3)n.parentElement.firstChild.textContent=text}
       }

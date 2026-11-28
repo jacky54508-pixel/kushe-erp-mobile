@@ -2,10 +2,10 @@
   'use strict';
   const $ = (selector, root = document) => root.querySelector(selector);
   const nf = new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 0 });
-  const money = (value) => `$${nf.format(Math.round(Number(value) || 0))}`;
+  const money = (value) => Number.isNaN(value)?'待核對':`$${nf.format(Math.round(Number(value) || 0))}`;
   const number = (value) => { const n = Number(String(value ?? '').replace(/[$,\s]/g, '')); return Number.isFinite(n) ? n : 0; };
   const text = (value) => String(value ?? '').trim();
-  const sum = (rows, getter) => rows.reduce((total, row) => total + number(getter(row)), 0);
+  const sum = (rows, getter) => rows.reduce((total, row) => {const value=getter(row);return Number.isNaN(value)?NaN:total+number(value)}, 0);
   const businessDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Taipei', year:'numeric', month:'2-digit', day:'2-digit' });
   const businessDate = (date = new Date()) => {
     const parts = Object.fromEntries(businessDateFormatter.formatToParts(date).map((part) => [part.type, part.value]));
@@ -20,7 +20,7 @@
   const validDate = (value) => { const d = value ? new Date(value) : null; return d && !Number.isNaN(d.getTime()) ? d : null; };
   const paidAR = (row) => number(row.received ?? row.receivedAmount ?? row.paidAmount);
   const paidAP = (row) => number(row.paid ?? row.paidAmount);
-  const arAmount = (row) => number(row.amount ?? row.totalAmount ?? row.receivableAmount);
+  const arAmount = (row) => row.financial?.valid===false?NaN:number(row.amount ?? row.totalAmount ?? row.receivableAmount);
   const apAmount = (row) => number(row.amount ?? row.totalAmount ?? row.payableAmount);
   const billingAmount = (row) => number(row.amount ?? row.untaxedAmount ?? row.total);
   const invoiceState = (row) => ['no_invoice','invoice_pending','invoiced'].includes(row?.invoiceStatus) ? row.invoiceStatus : text(row?.invoiceNo) ? 'invoiced' : row?.sourceType === 'daily-work' && row?.hasInvoice === false ? 'no_invoice' : 'invoice_pending';
@@ -41,7 +41,7 @@
       employees: new Map(data.employees.map((row) => [text(row.id), row]))
     };
   }
-  function monthRevenue(data, month) { return sum(data.billings.filter((row) => inMonth(row, month)), billingAmount); }
+  function monthRevenue(data, month) { return sum(data.billings.filter((row) => inMonth(row, month)), billingAmount) + sum((window.KuSheERPStore?.allowanceAccountingRows?.(data)||[]).filter(row=>inMonth(row,month)),row=>row.untaxed); }
   function collectionTransaction(data, receipt, retention = false) {
     const transactions = Array.isArray(data.bankTransactions) ? data.bankTransactions : [];
     const transactionId = text(receipt?.bankTransactionId);
@@ -207,6 +207,7 @@
   }
   function bankTotal(data) { return sum(data.banks, (row) => number(row.balance) || (number(row.openingBalance) + number(row.income) - number(row.expense))); }
   function delta(current, previous) {
+    if(!Number.isFinite(current)||!Number.isFinite(previous))return {text:'待核對',className:'neutral'};
     if (!previous) return { text: '—', className: 'neutral' };
     const rate = (current - previous) / Math.abs(previous) * 100;
     return { text: `${rate >= 0 ? '↑' : '↓'} ${Math.abs(rate).toFixed(1)}%`, className: rate >= 0 ? 'positive' : 'negative' };
@@ -220,27 +221,29 @@
   }
 
   function derive(data, month) {
+    const financialReceivables = data.receivables.map(row=>{const financial=window.KuSheERPStore?.receivableFinancialState?.(row.id,data);return financial?.valid===false?{...row,amount:NaN,financial}:financial?{...row,amount:financial.effective.receivable,received:financial.settlement.received,financial}:row});
+    const effectiveBilling = row => window.KuSheERPStore?.billingFinancialState?.(row.id,data);
     const maps = relationMaps(data);
     const prev = previousMonth(month);
     const revenue = monthRevenue(data, month);
     const collected = collectionPrincipalForMonth(data, month);
-    const openAR = data.receivables.filter((row) => arAmount(row) > paidAR(row));
+    const openAR = financialReceivables.filter((row) => row.financial?.valid===false||arAmount(row) > paidAR(row));
     const openAP = data.payables.filter((row) => apAmount(row) > paidAP(row));
     const outstandingAR = sum(openAR, (row) => Math.max(0, arAmount(row) - paidAR(row)));
     const outstandingAP = sum(openAP, (row) => Math.max(0, apAmount(row) - paidAP(row)));
-    const prevOpenAR = sum(data.receivables.filter((row) => inMonth(row, prev)), (row) => Math.max(0, arAmount(row) - paidAR(row)));
+    const prevOpenAR = sum(financialReceivables.filter((row) => inMonth(row, prev)), (row) => Math.max(0, arAmount(row) - paidAR(row)));
     const prevOpenAP = sum(data.payables.filter((row) => inMonth(row, prev)), (row) => Math.max(0, apAmount(row) - paidAP(row)));
-    const monthAR = data.receivables.filter((row) => inMonth(row, month));
+    const monthAR = financialReceivables.filter((row) => inMonth(row, month));
     const structureTotal = sum(monthAR, arAmount);
-    const structurePaid = structureTotal ? Math.min(structureTotal, sum(monthAR, paidAR)) : 0;
+    const structurePaid = Number.isNaN(structureTotal)?NaN:structureTotal ? Math.min(structureTotal, sum(monthAR, paidAR)) : 0;
     const structureOpen = Math.max(0, structureTotal - structurePaid);
-    const allAR = sum(data.receivables, arAmount);
-    const allReceived = sum(data.receivables, paidAR);
+    const allAR = sum(financialReceivables, arAmount);
+    const allReceived = sum(financialReceivables, paidAR);
 
     const projectRows = data.projects.map((project) => {
       const id = text(project.id);
       const bills = data.billings.filter((row) => projectId(row) === id);
-      const ars = data.receivables.filter((row) => projectId(row) === id);
+      const ars = financialReceivables.filter((row) => projectId(row) === id);
       const materials = data.materialUsages.filter((row) => projectId(row) === id);
       const attendance = data.attendance.filter((row) => projectId(row) === id);
       const commissions = data.commissions.filter((row) => projectId(row) === id);
@@ -252,7 +255,7 @@
       const commissionBase = sum(commissions, (row) => row.commission);
       const extraLabor = sum(logs.filter((row) => number(window.KuSheERPStore?.dailyWorkAmount?.(row)) > 0 && !attendanceSources.has(text(row.id))), (row) => window.KuSheERPStore?.dailyWorkAmount?.(row));
       const extraCommission = sum(logs.filter((row) => number(row.commission) > 0 && !commissionSources.has(text(row.id))), (row) => row.commission);
-      const billed = sum(bills, billingAmount);
+      const billed = sum(bills, row=>{const f=effectiveBilling(row);return f?.valid===false?NaN:f?.effective?.untaxed??billingAmount(row)});
       const received = sum(ars, paidAR);
       const outstanding = sum(ars, (row) => Math.max(0, arAmount(row) - paidAR(row)));
       const material = sum(materials, (row) => row.amount);
@@ -261,9 +264,9 @@
       const customerDeduction = number(window.KuSheERPStore?.projectCustomerDeductionCost?.(id,data));
       const totalCost = material + labor + other + customerDeduction;
       const profit = billed - totalCost;
-      const margin = billed ? profit / billed * 100 : 0;
-      return { id, name: text(project.name) || '—', customer: entityName(maps.customers, text(project.customer), project.customerName), billed, received, outstanding, material, labor, other, customerDeduction, totalCost, profit, margin, status: text(project.status) || '進行中', activity: billed + received + outstanding + totalCost };
-    }).filter((row) => row.activity > 0).sort((a, b) => b.billed - a.billed || b.activity - a.activity);
+      const margin = Number.isNaN(billed)?NaN:billed ? profit / billed * 100 : 0;
+      return { needsReview:!Number.isFinite(billed)||!Number.isFinite(outstanding),id, name: text(project.name) || '—', customer: entityName(maps.customers, text(project.customer), project.customerName), billed, received, outstanding, material, labor, other, customerDeduction, totalCost, profit, margin, status: text(project.status) || '進行中', activity: billed + received + outstanding + totalCost };
+    }).filter((row) => row.needsReview||row.activity > 0).sort((a, b) => b.billed - a.billed || b.activity - a.activity);
     const projects = projectRows.slice(0, 6);
 
     const today = businessDate();
@@ -271,8 +274,8 @@
     const overduePayables = openAP.filter((row) => { const due = businessDateValue(row.dueDate); return due && due < today; });
     const missingInvoices = data.billings.filter((row) => invoiceState(row) === 'invoice_pending');
     const missingInvoiceAmount = sum(missingInvoices, (billing) => {
-      const ar = data.receivables.find((row) => text(row.billingId) === text(billing.id) || text(row.sourceNo) === text(billing.number));
-      return ar ? Math.max(0, arAmount(ar) - paidAR(ar)) : number(billing.total ?? billing.grossTotal);
+      const ar = financialReceivables.find((row) => text(row.billingId) === text(billing.id) || text(row.sourceNo) === text(billing.number));
+      return ar ? Math.max(0, arAmount(ar) - paidAR(ar)) : number(effectiveBilling(billing)?.effective?.receivable??billing.total??billing.grossTotal);
     });
     // Paid history may retain several rows for one employee/month. Use the Store's
     // source-based view so those snapshots are never added together as new wages.
@@ -282,9 +285,12 @@
     const payrollPaid = sum(payrollRows, (row) => payrollGroups?row.paid:payrollPaidAmount(data,row));
     const payrollOpen = payrollGroups?sum(payrollRows,(row)=>Math.max(0,number(row.outstanding))):Math.max(0,payrollTotal-payrollPaid);
     const unbilledWork=unbilledWorkSummary(data);
-    const retentionBillings=data.billings.filter((row)=>number(row.retention)>number(row.retentionReceived));
-    const retentionOpen=sum(retentionBillings,(row)=>Math.max(0,number(row.retention)-number(row.retentionReceived)));
+    const retentionOutstanding=row=>{const f=effectiveBilling(row);return f?.valid===false?NaN:f?.settlement?.retentionOutstanding??Math.max(0,number(row.retention)-number(row.retentionReceived))};
+    const retentionBillings=data.billings.filter(row=>retentionOutstanding(row)>0);
+    const retentionOpen=sum(retentionBillings,retentionOutstanding);
+    const financialIssues=financialReceivables.filter(row=>row.financial?.valid===false);
     const attentions = [
+      ...(financialIssues.length?[{type:'折讓／應收待核對',count:financialIssues.length,amount:0,module:'receivables',tone:'red',icon:'circle-alert'}]:[]),
       ...(window.KusheCheques?.attentionItems(data)||[]),
       { type: '待請款施工', count: unbilledWork.count, countLabel: `${unbilledWork.count} 個案場`, amount: unbilledWork.amount, module: 'unbilled-work', tone: 'blue', icon: 'clipboard-list' },
       { type: '逾期應收', count: overdue.length, amount: sum(overdue, (row) => Math.max(0, arAmount(row) - paidAR(row))), module: 'receivables', tone: 'red', icon: 'circle-alert' },
@@ -303,8 +309,8 @@
         collected: delta(collected, collectionPrincipalForMonth(data, prev)), ar: delta(outstandingAR, prevOpenAR),
         ap: delta(outstandingAP, prevOpenAP), cash: delta(monthCash(data, month), monthCash(data, prev))
       }, structureTotal, structurePaid, structureOpen,
-      collectionRate: structureTotal ? structurePaid / structureTotal * 100 : 0,
-      recoveryRate: allAR ? Math.min(100, allReceived / allAR * 100) : 0,
+      collectionRate: Number.isNaN(structureTotal)?NaN:structureTotal ? structurePaid / structureTotal * 100 : 0,
+      recoveryRate: Number.isNaN(allAR)?NaN:allAR ? Math.min(100, allReceived / allAR * 100) : 0,
       projects, reportProjects: projectRows, attentions, payrollTotal, payrollPaid, payrollOpen
     };
   }
@@ -332,7 +338,7 @@
       return points;
     }
     if (range === 3) {
-      return [2,1,0].map((back) => { const year = base.getFullYear() - back; return { key: String(year), label: String(year), value: data.billings.filter((row) => monthOf(row).startsWith(String(year))).reduce((total, row) => total + billingAmount(row), 0) }; });
+      return [2,1,0].map((back) => { const year = base.getFullYear() - back; return { key: String(year), label: String(year), value: data.billings.filter((row) => monthOf(row).startsWith(String(year))).reduce((total, row) => total + billingAmount(row), 0)+(window.KuSheERPStore?.allowanceAccountingRows?.(data)||[]).filter(row=>String(row.date).startsWith(String(year))).reduce((total,row)=>total+number(row.untaxed),0) }; });
     }
     const points = [];
     for (let i = 11; i >= 0; i -= 1) { const d = new Date(base.getFullYear(), base.getMonth() - i, 1); const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; points.push({ key, label: `${d.getMonth() + 1}月`, value: monthRevenue(data, key) }); }
@@ -354,27 +360,27 @@
     const ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio);
     const w = rect.width, h = rect.height, left = 44, right = 18, top = 20, bottom = 30;
     const points = trendPoints(activeVm.data, activeVm.month, activeRange);
-    const rawMax = Math.max(...points.map((p) => p.value), 1);
-    const magnitude = 10 ** Math.floor(Math.log10(rawMax));
-    const max = Math.ceil(rawMax / magnitude) * magnitude;
+    const rawMax = Math.max(...points.map(p=>p.value),0),rawMin=Math.min(...points.map(p=>p.value),0);
+    const magnitude = 10 ** Math.floor(Math.log10(Math.max(rawMax,-rawMin,1)));
+    const max = Math.max(magnitude,Math.ceil(rawMax/magnitude)*magnitude),min=Math.floor(rawMin/magnitude)*magnitude,span=max-min,zeroY=top+(h-top-bottom)*(max/span);
     ctx.font = '11px Microsoft JhengHei'; ctx.textBaseline = 'middle';
-    for (let i = 0; i <= 4; i += 1) { const y = top + (h - top - bottom) * i / 4; ctx.strokeStyle = '#e5ebf2'; ctx.setLineDash([3,3]); ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(w-right, y); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = '#50627c'; const value = max * (1 - i / 4); ctx.fillText(value >= 10000 ? `${Math.round(value / 10000)}萬` : nf.format(Math.round(value)), 1, y); }
-    chartPositions = points.map((point, index) => ({ ...point, x: left + (w-left-right) * (points.length === 1 ? .5 : index/(points.length-1)), y: top + (h-top-bottom) * (1 - point.value/max) }));
+    for (let i = 0; i <= 4; i += 1) { const y = top + (h - top - bottom) * i / 4; ctx.strokeStyle = '#e5ebf2'; ctx.setLineDash([3,3]); ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(w-right, y); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = '#50627c'; const value = max - span*i/4; ctx.fillText(Math.abs(value) >= 10000 ? `${Math.round(value / 10000)}萬` : nf.format(Math.round(value)), 1, y); }
+    chartPositions = points.map((point, index) => ({ ...point, x: left + (w-left-right) * (points.length === 1 ? .5 : index/(points.length-1)), y: top + (h-top-bottom) * ((max-point.value)/span) }));
     const area = ctx.createLinearGradient(0, top, 0, h-bottom); area.addColorStop(0, 'rgba(25,95,222,.22)'); area.addColorStop(1, 'rgba(25,95,222,0)');
-    ctx.beginPath(); chartPositions.forEach((p, i) => i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y)); ctx.lineTo(chartPositions.at(-1).x,h-bottom); ctx.lineTo(chartPositions[0].x,h-bottom); ctx.closePath(); ctx.fillStyle=area; ctx.fill();
+    ctx.beginPath(); chartPositions.forEach((p, i) => i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y)); ctx.lineTo(chartPositions.at(-1).x,zeroY); ctx.lineTo(chartPositions[0].x,zeroY); ctx.closePath(); ctx.fillStyle=area; ctx.fill();
     ctx.beginPath(); chartPositions.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.strokeStyle='#0b5bd6'; ctx.lineWidth=2.5; ctx.lineJoin='round'; ctx.stroke();
     chartPositions.forEach((p) => { ctx.beginPath();ctx.arc(p.x,p.y,3.5,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#0b5bd6';ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#40536f';ctx.textAlign='center';ctx.fillText(p.label,p.x,h-11); }); ctx.textAlign='left';
   }
 
   function renderStructure(vm) {
-    const paidRate = Math.max(0, Math.min(100, vm.collectionRate));
+    const paidRate = Number.isFinite(vm.collectionRate)?Math.max(0,Math.min(100,vm.collectionRate)):0;
     $('#collectionDonut').style.background = `conic-gradient(var(--green) 0 ${paidRate}%,var(--orange) ${paidRate}% 100%)`;
     $('#structureTotal').textContent = money(vm.structureTotal); $('#structurePaid').textContent = money(vm.structurePaid); $('#structureOpen').textContent = money(vm.structureOpen);
-    $('#collectionRate').textContent = `${paidRate.toFixed(1)}%`; $('#collectionBar').style.width = `${paidRate}%`;
-    $('#recoveryRate').textContent = `${vm.recoveryRate.toFixed(1)}%`; $('#recoveryBar').style.width = `${vm.recoveryRate}%`;
+    $('#collectionRate').textContent = Number.isFinite(vm.collectionRate)?`${paidRate.toFixed(1)}%`:'待核對'; $('#collectionBar').style.width = `${paidRate}%`;
+    $('#recoveryRate').textContent = Number.isFinite(vm.recoveryRate)?`${vm.recoveryRate.toFixed(1)}%`:'待核對'; $('#recoveryBar').style.width = `${Number.isFinite(vm.recoveryRate)?vm.recoveryRate:0}%`;
   }
   function renderProjects(vm) {
-    $('#projectRows').innerHTML = vm.projects.length ? vm.projects.map((row) => `<tr data-module="projects"><td title="${escapeHtml(row.name)}">${escapeHtml(row.name)}</td><td>${money(row.billed)}</td><td>${money(row.received)}</td><td>${money(row.outstanding)}</td><td>${money(row.material)}</td><td>${money(row.labor)}</td><td>${money(row.other)}</td><td>${money(row.customerDeduction)}</td><td>${money(row.totalCost)}</td><td>${money(row.profit)}</td><td>${row.margin.toFixed(1)}%</td><td><span class="status-pill ${/已完工/.test(row.status) ? 'done' : /暫停|未完工/.test(row.status) ? 'hold' : ''}">${escapeHtml(row.status)}</span></td></tr>`).join('') : '<tr><td colspan="12" class="empty-cell">目前沒有可彙整的案場資料</td></tr>';
+    $('#projectRows').innerHTML = vm.projects.length ? vm.projects.map((row) => `<tr data-module="projects"><td title="${escapeHtml(row.name)}">${escapeHtml(row.name)}</td><td>${money(row.billed)}</td><td>${money(row.received)}</td><td>${money(row.outstanding)}</td><td>${money(row.material)}</td><td>${money(row.labor)}</td><td>${money(row.other)}</td><td>${money(row.customerDeduction)}</td><td>${money(row.totalCost)}</td><td>${money(row.profit)}</td><td>${Number.isFinite(row.margin)?row.margin.toFixed(1)+'%':'待核對'}</td><td><span class="status-pill ${/已完工/.test(row.status) ? 'done' : /暫停|未完工/.test(row.status) ? 'hold' : ''}">${escapeHtml(row.status)}</span></td></tr>`).join('') : '<tr><td colspan="12" class="empty-cell">目前沒有可彙整的案場資料</td></tr>';
   }
   function attentionMarkup(rows) {
     return rows.length ? rows.map((row) => `<button class="attention-item" type="button" ${row.chequeFilter?`data-cheque-filter="${row.chequeFilter}"`:`data-module="${row.module}"`}><span class="attention-icon ${row.tone}"><i data-icon="${row.icon}"></i></span><span class="attention-copy"><strong>${row.type}</strong><small class="count-pill">${row.countLabel||`${row.count} 筆`}</small></span><b class="attention-amount">${money(row.amount)}</b><i class="attention-arrow" data-icon="chevron-right"></i></button>`).join('') : '<div class="all-clear">目前沒有待處理項目</div>';
