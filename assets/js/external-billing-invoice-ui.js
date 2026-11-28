@@ -41,11 +41,18 @@
       '<p class="bg-inv-hint">表格金額為各「原請款」已記錄金額，不是重新開立的發票金額。開票月份只取各原單實際發票日期，不使用合併文件日期。</p>'+
       '</section>';
   }
+  function billingFinancialForDisplay(id,data=window.KuSheERPStore.getState()){const ui=window.KusheBillingAllowance;if(ui?.forBilling)return ui.forBilling(id,data);const ledger=data?.meta?.billingAllowances;if(ledger===undefined||Array.isArray(ledger)&&!ledger.length)return null;return window.KuSheERPStore.billingFinancialState?.(id,data)||{valid:false,issues:['折讓核對元件未完整載入，請重新整理。'],hasAllowanceHistory:true,status:'待核對'}}
+  function financialMarkup(model){
+    const store=window.KuSheERPStore;if(!store?.billingFinancialState)return '';
+    const data=store.getState(),invoices=store.invoiceRows(),rows=model.rows.map(row=>({row,financial:billingFinancialForDisplay(row.billingId,data),invoices:invoices.filter(i=>i.invoiceType==='output'&&String(i.sourceId)===String(row.billingId))}));
+    if(!rows.some(x=>x.financial?.hasAllowanceHistory||x.financial?.valid===false))return '';
+    return '<section class="bg-invoice-crosscheck" aria-label="折讓與實際發票對照"><header><div><b>有效帳款與實際發票</b><p>原請款金額保留於上表；待開票採有效金額，已開票保留實際票額，票後折讓另列。</p></div></header><div class="bg-invoice-scroll"><table><thead><tr><th>原請款</th><th>累計有效折讓</th><th>有效未稅</th><th>有效稅額</th><th>有效含稅</th><th>發票金額依據</th></tr></thead><tbody>'+rows.map(({row,financial,invoices:matches})=>{const f=financial||{valid:true,original:{grossTotal:row.originalGross},effective:{untaxed:row.originalUntaxed,tax:row.originalTax,grossTotal:row.originalGross}};const invoice=matches.length===1?matches[0]:null;if(f.valid===false)return '<tr><td>'+esc(row.billingNo)+'</td><td colspan="5" role="alert">'+esc((f.issues||[]).join('；'))+'</td></tr>';return '<tr><td>'+esc(row.billingNo)+'</td><td class="num">'+money(f.original.grossTotal-f.effective.grossTotal)+'</td><td class="num">'+money(f.effective.untaxed)+'</td><td class="num">'+money(f.effective.tax)+'</td><td class="num">'+money(f.effective.grossTotal)+'</td><td>'+(f.valid===false?'資料待核對':row.invoiceStatus==='no_invoice'?'免開發票':invoice?esc(invoice.status==='issued'?'已開票':'待開票')+'<small>未稅 '+money(invoice.netAmount)+'／稅額 '+money(invoice.taxAmount)+'／含稅 '+money(invoice.grossAmount)+'</small>':'發票來源待核對')+'</td></tr>'}).join('')+'</tbody></table></div></section>';
+  }
   function mount(host,sources,callbacks={}) {
     if(!host||!engine?.project)throw new Error('原請款／發票對照模組尚未載入');
     function render(nextSources=sources){
       const model=engine.project(nextSources);
-      host.innerHTML=markup(model,true);
+      host.innerHTML=markup(model,true)+financialMarkup(model);
       host.querySelectorAll('[data-bg-manage-invoice]').forEach(button=>{
         button.onclick=()=>{
           try{

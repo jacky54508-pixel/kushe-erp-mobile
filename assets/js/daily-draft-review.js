@@ -22,7 +22,8 @@
     function exportDraft(){
       if(!present()||busy)return;
       // User-initiated file only: never put business drafts into local/session storage.
-      const data={schema:'kushe-daily-draft-reference-v1',purpose:'施工輸入草稿，非 ERP 備份；請勿匯入還原',exportedAt:new Date().toISOString(),editingBatchId:context.batchId||'',draft:context.readDraft(),fields:$$('input,select,textarea',form).filter(n=>n.name).map(n=>({name:n.name,employeeId:n.dataset.employeeId||'',value:n.value,checked:(n.type==='checkbox'||n.type==='radio')?n.checked:undefined}))};
+      const draft=context.readDraft(),hasAgreement=Object.keys(draft.commissionAgreementsByProject||{}).length>0;
+      const data={schema:hasAgreement?'kushe-daily-draft-reference-v2':'kushe-daily-draft-reference-v1',purpose:'施工輸入草稿，非 ERP 備份；請勿匯入還原',exportedAt:new Date().toISOString(),editingBatchId:context.batchId||'',draft,fields:$$('input,select,textarea',form).filter(n=>n.name).map(n=>{const projectId=n.closest('[data-daily-commission-agreement]')?.dataset.projectId;return {name:n.name,employeeId:n.dataset.employeeId||'',...(projectId?{projectId}:{}),value:n.value,checked:(n.type==='checkbox'||n.type==='radio')?n.checked:undefined}})};
       const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');
       a.href=url;a.download='酷舍ERP_每日施工草稿_'+String(data.draft.date||'未填日期')+'.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
     }

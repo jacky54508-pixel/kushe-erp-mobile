@@ -9,9 +9,20 @@
   const expand=new Set(),rawModes=new Set();
   let indexState=null,indexCache=null;
   function index(){const s=store.getState();if(s!==indexState){indexState=s;indexCache=store.externalBillingDocumentIndex()}return indexCache;}
+  function billingFinancialForDisplay(id,data=store.getState()){const ui=window.KusheBillingAllowance;if(ui?.forBilling)return ui.forBilling(id,data);const ledger=data?.meta?.billingAllowances;if(ledger===undefined||Array.isArray(ledger)&&!ledger.length)return null;return store.billingFinancialState?.(id,data)||{valid:false,issues:['折讓核對元件未完整載入，請重新整理。'],hasAllowanceHistory:true,status:'待核對'}}
+  let financialCacheState=null,financialCache=new WeakMap();
+  function groupTotals(group){
+    const data=store.getState();if(data!==financialCacheState){financialCacheState=data;financialCache=new WeakMap()}
+    if(financialCache.has(group))return financialCache.get(group);
+    if(!store.billingFinancialState)return group.totals;
+    const keys=['untaxed','tax','grossTotal','retention','receivable','received','outstanding','retentionReceived','retentionOutstanding','pendingCheque','availableToCollect'],totals=Object.fromEntries(keys.map(k=>[k,0]));
+    for(const source of group.sources||[]){const f=billingFinancialForDisplay(source.document.billingId,data);if(!f){for(const k of keys)totals[k]+=source.document.anchors[k]??source.settlement[k]??0;continue}if(f.valid===false){for(const k of keys)totals[k]=NaN;totals.invalid=true;continue}const v=f.settlement;for(const k of ['untaxed','tax','grossTotal','retention','receivable'])totals[k]+=f.effective[k];for(const k of ['received','outstanding','retentionReceived','retentionOutstanding'])totals[k]+=v[k];totals.pendingCheque+=v.pendingChequeReserved;totals.availableToCollect+=v.available;if(f.valid===false)totals.invalid=true;if(f.hasAllowance)totals.hasAllowance=true}
+    financialCache.set(group,totals);return totals;
+  }
+  function sourceSettlement(source){const f=billingFinancialForDisplay(source.document.billingId,store.getState());return f?.valid===false?{financial:f,received:NaN,outstanding:NaN,retentionReceived:NaN,retentionOutstanding:NaN,pendingCheque:NaN,availableToCollect:NaN}:f?{...source.settlement,...f.settlement,pendingCheque:f.settlement.pendingChequeReserved,availableToCollect:f.settlement.available,financial:f}:source.settlement}
   function memberId(row,kind){return String(row.id||'');}
   function memberKeys(g,kind){return g.sources.map(s=>kind==='billing'?s.document.billingId:s.document.receivableId);}
-  function status(g,kind){const t=g.totals;if(t.outstanding>0)return t.received>0?'部分收款':'未收';return kind==='billing'?'已收':t.retentionOutstanding>0?'本期已收清':'全部收清';}
+  function status(g,kind){const t=groupTotals(g);if(t.invalid)return '待核對';if(t.outstanding>0)return t.received>0?'部分收款':'未收';return kind==='billing'?'已收':t.retentionOutstanding>0?'本期已收清':'全部收清';}
   function filterRows(rows,kind,filters,match){
     if(rawModes.has(kind)||kind==='receivable'&&filters.view==='employee_cash')return rows.filter(r=>match(r,filters));
     const groups=index().documents.filter(g=>g.canGroup),map=new Map();groups.forEach(g=>memberKeys(g,kind).forEach(id=>map.set(id,g)));
@@ -19,11 +30,11 @@
     rows.forEach(row=>{
       const g=map.get(memberId(row,kind));if(!g){if(match(row,filters))result.push(row);return}
       if(visited.has(g.document.id))return;visited.add(g.document.id);
-      const keys=new Set(memberKeys(g,kind)),members=rows.filter(r=>keys.has(memberId(r,kind))),t=g.totals;
+      const keys=new Set(memberKeys(g,kind)),members=rows.filter(r=>keys.has(memberId(r,kind))),t=groupTotals(g);
       if(kind==='billing'&&filters.receipt&&status(g,kind)!==filters.receipt)return;
       if(kind==='receivable'){
         if(filters.view==='outstanding'&&t.outstanding<=0&&t.retentionOutstanding<=0)return;
-        if(filters.view==='settled'&&(t.outstanding>0||t.retentionOutstanding>0))return;
+        if(filters.view==='settled'&&(t.invalid||t.outstanding>0||t.retentionOutstanding>0))return;
         if(filters.status&&filters.status!==status(g,kind)&&!(filters.status==='本期已收清'&&t.outstanding===0))return;
       }
       // The group is a filter unit. Search any member/primary name and show its original members once.
@@ -36,7 +47,7 @@
     return result;
   }
   function activeFor(billingId){return index().documents.find(g=>g.canGroup&&g.document.sourceIds.includes(String(billingId)));}
-  function statusText(g){return g.totals.outstanding>0?(g.totals.received>0?'部分收款':'待收款'):g.totals.retentionOutstanding>0?'本期收清・保留款待收':'全部收清';}
+  function statusText(g){const t=groupTotals(g);return t.invalid?'待核對':t.outstanding>0?(t.received>0?'部分收款':'待收款'):t.retentionOutstanding>0?'本期收清・保留款待收':'全部收清';}
   // P31-8: project saved document metadata only. Never invent or persist dates on read.
   function documentDateText(value){
     if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return '未記錄';
@@ -83,7 +94,7 @@
     requestAnimationFrame(()=>{if(!m.isClosed())$('[data-bg-history-close]',m.footer).focus({preventScroll:true})});
   }
   function groupSummary(g,kind){
-    const d=g.document,t=g.totals,isReceivable=kind==='receivable';
+    const d=g.document,t=groupTotals(g),isReceivable=kind==='receivable';
     // P31-5: one primary amount per view, using the existing validated read model.
     return '<div class="bg-summary bg-summary-single"><div class="bg-identity"><div class="bg-titleline"><h3>'+esc(d.displayProjectName)+'</h3><span class="bg-kind">合併請款</span></div><p class="bg-caption">'+esc(d.customerName)+'</p></div>'+
       '<div class="bg-money-grid"><div class="bg-metric bg-amount"><small>'+(isReceivable?'本期未沖銷':'請款合計')+'</small><strong>'+money(isReceivable?t.outstanding:t.grossTotal)+'</strong><span class="bg-state">'+statusText(g)+'</span></div></div>'+
@@ -94,7 +105,7 @@
   }
   // P31-6: native summary cells share the existing table columns. Read-only presentation.
   function inlineGroupRow(g,kind,header){
-    const titles=Array.from(header?.cells||[],cell=>cell.textContent.trim()),billing=kind==='billing',d=g.document,t=g.totals;
+    const titles=Array.from(header?.cells||[],cell=>cell.textContent.trim()),billing=kind==='billing',d=g.document,t=groupTotals(g);
     const known=billing?['選取','請款單號','日期','客戶','案場','請款金額','保留款','應收金額','已沖銷','未沖銷','發票','狀態','操作']:['請款資訊','客戶／案場','本期應收','應收沖銷','收款進度','保留款','狀態','操作'];
     const required=billing?['選取','請款單號','日期','客戶','案場','請款金額','操作']:['請款資訊','客戶／案場','本期應收','操作'];
     if(!required.every(v=>titles.includes(v))||titles.some(v=>!known.includes(v))||!billing&&!titles.some(v=>['應收沖銷','收款進度'].includes(v)))return null;
@@ -126,17 +137,17 @@
     return row;
   }
   function groupReadOnlyFacts(g){
-    const n=document.createElement('details'),t=g.totals;n.className='bg-finance-details';
-    n.innerHTML='<summary>金額與文件資訊</summary><div class="bg-finance-values">'+[['原請款合計',t.grossTotal],['本期應收',t.receivable],['本期已沖銷',t.received],['本期未沖銷',t.outstanding],['保留款待收',t.retentionOutstanding],['待兌現預留',t.pendingCheque]].map(([label,value])=>'<span>'+label+'<b>'+money(value)+'</b></span>').join('')+'</div><p>第 '+g.document.revision+' 版 · '+g.document.sourceIds.length+' 張原單／發票各自保留，不另計一筆應收。待兌現預留包含在本期未沖銷中，不另加計。</p>';
+    const n=document.createElement('details'),t=groupTotals(g);n.className='bg-finance-details';
+    n.innerHTML='<summary>金額與文件資訊</summary><div class="bg-finance-values">'+[['原請款合計',g.totals.grossTotal],...(t.hasAllowance?[['累計有效折讓',g.totals.grossTotal-t.grossTotal],['調整後總額',t.grossTotal]]:[]),['本期應收',t.receivable],['本期已沖銷',t.received],['本期未沖銷',t.outstanding],['保留款待收',t.retentionOutstanding],['待兌現預留',t.pendingCheque]].map(([label,value])=>'<span>'+label+'<b>'+money(value)+'</b></span>').join('')+'</div><p>第 '+g.document.revision+' 版 · '+g.document.sourceIds.length+' 張原單／發票各自保留，不另計一筆應收。待兌現預留包含在本期未沖銷中，不另加計。</p>';
     return n;
   }
   function sourceLabels(source,kind){
-    const d=source.document,p=source.settlement;
+    const d=source.document,p=sourceSettlement(source);
     const invoice=['invoiced','no_invoice'].includes(d.invoiceStatus)?d.invoiceStatus:'invoice_pending';
     const label=invoice==='invoiced'?'已開發票':invoice==='no_invoice'?'免開發票':'待開發票';
     return {
       info:'<b class="bg-source-title">'+esc(d.projectName)+'</b><small class="bg-source-reference">'+esc(d.number||'未填單號')+'<span>'+esc(d.date||'日期未填')+'</span></small>',
-      amount:'<small class="bg-source-amount-label">'+(kind==='receivable'?'本期未沖銷':'原請款金額')+'</small><strong>'+money(kind==='receivable'?p.outstanding:d.anchors.grossTotal)+'</strong>'+(kind==='receivable'?'<small class="bg-source-state">'+(p.outstanding>0?(p.received>0?'部分收款':'待收款'):'本期已收清')+'</small>':'')+(p.retentionOutstanding>0?'<small class="bg-source-attention">保留款待收 '+money(p.retentionOutstanding)+'</small>':'')+(p.pendingCheque>0?'<small class="bg-source-attention">待兌現預留 '+money(p.pendingCheque)+'</small>':''),
+      amount:'<small class="bg-source-amount-label">'+(kind==='receivable'?'本期未沖銷':'原請款金額')+'</small><strong>'+money(kind==='receivable'?p.outstanding:d.anchors.grossTotal)+'</strong>'+(kind==='receivable'?'<small class="bg-source-state">'+(p.financial?.valid===false?'待核對':p.outstanding>0?(p.received>0?'部分收款':'待收款'):'本期已收清')+'</small>':'')+(p.retentionOutstanding>0?'<small class="bg-source-attention">保留款待收 '+money(p.retentionOutstanding)+'</small>':'')+(p.pendingCheque>0?'<small class="bg-source-attention">待兌現預留 '+money(p.pendingCheque)+'</small>':''),
       invoice:'<span class="invoice-status-badge '+invoice+'">'+label+'</span>'+(d.invoiceNo?'<small class="bg-source-invoice-no">'+esc(d.invoiceNo)+'</small>':'')
     };
   }
@@ -190,7 +201,7 @@
     button.onclick=()=>{if(expand.has(key))expand.delete(key);else expand.add(key);update()};update();
     $('[data-bg-edit]',box).onclick=()=>openEditor(g.document.sourceIds,g.document.id);
     $('[data-bg-pdf]',box).onclick=()=>printSaved(g.document.id);
-    $('[data-bg-discount]',box)?.addEventListener('click',()=>{try{if(!window.KusheBillingGroupDiscountPreview)throw Error('合併議價試算元件尚未載入');window.KusheBillingGroupDiscountPreview.open(g.document.id)}catch(error){notifyError(error.message||String(error))}});
+    $('[data-bg-discount]',box)?.addEventListener('click',()=>{try{if(!window.KusheBillingAllowance)throw Error('折讓入帳元件尚未載入，請重新整理');window.KusheBillingAllowance.open({externalDocumentId:g.document.id})}catch(error){notifyError(error.message||String(error))}});
     $$('[data-bg-history]',box).forEach(button=>button.onclick=()=>openDocumentHistory(g.document.id));
   }
   function mountList(root,kind,context){
