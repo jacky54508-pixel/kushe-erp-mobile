@@ -198,8 +198,9 @@ def run_legacy_consumers(browser, server, report, device, unrelated_allowance=Fa
         report.check(name + ': the same legacy missing-invoice source remains ineligible for formal allowance',
                      compatibility['strict']['valid'] is False and compatibility['strict']['settlement'] is None)
         page.evaluate("""async()=>{KusheBilling.deactivate();document.getElementById('billingsView').style.setProperty('display','none','important');document.body.dataset.route='receivables';await KusheReceivables.activate()}""")
-        page.locator('#receivableMonth').fill('2026-10')
-        page.locator('#receivableMonth').dispatch_event('change')
+        month_selector = '#receivablesApp .mobile-filter-common input[type="month"]' if device == 'mobile' else '#receivableMonth'
+        page.locator(month_selector).fill('2026-10')
+        page.locator(month_selector).dispatch_event('change')
         for receivable_id, expected in ((LEGACY_AR, 7500), (LEGACY_BILL_AR, 60000)):
             attribute = 'data-mobile-receivable' if device == 'mobile' else 'data-expand-receivable'
             row = page.locator('#receivablesApp [' + attribute + '="' + receivable_id + '"]')

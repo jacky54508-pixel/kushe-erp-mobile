@@ -18,8 +18,8 @@
       "sha256": "0e29b679ec2dde8c6e4a58cbe39ebb32dd8b13aac00bd48ef061faef0f771e1b"
     },
     ".p41-k30-tests/k30_browser_ui.py": {
-      "bytes": 22349,
-      "sha256": "95d7f8573ce02f643130607f06231e2f093077fabf03c0fe799f0643df941324"
+      "bytes": 22472,
+      "sha256": "249744ee39be1097de492ea97c20ed1a5b9f5f596c6a9a7e0b50fb227a9e58a7"
     },
     ".p41-k30-tests/k30_fixture.py": {
       "bytes": 16165,
