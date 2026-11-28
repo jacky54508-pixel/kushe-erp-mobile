@@ -26,7 +26,7 @@ CREATE OR REPLACE FUNCTION public.erp_state_cas_write(expected_sync_version bigi
  RETURNS TABLE(status text, sync_version bigint, updated_at timestamp with time zone)
  LANGUAGE plpgsql
  SET search_path TO 'pg_catalog'
-AS $function$
+AS $function$;
 declare
   principal_id uuid := auth.uid();
   applied_version bigint;
@@ -72,13 +72,13 @@ begin
     return query select 'CONFLICT'::text, null::bigint, null::timestamptz;
   end if;
 end;
-$function$
+$function$;
 
 CREATE OR REPLACE FUNCTION public.erp_state_cas_write_v2(expected_sync_version bigint, new_data jsonb, writer_mode text)
  RETURNS TABLE(status text, sync_version bigint, updated_at timestamp with time zone, last_writer_mode text, last_base_sync_version bigint)
  LANGUAGE plpgsql
  SET search_path TO 'pg_catalog'
-AS $function$
+AS $function$;
 declare
   principal_id uuid := auth.uid();
   applied_version bigint;
@@ -142,13 +142,13 @@ begin
   return query
     select 'CONFLICT'::text, current_version, current_at, current_mode, current_base;
 end;
-$function$
+$function$;
 
 CREATE OR REPLACE FUNCTION public.erp_states_enforce_sync_version()
  RETURNS trigger
  LANGUAGE plpgsql
  SET search_path TO 'pg_catalog'
-AS $function$
+AS $function$;
     BEGIN
       IF TG_OP = 'INSERT' THEN
         NEW.sync_version := 1;
@@ -157,7 +157,7 @@ AS $function$
       END IF;
       RETURN NEW;
     END;
-    $function$
+    $function$;
 
 create trigger erp_states_sync_version_before_write before insert or update on public.erp_states
  for each row execute function public.erp_states_enforce_sync_version();
