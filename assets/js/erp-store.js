@@ -531,6 +531,11 @@
       persistentValue = await dbGetCommitted(STATE_KEY);
       state = persistentValue;
     } catch (_) { db = null; }
+    // Refuse damaged allowance history before legacy bootstrap can write any
+    // journal, mirror or commit token. The original layers remain reviewable.
+    let allowanceEmergencyCandidate=null;
+    try{const raw=localStorage.getItem(EMERGENCY_KEY);allowanceEmergencyCandidate=raw?JSON.parse(raw):null}catch(_){}
+    try{for(const candidate of [persistentValue,allowanceEmergencyCandidate,window.KuSheLegacyData?.getState?.()])if(candidate?.meta?.billingAllowances!==undefined)billingAllowanceValidateSnapshot(candidate)}catch(error){state=null;throw error}
     if(db&&!recoveryVerification){
       await bootstrapLegacyStore();
       persistentValue=await dbGetCommitted(STATE_KEY);state=persistentValue;
@@ -5500,6 +5505,8 @@
     if(!basis)return ctx.original;
     if(basis.schema!==BILLING_INVOICE_BASIS_SCHEMA||basis.billingId!==String(ctx.billing.id)||basis.invoiceId!==String(ctx.invoice.id)||storeStateFingerprint(basis.original)!==storeStateFingerprint(ctx.original)||!Array.isArray(basis.allowanceIds)||!basis.allowanceIds.length||new Set(basis.allowanceIds).size!==basis.allowanceIds.length)throw allowanceError('ALLOWANCE_INVOICE_BASIS_INVALID','折讓後開票依據不完整');
     const active=allowanceActiveEvents(rows),reductions=[],taxBases=[];
+    const expectedIds=active.filter(row=>row.allocations.some(allocation=>allocation.billingId===String(ctx.billing.id)&&allocation.invoiceStage==='preinvoice')).map(row=>row.id).sort();
+    if(storeStateFingerprint([...basis.allowanceIds].sort())!==storeStateFingerprint(expectedIds))throw allowanceError('ALLOWANCE_INVOICE_BASIS_INVALID','開票依據必須完整包含此原單所有有效的開票前折讓');
     for(const id of basis.allowanceIds){
       const event=active.find(row=>row.id===id),allocation=event?.allocations.find(row=>row.billingId===String(ctx.billing.id));
       if(!allocation||allocation.invoiceStage!=='preinvoice')throw allowanceError('ALLOWANCE_INVOICE_BASIS_INVALID','已開票吸收的折讓不可撤銷或更換');
@@ -5778,7 +5785,14 @@
       });
       // Documentary identity excludes settlement fields; receipts remain dynamic in lists.
       const document={billingId:String(id),receivableId:String(ar.id),number:String(billing.number||''),date:String(billing.date||''),customerId:String(billing.customer),customerName:String(customers[0].name||billing.customerName||''),projectId:String(billing.project),projectName:String(billing.projectName||projects[0].name||''),taxMode,anchors,invoiceId:String(invoice?.id||''),invoiceNo:String(invoice?.invoiceNumber||invoice?.number||billing.invoiceNo||''),invoiceDate:String(invoice?.invoiceDate||invoice?.date||billing.invoiceDate||''),invoiceStatus:billingInvoiceStatus(billing),originalLines};
-      return {document,settlement:{billingId:String(id),received,outstanding:anchors.receivable-received,retentionReceived,retentionOutstanding:anchors.retention-retentionReceived,pendingCheque:pending,availableToCollect:anchors.receivable-received-pending},snapshot:ctx.snapshot};
+      const settlement={billingId:String(id),received,outstanding:anchors.receivable-received,retentionReceived,retentionOutstanding:anchors.retention-retentionReceived,pendingCheque:pending,availableToCollect:anchors.receivable-received-pending};
+      let effectiveAmounts={...anchors},effectiveSettlement={...settlement};
+      if(billingAllowanceHistoryLock(id)){
+        const financial=billingFinancialState(id);if(!financial.valid)throw new Error(financial.issues.join('；'));
+        effectiveAmounts={...financial.effective};
+        effectiveSettlement={billingId:String(id),received:financial.settlement.received,outstanding:financial.settlement.outstanding,retentionReceived:financial.settlement.retentionReceived,retentionOutstanding:financial.settlement.retentionOutstanding,pendingCheque:financial.settlement.pendingChequeReserved,availableToCollect:financial.settlement.available,status:financial.status};
+      }
+      return {document,settlement,effectiveAmounts,effectiveSettlement,snapshot:ctx.snapshot};
     });
     if(new Set(sources.map(s=>s.document.customerId)).size!==1)throw new Error('只能合併同一客戶的原請款單；不按相同名稱推測');
     if(new Set(sources.map(s=>s.document.receivableId)).size!==sources.length)throw new Error('不同請款共用同一應收，請先核對，不能重複計入');
@@ -5787,6 +5801,11 @@
   function externalBillingTotals(sources) {
     const totals={untaxed:0,tax:0,grossTotal:0,retention:0,receivable:0,received:0,outstanding:0,retentionReceived:0,retentionOutstanding:0,pendingCheque:0,availableToCollect:0};
     sources.forEach(s=>Object.keys(totals).forEach(key=>{totals[key]+=s.document.anchors[key]??s.settlement[key]??0;if(!Number.isSafeInteger(totals[key]))throw new Error('合併金額超過安全範圍')}));
+    return totals;
+  }
+  function externalBillingEffectiveTotals(sources) {
+    const totals={untaxed:0,tax:0,grossTotal:0,retention:0,receivable:0,received:0,outstanding:0,retentionReceived:0,retentionOutstanding:0,pendingCheque:0,availableToCollect:0};
+    sources.forEach(source=>Object.keys(totals).forEach(key=>{totals[key]+=(source.effectiveAmounts||source.document.anchors)[key]??(source.effectiveSettlement||source.settlement)[key]??0;if(!Number.isSafeInteger(totals[key]))throw new Error('折讓後合併金額超過安全範圍')}));
     return totals;
   }
   function externalBillingContext(sourceIds,documentId='') {
@@ -5931,7 +5950,7 @@
       }catch(error){issues.push(error.message)}
       const termsChanged=issues.length>0||storeStateFingerprint(sources.map(s=>s.document))!==storeStateFingerprint(doc.sourceSnapshots);
       const settlementChanged=issues.length>0||storeStateFingerprint(sources.map(s=>s.settlement))!==storeStateFingerprint(doc.settlementSnapshots);
-      return {document:storeStateClone(doc),documentSnapshot:storeStateFingerprint(doc),sources,totals,issues,termsChanged,settlementChanged,canGroup:doc.status==='active'&&issues.length===0};
+      return {document:storeStateClone(doc),documentSnapshot:storeStateFingerprint(doc),sources,totals,effectiveTotals:issues.length?null:externalBillingEffectiveTotals(sources),issues,termsChanged,settlementChanged,canGroup:doc.status==='active'&&issues.length===0};
     });
     return {documents,issues:documents.flatMap(d=>d.issues.map(message=>(d.document.displayProjectName||d.document.id)+'：'+message))};
   }

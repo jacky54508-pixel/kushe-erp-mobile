@@ -15,6 +15,9 @@ BANK = PREFIX + 'BANK'
 EMPLOYEE = PREFIX + 'EMPLOYEE'
 IDS = [PREFIX + 'BILL-' + c for c in 'ABC']
 ARS = [bid + '-AR' for bid in IDS]
+LEGACY_AR = PREFIX + 'LEGACY-STANDALONE-AR'
+LEGACY_BILL = PREFIX + 'LEGACY-MISSING-INVOICE-BILL'
+LEGACY_BILL_AR = LEGACY_BILL + '-AR'
 DATE = '2026-10-20'
 STAMP = '2026-10-20T02:03:04.000Z'
 FIELDS = ('untaxed', 'tax', 'grossTotal', 'retention', 'receivable')
@@ -192,6 +195,29 @@ def fixture(kind='standard'):
         next(item for item in state['receivables'] if item['id'] == ARS[0]).update(received=41000, legacyReceived=1000)
     elif kind == 'tax-rate-changed':
         state['settings']['defaultTax'] = 10
+    elif kind == 'legacy-consumers':
+        project = PREFIX + 'LEGACY-PROJECT'
+        state['projects'].append({'id': project, 'name': project, 'customer': CUSTOMER, 'customerName': PREFIX + '合成客戶'})
+        state['receivables'].append({'id': LEGACY_AR, 'sourceNo': PREFIX + 'LEGACY-STANDALONE-NO',
+            'date': '2026-10-15', 'customer': CUSTOMER, 'customerName': PREFIX + '合成客戶',
+            'project': project, 'projectName': project, 'amount': 10000, 'received': 2500,
+            'legacyReceived': 2500, 'retention': 0, 'retentionAmount': 0, 'retentionReceived': 0,
+            'legacyRetentionReceived': 0, 'receivableCheques': [], 'status': '部分收款',
+            'createdAt': STAMP, 'updatedAt': STAMP})
+        old_bill = deepcopy(next(row for row in state['billings'] if row['id'] == IDS[0]))
+        old_bill.update(id=LEGACY_BILL, number=PREFIX + 'LEGACY-MISSING-INVOICE-NO', receivableId=LEGACY_BILL_AR,
+            project=project, projectName=project, invoiceStatus='invoiced', hasInvoice=True,
+            invoiceNo=PREFIX + 'LEGACY-ISSUED-VOUCHER', invoiceDate='2026-10-16')
+        old_bill['lines'][0]['id'] = LEGACY_BILL + '-LINE'
+        old_ar = deepcopy(next(row for row in state['receivables'] if row['id'] == ARS[0]))
+        old_ar.update(id=LEGACY_BILL_AR, billingId=LEGACY_BILL, sourceNo=old_bill['number'],
+            project=project, projectName=project, received=40000, legacyReceived=40000,
+            invoiceStatus='invoiced', invoiceNo=old_bill['invoiceNo'], invoiceDate=old_bill['invoiceDate'])
+        state['billings'].append(old_bill)
+        state['receivables'].append(old_ar)
+        # Deliberately no invoice row: existing ordinary K29 receipt consumers
+        # accept this saved legacy source, while formal allowance admission must
+        # still require its complete original invoice evidence.
     return state
 
 

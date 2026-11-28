@@ -22,8 +22,46 @@
   // These are presentation helpers only. The Store owns every amount and cap.
   function billing(id, data) { return store.billingFinancialState?.(String(id), data); }
   function receivable(id, data) { return store.receivableFinancialState?.(String(id), data); }
+  const presentationHistoryCache = new WeakMap();
+  function invalidFinancial(message) {
+    return {valid:false,issues:[message],original:null,adjustment:null,effective:null,settlement:null,status:'待核對',hasAllowance:false,hasAllowanceHistory:true,history:[],snapshot:''};
+  }
+  function presentationHistory(data) {
+    if(Object.isFrozen(data)&&presentationHistoryCache.has(data))return presentationHistoryCache.get(data);
+    const index={billings:new Set(),receivables:new Set(),error:''},ledger=data?.meta?.billingAllowances;
+    try{
+      if(ledger!==undefined){
+        if(!Array.isArray(ledger))throw new Error('折讓紀錄格式待核對，請先核對資料來源。');
+        if(ledger.length){
+          if(typeof store.allowanceAccountingRows!=='function')throw new Error('折讓紀錄核對元件未載入，請重新整理。');
+          // This Store query validates the complete ledger, including original
+          // source identities, reversals and zero-amount group allocations.
+          const rows=store.allowanceAccountingRows(data);
+          if(!Array.isArray(rows)||!rows.length)throw new Error('折讓紀錄來源缺漏，請先核對。');
+          for(const row of rows){
+            if(!row?.billingId||!row?.receivableId)throw new Error('折讓紀錄缺少原請款／應收識別。');
+            index.billings.add(String(row.billingId));index.receivables.add(String(row.receivableId));
+          }
+        }
+      }
+    }catch(error){index.error=error.message||String(error)}
+    if(Object.isFrozen(data))presentationHistoryCache.set(data,index);
+    return index;
+  }
+  function forBilling(id,data=store.getState()) {
+    const index=presentationHistory(data);
+    if(index.error)return invalidFinancial(index.error);
+    if(!index.billings.has(String(id)))return null;
+    return billing(id,data)||invalidFinancial('有效請款核對元件未載入，請重新整理。');
+  }
+  function forReceivable(id,data=store.getState()) {
+    const index=presentationHistory(data);
+    if(index.error)return invalidFinancial(index.error);
+    if(!index.receivables.has(String(id)))return null;
+    return receivable(id,data)||invalidFinancial('有效應收核對元件未載入，請重新整理。');
+  }
   function receiptState(row, data = store.getState()) {
-    const f = billing(row.id, data);
+    const f = forBilling(row.id, data);
     if (!f) return store.billingReceiptState(row);
     const ar = data.receivables.find(a => String(a.id) === String(f.receivableId || row.receivableId)) || data.receivables.find(a => String(a.billingId) === String(row.id));
     if(f.valid===false)return {receivable:ar,received:NaN,unreceived:NaN,status:'待核對',financial:f};
@@ -91,7 +129,7 @@
     const totals = preview.totals;
     return '<h3>'+(preview.allowed?'核對結果：可確認入帳':'尚不能入帳，請處理下列項目')+'</h3>'+
       (blockers.length?'<ul>'+blockers.map(b=>'<li>'+esc(issueText(b))+(b.billingId?'（'+esc(b.billingId)+'）':'')+'</li>').join('')+'</ul>':'')+
-      (totals?'<p>整筆'+(preview.reverseOf?'撤銷恢復':'折讓減額')+' '+money(totals.reductions?.grossTotal)+'；入帳後總額 '+money(totals.after?.grossTotal)+'、本期應收 '+money(totals.after?.receivable)+'、保留款 '+money(totals.after?.retention)+'</p>':'')+rows;
+      (totals?'<p>整筆'+(preview.reverseOf?'撤銷恢復':'折讓減額')+' '+money(totals.reductions?.grossTotal)+'；入帳後總額 '+money(totals.after?.grossTotal)+'、本期應收 '+money(totals.after?.receivable)+'、保留款 '+money(totals.after?.retention)+'</p>':'')+(rows?'<p class="allowance-note">窄螢幕可左右滑動下方表格，核對總額、保留款與本期應收的完整金額。</p>':'')+rows;
   }
   function open(options = {}) {
     style();
@@ -177,5 +215,5 @@
     return {element:shade,close};
   }
   style();
-  window.KusheBillingAllowance = Object.freeze({open,billing,receivable,receiptState,summary,issueText});
+  window.KusheBillingAllowance = Object.freeze({open,billing,receivable,forBilling,forReceivable,receiptState,summary,issueText});
 }());

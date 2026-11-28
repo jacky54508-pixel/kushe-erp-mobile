@@ -12,12 +12,13 @@
   function closeModal(){document.querySelector('.erp-detail-overlay')?.remove()}
   function optionRows(rows,value,label){return rows.map((row)=>`<option value="${esc(row.id)}" ${String(row.id)===String(value)?'selected':''}>${esc(label(row))}</option>`).join('')}
   function visibleRows(){return store.invoiceRows().filter((row)=>(!filters.month||row.status==='pending'||monthOf(row.invoiceDate)===filters.month)&&(!filters.type||row.invoiceType===filters.type)&&(!filters.status||row.status===filters.status)).sort((a,b)=>String(b.invoiceDate||'').localeCompare(String(a.invoiceDate||'')))}
+  function billingFinancialForDisplay(id,data=store.getState()){const ui=window.KusheBillingAllowance;if(ui?.forBilling)return ui.forBilling(id,data);const ledger=data?.meta?.billingAllowances;if(ledger===undefined||Array.isArray(ledger)&&!ledger.length)return null;return store.billingFinancialState?.(id,data)||{valid:false,issues:['折讓核對元件未完整載入，請重新整理。'],hasAllowanceHistory:true,status:'待核對'}}
   function buildInvoicePresentation(row){
-    const financial=row.invoiceType==='output'&&row.sourceType==='billing'?store.billingFinancialState?.(row.sourceId):null,statusText=(financial?.valid===false?'帳款待核對':statusLabel(row.status))+(financial?.hasAllowanceHistory?(row.status==='pending'?'・依折讓後金額開票':'・折讓另列'):''),typeText=typeLabel(row.invoiceType);
+    const financial=row.invoiceType==='output'&&row.sourceType==='billing'?billingFinancialForDisplay(row.sourceId):null,statusText=(financial?.valid===false?'帳款待核對':statusLabel(row.status))+(financial?.hasAllowanceHistory?(row.status==='pending'?'・依折讓後金額開票':'・折讓另列'):''),typeText=typeLabel(row.invoiceType);
     return {...row,statusText,typeText,invoiceNumberText:row.invoiceNumber||statusText,partyText:row.party||'',projectPurpose:row.projectName||'',sourceText:row.sourceNo||'',financial,canEdit:!(financial?.hasAllowanceHistory&&row.status==='issued')&&financial?.valid!==false};
   }
   function openOutput(row,options={}){
-    const financial=store.billingFinancialState?.(row.sourceId),invoiceLocked=Boolean(financial?.hasAllowanceHistory&&row.status==='issued'),expectedFinancialSnapshot=financial?.snapshot;
+    const financial=billingFinancialForDisplay(row.sourceId),invoiceLocked=Boolean(financial?.hasAllowanceHistory&&row.status==='issued'),expectedFinancialSnapshot=financial?.snapshot;
     const overlay=document.createElement('div');overlay.className='erp-detail-overlay';
     if(options.fromGroup===true)overlay.style.zIndex='2450';
     const closeCurrent=()=>{overlay.remove();try{options.onClosed?.()}catch(error){window.KushePhase1?.toast(error.message||'請重新開啟發票對照')}};

@@ -18,6 +18,8 @@
   const previousMonth = (month) => { const d = new Date(`${month}-01T00:00:00`); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
   const escapeHtml = (value) => text(value).replace(/[&<>"']/g, (char) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[char]));
   const validDate = (value) => { const d = value ? new Date(value) : null; return d && !Number.isNaN(d.getTime()) ? d : null; };
+  function billingFinancialForDisplay(id,data=window.KuSheERPStore.getState()){const ui=window.KusheBillingAllowance;if(ui?.forBilling)return ui.forBilling(id,data);const ledger=data?.meta?.billingAllowances;if(ledger===undefined||Array.isArray(ledger)&&!ledger.length)return null;return window.KuSheERPStore.billingFinancialState?.(id,data)||{valid:false,issues:['折讓核對元件未完整載入，請重新整理。'],hasAllowanceHistory:true,status:'待核對'}}
+  function receivableFinancialForDisplay(id,data=window.KuSheERPStore.getState()){const ui=window.KusheBillingAllowance;if(ui?.forReceivable)return ui.forReceivable(id,data);const ledger=data?.meta?.billingAllowances;if(ledger===undefined||Array.isArray(ledger)&&!ledger.length)return null;return window.KuSheERPStore.receivableFinancialState?.(id,data)||{valid:false,issues:['折讓核對元件未完整載入，請重新整理。'],hasAllowanceHistory:true,status:'待核對'}}
   const paidAR = (row) => number(row.received ?? row.receivedAmount ?? row.paidAmount);
   const paidAP = (row) => number(row.paid ?? row.paidAmount);
   const arAmount = (row) => row.financial?.valid===false?NaN:number(row.amount ?? row.totalAmount ?? row.receivableAmount);
@@ -221,8 +223,8 @@
   }
 
   function derive(data, month) {
-    const financialReceivables = data.receivables.map(row=>{const financial=window.KuSheERPStore?.receivableFinancialState?.(row.id,data);return financial?.valid===false?{...row,amount:NaN,financial}:financial?{...row,amount:financial.effective.receivable,received:financial.settlement.received,financial}:row});
-    const effectiveBilling = row => window.KuSheERPStore?.billingFinancialState?.(row.id,data);
+    const financialReceivables = data.receivables.map(row=>{const financial=receivableFinancialForDisplay(row.id,data);return financial?.valid===false?{...row,amount:NaN,financial}:financial?{...row,amount:financial.effective.receivable,received:financial.settlement.received,financial}:row});
+    const effectiveBilling = row => billingFinancialForDisplay(row.id,data);
     const maps = relationMaps(data);
     const prev = previousMonth(month);
     const revenue = monthRevenue(data, month);

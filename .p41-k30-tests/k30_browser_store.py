@@ -186,7 +186,11 @@ def run_positive(browser, server, report, kind='standard', group=False, zero_sou
             report.check(name + ': group allowance is booked once across sources', sum(row['reductions']['grossTotal'] for row in event['allocations']) == values['approvedGrossReduction'])
             index = invoke(page, report, name, 'externalBillingDocumentIndex')
             grouped = next(row for row in index['documents'] if row['document']['id'] == group_row['document']['id'])
-            report.check(name + ': group balances equal the sum of its effective original sources', grouped['totals']['outstanding'] == actual['settlement']['outstanding'] + other['settlement']['outstanding'] and grouped['totals']['retentionOutstanding'] == actual['settlement']['retentionOutstanding'] + other['settlement']['retentionOutstanding'], grouped['totals'])
+            report.check(name + ': original grouped totals remain exactly the stored original source view', grouped['totals'] == group_row['totals'], grouped['totals'])
+            effective_totals = grouped['effectiveTotals']
+            report.check(name + ': separate effective grouped money equals both individual source projections',
+                         all(effective_totals[key] == actual['effective'][key] + other['effective'][key] for key in FIELDS), effective_totals)
+            report.check(name + ': separate effective group balances equal the sum of its source settlements', effective_totals['outstanding'] == actual['settlement']['outstanding'] + other['settlement']['outstanding'] and effective_totals['retentionOutstanding'] == actual['settlement']['retentionOutstanding'] + other['settlement']['retentionOutstanding'], effective_totals)
         accounting = invoke(page, report, name, 'allowanceAccountingRows')
         rows = [row for row in accounting if row['eventId'] == event['id']]
         report.check(name + ': accounting exports one signed row per original source', len(rows) == len(values['allocations']) and sum(row['grossTotal'] for row in rows) == -values['approvedGrossReduction'] and sum(row['tax'] for row in rows) == -sum(row['reductions']['tax'] for row in values['allocations']), rows)
@@ -606,7 +610,9 @@ def run_malformed(browser, server, report):
             report.check(name + ': malformed ledger cannot be admitted', not plan['allowed'] and bool(plan['blockers']), plan)
             result = call(page, 'postBillingAllowance', {**allowance_input(), 'expectedSnapshot': plan.get('snapshot', '')})
             report.check(name + ': actual writer refuses malformed ledger', not result['ok'], result)
-        report.check(name + ': malformed source is never normalized away or persisted', raw(page) == before and raw(page)['idb']['main']['meta']['billingAllowances'] == seed['meta']['billingAllowances'])
+        after = raw(page)
+        report.save(name + '.json', {'load': loaded, 'before': before, 'after': after})
+        report.check(name + ': malformed source is never normalized away or persisted', after == before and after['idb']['main']['meta']['billingAllowances'] == seed['meta']['billingAllowances'])
         report.case(name)
     finally:
         context.close()
@@ -681,6 +687,53 @@ def run_restore_history_guard(browser, server, report):
             if variant == 'edited-event':
                 replacement['meta']['billingAllowances'][0]['reason'] = PREFIX + 'FORGED-CHANGE'
             denied(page, report, name + '-' + variant, 'replaceSnapshot', replacement, {'confirmed': True, 'baseline': current['baseline']})
+        report.case(name)
+    finally:
+        context.close()
+
+
+def run_restore_incomplete_invoice_basis(browser, server, report):
+    name = 'fresh-restore-rejects-incomplete-active-preinvoice-basis'
+    context = browser.new_context(service_workers='block')
+    try:
+        page, _ = boot(context, server, report, name + '-source')
+        first = post(page, report, name + '-first', allowance_input())[0]
+        second = post(page, report, name + '-second', allowance_input(
+            reductions={key: value // 10 for key, value in REDUCTIONS[0].items()}, key='SECOND-PREINVOICE'))[0]
+        projection = financial(page, report, name)
+        invoice = invoke(page, report, name, 'saveInvoice', {'invoiceType': 'output', 'sourceId': IDS[0],
+            'status': 'issued', 'invoiceNumber': PREFIX + 'COMPLETE-BASIS-INVOICE', 'invoiceDate': DATE,
+            'expectedFinancialSnapshot': projection['snapshot']})
+        valid_backup = invoke(page, report, name, 'readCommittedSnapshot')['data']
+        report.check(name + ': actual two-post invoice includes both active preinvoice events',
+                     set(invoice['invoiceIssueBasis']['allowanceIds']) == {first['id'], second['id']}
+                     and invoice['netAmount'] == 89000 and invoice['taxAmount'] == 4450 and invoice['grossAmount'] == 93450)
+    finally:
+        context.close()
+    # Restore into a profile with NO prior allowance history/basis. Otherwise the
+    # ordinary immutable-history check would hide the incomplete-ID validator bug.
+    context = browser.new_context(service_workers='block')
+    try:
+        page, _ = boot(context, server, report, name + '-fresh-destination')
+        report.check(name + ': destination has no existing ledger or invoice basis to reject the forged import incidentally',
+                     ledger(public(page)) == [] and not any(row.get('invoiceIssueBasis') for row in public(page)['invoices']))
+        forged = deepcopy(valid_backup)
+        changed = next(row for row in forged['invoices'] if row['id'] == invoice['id'])
+        changed['invoiceIssueBasis']['allowanceIds'] = [first['id']]
+        changed['invoiceIssueBasis']['amounts'] = {key: ORIGINALS[0][key] - REDUCTIONS[0][key] for key in FIELDS}
+        # Keep the forged invoice mathematically consistent with its incomplete
+        # basis; only completeness against the two active events can reject it.
+        changed.update(netAmount=90000, amount=90000, taxAmount=4500, tax=4500, grossAmount=94500, total=94500)
+        committed = invoke(page, report, name, 'readCommittedSnapshot')
+        before = raw(page)
+        rejected = denied(page, report, name, 'replaceSnapshot', forged, {'confirmed': True, 'baseline': committed['baseline']})
+        report.check(name + ': exact missing-active-event basis error is returned', rejected['error']['code'] == 'ALLOWANCE_INVOICE_BASIS_INVALID', rejected)
+        report.check(name + ': rejected fresh import has zero writes including journal', raw(page) == before)
+        accepted = invoke(page, report, name, 'replaceSnapshot', valid_backup, {'confirmed': True, 'baseline': committed['baseline']})
+        restored = next(row for row in public(page)['invoices'] if row['id'] == invoice['id'])
+        report.check(name + ': complete original backup succeeds on the same unchanged baseline',
+                     set(restored['invoiceIssueBasis']['allowanceIds']) == {first['id'], second['id']}
+                     and financial(page, report, name)['effective'] == projection['effective'], accepted)
         report.case(name)
     finally:
         context.close()
@@ -769,6 +822,7 @@ def main():
                     execute(run_two_tabs, browser, server, report)
                     execute(run_backup, browser, server, report)
                     execute(run_restore_history_guard, browser, server, report)
+                    execute(run_restore_incomplete_invoice_basis, browser, server, report)
             finally:
                 browser.close()
             if args.only in (None, 'durability'):

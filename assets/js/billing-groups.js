@@ -9,16 +9,17 @@
   const expand=new Set(),rawModes=new Set();
   let indexState=null,indexCache=null;
   function index(){const s=store.getState();if(s!==indexState){indexState=s;indexCache=store.externalBillingDocumentIndex()}return indexCache;}
+  function billingFinancialForDisplay(id,data=store.getState()){const ui=window.KusheBillingAllowance;if(ui?.forBilling)return ui.forBilling(id,data);const ledger=data?.meta?.billingAllowances;if(ledger===undefined||Array.isArray(ledger)&&!ledger.length)return null;return store.billingFinancialState?.(id,data)||{valid:false,issues:['折讓核對元件未完整載入，請重新整理。'],hasAllowanceHistory:true,status:'待核對'}}
   let financialCacheState=null,financialCache=new WeakMap();
   function groupTotals(group){
     const data=store.getState();if(data!==financialCacheState){financialCacheState=data;financialCache=new WeakMap()}
     if(financialCache.has(group))return financialCache.get(group);
     if(!store.billingFinancialState)return group.totals;
     const keys=['untaxed','tax','grossTotal','retention','receivable','received','outstanding','retentionReceived','retentionOutstanding','pendingCheque','availableToCollect'],totals=Object.fromEntries(keys.map(k=>[k,0]));
-    for(const source of group.sources||[]){const f=store.billingFinancialState(source.document.billingId,data);if(f.valid===false){for(const k of keys)totals[k]=NaN;totals.invalid=true;continue}const v=f.settlement;for(const k of ['untaxed','tax','grossTotal','retention','receivable'])totals[k]+=f.effective[k];for(const k of ['received','outstanding','retentionReceived','retentionOutstanding'])totals[k]+=v[k];totals.pendingCheque+=v.pendingChequeReserved;totals.availableToCollect+=v.available;if(f.valid===false)totals.invalid=true;if(f.hasAllowance)totals.hasAllowance=true}
+    for(const source of group.sources||[]){const f=billingFinancialForDisplay(source.document.billingId,data);if(!f){for(const k of keys)totals[k]+=source.document.anchors[k]??source.settlement[k]??0;continue}if(f.valid===false){for(const k of keys)totals[k]=NaN;totals.invalid=true;continue}const v=f.settlement;for(const k of ['untaxed','tax','grossTotal','retention','receivable'])totals[k]+=f.effective[k];for(const k of ['received','outstanding','retentionReceived','retentionOutstanding'])totals[k]+=v[k];totals.pendingCheque+=v.pendingChequeReserved;totals.availableToCollect+=v.available;if(f.valid===false)totals.invalid=true;if(f.hasAllowance)totals.hasAllowance=true}
     financialCache.set(group,totals);return totals;
   }
-  function sourceSettlement(source){const f=store.billingFinancialState?.(source.document.billingId,store.getState());return f?.valid===false?{financial:f,received:NaN,outstanding:NaN,retentionReceived:NaN,retentionOutstanding:NaN,pendingCheque:NaN,availableToCollect:NaN}:f?{...source.settlement,...f.settlement,pendingCheque:f.settlement.pendingChequeReserved,availableToCollect:f.settlement.available,financial:f}:source.settlement}
+  function sourceSettlement(source){const f=billingFinancialForDisplay(source.document.billingId,store.getState());return f?.valid===false?{financial:f,received:NaN,outstanding:NaN,retentionReceived:NaN,retentionOutstanding:NaN,pendingCheque:NaN,availableToCollect:NaN}:f?{...source.settlement,...f.settlement,pendingCheque:f.settlement.pendingChequeReserved,availableToCollect:f.settlement.available,financial:f}:source.settlement}
   function memberId(row,kind){return String(row.id||'');}
   function memberKeys(g,kind){return g.sources.map(s=>kind==='billing'?s.document.billingId:s.document.receivableId);}
   function status(g,kind){const t=groupTotals(g);if(t.invalid)return '待核對';if(t.outstanding>0)return t.received>0?'部分收款':'未收';return kind==='billing'?'已收':t.retentionOutstanding>0?'本期已收清':'全部收清';}

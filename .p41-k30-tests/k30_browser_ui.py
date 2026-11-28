@@ -10,8 +10,9 @@ import traceback
 from playwright.sync_api import sync_playwright
 
 from k30_browser_store import (ROOT, Report, Server, boot, raw, public, invoke, ledger,
-    check_commit, financial, receipt, select_browser, GROUP_SETUP)
-from k30_fixture import HTML, PREFIX, DATE, IDS, ORIGINALS, REDUCTIONS
+    check_commit, financial, receipt, select_browser, GROUP_SETUP, post)
+from k30_fixture import (HTML, PREFIX, DATE, IDS, ORIGINALS, REDUCTIONS,
+    LEGACY_AR, LEGACY_BILL, LEGACY_BILL_AR, allowance_input)
 
 STYLES = ['assets/css/app.css', 'assets/css/commissions-scoped.css',
           'assets/css/receivables-scoped.css', 'assets/css/receivable-cheques.css', 'assets/css/billing-groups.css']
@@ -170,6 +171,85 @@ def run_refusal(browser, server, report, device, failure):
         context.close()
 
 
+def run_legacy_consumers(browser, server, report, device, unrelated_allowance=False):
+    name = 'ui-legacy-consumers-' + device + ('-with-unrelated-allowance' if unrelated_allowance else '-without-ledger')
+    context = browser.new_context(viewport=VIEWPORTS[device], is_mobile=device == 'mobile', has_touch=device == 'mobile', service_workers='block')
+    try:
+        page, _ = boot(context, server, report, name, 'legacy-consumers')
+        if unrelated_allowance:
+            post(page, report, name + '-unrelated-real-post', allowance_input())
+        before_render = raw(page)
+        original_state = public(page)
+        report.check(name + ': fixtures retain a standalone AR and an issued legacy bill with no invoice row',
+                     not any(row.get('receivableId') == LEGACY_AR for row in original_state['billings'])
+                     and not any(row.get('billingId') == LEGACY_BILL or row.get('sourceId') == LEGACY_BILL for row in original_state['invoices']))
+        install_ui(page, server)
+        compatibility = page.evaluate('''ids=>{
+          const s=KuSheERPStore.getState(),bill=s.billings.find(row=>row.id===ids.bill);
+          return {standalone:KusheBillingAllowance.forReceivable(ids.ar),
+            oldBilling:KusheBillingAllowance.forBilling(ids.bill),oldReceivable:KusheBillingAllowance.forReceivable(ids.billAr),
+            ordinary:KusheBillingAllowance.receiptState(bill,s),strict:KusheBillingAllowance.billing(ids.bill,s)};
+        }''', {'ar': LEGACY_AR, 'bill': LEGACY_BILL, 'billAr': LEGACY_BILL_AR})
+        report.check(name + ': unrelated allowance history never forces legacy consumers into new strict admission',
+                     compatibility['standalone'] is None and compatibility['oldBilling'] is None and compatibility['oldReceivable'] is None, compatibility)
+        report.check(name + ': original legacy receipt status and 60000 balance remain exact',
+                     compatibility['ordinary']['received'] == 40000 and compatibility['ordinary']['unreceived'] == 60000
+                     and compatibility['ordinary']['status'] == '部分收款')
+        report.check(name + ': the same legacy missing-invoice source remains ineligible for formal allowance',
+                     compatibility['strict']['valid'] is False and compatibility['strict']['settlement'] is None)
+        page.evaluate("""async()=>{KusheBilling.deactivate();document.getElementById('billingsView').style.setProperty('display','none','important');document.body.dataset.route='receivables';await KusheReceivables.activate()}""")
+        page.locator('#receivableMonth').fill('2026-10')
+        page.locator('#receivableMonth').dispatch_event('change')
+        for receivable_id, expected in ((LEGACY_AR, 7500), (LEGACY_BILL_AR, 60000)):
+            attribute = 'data-mobile-receivable' if device == 'mobile' else 'data-expand-receivable'
+            row = page.locator('#receivablesApp [' + attribute + '="' + receivable_id + '"]')
+            report.check(name + ': actual legacy row shows its saved open balance ' + receivable_id,
+                         row.count() == 1 and '$' + format(expected, ',') in row.inner_text(), row.inner_text())
+            collect = row.locator('button.receivable-action-collect' if device == 'mobile' else '[data-receive="' + receivable_id + '"]').first
+            report.check(name + ': original ordinary receive action stays enabled ' + receivable_id, collect.is_enabled())
+            collect.click()
+            form = page.locator('#receiptEditorForm')
+            form.wait_for(state='visible')
+            amount = form.locator('[name="cashAmount"]')
+            report.check(name + ': actual receive form retains original available amount and ceiling ' + receivable_id,
+                         amount.input_value() == str(expected) and amount.get_attribute('max') == str(expected))
+            page.locator('.receipt-card [data-close-detail]').first.click()
+        report.check(name + ': list rendering and opening both ordinary receipt forms perform zero storage writes',
+                     raw(page) == before_render and public(page) == original_state)
+        # Formal allowance uses the strict projection even when ordinary screens
+        # preserve a valid saved legacy balance.
+        page.evaluate('id=>{KusheBillingAllowance.open({billingId:id});return true}', LEGACY_BILL)
+        page.locator('#billingAllowanceForm').wait_for(state='visible')
+        report.check(name + ': formal legacy-source modal displays its invoice blocker and stays disabled',
+                     '發票' in page.locator('[data-allowance-source="' + LEGACY_BILL + '"]').inner_text()
+                     and page.locator('[data-allowance-post]').is_disabled()
+                     and page.locator('#billingAllowanceForm [name="confirmed"]').is_disabled())
+        page.locator('[data-allowance-close]').first.click()
+        # A malformed snapshot cannot enter the real Store at all. Exercise the
+        # public presentation API with its explicit snapshot argument in the real
+        # browser; do not fake getState(), rewrite published state, or bypass load.
+        blocked = page.evaluate('''x=>{
+          const bad=structuredClone(KuSheERPStore.getState());
+          if(x.related)bad.meta.billingAllowances[0].allocations[0].receivableId='SYN-K30-MISSING-AR';
+          else bad.meta.billingAllowances={unexpected:'SYN-K30-MALFORMED'};
+          const ar=KusheBillingAllowance.forReceivable(x.ar,bad),bill=KusheBillingAllowance.forBilling(x.bill,bad);
+          const host=document.createElement('div');host.dataset.k30InvalidProof='true';host.innerHTML=KusheBillingAllowance.summary(ar);document.body.append(host);
+          return {ar,bill,strict:KuSheERPStore.receivableFinancialState(x.ar,bad)};
+        }''', {'ar': LEGACY_AR, 'bill': LEGACY_BILL, 'related': unrelated_allowance})
+        report.check(name + ': malformed or unidentifiable ledger never falls back to raw legacy balances',
+                     all(blocked[key] is not None and blocked[key]['valid'] is False and blocked[key]['effective'] is None
+                         and blocked[key]['settlement'] is None for key in ('ar', 'bill', 'strict')), blocked)
+        report.check(name + ': malformed projection renders a visible blocker rather than a numeric zero',
+                     page.locator('[data-k30-invalid-proof] [role="alert"]').count() == 1
+                     and '$0' not in page.locator('[data-k30-invalid-proof]').inner_text())
+        report.check(name + ': malformed-snapshot presentation leaves real ledger and every durable layer untouched',
+                     raw(page) == before_render and public(page) == original_state)
+        report.save(name + '.json', {'compatibility': compatibility, 'malformedProjection': blocked})
+        report.case(name)
+    finally:
+        context.close()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=Path, default=ROOT)
@@ -193,6 +273,7 @@ def main():
                 tasks = [(run_flow, (device, group, False)) for device in VIEWPORTS for group in (False, True)]
                 tasks += [(run_flow, ('desktop', False, True))]
                 tasks += [(run_refusal, (device, failure)) for device in VIEWPORTS for failure in ('cloud-prepare', 'receipt-arrived', 'owner-changed')]
+                tasks += [(run_legacy_consumers, ('desktop', False)), (run_legacy_consumers, ('mobile', True))]
                 for function, arguments in tasks:
                     try:
                         function(browser, server, report, *arguments)
