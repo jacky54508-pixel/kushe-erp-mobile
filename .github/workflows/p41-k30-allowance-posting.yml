@@ -1,0 +1,54 @@
+name: P41 K30 allowance posting candidate
+
+on:
+  push:
+    branches: [p41-k30-allowance-posting-20261128]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p41-k30-allowance-posting-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  postgres-guard:
+    name: Disposable PostgreSQL allowance and legacy-client guard
+    if: github.ref == 'refs/heads/p41-k30-allowance-posting-20261128'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17.6
+        env:
+          POSTGRES_DB: k30_synthetic
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: SYN-K30-DISPOSABLE-ONLY
+        ports: ['15430:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d k30_synthetic"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PYTHONUTF8: '1'
+      K30_POSTGRES_URL: postgresql://postgres:SYN-K30-DISPOSABLE-ONLY@127.0.0.1:15430/k30_synthetic
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install pinned disposable database driver
+        run: python -m pip install 'psycopg[binary]==3.2.10'
+      - name: Verify actual trigger RLS rollback and concurrent CAS
+        run: python .p41-k30-tests/postgres_guard.py --output artifacts/p41-k30-postgres
+      - name: Retain exact PostgreSQL results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p41-k30-postgres-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/p41-k30-postgres/
+          if-no-files-found: error
+          retention-days: 14
