@@ -5376,7 +5376,7 @@
     const settlement={id:uid(),allocationVersion:2,idempotencyKey:idempotencyKey||uid(),date:values.date||businessDate(new Date(now)),employeeId,employeeName:employee?.name||'',projectId,projectName:project?.name||'',sourceCommissionIds:[...new Set(allocations.map((row)=>row.commissionId))],selectionKeys:allocations.map((row)=>row.allocationKey),allocations,amount,fee,feePayer,actualDebit,bankId:bank.id,bankAccountId:bank.id,paymentMethod:values.paymentMethod||'銀行轉帳',note:String(values.note||''),createdAt:now,updatedAt:now};
     state.commissionSettlements.unshift(settlement);syncProjectCommissionSettlementBankTransaction(settlement,now);
     [...new Set(settlement.allocations.map((row)=>row.month))].forEach((month)=>{const payroll=state.payroll.find((row)=>payrollEmployeeId(row)===employeeId&&String(row.month||'')===month);if(payroll)syncSalarySummary(payroll,now)});
-    persist(`新增案場戶別抽成結算 ${project?.name||projectId}｜${employee?.name||employeeId}`,{commissionSettlementId:settlement.id,employeeId,projectId,selectionKeys:settlement.selectionKeys,sourceCommissionIds:settlement.sourceCommissionIds,amount});
+    persist(`新增案場戶別抽成結算 ${project?.name||projectId}｜${employee?.name||employeeId}`,{commissionSettlementId:settlement.id,employeeId,projectId,selectionKeys:[...settlement.selectionKeys],sourceCommissionIds:[...settlement.sourceCommissionIds],amount});
     return settlement;
   }
   async function deleteProjectCommissionSettlement(id) {
