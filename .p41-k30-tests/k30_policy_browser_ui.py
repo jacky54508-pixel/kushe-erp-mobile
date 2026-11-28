@@ -50,6 +50,7 @@ def daily_form(page, agreed=True, amount=100000, date=DATE):
     form.locator('[name=date]').fill(date)
     for employee in EMPLOYEES:
         form.locator('[name=dailyEmployees][value="' + employee + '"]').check()
+    form.locator('details.daily-pay-details > summary').click()
     for employee, rate in RATES.items():
         form.locator('[name=dailyCommissionRate][data-employee-id="' + employee + '"]').fill(str(rate))
     form.locator('.daily-house-project').select_option(PROJECT)

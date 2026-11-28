@@ -529,6 +529,79 @@ def run_unbilled_due_and_later_billing(browser, server, report, future=False):
         context.close()
 
 
+def run_paid_month_second_finalization(browser, server, report):
+    name = 'policy-paid-month-second-finalization-preserves-first-payment'
+    context = browser.new_context(service_workers='block')
+    try:
+        page, initial = boot(context, server, report, name)
+        _, _, agreements = save_daily(page, report, name + '-FIRST', daily_values(
+            agreement=terms(workScope=PREFIX + 'PAID-FIRST-WORK', reference=PREFIX + 'PAID-FIRST-AGREEMENT')))
+        first = agreements[0]
+        first_event, first_rows, _, _ = finalize(page, report, name + '-FIRST',
+            finalization_values([first['id']], [unbilled_allocation(first, 90000)], name + '-FIRST'),
+            {first['id']: 90000})
+        group = next(row for row in invoke(page, report, name, 'monthlyPayrollGroups')
+                     if row['employeeId'] == EMPLOYEES[0] and row['month'] == DATE[:7])
+        plan = invoke(page, report, name, 'salaryPaymentPlan', group['primaryPayrollId'])
+        first_person = next(row for row in first_rows if row['employee'] == EMPLOYEES[0])
+        first_keys = [row['allocationKey'] for row in plan['available'] if row['commissionId'] == first_person['id']]
+        report.check(name + ': first agreed amount is fully payable with an explicit source selection',
+                     plan['allowed'] and len(first_keys) == 1 and plan['currentPayable'] == 27000
+                     and plan['baseOutstanding'] == 0 and plan['recordedPaid'] == 0, plan)
+        before_payment = raw(page)
+        request = {'payrollId': plan['payrollId'], 'date': DATE, 'amount': 27000,
+                   'commissionSelectionKeys': first_keys, 'bankId': BANK,
+                   'fee': 25, 'feePayer': 'company', 'paymentMethod': '銀行轉帳',
+                   'note': PREFIX + 'EXPLICIT-FIRST-SALARY-PAYMENT',
+                   'idempotencyKey': PREFIX + name + '-FIRST-PAYMENT'}
+        payment = invoke(page, report, name, 'addSalaryPayment', request)
+        paid = coherent_commit(page, report, name + '-PAYMENT', before_payment, 'addSalaryPayment')['idb']['main']
+        paid_payroll = next(row for row in paid['payroll'] if row['id'] == payment['payrollId'])
+        bank_transaction = next(row for row in paid['bankTransactions'] if row['id'] == payment['bankTransactionId'])
+        report.check(name + ': actual salary writer pays the first source once and records its fee separately',
+                     payment['amount'] == payment['commissionAmount'] == 27000
+                     and payment['baseAmount'] == 0 and payment['actualDebit'] == 27025
+                     and payment['commissionSelectionKeys'] == first_keys
+                     and bank_transaction['sourceId'] == payment['id'] and bank_transaction['amount'] == 27025
+                     and paid_payroll['status'] == '已付款' and paid_payroll['paidAmount'] == 27000)
+        _, _, agreements = save_daily(page, report, name + '-SECOND', daily_values(amount=40000,
+            agreement=terms(workScope=PREFIX + 'PAID-SECOND-WORK', reference=PREFIX + 'PAID-SECOND-AGREEMENT')))
+        second = agreements[0]
+        second_event, second_rows, _, _ = finalize(page, report, name + '-SECOND',
+            finalization_values([second['id']], [unbilled_allocation(second, 36000)], name + '-SECOND'),
+            {second['id']: 36000})
+        after = public(page)
+        report.check(name + ': second finalization preserves the complete paid payroll and first formal rows',
+                     next(row for row in after['payroll'] if row['id'] == paid_payroll['id']) == paid_payroll
+                     and all(next(row for row in after['commissions'] if row['id'] == original['id']) == original
+                             for original in first_rows)
+                     and after['meta']['commissionFinalizations'] == [first_event, second_event])
+        report.check(name + ': new work and its approval never rewrite or repeat the original salary or bank payment',
+                     all(after[key] == paid[key] for key in
+                         ('salaryPayments', 'commissionSettlements', 'banks', 'bankTransactions')))
+        updated_group = next(row for row in invoke(page, report, name, 'monthlyPayrollGroups')
+                             if row['employeeId'] == EMPLOYEES[0] and row['month'] == DATE[:7])
+        plan = invoke(page, report, name, 'salaryPaymentPlan', paid_payroll['id'])
+        second_person = next(row for row in second_rows if row['employee'] == EMPLOYEES[0])
+        report.check(name + ': cumulative salary adds only the second 10800 while paid truth stays 27000',
+                     updated_group['total'] == 37800 and updated_group['paid'] == 27000
+                     and updated_group['outstanding'] == 10800 and plan['allowed']
+                     and plan['recordedPaid'] == plan['settledCommission'] == 27000
+                     and plan['currentPayable'] == plan['availableCommission'] == 10800, plan)
+        report.check(name + ': only the new finalized source is selectable and the first remains settled',
+                     len(plan['available']) == 1 and plan['available'][0]['commissionId'] == second_person['id']
+                     and len(plan['settled']) == 1 and plan['settled'][0]['commissionId'] == first_person['id'])
+        denied(page, report, name + '-cannot-pay-first-source-twice', 'addSalaryPayment',
+               {**request, 'idempotencyKey': PREFIX + name + '-DUPLICATE-ATTEMPT'})
+        report.save(name + '.json', {'firstEvent': first_event, 'firstPayment': payment,
+                    'paidPayroll': paid_payroll, 'bankTransaction': bank_transaction,
+                    'secondEvent': second_event, 'finalGroup': updated_group, 'finalPlan': plan})
+        preserve_history(report, name, initial['idb']['main'], after, {'banks': {BANK}})
+        report.case(name)
+    finally:
+        context.close()
+
+
 def run_manual(browser, server, report, linked=True):
     name = 'policy-manual-' + ('discounted-bill' if linked else 'approved-unbilled')
     context = browser.new_context(service_workers='block')
@@ -748,6 +821,7 @@ def main():
                     (run_billed_finalization, (False,)), (run_billed_finalization, (True,)),
                     (run_complete_matrix, ()), (run_unbilled_due_and_later_billing, (False,)),
                     (run_unbilled_due_and_later_billing, (True,)),
+                    (run_paid_month_second_finalization, ()),
                     (run_manual, (True,)), (run_manual, (False,)), (run_manual_daily_conflict, ()),
                     (run_legacy_terms, (False,)), (run_legacy_terms, (True,)),
                     (run_stale_finalization, ()), (run_finalization_guards, (False,)),
